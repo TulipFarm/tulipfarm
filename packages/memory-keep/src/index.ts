@@ -109,6 +109,47 @@ export type KeepMemoryContext = {
   readonly notes: readonly string[];
 };
 
+/** One part of a knowledge source, such as a section of a document. Episode ids are unique within the source. */
+export type KeepKnowledgeEpisode = {
+  readonly id: string;
+  readonly text: string;
+  readonly speaker?: string;
+  readonly occurredAt?: string;
+};
+
+export type KeepKnowledgeIngest = {
+  readonly sourceId: string;
+  readonly replaced: boolean;
+  readonly episodesAdded: number;
+  readonly episodesUnchanged: number;
+};
+
+export type KeepKnowledgeCitation = {
+  readonly sourceId: string;
+  readonly sourceTitle: string | null;
+  /** `<sourceId>#<episode id>`. */
+  readonly episodeId: string | null;
+  readonly charStart: number | null;
+  readonly charEnd: number | null;
+  readonly quote: string;
+  readonly sourceMetadata: Readonly<Record<string, string>>;
+};
+
+export type KeepKnowledgeHit = {
+  readonly id: string;
+  readonly score: number;
+  readonly sourceId: string | null;
+  readonly text: string;
+  readonly citation: KeepKnowledgeCitation | null;
+};
+
+export type KeepKnowledgeSearch = { readonly hits: readonly KeepKnowledgeHit[]; readonly omitted: number };
+
+export type KeepForgetSourceReceipt = { readonly episodes: number; readonly chunks: number };
+
+/** The most source ids or collections one knowledge request may list. */
+export const keepKnowledgeAllowlistLimit = 1000;
+
 export type KeepClientOptions = {
   /** Keep's origin, such as `http://keep:7357`. */
   readonly endpoint: URL;
@@ -188,6 +229,33 @@ const refusalSchema = z.object({
     reason: z.string().optional(),
     details: z.object({ current: headSchema.optional() }).passthrough().nullish(),
   }),
+});
+
+const ingestSchema = z.object({
+  sourceId: z.string(),
+  replaced: z.boolean(),
+  report: z.object({ episodes_added: z.number().int(), episodes_unchanged: z.number().int() }),
+});
+const knowledgeHitSchema = z.object({
+  item: z.object({ id: z.string() }),
+  score: z.number(),
+  source_id: z.string().nullish(),
+  text: z.string(),
+  citation: z
+    .object({
+      source_id: z.string(),
+      source_title: z.string().nullish(),
+      episode_id: z.string().nullish(),
+      char_start: z.number().int().nullish(),
+      char_end: z.number().int().nullish(),
+      quote: z.string(),
+      source_metadata: z.record(z.string(), z.string()).nullish(),
+    })
+    .nullish(),
+});
+const knowledgeSearchSchema = z.object({ hits: z.array(knowledgeHitSchema), omitted: z.number().int().default(0) });
+const forgetSourceSchema = z.object({
+  receipt: z.object({ episodes: z.number().int(), chunks: z.number().int() }),
 });
 
 const target = (value: KeepTarget) => ('path' in value ? { path: value.path } : { memory_id: value.memoryId });
@@ -369,10 +437,114 @@ export function createKeepClient(options: KeepClientOptions) {
           ? { status: 'ok' as const, value: { files: result.value.files, nextAfter: result.value.nextAfter ?? null } }
           : result,
       ),
+
+    /**
+     * `POST /v1/knowledge/ingest`: adds a source's episodes to the scope's corpus. With `replace`, the source's previous
+     * revision is swapped out atomically; without it, new episodes are appended and repeated ones are unchanged.
+     */
+    ingestKnowledge: (input: {
+      readonly scope: KeepScope;
+      readonly sourceId: string;
+      readonly title: string;
+      readonly collection: string;
+      readonly kind: string;
+      readonly episodes: readonly KeepKnowledgeEpisode[];
+      readonly metadata?: Readonly<Record<string, string>>;
+      readonly replace?: boolean;
+    }): Promise<KeepMemoryResult<KeepKnowledgeIngest>> =>
+      post('/v1/knowledge/ingest', ingestSchema, {
+        scope: input.scope,
+        source_id: input.sourceId,
+        title: input.title,
+        collection: input.collection,
+        kind: input.kind,
+        episodes: input.episodes.map(episode => ({
+          id: episode.id,
+          text: episode.text,
+          ...(episode.speaker === undefined ? {} : { speaker: episode.speaker }),
+          ...(episode.occurredAt === undefined ? {} : { occurred_at: episode.occurredAt }),
+        })),
+        ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+        ...(input.replace ? { replace: true } : {}),
+      }).then(result =>
+        result.status === 'ok'
+          ? {
+              status: 'ok' as const,
+              value: {
+                sourceId: result.value.sourceId,
+                replaced: result.value.replaced,
+                episodesAdded: result.value.report.episodes_added,
+                episodesUnchanged: result.value.report.episodes_unchanged,
+              },
+            }
+          : result,
+      ),
+
+    /**
+     * `POST /v1/knowledge/search`: ranked passages from the scope's corpus. Only sources in `sourceIds` (and
+     * `collections`, when given) can match; an empty list matches nothing. Each list holds at most
+     * {@link keepKnowledgeAllowlistLimit} entries.
+     */
+    searchKnowledge: (input: {
+      readonly scope: KeepScope;
+      readonly query: string;
+      readonly sourceIds?: readonly string[];
+      readonly collections?: readonly string[];
+      readonly limit?: number;
+      readonly budgetTokens?: number;
+    }): Promise<KeepMemoryResult<KeepKnowledgeSearch>> =>
+      post('/v1/knowledge/search', knowledgeSearchSchema, {
+        scope: input.scope,
+        query: input.query,
+        ...(input.sourceIds === undefined ? {} : { source_ids: input.sourceIds }),
+        ...(input.collections === undefined ? {} : { collections: input.collections }),
+        ...(input.limit === undefined ? {} : { limit: input.limit }),
+        ...(input.budgetTokens === undefined ? {} : { budget_tokens: input.budgetTokens }),
+      }).then(result =>
+        result.status === 'ok'
+          ? {
+              status: 'ok' as const,
+              value: {
+                omitted: result.value.omitted,
+                hits: result.value.hits.map(hit => ({
+                  id: hit.item.id,
+                  score: hit.score,
+                  sourceId: hit.source_id ?? hit.citation?.source_id ?? null,
+                  text: hit.text,
+                  citation: hit.citation
+                    ? {
+                        sourceId: hit.citation.source_id,
+                        sourceTitle: hit.citation.source_title ?? null,
+                        episodeId: hit.citation.episode_id ?? null,
+                        charStart: hit.citation.char_start ?? null,
+                        charEnd: hit.citation.char_end ?? null,
+                        quote: hit.citation.quote,
+                        sourceMetadata: hit.citation.source_metadata ?? {},
+                      }
+                    : null,
+                })),
+              },
+            }
+          : result,
+      ),
+
+    /** `POST /v1/knowledge/forget_source`: erases a source and everything derived only from it. */
+    forgetKnowledgeSource: (input: {
+      readonly scope: KeepScope;
+      readonly sourceId: string;
+    }): Promise<KeepMemoryResult<KeepForgetSourceReceipt>> =>
+      post('/v1/knowledge/forget_source', forgetSourceSchema, {
+        scope: input.scope,
+        source_id: input.sourceId,
+      }).then(result => (result.status === 'ok' ? { status: 'ok' as const, value: result.value.receipt } : result)),
   };
 
-  async function memory<T>(route: string, schema: z.ZodType<T>, body: unknown): Promise<KeepMemoryResult<T>> {
-    const result = await request(`/v1/memory/${route}`, { method: 'POST', body });
+  function memory<T>(route: string, schema: z.ZodType<T>, body: unknown): Promise<KeepMemoryResult<T>> {
+    return post(`/v1/memory/${route}`, schema, body);
+  }
+
+  async function post<T>(path: string, schema: z.ZodType<T>, body: unknown): Promise<KeepMemoryResult<T>> {
+    const result = await request(path, { method: 'POST', body });
     if ('status' in result) return result;
     if (result.response.ok) {
       const value = schema.safeParse(result.body);

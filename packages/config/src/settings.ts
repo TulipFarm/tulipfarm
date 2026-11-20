@@ -1296,7 +1296,7 @@ export const settings: readonly Setting[] = [
     requirement: 'optional',
     secret: false,
     description:
-      'Origin (no path or credentials) of an optional [Keep](https://github.com/TulipFarm/keep) memory service. Unset reports Keep as not configured. Used only in workspaces where the `keep-memory` flag is on, where personal memory lives in Keep.',
+      'Origin (no path or credentials) of an optional [Keep](https://github.com/TulipFarm/keep) memory service. Unset reports Keep as not configured. Used only in workspaces where the `keep-memory` flag is on, where personal memory and Knowledge search live in Keep.',
   },
   {
     name: 'KEEP_TOKEN',

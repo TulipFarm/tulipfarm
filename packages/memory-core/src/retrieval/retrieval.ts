@@ -14,7 +14,7 @@ import {
   type KnowledgeRetrievalBranchResult,
   type KnowledgeRetrievalDocument,
 } from '../contracts/retrieval.ts';
-import { KnowledgeError } from '../documents/contracts.ts';
+import { KnowledgeError, KnowledgeSearchUnavailable } from '../documents/contracts.ts';
 import type { createDocumentStore } from '../documents/store.ts';
 import type { createSearchEngine } from '../search/search.ts';
 type Dependency = KnowledgeDependency;
@@ -317,7 +317,8 @@ export function createRetrievalEngine<Context, Source extends { kind: string }>(
           if (
             !denied &&
             !(error instanceof StorageUnavailableError) &&
-            !(error instanceof SourceAuthorizationUnavailable)
+            !(error instanceof SourceAuthorizationUnavailable) &&
+            !(error instanceof KnowledgeSearchUnavailable)
           )
             throw error;
           const result: KnowledgeRetrievalBranchResult = {
@@ -329,7 +330,9 @@ export function createRetrievalEngine<Context, Source extends { kind: string }>(
               ? 'source-unavailable'
               : error instanceof StorageUnavailableError
                 ? error.code
-                : 'source-authorization-unavailable',
+                : error instanceof KnowledgeSearchUnavailable
+                  ? error.code
+                  : 'source-authorization-unavailable',
             documents: [],
           };
           return { branch: result, sources: [] as Dependency[] };

@@ -122,6 +122,17 @@ export function fuseKnowledgeCandidates(lexical: Candidate[], semantic: Candidat
     .map(({ candidate }) => candidate);
 }
 
+/** A ranked passage from an external Knowledge index, already mapped to TulipFarm ids. */
+export type KnowledgeIndexHit = { documentId: string; publicationId: string; ordinal: number; score: number };
+/**
+ * An external Knowledge index that replaces keyword and vector matching for a workspace.
+ * `search` receives only document ids the actor may read now and throws `KnowledgeSearchUnavailable` when it cannot answer.
+ */
+export type KnowledgeIndexSearch = {
+  enabled(workspaceId: string): Promise<boolean>;
+  search(workspaceId: string, query: string, documentIds: string[]): Promise<KnowledgeIndexHit[]>;
+};
+
 export type SearchEngineOptions<Context, Source extends { kind: string }> = {
   runtime: TenantRuntime<Context>;
   store: ReturnType<typeof createDocumentStore<Context, Source>>;
@@ -137,6 +148,7 @@ export type SearchEngineOptions<Context, Source extends { kind: string }> = {
   clock: Clock;
   callTimeoutMs: number;
   profile: { id: string };
+  index?: KnowledgeIndexSearch;
 };
 export function createSearchEngine<Context, Source extends { kind: string }>({
   runtime,
@@ -153,6 +165,7 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
   clock,
   callTimeoutMs,
   profile: knowledgeEmbeddingProfile,
+  index,
 }: SearchEngineOptions<Context, Source>) {
   type Transaction = Context;
   const { AccessDenied, SourceAuthorizationUnavailable } = errors;
@@ -336,6 +349,48 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
       }
       return candidates.slice(0, 200);
     });
+  }
+  async function indexed(
+    externalIndex: KnowledgeIndexSearch,
+    workspaceId: string,
+    userId: string,
+    query: string,
+    filters: KnowledgeSearchFilters,
+    deadlineAt: number,
+  ) {
+    const { eligible, unavailable } = await transaction(workspaceId, userId, deadlineAt, false, async (tx, actor) => ({
+      eligible: z
+        .array(eligibleLexicalSchema)
+        .parse(
+          (await lexicalIndex(tx).eligiblePublications([...values(actor, filters), knowledgeEmbeddingProfile.id])).rows,
+        ),
+      unavailable: await availability(tx, actor, filters),
+    }));
+    const byDocument = new Map(eligible.map(row => [row.document_id, row]));
+    // The index only sees documents this actor may read now; page() re-checks each hit before returning it.
+    const hits = byDocument.size ? await externalIndex.search(workspaceId, query, [...byDocument.keys()]) : [];
+    const documents = new Set<string>();
+    const candidates: Candidate[] = [];
+    for (const hit of [...hits].sort(
+      (a, b) => b.score - a.score || a.documentId.localeCompare(b.documentId) || a.ordinal - b.ordinal,
+    )) {
+      const owner = byDocument.get(hit.documentId);
+      // A hit from an older publication points at passages that no longer exist; its replacement is still in flight.
+      if (!owner || owner.publication_id !== hit.publicationId || documents.has(hit.documentId)) continue;
+      documents.add(hit.documentId);
+      candidates.push({
+        document_id: owner.document_id,
+        source_id: owner.source_id,
+        revision_id: owner.revision_id,
+        publication_id: owner.publication_id,
+        access_epoch: owner.access_epoch,
+        ordinal: hit.ordinal,
+        vector_publication_id: null,
+        exact: false,
+      });
+      if (candidates.length === 100) break;
+    }
+    return { candidates: z.array(candidateSchema).parse(candidates), unavailable };
   }
   async function readSession(workspaceId: string, userId: string, id: string, deadlineAt: number) {
     return transaction(workspaceId, userId, deadlineAt, false, async (tx, actor) =>
@@ -539,6 +594,21 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
         if (previous.fingerprint !== hash) throw new KnowledgeError('conflict');
         return page(workspaceId, userId, previous, 0, deadlineAt, false);
       }
+    }
+    if (index && (await index.enabled(workspaceId))) {
+      const found = await indexed(index, workspaceId, userId, input.query, filters, deadlineAt - 400);
+      const session: Session = {
+        id: input.kind === 'submitted' ? input.commandId : randomUUID(),
+        fingerprint: hash,
+        filters,
+        candidates: found.candidates,
+        mode: 'hybrid',
+        reason: input.kind === 'typing' ? 'typing' : null,
+        coverage: found.unavailable ? 'partial' : 'complete',
+        expires_at: new Date(clock.now() + 300000),
+      };
+      const result = await page(workspaceId, userId, session, 0, deadlineAt, input.kind === 'submitted');
+      return input.kind === 'typing' ? { ...result, continuation: null } : result;
     }
     const lexicalResult = await lexical(
       workspaceId,

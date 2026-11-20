@@ -39,6 +39,7 @@ export const commonTables = {
   memberships: 'tf_memberships',
   personalMemory: 'tf_personal_memory',
   keepMemory: 'tf_keep_memory',
+  keepKnowledge: 'tf_keep_knowledge',
   budState: 'tf_bud_state',
   budNudges: 'tf_bud_nudges',
   budPreferences: 'tf_bud_preferences',

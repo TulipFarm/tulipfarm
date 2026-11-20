@@ -54,6 +54,7 @@ import { createKnowledgeActivities } from './knowledge-activities.ts';
 import { knowledgeMediaRecognition } from './media-recognition.ts';
 import { createFiles } from '@tulipfarm/files';
 import { createKnowledgeEmbeddingWorker } from './knowledge-embedding-composition.ts';
+import { createKnowledgeKeepWorker } from './knowledge-keep-composition.ts';
 import { createGoogleKnowledgeWorker } from './knowledge-google-composition.ts';
 import { createSlackKnowledgeWorker } from './knowledge-slack-composition.ts';
 import { createGitHubKnowledgeWorker } from './knowledge-github-composition.ts';
@@ -534,6 +535,9 @@ async function run() {
           ...(atlassianKnowledge ? { atlassian: atlassianKnowledge.service } : {}),
         })
       : undefined;
+    const knowledgeKeep = knowledgeResources
+      ? await createKnowledgeKeepWorker({ runtime: knowledgeResources.runtime, connection, telemetry })
+      : undefined;
     const workers = [
       ...(worker ? [worker] : []),
       ...(knowledgeWorker ? [knowledgeWorker] : []),
@@ -544,6 +548,7 @@ async function run() {
       ...(atlassianKnowledge ? [atlassianKnowledge.worker] : []),
       ...(defaultKnowledge ? [defaultKnowledge.worker] : []),
       ...(knowledgeEmbeddings?.worker ? [knowledgeEmbeddings.worker] : []),
+      ...(knowledgeKeep ? [knowledgeKeep.worker] : []),
     ];
     await taskDispatch?.startRecovery();
     await planDispatch?.startRecovery();

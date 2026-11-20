@@ -5,7 +5,7 @@ import { AccessDenied, humanActorSchema, type HumanActor, type SourceDependency 
 import { requireAccess } from '@tulipfarm/memory-core/ports/authorizer';
 import { createKnowledgeAuthorizer, knowledgeEgressPolicy } from '../authorization/authorizer.ts';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
-import { KnowledgeError, citationSchema } from './contracts.ts';
+import { KnowledgeError, KnowledgeSearchUnavailable, citationSchema } from './contracts.ts';
 import { createKnowledgeStore, type KnowledgeOptions } from './store.ts';
 import { sqlExternalAuthority } from './external-authority.ts';
 import type { createKnowledgeSearch } from './search.ts';
@@ -151,14 +151,28 @@ export function createKnowledgeAgentTools({
     knowledgeEgressPolicy.deny();
     await admit(workspaceId, actor, context, deadlineAt);
     const filters = knowledgeSearchFiltersSchema.parse(input.kind ? { kinds: [input.kind] } : {});
-    const found = await search.search(
-      workspaceId,
-      actor.userId,
-      { kind: 'submitted', commandId: context.commandId, query: input.query, filters },
-      deadlineAt,
-      context.signal,
-      context.taskFlowId ? { taskFlowId: context.taskFlowId } : undefined,
-    );
+    let found: Awaited<ReturnType<typeof search.search>>;
+    try {
+      found = await search.search(
+        workspaceId,
+        actor.userId,
+        { kind: 'submitted', commandId: context.commandId, query: input.query, filters },
+        deadlineAt,
+        context.signal,
+        context.taskFlowId ? { taskFlowId: context.taskFlowId } : undefined,
+      );
+    } catch (error) {
+      if (!(error instanceof KnowledgeSearchUnavailable)) throw error;
+      return {
+        result: {
+          provider: 'knowledge',
+          error: 'knowledge-unavailable',
+          instruction:
+            'Knowledge search is unavailable right now, so no knowledge was searched. Tell the requester; do not answer as if no knowledge exists and do not invent knowledge evidence.',
+        },
+        sources: [] as Dependency[],
+      };
+    }
     const hits = found.hits.slice(0, knowledgeToolLimits.hits);
     const kinds = hits.length
       ? await store.transaction(

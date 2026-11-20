@@ -13,6 +13,7 @@ export {
   citationSchema,
   KnowledgeAccountChanged,
   KnowledgeError,
+  KnowledgeSearchUnavailable,
   type KnowledgeCitation,
   type EmbeddingProfile,
 } from '@tulipfarm/memory-core/documents/contracts';

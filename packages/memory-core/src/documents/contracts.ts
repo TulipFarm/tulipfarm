@@ -147,6 +147,13 @@ export class KnowledgeAccountChanged extends Error {
     super('Knowledge account changed');
   }
 }
+/** The external Knowledge index could not answer, so a search has no trustworthy result. */
+export class KnowledgeSearchUnavailable extends Error {
+  readonly code = 'knowledge-search-unavailable';
+  constructor(readonly reason: string) {
+    super(`Knowledge search unavailable: ${reason}`);
+  }
+}
 export class KnowledgeError extends Error {
   constructor(
     readonly code:

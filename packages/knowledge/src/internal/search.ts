@@ -1,5 +1,5 @@
 import type { Clock } from '@tulipfarm/memory-core/ports/runtime';
-import { createSearchEngine } from '@tulipfarm/memory-core/search';
+import { createSearchEngine, type KnowledgeIndexSearch } from '@tulipfarm/memory-core/search';
 import {
   createPostgresLexicalIndex,
   createPostgresVectorIndex,
@@ -24,6 +24,7 @@ import type { GitHubKnowledge } from './github.ts';
 import type { AtlassianKnowledge } from './atlassian.ts';
 import { externalAuthority } from './external-authority.ts';
 import type { SourceDependency } from '../authorization/contracts.ts';
+import { createKnowledgeKeepIndex } from './keep.ts';
 export { fuseKnowledgeCandidates } from '@tulipfarm/memory-core/search';
 type Transaction = Parameters<ReturnType<typeof createKnowledgeStore>['bind']>[0];
 export function createKnowledgeSearch({
@@ -35,6 +36,7 @@ export function createKnowledgeSearch({
   atlassian,
   clock = systemClock,
   callTimeoutMs = knowledgeHostPolicy.callTimeoutMs,
+  index = createKnowledgeKeepIndex(),
 }: {
   runtime: KnowledgeOptions['runtime'];
   embeddings: ReturnType<typeof createKnowledgeEmbeddings>;
@@ -44,6 +46,8 @@ export function createKnowledgeSearch({
   atlassian?: AtlassianKnowledge;
   clock?: Clock;
   callTimeoutMs?: number;
+  /** Where a workspace with `keep-memory` on searches. Defaults to Keep. */
+  index?: KnowledgeIndexSearch;
 }) {
   const store = createKnowledgeStore({
     runtime,
@@ -96,5 +100,6 @@ export function createKnowledgeSearch({
     clock,
     callTimeoutMs,
     profile: knowledgeHostPolicy.embeddingProfile,
+    index,
   });
 }
