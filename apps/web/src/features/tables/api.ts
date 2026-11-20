@@ -25,7 +25,7 @@ const tableSchema = z.object({
   id: z.uuid(),
   revision: z.string(),
   definition: tableDefinitionSchema,
-  systemKind: z.literal('workspace-members').optional(),
+  systemKind: z.enum(['workspace-members', 'tasks']).optional(),
 });
 export const tableListSchema = z.object({
   tables: z.array(tableSchema.extend({ appliedAt: z.iso.datetime().nullable(), recordCount: z.string() })),
@@ -54,7 +54,7 @@ const schemaHistoryEntrySchema = z.object({
 const schemaHistorySchema = z.object({ entries: z.array(schemaHistoryEntrySchema), nextCursor: z.uuid().nullable() });
 export const tableStateSchema = z.object({
   id: z.uuid(),
-  systemKind: z.literal('workspace-members').optional(),
+  systemKind: z.enum(['workspace-members', 'tasks']).optional(),
   saved: schemaHistoryEntrySchema.nullable(),
   applied: z
     .object({ revision: z.string(), definition: tableDefinitionSchema, appliedAt: z.iso.datetime().nullable() })
@@ -378,6 +378,7 @@ export function tableApi(workspaceId: string) {
     return tableStateSchema.parse(await request(`/${encodeURIComponent(id)}`, signal));
   }
   return {
+    workspaceId,
     list,
     detail,
     /** Archives or restores through the same checks as chat. Reuse the request id to retry safely. */

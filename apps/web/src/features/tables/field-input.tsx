@@ -30,6 +30,9 @@ import type { TableField, TableValue } from './review-contracts';
 import type { TableApi } from './api';
 import { localDateTime, utcTimestamp } from './row-query';
 import { fieldHint } from './record-validation';
+import { ActorPicker } from './actors';
+import { MessageResponse } from '@tulipfarm/sprout/message-response';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@tulipfarm/sprout/tabs';
 
 function RowField({
   field,
@@ -223,7 +226,29 @@ export function FieldInput({
       />
     );
   }
+  if (field.kind === 'actor')
+    return (
+      <RowField field={field} error={error} disabled={disabled} helper={fieldHint(field)}>
+        <ActorPicker
+          workspaceId={workspace.id}
+          value={value?.kind === 'actor' ? value.actor : null}
+          disabled={disabled}
+          label={field.label}
+          change={actor => change(actor ? { kind: 'actor', actor } : null)}
+        />
+      </RowField>
+    );
   const text = value && 'value' in value ? String(value.value) : '';
+  if (field.kind === 'text' && field.markdown)
+    return (
+      <RowField field={field} error={error} disabled={disabled} helper={fieldHint(field)}>
+        <MarkdownInput
+          label={field.label}
+          text={text}
+          change={next => change(next === '' ? null : { kind: 'text', value: next })}
+        />
+      </RowField>
+    );
   const timestamp = field.kind === 'timestamp';
   const zone = timestamp ? (Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC') : '';
   if (field.kind === 'text' && field.maxLength > 255)
@@ -253,6 +278,28 @@ export function FieldInput({
         }}
       />
     </RowField>
+  );
+}
+
+/** Write and formatted modes for a Markdown text field. Pasted Markdown stays Markdown. */
+function MarkdownInput({ label, text, change }: { label: string; text: string; change: (text: string) => void }) {
+  return (
+    <Tabs defaultValue="write">
+      <TabsList variant="line" aria-label={`${label} editor`}>
+        <TabsTrigger value="write">Write</TabsTrigger>
+        <TabsTrigger value="formatted">Formatted</TabsTrigger>
+      </TabsList>
+      <TabsContent value="write" keepMounted>
+        <Textarea value={text} rows={8} onChange={event => change(event.target.value)} />
+      </TabsContent>
+      <TabsContent value="formatted">
+        {text.trim() ? (
+          <MessageResponse>{text}</MessageResponse>
+        ) : (
+          <p className="text-sm text-muted-foreground">No text yet.</p>
+        )}
+      </TabsContent>
+    </Tabs>
   );
 }
 

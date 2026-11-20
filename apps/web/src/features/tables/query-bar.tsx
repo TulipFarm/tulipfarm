@@ -56,6 +56,7 @@ import { Textarea } from '@tulipfarm/sprout/textarea';
 import { ButtonGroup } from '@tulipfarm/sprout/button-group';
 import { ViewSwitcher, type ViewSwitcherView } from '@tulipfarm/sprout/view-switcher';
 import { exportCsv, exportRowCap } from './table-export';
+import { ActorPicker, actorKey, parseActorKey } from './actors';
 import { TableRequestError } from './request-state';
 import { useTableCapabilities } from './hooks';
 import { TableQueryRejected, type TableApi, type TableDefinition, type Translation } from './api';
@@ -1191,6 +1192,17 @@ function ValueEditor({
   change: (values: string[]) => void;
 }) {
   const one = values[0] ?? '';
+  if (field.kind === 'actor')
+    return (
+      <ActorPicker
+        workspaceId={api.workspaceId}
+        value={parseActorKey(one)}
+        disabled={disabled}
+        label="Value"
+        size="sm"
+        change={actor => change(actor ? [actorKey(actor)] : [])}
+      />
+    );
   if (field.kind === 'relationship')
     return (
       <ReferencePicker

@@ -22,7 +22,7 @@ export const tableProposalOutcomeSchema = z.discriminatedUnion('kind', [
 const optionSchema = z.object({ id: z.uuid(), label: z.string(), retired: z.boolean() });
 const fieldBase = { id: z.uuid(), label: z.string(), required: z.boolean() };
 export const tableFieldSchema = z.discriminatedUnion('kind', [
-  z.object({ ...fieldBase, kind: z.literal('text'), maxLength: z.number() }),
+  z.object({ ...fieldBase, kind: z.literal('text'), maxLength: z.number(), markdown: z.boolean().optional() }),
   z.object({ ...fieldBase, kind: z.literal('numeric'), precision: z.number(), scale: z.number() }),
   z.object({ ...fieldBase, kind: z.literal('boolean') }),
   z.object({ ...fieldBase, kind: z.literal('date') }),
@@ -44,6 +44,7 @@ export const tableFieldSchema = z.discriminatedUnion('kind', [
     cardinality: z.enum(['one', 'many']),
     access: z.literal('independent'),
   }),
+  z.object({ ...fieldBase, kind: z.literal('actor'), assignee: z.boolean() }),
 ]);
 export const tableDefinitionSchema = z.object({
   formatVersion: z.literal(2),
@@ -65,6 +66,7 @@ export const tableValueSchema = z.union([
     z.object({ kind: z.literal('multi-select'), optionIds: z.array(z.uuid()) }),
     z.object({ kind: z.literal('relationship'), tableId: z.uuid(), recordIds: z.array(z.uuid()) }),
     z.object({ kind: z.literal('file'), fileIds: z.array(z.uuid()) }),
+    z.object({ kind: z.literal('actor'), actor: z.object({ type: z.enum(['member', 'agent']), id: z.uuid() }) }),
   ]),
 ]);
 export const tableValuesSchema = z.record(z.string(), tableValueSchema);

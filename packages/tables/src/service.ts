@@ -55,6 +55,7 @@ import {
 } from './query.ts';
 import { bindCurrentMemberQuery, runRowsQuery, runSummaryQuery } from './query-execution.ts';
 import { workspaceMemberFields, workspaceMemberMutationSchema, WorkspaceMemberError } from './workspace-members.ts';
+import { tasksTable } from './task-mutations.ts';
 
 /** listPage counts matching rows on the first page only and stops at this many, reporting `"10000+"` beyond it. */
 export const listPageCountLimit = 10000;
@@ -725,6 +726,7 @@ export function createTableService(
     const pattern = query.search ? likePattern(query.search) : null;
     return authorized(workspaceId, principal, async (tx, actor) => {
       const memberTableId = (await store.workspaceMembersTable(tx))?.coreDefinition.id;
+      const tasksTableId = (await tasksTable(tx))?.coreDefinition.id;
       const select = `SELECT g.*,c.owning_team_id FROM ${table(tx, 'tf_table_generations')} g JOIN ${table(tx, 'tf_table_catalog')} c ON c.id=g.table_id WHERE g.state='active' AND (c.archived_at IS NOT NULL)=$1 AND ($2::text IS NULL OR g.definition->>'label' ILIKE $2)`;
       const entry = (row: Record<string, unknown>) => ({
         ...store.currentGeneration(row),
@@ -740,6 +742,7 @@ export function createTableService(
         appliedAt: row.appliedAt,
         recordCount: recordCount ?? (await countUpTo(tx, table(tx, row.physical_table), [])),
         ...(row.table_id === memberTableId ? { systemKind: 'workspace-members' as const } : {}),
+        ...(row.table_id === tasksTableId ? { systemKind: 'tasks' as const } : {}),
       });
       if (!query.sort) {
         const after = tableIdSchema.optional().parse(query.after);

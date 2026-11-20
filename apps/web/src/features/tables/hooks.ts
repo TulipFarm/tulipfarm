@@ -8,6 +8,7 @@ import type { RowPage, RowQuery, TableDataRow, TableDefinition, TableApi, TableL
 import { workspaceMembersApi, type MemberStateQuery } from './api';
 import type { TableQueryRequest } from '@tulipfarm/tables/query';
 import { workspaceMemberFields } from '@tulipfarm/tables/workspace-members';
+import { runStateOf, taskFields } from '@tulipfarm/tables/tasks-table';
 import type { ReadState } from './request-state';
 import { TableRequestError } from './request-state';
 import { concealTableQueries, useTableAuthority } from './authority';
@@ -55,7 +56,24 @@ export function useTableQueryResult(
   request: TableQueryRequest,
   enabled = true,
 ) {
-  return useTableQuery({ ...tableQueries.query(api, table, request), enabled });
+  return useTableQuery({
+    ...tableQueries.query(api, table, request),
+    enabled,
+    pollWhile: runInProgress,
+    interval: 3000,
+    maxChecks: 200,
+  });
+}
+/** Assignment runs change Run state on the server, so a page showing a queued or working task checks again. */
+function runInProgress(data: Awaited<ReturnType<ReturnType<typeof tableQueries.query>['load']>>) {
+  return (
+    data.mode === 'rows' &&
+    data.records.some(record => {
+      const value = record.values[taskFields.runState];
+      const state = value?.kind === 'single-select' ? runStateOf(value.optionId) : null;
+      return state === 'queued' || state === 'working';
+    })
+  );
 }
 export function useMemberDirectory(workspaceId: string) {
   const api = useMemo(() => workspaceMembersApi(workspaceId), [workspaceId]);

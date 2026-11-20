@@ -8,7 +8,9 @@ import { useFeatureRead } from '@/lib/query';
 import { fileKeys, useFilesApi, type FileSummary } from '@/features/files/api';
 import { formatTableValue } from './definition-view';
 import { optionTone } from './table-view';
+import { MessageResponse } from '@tulipfarm/sprout/message-response';
 import { MemberPhoto } from './member-profile';
+import { ActorName } from './actors';
 import {
   workspaceMemberAccess,
   workspaceMemberFields,
@@ -257,7 +259,7 @@ export function TableValueView({
   files: FileNames;
   unavailableFileIds: readonly string[];
   workspace: TableWorkspace;
-  systemKind?: 'workspace-members' | undefined;
+  systemKind?: 'workspace-members' | 'tasks' | undefined;
   record?: Pick<TableDataRow, 'id' | 'values'> | undefined;
 }) {
   if (systemKind === 'workspace-members' && fieldId === workspaceMemberFields.photo)
@@ -292,6 +294,7 @@ export function TableValueView({
         </span>
       );
   }
+  if (value?.kind === 'actor') return <ActorName workspaceId={workspace.id} actor={value.actor} compact={compact} />;
   if (value?.kind === 'relationship' && value.recordIds.length && compact)
     return <LinkedPeople tableId={value.tableId} ids={value.recordIds} linked={linked} workspace={workspace} />;
   if (value?.kind === 'relationship' && value.recordIds.length)
@@ -353,6 +356,22 @@ export function TableValueView({
       </span>
     );
   const text = compact && value == null ? '—' : formatTableValue(value, definition, fieldId);
+  const textField = definition.fields.find(item => item.id === fieldId);
+  const markdown = value?.kind === 'text' && textField?.kind === 'text' && textField.markdown === true;
+  // The grid shows a Markdown value's first line as plain text; the row detail renders it.
+  if (markdown && !compact) return <MessageResponse>{text}</MessageResponse>;
+  if (markdown) {
+    const line =
+      text
+        .split('\n')
+        .find(item => item.trim())
+        ?.trim() ?? '';
+    return (
+      <span title={line} className="block max-w-64 truncate">
+        {line}
+      </span>
+    );
+  }
   return (
     <span
       title={text}

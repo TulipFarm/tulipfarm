@@ -15,6 +15,7 @@ import {
   type SignedRequestHandle,
 } from '@tulipfarm/apps/store';
 import { TableValidationError } from '@tulipfarm/tables/definition';
+import { TaskTableError } from '@tulipfarm/tables/tasks-table';
 import type { createTableService } from '@tulipfarm/tables/service';
 import type { FeatureFlag } from '@tulipfarm/config/feature-flags';
 import { featureFlagAnswer, log, recordAppKeyCheck } from '@tulipfarm/observability';
@@ -269,6 +270,7 @@ export function registerAppData(
         if (live) appRefusals.spend(live.appId);
         return reply.code(403).send({ error: 'denied' });
       }
+      if (error instanceof TaskTableError) return reply.code(error.status).send({ error: error.code });
       if (error instanceof TableValidationError)
         return reply.code(422).send({ error: 'invalid-value', fieldId: error.fieldId ?? null, message: error.message });
       if (error instanceof z.ZodError || (typeof error === 'object' && error !== null && 'validation' in error))

@@ -352,9 +352,13 @@
                         "maxLength": {
                           "type": "integer",
                           "minimum": 1,
-                          "maximum": 10000,
+                          "maximum": 100000,
                           "description": "Maximum number of characters allowed in a text value. Use a title-sized limit such as 120–255 for short names.",
                           "examples": [255]
+                        },
+                        "markdown": {
+                          "type": "boolean",
+                          "description": "Show as Markdown; allows maxLength up to 100000."
                         },
                         "key": {
                           "type": "string",

@@ -245,3 +245,31 @@ test('custom rule failures report the exported rule messages', () => {
     assert.ok(listed.includes(message), message);
   assert.ok(tableDefinitionRules.every(rule => tableProposalRules.includes(rule)));
 });
+
+test('Person or agent fields hold one member or agent and a table has at most one Assignee', async () => {
+  const { actorKey, parseActorKey } = await import('@tulipfarm/tables/definition');
+  const actor = { ...base, kind: 'actor', assignee: true };
+  const member = { type: 'member', id: record };
+  assert.deepEqual(validateValue(fieldSchema.parse(actor), { kind: 'actor', actor: member }), {
+    kind: 'actor',
+    actor: member,
+  });
+  assert.equal(actorKey(member), `member:${record}`);
+  assert.deepEqual(parseActorKey(`agent:${record}`), { type: 'agent', id: record });
+  for (const invalid of [`team:${record}`, 'member:not-a-uuid', record]) assert.throws(() => parseActorKey(invalid));
+  assert.throws(() => validateValue(fieldSchema.parse(actor), { kind: 'actor', actor: { type: 'bud', id: record } }));
+  assert.doesNotThrow(() => definitionSchema.parse(definition([actor, { ...actor, id: second, assignee: false }])));
+  assert.throws(
+    () => definitionSchema.parse(definition([actor, { ...actor, id: second }])),
+    new RegExp(tableDefinitionMessages.oneAssignee),
+  );
+});
+
+test('text longer than 10000 characters needs Display as Markdown, up to 100000', () => {
+  assert.throws(
+    () => fieldSchema.parse({ ...text, maxLength: 10001 }),
+    new RegExp(tableDefinitionMessages.markdownLength),
+  );
+  assert.equal(fieldSchema.parse({ ...text, maxLength: 100000, markdown: true }).maxLength, 100000);
+  assert.throws(() => fieldSchema.parse({ ...text, maxLength: 100001, markdown: true }));
+});

@@ -179,6 +179,18 @@
       "types": "./dist/draft-contracts.d.ts",
       "default": "./dist/draft-contracts.js"
     },
+    "./actors": {
+      "types": "./dist/actors.d.ts",
+      "default": "./dist/actors.js"
+    },
+    "./row-assignments": {
+      "types": "./dist/row-assignments.d.ts",
+      "default": "./dist/row-assignments.js"
+    },
+    "./row-work": {
+      "types": "./dist/row-work.d.ts",
+      "default": "./dist/row-work.js"
+    },
     "./tasks": {
       "types": "./dist/tasks.d.ts",
       "default": "./dist/tasks.js"

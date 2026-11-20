@@ -214,6 +214,12 @@ export async function humanTableGrantPredicate(
     SELECT 1 FROM ${table(transaction, 'tf_system_tables')} directory
     JOIN ${table(transaction, 'tf_memberships')} reader ON reader.id=${membershipId} AND reader.removed_at IS NULL
     WHERE directory.kind='workspace-members' AND directory.table_id=${assetId}))`);
+  // Every member works with the shared Tasks table's rows; its schema stays with its owning team.
+  if (installed)
+    alternatives.push(`(${permissions} && ARRAY['table.row.read','table.row.create','table.row.update','table.row.delete'] AND EXISTS (
+    SELECT 1 FROM ${table(transaction, 'tf_system_tables')} shared
+    JOIN ${table(transaction, 'tf_memberships')} worker ON worker.id=${membershipId} AND worker.removed_at IS NULL
+    WHERE shared.kind='tasks' AND shared.table_id=${assetId}))`);
   return `(${alternatives.join(' OR ')})`;
 }
 

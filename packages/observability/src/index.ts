@@ -1491,6 +1491,7 @@ export const backgroundJobs = [
   'social-refresh',
   'app-reconcile',
   'app-usage',
+  'row-assignments',
 ] as const;
 export type BackgroundJob = (typeof backgroundJobs)[number];
 

@@ -32,7 +32,8 @@ import {
   type ProposalPlan,
   type TableEffect,
 } from './proposal-contracts.ts';
-import { requireMemberTableDefinition, workspaceMembersTable } from './store.ts';
+import { requireMemberTableDefinition, tasksTable, workspaceMembersTable } from './store.ts';
+import { TaskTableError } from './tasks-table.ts';
 import { nonTableAssetIds } from './identities.ts';
 import { WorkspaceMemberError } from './workspace-members.ts';
 
@@ -222,6 +223,7 @@ export async function planAuthority(
     await requireTablePermission(tx, actor, plan.tableId, 'table.schema.manage');
     if ((await workspaceMembersTable(tx))?.coreDefinition.id === plan.tableId)
       throw new WorkspaceMemberError('member-table-protected');
+    if ((await tasksTable(tx))?.coreDefinition.id === plan.tableId) throw new TaskTableError('tasks-table-protected');
   }
   if (plan.kind === 'records')
     for (const kind of new Set(plan.changes.map(change => change.kind))) {

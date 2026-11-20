@@ -4,6 +4,8 @@ import { registerAgents } from './agents.ts';
 import { registerAppPages } from './app-pages.ts';
 import { registerGovernance } from './governance.ts';
 import { registerWorkspaceMembers } from './workspace-members.ts';
+import { registerActors } from './actors.ts';
+import { registerRowWork } from './row-work.ts';
 import { registerWorkspaceSettings } from './workspace-settings.ts';
 import { registerSoulExplorer } from './soul-explorer.ts';
 import { registerCredits } from './credits.ts';
@@ -310,6 +312,8 @@ export function registerStorageComposition(
     acceptUnverifiedEmail: authConfig().emailPassword,
   });
   registerWorkspaceMembers(app, { auth: dependencies.auth, runtime });
+  registerActors(app, { auth: dependencies.auth, runtime });
+  registerRowWork(app, { auth: dependencies.auth, runtime });
   registerIntegrations(app, {
     auth: dependencies.auth,
     service: createIntegrationService({ runtime, keyring: integrationCredentialKeyring() }),

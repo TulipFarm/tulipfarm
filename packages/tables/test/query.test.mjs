@@ -411,3 +411,24 @@ test('descriptions use labels for people', () => {
   );
   assert.equal(describeWhere(definition, null), 'All rows');
 });
+
+test('Person or agent fields filter by me, by person or agent, and by an exact actor key', () => {
+  const assignee = { id: id(11), label: 'Assignee', kind: 'actor', required: false, assignee: true };
+  const tasks = { fields: [fields.subject, assignee] };
+  assert.deepEqual(parseRsql(tasks, 'assignee=isme=true'), rule(assignee, 'is-me'));
+  assert.deepEqual(parseRsql(tasks, 'assignee=isagent=true'), rule(assignee, 'is-agent'));
+  assert.equal(printRsql(tasks, rule(assignee, 'is-person')), 'assignee=isperson=true');
+  assert.deepEqual(
+    parseRsql(tasks, `assignee==AGENT:${id(70).toUpperCase()}`),
+    rule(assignee, 'eq', `agent:${id(70)}`),
+  );
+  assert.deepEqual(
+    issueCodes(() => parseRsql(tasks, `assignee==team:${id(70)}`)),
+    ['invalid-value'],
+  );
+  assert.ok(
+    queryCapabilities(tasks)
+      .fields.find(field => field.fieldId === assignee.id)
+      .ops.includes('is-me'),
+  );
+});

@@ -361,7 +361,7 @@ test('after a provider overflow with many images, only the text is rescaled, so 
   const format = 'anthropic';
   const route = { ...nativeRoutes.anthropic, model: 'claude-synthetic-vision', capabilities: { imageInput: true } };
   const images = Array.from({ length: 30 }, () => ({ type: 'image', mediaType: 'image/png', data: png }));
-  const page = round => `page-${round} ${'lorem ipsum dolor '.repeat(660)}`;
+  const page = round => `page-${round} ${'lorem ipsum dolor '.repeat(800)}`;
   let rounds = 0;
   let rejected = 0;
   let retried;

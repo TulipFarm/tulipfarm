@@ -318,7 +318,7 @@ test('the model-facing proposal schema reuses definitions and stays small', () =
   assert.ok(Object.keys(schema.$defs ?? {}).length > 0);
   assert.match(text, /"\$ref":"#\/\$defs\//);
   const bytes = Buffer.byteLength(text);
-  assert.ok(bytes < 29000, `proposal schema is ${bytes} bytes`);
+  assert.ok(bytes < 31000, `proposal schema is ${bytes} bytes`);
 });
 
 test('the model-facing proposal schema offers schema, import, archive and restore plans', () => {

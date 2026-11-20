@@ -218,6 +218,8 @@ function valueKey(value: TableValue): string {
       return `relationship:${value.tableId}:${[...value.recordIds].sort().join(',')}`;
     case 'file':
       return `file:${[...value.fileIds].sort().join(',')}`;
+    case 'actor':
+      return `actor:${value.actor.type}:${value.actor.id}`;
     default: {
       const exhaustive: never = value;
       return exhaustive;

@@ -18,7 +18,7 @@
       "$ref": "#/$defs/__schema5"
     },
     "uniqueKeys": {
-      "$ref": "#/$defs/__schema48"
+      "$ref": "#/$defs/__schema52"
     }
   },
   "required": [
@@ -78,28 +78,31 @@
           "$ref": "#/$defs/__schema7"
         },
         {
-          "$ref": "#/$defs/__schema13"
+          "$ref": "#/$defs/__schema14"
         },
         {
-          "$ref": "#/$defs/__schema17"
+          "$ref": "#/$defs/__schema18"
         },
         {
-          "$ref": "#/$defs/__schema19"
+          "$ref": "#/$defs/__schema20"
         },
         {
-          "$ref": "#/$defs/__schema21"
+          "$ref": "#/$defs/__schema22"
         },
         {
-          "$ref": "#/$defs/__schema24"
+          "$ref": "#/$defs/__schema25"
         },
         {
-          "$ref": "#/$defs/__schema32"
+          "$ref": "#/$defs/__schema33"
         },
         {
-          "$ref": "#/$defs/__schema35"
+          "$ref": "#/$defs/__schema36"
         },
         {
-          "$ref": "#/$defs/__schema44"
+          "$ref": "#/$defs/__schema45"
+        },
+        {
+          "$ref": "#/$defs/__schema49"
         }
       ],
       "description": "One field in the table shape; kind selects the field-specific properties and row value type."
@@ -121,6 +124,9 @@
         },
         "maxLength": {
           "$ref": "#/$defs/__schema12"
+        },
+        "markdown": {
+          "$ref": "#/$defs/__schema13"
         }
       },
       "required": [
@@ -161,13 +167,17 @@
     "__schema12": {
       "type": "integer",
       "minimum": 1,
-      "maximum": 10000,
+      "maximum": 100000,
       "description": "Maximum number of characters allowed in a text value. Use a title-sized limit such as 120–255 for short names.",
       "examples": [
         255
       ]
     },
     "__schema13": {
+      "type": "boolean",
+      "description": "Show as Markdown; allows maxLength up to 100000."
+    },
+    "__schema14": {
       "type": "object",
       "properties": {
         "id": {
@@ -180,13 +190,13 @@
           "$ref": "#/$defs/__schema10"
         },
         "kind": {
-          "$ref": "#/$defs/__schema14"
-        },
-        "precision": {
           "$ref": "#/$defs/__schema15"
         },
-        "scale": {
+        "precision": {
           "$ref": "#/$defs/__schema16"
+        },
+        "scale": {
+          "$ref": "#/$defs/__schema17"
         }
       },
       "required": [
@@ -488,12 +498,12 @@
         }
       ]
     },
-    "__schema14": {
+    "__schema15": {
       "type": "string",
       "const": "numeric",
       "description": "A fixed-precision decimal field."
     },
-    "__schema15": {
+    "__schema16": {
       "type": "integer",
       "minimum": 1,
       "maximum": 30,
@@ -502,7 +512,7 @@
         12
       ]
     },
-    "__schema16": {
+    "__schema17": {
       "type": "integer",
       "minimum": 0,
       "maximum": 10,
@@ -511,7 +521,7 @@
         2
       ]
     },
-    "__schema17": {
+    "__schema18": {
       "type": "object",
       "properties": {
         "id": {
@@ -524,7 +534,7 @@
           "$ref": "#/$defs/__schema10"
         },
         "kind": {
-          "$ref": "#/$defs/__schema18"
+          "$ref": "#/$defs/__schema19"
         }
       },
       "required": [
@@ -536,12 +546,12 @@
       "additionalProperties": false,
       "description": "A true-or-false field, useful for a yes/no business fact."
     },
-    "__schema18": {
+    "__schema19": {
       "type": "string",
       "const": "boolean",
       "description": "A field containing true or false."
     },
-    "__schema19": {
+    "__schema20": {
       "type": "object",
       "properties": {
         "id": {
@@ -554,7 +564,7 @@
           "$ref": "#/$defs/__schema10"
         },
         "kind": {
-          "$ref": "#/$defs/__schema20"
+          "$ref": "#/$defs/__schema21"
         }
       },
       "required": [
@@ -566,12 +576,12 @@
       "additionalProperties": false,
       "description": "A calendar-date field, such as an invoice due date."
     },
-    "__schema20": {
+    "__schema21": {
       "type": "string",
       "const": "date",
       "description": "A calendar date without a time of day."
     },
-    "__schema21": {
+    "__schema22": {
       "type": "object",
       "properties": {
         "id": {
@@ -584,10 +594,10 @@
           "$ref": "#/$defs/__schema10"
         },
         "kind": {
-          "$ref": "#/$defs/__schema22"
+          "$ref": "#/$defs/__schema23"
         },
         "timezone": {
-          "$ref": "#/$defs/__schema23"
+          "$ref": "#/$defs/__schema24"
         }
       },
       "required": [
@@ -600,17 +610,17 @@
       "additionalProperties": false,
       "description": "A date-and-time field for an event that occurs at a specific instant."
     },
-    "__schema22": {
+    "__schema23": {
       "type": "string",
       "const": "timestamp",
       "description": "A date and time represented as a UTC instant."
     },
-    "__schema23": {
+    "__schema24": {
       "type": "string",
       "const": "UTC",
       "description": "The required timezone for this timestamp field: UTC."
     },
-    "__schema24": {
+    "__schema25": {
       "type": "object",
       "properties": {
         "id": {
@@ -623,10 +633,10 @@
           "$ref": "#/$defs/__schema10"
         },
         "kind": {
-          "$ref": "#/$defs/__schema25"
+          "$ref": "#/$defs/__schema26"
         },
         "options": {
-          "$ref": "#/$defs/__schema26"
+          "$ref": "#/$defs/__schema27"
         }
       },
       "required": [
@@ -639,12 +649,12 @@
       "additionalProperties": false,
       "description": "A controlled choice field where each row selects one option."
     },
-    "__schema25": {
+    "__schema26": {
       "type": "string",
       "const": "single-select",
       "description": "A field where a row chooses one option."
     },
-    "__schema26": {
+    "__schema27": {
       "description": "The one-of choices available to rows, such as a ticket status.",
       "examples": [
         [
@@ -655,19 +665,19 @@
           }
         ]
       ],
-      "$ref": "#/$defs/__schema31"
+      "$ref": "#/$defs/__schema32"
     },
-    "__schema27": {
+    "__schema28": {
       "type": "object",
       "properties": {
         "id": {
-          "$ref": "#/$defs/__schema28"
-        },
-        "label": {
           "$ref": "#/$defs/__schema29"
         },
-        "retired": {
+        "label": {
           "$ref": "#/$defs/__schema30"
+        },
+        "retired": {
+          "$ref": "#/$defs/__schema31"
         }
       },
       "required": [
@@ -678,13 +688,13 @@
       "additionalProperties": false,
       "description": "One selectable option, with a stable identity and display text."
     },
-    "__schema28": {
+    "__schema29": {
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
       "description": "Stable UUID identifying a select option; input is normalized to lowercase."
     },
-    "__schema29": {
+    "__schema30": {
       "maxLength": 10000,
       "description": "Display text shown for this select option.",
       "examples": [
@@ -694,20 +704,20 @@
       "type": "string",
       "pattern": "^(?!\\s*$)(?![\\s\\S]*\\u0000)[\\s\\S]*$"
     },
-    "__schema30": {
+    "__schema31": {
       "type": "boolean",
       "description": "Whether this option is retired; retired options remain readable but cannot be newly selected."
     },
-    "__schema31": {
+    "__schema32": {
       "minItems": 1,
       "maxItems": 256,
       "type": "array",
       "items": {
-        "$ref": "#/$defs/__schema27"
+        "$ref": "#/$defs/__schema28"
       },
       "description": "The available choices for a select field; provide 1–256 options with distinct IDs."
     },
-    "__schema32": {
+    "__schema33": {
       "type": "object",
       "properties": {
         "id": {
@@ -720,10 +730,10 @@
           "$ref": "#/$defs/__schema10"
         },
         "kind": {
-          "$ref": "#/$defs/__schema33"
+          "$ref": "#/$defs/__schema34"
         },
         "options": {
-          "$ref": "#/$defs/__schema34"
+          "$ref": "#/$defs/__schema35"
         }
       },
       "required": [
@@ -736,16 +746,16 @@
       "additionalProperties": false,
       "description": "A controlled choice field where each row can select multiple options."
     },
-    "__schema33": {
+    "__schema34": {
       "type": "string",
       "const": "multi-select",
       "description": "A field where a row can choose multiple options."
     },
-    "__schema34": {
-      "description": "The choices available to rows, such as the tags that can be applied.",
-      "$ref": "#/$defs/__schema31"
-    },
     "__schema35": {
+      "description": "The choices available to rows, such as the tags that can be applied.",
+      "$ref": "#/$defs/__schema32"
+    },
+    "__schema36": {
       "type": "object",
       "properties": {
         "id": {
@@ -758,22 +768,22 @@
           "$ref": "#/$defs/__schema10"
         },
         "kind": {
-          "$ref": "#/$defs/__schema36"
-        },
-        "targetTableId": {
           "$ref": "#/$defs/__schema37"
         },
-        "cardinality": {
+        "targetTableId": {
           "$ref": "#/$defs/__schema38"
         },
-        "inverseCardinality": {
-          "$ref": "#/$defs/__schema40"
+        "cardinality": {
+          "$ref": "#/$defs/__schema39"
         },
-        "reverse": {
+        "inverseCardinality": {
           "$ref": "#/$defs/__schema41"
         },
+        "reverse": {
+          "$ref": "#/$defs/__schema42"
+        },
         "onDelete": {
-          "$ref": "#/$defs/__schema43"
+          "$ref": "#/$defs/__schema44"
         }
       },
       "required": [
@@ -790,20 +800,20 @@
       "additionalProperties": false,
       "description": "A field that links rows to another table."
     },
-    "__schema36": {
+    "__schema37": {
       "type": "string",
       "const": "relationship",
       "description": "A field linking a row to rows in another table."
     },
-    "__schema37": {
+    "__schema38": {
       "description": "UUID of the table whose rows this field links to.",
       "$ref": "#/$defs/__schema1"
     },
-    "__schema38": {
-      "description": "How many target rows one source row may reference.",
-      "$ref": "#/$defs/__schema39"
-    },
     "__schema39": {
+      "description": "How many target rows one source row may reference.",
+      "$ref": "#/$defs/__schema40"
+    },
+    "__schema40": {
       "type": "string",
       "enum": [
         "one",
@@ -815,14 +825,14 @@
         "many"
       ]
     },
-    "__schema40": {
-      "description": "How many source rows one target row may be referenced from.",
-      "$ref": "#/$defs/__schema39"
-    },
     "__schema41": {
+      "description": "How many source rows one target row may be referenced from.",
+      "$ref": "#/$defs/__schema40"
+    },
+    "__schema42": {
       "anyOf": [
         {
-          "$ref": "#/$defs/__schema42"
+          "$ref": "#/$defs/__schema43"
         },
         {
           "type": "null"
@@ -830,7 +840,7 @@
       ],
       "description": "Optional reverse field to expose this relationship on the target table; null means none."
     },
-    "__schema42": {
+    "__schema43": {
       "type": "object",
       "properties": {
         "fieldId": {
@@ -853,12 +863,12 @@
       ],
       "additionalProperties": false
     },
-    "__schema43": {
+    "__schema44": {
       "type": "string",
       "const": "restrict",
       "description": "Deletion behavior for a target row. The only supported value, restrict, prevents deleting a linked row."
     },
-    "__schema44": {
+    "__schema45": {
       "type": "object",
       "properties": {
         "id": {
@@ -871,13 +881,13 @@
           "$ref": "#/$defs/__schema10"
         },
         "kind": {
-          "$ref": "#/$defs/__schema45"
-        },
-        "cardinality": {
           "$ref": "#/$defs/__schema46"
         },
-        "access": {
+        "cardinality": {
           "$ref": "#/$defs/__schema47"
+        },
+        "access": {
+          "$ref": "#/$defs/__schema48"
         }
       },
       "required": [
@@ -891,39 +901,77 @@
       "additionalProperties": false,
       "description": "A field that stores one or more independently authorized file references."
     },
-    "__schema45": {
+    "__schema46": {
       "type": "string",
       "const": "file",
       "description": "A field containing references to attached files."
     },
-    "__schema46": {
-      "description": "Whether this row can contain one file or multiple files.",
-      "$ref": "#/$defs/__schema39"
-    },
     "__schema47": {
+      "description": "Whether this row can contain one file or multiple files.",
+      "$ref": "#/$defs/__schema40"
+    },
+    "__schema48": {
       "type": "string",
       "const": "independent",
       "description": "File access behavior. Independent means file authorization is checked separately from table access."
-    },
-    "__schema48": {
-      "maxItems": 64,
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/__schema49"
-      },
-      "description": "Optional uniqueness rules across fields; use these when a business identifier must not repeat."
     },
     "__schema49": {
       "type": "object",
       "properties": {
         "id": {
+          "$ref": "#/$defs/__schema8"
+        },
+        "label": {
+          "$ref": "#/$defs/__schema9"
+        },
+        "required": {
+          "$ref": "#/$defs/__schema10"
+        },
+        "kind": {
           "$ref": "#/$defs/__schema50"
         },
-        "fieldIds": {
+        "assignee": {
           "$ref": "#/$defs/__schema51"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "required",
+        "kind",
+        "assignee"
+      ],
+      "additionalProperties": false,
+      "description": "Holds one workspace member or saved agent."
+    },
+    "__schema50": {
+      "type": "string",
+      "const": "actor",
+      "description": "A Person or agent field."
+    },
+    "__schema51": {
+      "type": "boolean",
+      "description": "The table Assignee; at most one per table."
+    },
+    "__schema52": {
+      "maxItems": 64,
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/__schema53"
+      },
+      "description": "Optional uniqueness rules across fields; use these when a business identifier must not repeat."
+    },
+    "__schema53": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/__schema54"
+        },
+        "fieldIds": {
+          "$ref": "#/$defs/__schema55"
         },
         "nulls": {
-          "$ref": "#/$defs/__schema52"
+          "$ref": "#/$defs/__schema56"
         }
       },
       "required": [
@@ -934,13 +982,13 @@
       "additionalProperties": false,
       "description": "A compound uniqueness rule for the selected fields."
     },
-    "__schema50": {
+    "__schema54": {
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
       "description": "Stable UUID identifying a unique key; input is normalized to lowercase."
     },
-    "__schema51": {
+    "__schema55": {
       "minItems": 1,
       "maxItems": 8,
       "type": "array",
@@ -949,7 +997,7 @@
       },
       "description": "IDs of 1–8 existing scalar fields that together must be unique for each row."
     },
-    "__schema52": {
+    "__schema56": {
       "type": "string",
       "const": "distinct",
       "description": "Null handling for this key. Distinct means rows with null key values do not conflict."

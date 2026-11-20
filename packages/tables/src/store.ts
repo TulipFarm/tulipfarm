@@ -20,8 +20,13 @@ import {
   type TableField,
   type TableValue,
   type TableValues,
+  actorKey,
+  parseActorKey,
+  TableValidationError,
 } from './definition.ts';
 import type { ProposalData } from './proposal-data.ts';
+import { finishTaskWrite, prepareTaskWrite, tasksTable } from './task-mutations.ts';
+import { requireTasksDefinition, runStateOptions, taskFields, type RunState } from './tasks-table.ts';
 import { recordTableRecommendationChange } from './recommendations.ts';
 import { nonTableAssetIds } from './identities.ts';
 import {
@@ -70,6 +75,7 @@ export class GenerationError extends Error {
 const table = (tx: GenerationTransaction, name: string) => qualified(tx.schema, name);
 const column = (id: string) => escapeIdentifier(`f_${fieldIdSchema.parse(id).replaceAll('-', '')}`);
 export { column as fieldColumn };
+export { tasksTable };
 const idsSchema = z.array(z.uuid());
 
 let lastHistoryOrder = 0n;
@@ -145,6 +151,8 @@ export async function workspaceMembersTable(tx: GenerationTransaction) {
 }
 
 export async function requireMemberTableDefinition(tx: GenerationTransaction, definition: Generation['definition']) {
+  const tasks = await tasksTable(tx);
+  if (tasks?.coreDefinition.id === definition.id) requireTasksDefinition(tasks, definition);
   const registration = await workspaceMembersTable(tx);
   if (registration?.coreDefinition.id !== definition.id) return;
   requireWorkspaceMembersDefinition(registration, definition);
@@ -267,6 +275,8 @@ function sqlType(field: TableField): string {
     case 'relationship':
     case 'file':
       return field.cardinality === 'one' ? 'uuid' : 'uuid[]';
+    case 'actor':
+      return 'varchar(43) COLLATE "C"';
     default: {
       const exhaustive: never = field;
       return exhaustive;
@@ -291,6 +301,8 @@ function fieldSql(field: TableField) {
     checks.push(`cardinality(${name})<=256`, `array_position(${name}, NULL) IS NULL`);
     if (field.required) checks.push(`cardinality(${name})>0`);
   }
+  if (field.kind === 'actor')
+    checks.push(`${name} ~ '^(member|agent):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'`);
   if (field.kind === 'date') checks.push(`${name} BETWEEN DATE '0001-01-01' AND DATE '9999-12-31'`);
   if (field.kind === 'timestamp')
     checks.push(`${name} BETWEEN TIMESTAMPTZ '0001-01-01 00:00:00+00' AND TIMESTAMPTZ '9999-12-31 23:59:59.999+00'`);
@@ -358,6 +370,7 @@ function storageValue(value: TableValue, field: TableField) {
   if ('value' in value) return value.value;
   if (value.kind === 'single-select') return value.optionId;
   if (value.kind === 'multi-select') return [...value.optionIds].sort();
+  if (value.kind === 'actor') return actorKey(value.actor);
   const ids = value.kind === 'relationship' ? value.recordIds : value.fileIds;
   return 'cardinality' in field && field.cardinality === 'one' ? ids[0] : [...ids].sort();
 }
@@ -395,6 +408,8 @@ function logicalRecord(generation: Generation, input: unknown): LogicalRecord {
         tableId: field.targetTableId,
         recordIds: field.cardinality === 'one' ? [value] : value,
       });
+    else if (field.kind === 'actor')
+      values[field.id] = valueSchema.parse({ kind: field.kind, actor: parseActorKey(value) });
     else if (field.kind === 'file')
       values[field.id] = valueSchema.parse({
         kind: field.kind,
@@ -629,7 +644,39 @@ export async function writePhysicalRecord(
     before: before?.values ?? null,
     values: record.values,
   });
+  await requireActorValues(tx, generation, before?.values ?? null, record.values);
   await writePhysicalRecordUnchecked(tx, generation, record);
+}
+
+/** A newly set Person or agent value must name a current member or a saved, undeleted agent. Unchanged values may point at former ones. */
+export async function requireActorValues(
+  tx: GenerationTransaction,
+  generation: Generation,
+  before: TableValues | null,
+  values: TableValues | null,
+) {
+  const added = generation.definition.fields.flatMap(field => {
+    const value = values?.[field.id];
+    if (field.kind !== 'actor' || value?.kind !== 'actor') return [];
+    const previous = before?.[field.id];
+    return previous?.kind === 'actor' && actorKey(previous.actor) === actorKey(value.actor) ? [] : [value.actor];
+  });
+  const members = added.filter(actor => actor.type === 'member').map(actor => actor.id);
+  const agents = added.filter(actor => actor.type === 'agent').map(actor => actor.id);
+  if (members.length) {
+    const found = await tx.client.query(
+      `SELECT id FROM ${table(tx, 'tf_memberships')} WHERE id=ANY($1::uuid[]) AND removed_at IS NULL`,
+      [members],
+    );
+    if (found.rowCount !== new Set(members).size) throw new TableValidationError('Person is not a current member');
+  }
+  if (agents.length) {
+    const found = await tx.client.query(
+      `SELECT id FROM ${table(tx, 'tf_agents')} WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL AND saved_revision IS NOT NULL`,
+      [agents],
+    );
+    if (found.rowCount !== new Set(agents).size) throw new TableValidationError('Agent is not a saved agent');
+  }
 }
 
 export function endpoints(tableId: string, recordId: string, ...snapshots: (TableValues | null)[]) {
@@ -716,9 +763,23 @@ type MutationInput = {
   writtenFieldIds?: string[];
   imported?: boolean;
   restoration?: Restoration;
+  /** Set only by the assignment service, the one writer of a task's Run state. */
+  system?: boolean;
 };
 
 export async function persistMutation(tx: GenerationTransaction, input: MutationInput) {
+  const write = {
+    tableId: input.generation.table_id,
+    recordId: input.recordId,
+    definition: input.generation.definition,
+    before: input.before,
+    values: input.values,
+    actor: input.actor,
+    operation: input.operation,
+    ...(input.system ? { system: true } : {}),
+  };
+  const plan = await prepareTaskWrite(tx, write);
+  if (plan) input = { ...input, values: plan.values };
   await requireMemberMutation(tx, {
     tableId: input.generation.table_id,
     recordId: input.recordId,
@@ -726,7 +787,65 @@ export async function persistMutation(tx: GenerationTransaction, input: Mutation
     values: input.values,
     ...(input.operation === 'restore' && input.restoration ? { restoration: input.restoration } : {}),
   });
-  return persistMutationUnchecked(tx, input);
+  if (plan?.tasks && input.values === null) await detachSubtasks(tx, input);
+  const result = await persistMutationUnchecked(tx, input);
+  if (plan) await finishTaskWrite(tx, { ...write, values: input.values }, plan);
+  return result;
+}
+
+/** A deleted task's subtasks stay, with an empty Parent task. */
+async function detachSubtasks(tx: GenerationTransaction, input: MutationInput) {
+  const children = idsSchema.parse(
+    (
+      await tx.client.query(
+        `SELECT DISTINCT l.source_row AS id FROM ${table(tx, 'tf_table_generation_links')} l WHERE l.generation_id=$1 AND l.target_table=$2 AND l.target_row=$3 AND l.source_table=$2 AND l.field_id=$4 AND l.source_row<>$3`,
+        [input.generation.id, input.generation.table_id, input.recordId, taskFields.parent],
+      )
+    ).rows.map(row => row.id),
+  );
+  await lockIdentities(
+    tx,
+    children.map(recordId => ({ tableId: input.generation.table_id, recordId })),
+  );
+  for (const recordId of children) {
+    const child = await readRecord(tx, input.generation, recordId);
+    if (!child) continue;
+    await persistMutationUnchecked(tx, {
+      generation: input.generation,
+      recordId,
+      before: child.values,
+      values: { ...child.values, [taskFields.parent]: null },
+      actor: input.actor,
+      operation: 'update',
+      writtenFieldIds: [taskFields.parent],
+    });
+  }
+}
+
+/** Writes a row's Run state on behalf of the assignment service. Does nothing outside Tasks or when unchanged. */
+export async function writeRunState(
+  tx: GenerationTransaction,
+  input: { tableId: string; recordId: string; state: RunState | null },
+) {
+  const registration = await tasksTable(tx);
+  if (registration?.coreDefinition.id !== input.tableId) return;
+  await lockCatalogs(tx, [input.tableId]);
+  await lockIdentities(tx, [{ tableId: input.tableId, recordId: input.recordId }]);
+  const generation = await activeGeneration(tx, input.tableId);
+  const current = await readRecord(tx, generation, input.recordId);
+  if (!current) return;
+  const value =
+    input.state === null ? null : { kind: 'single-select' as const, optionId: runStateOptions[input.state] };
+  if (JSON.stringify(current.values[taskFields.runState] ?? null) === JSON.stringify(value)) return;
+  await persistMutationUnchecked(tx, {
+    generation,
+    recordId: input.recordId,
+    before: current.values,
+    values: { ...current.values, [taskFields.runState]: value },
+    actor: { kind: 'system', operation: 'row-assignment' },
+    operation: 'update',
+    writtenFieldIds: [taskFields.runState],
+  });
 }
 
 async function persistMutationUnchecked(tx: GenerationTransaction, input: MutationInput) {

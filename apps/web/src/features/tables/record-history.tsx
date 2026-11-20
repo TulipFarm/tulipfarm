@@ -19,10 +19,19 @@ import { RecordMutationFeedback, useRecordMutation } from './record-mutation';
 import { rejectionMessage, restoreIssues } from './record-validation';
 import type { DeletedRecord, RecordHistoryEntry, RowPermissions, TableDataRow, TableDefinition, TableApi } from './api';
 
+const systemActorLabels = {
+  'workspace-member-profile': 'TulipFarm profile sync',
+  'workspace-member-access': 'Workspace access update',
+  'row-assignment': 'Assignment run',
+} as const;
+
 const actorSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('human'), userId: z.string() }),
   z.object({ kind: z.literal('agent'), agentId: z.string() }),
-  z.object({ kind: z.literal('system'), operation: z.enum(['workspace-member-profile', 'workspace-member-access']) }),
+  z.object({
+    kind: z.literal('system'),
+    operation: z.enum(['workspace-member-profile', 'workspace-member-access', 'row-assignment']),
+  }),
 ]);
 /** Each column reads the field id; the cells look up current, historical and restored values. */
 type ValueRow = Record<'id' | 'field' | 'current' | 'historical' | 'restored', string>;
@@ -30,8 +39,7 @@ type ValueRow = Record<'id' | 'field' | 'current' | 'historical' | 'restored', s
 function actorLabel({ actor, actor_name }: RecordHistoryEntry) {
   const parsed = actorSchema.safeParse(actor);
   if (!parsed.success) return 'Actor details unavailable';
-  if (parsed.data.kind === 'system')
-    return parsed.data.operation === 'workspace-member-profile' ? 'TulipFarm profile sync' : 'Workspace access update';
+  if (parsed.data.kind === 'system') return systemActorLabels[parsed.data.operation];
   return actor_name ?? (parsed.data.kind === 'human' ? 'Former member' : 'An agent');
 }
 

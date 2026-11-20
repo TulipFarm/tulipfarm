@@ -27,6 +27,7 @@ import { AvatarImagePicker } from '@/features/avatar/image-picker';
 import { EntityAvatar } from '@tulipfarm/sprout/avatar';
 import { useFlag } from '@/lib/feature-flags';
 import { KnowledgeSettings } from '@/features/files/knowledge-settings';
+import { AssignmentLimitsSettings } from '@/features/tables/assignment-limits';
 
 export function SettingsPage() {
   const { workspace, user, membershipId } = workspaceRoute.useRouteContext();
@@ -42,6 +43,7 @@ export function SettingsPage() {
 
 function GeneralSettings({ workspaceId, slug, userId }: { workspaceId: string; slug: string; userId: string }) {
   const soulExplorer = useFlag('soul-repository-explorer');
+  const assignable = useFlag('assignable-tasks');
   const router = useRouter();
   const api = useMemo(() => settingsApi(workspaceId), [workspaceId]);
   const receipt = useSettingsReceipt(workspaceId);
@@ -366,6 +368,7 @@ function GeneralSettings({ workspaceId, slug, userId }: { workspaceId: string; s
               </SettingsGroup>
             )}
             {admin && <KnowledgeSettings workspaceId={workspaceId} />}
+            {admin && assignable && <AssignmentLimitsSettings workspaceId={workspaceId} />}
             {admin && (
               <SettingsGroup title="Close workspace" titleId="delete-heading">
                 <SettingsRow
