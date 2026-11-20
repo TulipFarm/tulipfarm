@@ -202,7 +202,7 @@ export function TableProposalCard({
 }
 
 type BlockedReport = Extract<TableProposalOutcome, { kind: 'blocked' }>['report'];
-type ReportTable = { definition: TableDefinition; systemKind?: 'workspace-members' | undefined };
+type ReportTable = { definition: TableDefinition; systemKind?: 'workspace-members' | 'tasks' | undefined };
 
 /** Names each invalid row and its failing value from the table as it is now; the stored report keeps IDs only. */
 function InvalidRows({

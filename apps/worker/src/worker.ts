@@ -72,6 +72,7 @@ import { codingRunsFactory, createCodingRunActivities, createCodingRunDispatcher
 import { createWorkflowCodingActivities, createWorkflowCodingDispatcher } from './workflow-coding-steps.ts';
 import { slackActionsFromEnvironment } from '@tulipfarm/agents/slack-environment';
 import { createRecommendationComposition } from './recommendation-activities.ts';
+import { createRowAssignmentComposition } from './row-assignment-composition.ts';
 import { createMemberProfileComposition } from './member-profile-composition.ts';
 import { createSocialPublisherComposition } from './social-publisher-composition.ts';
 import { createSecretsSweep } from './secrets-sweep.ts';
@@ -154,6 +155,7 @@ async function run() {
   let knowledgeEmbeddings: Awaited<ReturnType<typeof createKnowledgeEmbeddingWorker>>;
   let recommendations: ReturnType<typeof createRecommendationComposition> | undefined;
   let memberProfiles: ReturnType<typeof createMemberProfileComposition> | undefined;
+  let rowAssignments: ReturnType<typeof createRowAssignmentComposition> | undefined;
   let socialPublisher: ReturnType<typeof createSocialPublisherComposition> | undefined;
   try {
     email = emailEnabled && role !== 'knowledge' ? await createEmailDeliveryComposition() : undefined;
@@ -293,6 +295,15 @@ async function run() {
           })
         : undefined;
     const agentTasks = coreResources ? createAgentTasks(coreResources.runtime) : undefined;
+    rowAssignments =
+      coreResources && agentTasks && taskDispatch
+        ? createRowAssignmentComposition({
+            runtime: coreResources.runtime,
+            agentTasks,
+            discover: coreResources.readyTaskWorkspaces,
+            wake: taskDispatch.wake,
+          })
+        : undefined;
     const planFailure = (workspaceId: string, planId: string) =>
       Runtime.instance().logger.error('Plan dispatch will retry', { workspaceId, planId });
     planDispatch = coreResources ? createPlanDispatcher(planFailure) : undefined;
@@ -564,6 +575,7 @@ async function run() {
     const failure = outcomes.find(outcome => outcome.status === 'rejected');
     if (failure?.status === 'rejected') throw failure.reason;
   } finally {
+    await rowAssignments?.close();
     await memberProfiles?.close();
     await socialPublisher?.close();
     await recommendations?.close();

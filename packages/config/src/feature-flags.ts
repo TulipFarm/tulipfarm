@@ -44,6 +44,13 @@ export const featureFlags = {
     scope: 'workspace',
     env: 'FEATURE_FLAG_APP_KEY_REQUIRED',
   },
+  'assignable-tasks': {
+    description:
+      'Assign rows to people or agents: the Tasks table, Person or agent fields, Markdown text, row threads, assignment runs, limits and the Inbox.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_ASSIGNABLE_TASKS',
+  },
   'hosted-mcp': {
     description: 'Set up MCP connections that run an npm or PyPI package on a sandbox host.',
     default: false,

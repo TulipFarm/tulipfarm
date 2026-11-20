@@ -18,7 +18,7 @@
       "$ref": "#/$defs/__schema6"
     },
     "uniqueKeys": {
-      "$ref": "#/$defs/__schema34"
+      "$ref": "#/$defs/__schema37"
     }
   },
   "required": [
@@ -97,6 +97,9 @@
             },
             "maxLength": {
               "$ref": "#/$defs/__schema12"
+            },
+            "markdown": {
+              "$ref": "#/$defs/__schema13"
             }
           },
           "required": [
@@ -122,13 +125,13 @@
               "$ref": "#/$defs/__schema10"
             },
             "kind": {
-              "$ref": "#/$defs/__schema13"
-            },
-            "precision": {
               "$ref": "#/$defs/__schema14"
             },
-            "scale": {
+            "precision": {
               "$ref": "#/$defs/__schema15"
+            },
+            "scale": {
+              "$ref": "#/$defs/__schema16"
             }
           },
           "required": [
@@ -443,7 +446,7 @@
               "$ref": "#/$defs/__schema10"
             },
             "kind": {
-              "$ref": "#/$defs/__schema16"
+              "$ref": "#/$defs/__schema17"
             }
           },
           "required": [
@@ -468,7 +471,7 @@
               "$ref": "#/$defs/__schema10"
             },
             "kind": {
-              "$ref": "#/$defs/__schema17"
+              "$ref": "#/$defs/__schema18"
             }
           },
           "required": [
@@ -493,10 +496,10 @@
               "$ref": "#/$defs/__schema10"
             },
             "kind": {
-              "$ref": "#/$defs/__schema18"
+              "$ref": "#/$defs/__schema19"
             },
             "timezone": {
-              "$ref": "#/$defs/__schema19"
+              "$ref": "#/$defs/__schema20"
             }
           },
           "required": [
@@ -522,10 +525,10 @@
               "$ref": "#/$defs/__schema10"
             },
             "kind": {
-              "$ref": "#/$defs/__schema20"
+              "$ref": "#/$defs/__schema21"
             },
             "options": {
-              "$ref": "#/$defs/__schema21"
+              "$ref": "#/$defs/__schema22"
             }
           },
           "required": [
@@ -551,10 +554,10 @@
               "$ref": "#/$defs/__schema10"
             },
             "kind": {
-              "$ref": "#/$defs/__schema27"
+              "$ref": "#/$defs/__schema28"
             },
             "options": {
-              "$ref": "#/$defs/__schema28"
+              "$ref": "#/$defs/__schema29"
             }
           },
           "required": [
@@ -580,13 +583,13 @@
               "$ref": "#/$defs/__schema10"
             },
             "kind": {
-              "$ref": "#/$defs/__schema29"
-            },
-            "cardinality": {
               "$ref": "#/$defs/__schema30"
             },
+            "cardinality": {
+              "$ref": "#/$defs/__schema31"
+            },
             "access": {
-              "$ref": "#/$defs/__schema32"
+              "$ref": "#/$defs/__schema33"
             }
           },
           "required": [
@@ -613,6 +616,35 @@
               "$ref": "#/$defs/__schema10"
             },
             "kind": {
+              "$ref": "#/$defs/__schema34"
+            },
+            "assignee": {
+              "$ref": "#/$defs/__schema35"
+            }
+          },
+          "required": [
+            "id",
+            "label",
+            "required",
+            "kind",
+            "assignee"
+          ],
+          "additionalProperties": false,
+          "description": "Holds one workspace member or saved agent."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/__schema8"
+            },
+            "label": {
+              "$ref": "#/$defs/__schema9"
+            },
+            "required": {
+              "$ref": "#/$defs/__schema10"
+            },
+            "kind": {
               "type": "string",
               "const": "relationship",
               "description": "A field linking a row to rows in another table."
@@ -622,16 +654,16 @@
             },
             "cardinality": {
               "description": "How many target rows one source row may reference.",
-              "$ref": "#/$defs/__schema31"
+              "$ref": "#/$defs/__schema32"
             },
             "inverseCardinality": {
               "description": "How many source rows one target row may be referenced from.",
-              "$ref": "#/$defs/__schema31"
+              "$ref": "#/$defs/__schema32"
             },
             "reverse": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/__schema33"
+                  "$ref": "#/$defs/__schema36"
                 },
                 {
                   "type": "null"
@@ -688,18 +720,22 @@
     "__schema12": {
       "type": "integer",
       "minimum": 1,
-      "maximum": 10000,
+      "maximum": 100000,
       "description": "Maximum number of characters allowed in a text value. Use a title-sized limit such as 120–255 for short names.",
       "examples": [
         255
       ]
     },
     "__schema13": {
+      "type": "boolean",
+      "description": "Show as Markdown; allows maxLength up to 100000."
+    },
+    "__schema14": {
       "type": "string",
       "const": "numeric",
       "description": "A fixed-precision decimal field."
     },
-    "__schema14": {
+    "__schema15": {
       "type": "integer",
       "minimum": 1,
       "maximum": 30,
@@ -708,7 +744,7 @@
         12
       ]
     },
-    "__schema15": {
+    "__schema16": {
       "type": "integer",
       "minimum": 0,
       "maximum": 10,
@@ -717,32 +753,32 @@
         2
       ]
     },
-    "__schema16": {
+    "__schema17": {
       "type": "string",
       "const": "boolean",
       "description": "A field containing true or false."
     },
-    "__schema17": {
+    "__schema18": {
       "type": "string",
       "const": "date",
       "description": "A calendar date without a time of day."
     },
-    "__schema18": {
+    "__schema19": {
       "type": "string",
       "const": "timestamp",
       "description": "A date and time represented as a UTC instant."
     },
-    "__schema19": {
+    "__schema20": {
       "type": "string",
       "const": "UTC",
       "description": "The required timezone for this timestamp field: UTC."
     },
-    "__schema20": {
+    "__schema21": {
       "type": "string",
       "const": "single-select",
       "description": "A field where a row chooses one option."
     },
-    "__schema21": {
+    "__schema22": {
       "description": "The one-of choices available to rows, such as a ticket status.",
       "examples": [
         [
@@ -753,19 +789,19 @@
           }
         ]
       ],
-      "$ref": "#/$defs/__schema26"
+      "$ref": "#/$defs/__schema27"
     },
-    "__schema22": {
+    "__schema23": {
       "type": "object",
       "properties": {
         "id": {
-          "$ref": "#/$defs/__schema23"
-        },
-        "label": {
           "$ref": "#/$defs/__schema24"
         },
-        "retired": {
+        "label": {
           "$ref": "#/$defs/__schema25"
+        },
+        "retired": {
+          "$ref": "#/$defs/__schema26"
         }
       },
       "required": [
@@ -776,13 +812,13 @@
       "additionalProperties": false,
       "description": "One selectable option, with a stable identity and display text."
     },
-    "__schema23": {
+    "__schema24": {
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
       "description": "Stable UUID identifying a select option; input is normalized to lowercase."
     },
-    "__schema24": {
+    "__schema25": {
       "maxLength": 10000,
       "description": "Display text shown for this select option.",
       "examples": [
@@ -792,38 +828,38 @@
       "type": "string",
       "pattern": "^(?!\\s*$)(?![\\s\\S]*\\u0000)[\\s\\S]*$"
     },
-    "__schema25": {
+    "__schema26": {
       "type": "boolean",
       "description": "Whether this option is retired; retired options remain readable but cannot be newly selected."
     },
-    "__schema26": {
+    "__schema27": {
       "minItems": 1,
       "maxItems": 256,
       "type": "array",
       "items": {
-        "$ref": "#/$defs/__schema22"
+        "$ref": "#/$defs/__schema23"
       },
       "description": "The available choices for a select field; provide 1–256 options with distinct IDs."
     },
-    "__schema27": {
+    "__schema28": {
       "type": "string",
       "const": "multi-select",
       "description": "A field where a row can choose multiple options."
     },
-    "__schema28": {
-      "description": "The choices available to rows, such as the tags that can be applied.",
-      "$ref": "#/$defs/__schema26"
-    },
     "__schema29": {
+      "description": "The choices available to rows, such as the tags that can be applied.",
+      "$ref": "#/$defs/__schema27"
+    },
+    "__schema30": {
       "type": "string",
       "const": "file",
       "description": "A field containing references to attached files."
     },
-    "__schema30": {
-      "description": "Whether this row can contain one file or multiple files.",
-      "$ref": "#/$defs/__schema31"
-    },
     "__schema31": {
+      "description": "Whether this row can contain one file or multiple files.",
+      "$ref": "#/$defs/__schema32"
+    },
+    "__schema32": {
       "type": "string",
       "enum": [
         "one",
@@ -835,12 +871,21 @@
         "many"
       ]
     },
-    "__schema32": {
+    "__schema33": {
       "type": "string",
       "const": "independent",
       "description": "File access behavior. Independent means file authorization is checked separately from table access."
     },
-    "__schema33": {
+    "__schema34": {
+      "type": "string",
+      "const": "actor",
+      "description": "A Person or agent field."
+    },
+    "__schema35": {
+      "type": "boolean",
+      "description": "The table Assignee; at most one per table."
+    },
+    "__schema36": {
       "type": "object",
       "properties": {
         "fieldId": {
@@ -863,25 +908,25 @@
       ],
       "additionalProperties": false
     },
-    "__schema34": {
+    "__schema37": {
       "maxItems": 64,
       "type": "array",
       "items": {
-        "$ref": "#/$defs/__schema35"
+        "$ref": "#/$defs/__schema38"
       },
       "description": "Optional uniqueness rules across fields; use these when a business identifier must not repeat."
     },
-    "__schema35": {
+    "__schema38": {
       "type": "object",
       "properties": {
         "id": {
-          "$ref": "#/$defs/__schema36"
+          "$ref": "#/$defs/__schema39"
         },
         "fieldIds": {
-          "$ref": "#/$defs/__schema37"
+          "$ref": "#/$defs/__schema40"
         },
         "nulls": {
-          "$ref": "#/$defs/__schema38"
+          "$ref": "#/$defs/__schema41"
         }
       },
       "required": [
@@ -892,13 +937,13 @@
       "additionalProperties": false,
       "description": "A compound uniqueness rule for the selected fields."
     },
-    "__schema36": {
+    "__schema39": {
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
       "description": "Stable UUID identifying a unique key; input is normalized to lowercase."
     },
-    "__schema37": {
+    "__schema40": {
       "minItems": 1,
       "maxItems": 8,
       "type": "array",
@@ -907,7 +952,7 @@
       },
       "description": "IDs of 1–8 existing scalar fields that together must be unique for each row."
     },
-    "__schema38": {
+    "__schema41": {
       "type": "string",
       "const": "distinct",
       "description": "Null handling for this key. Distinct means rows with null key values do not conflict."

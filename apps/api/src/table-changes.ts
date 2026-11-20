@@ -1,3 +1,4 @@
+import { isFeatureEnabled } from '@tulipfarm/observability';
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import { z } from 'zod';
@@ -15,6 +16,7 @@ import {
   createTableProposalDecisions,
   type TableProposalOptions,
 } from '@tulipfarm/tables/proposals';
+import { TaskTableError } from '@tulipfarm/tables/tasks-table';
 import {
   archivePlanSchema,
   blockedTableProposalSchema,
@@ -173,6 +175,7 @@ export function registerTableChanges(
       if (error instanceof WorkspaceMemberError) return reply.code(error.status).send({ error: error.code });
       if (error instanceof TableQueryError)
         return reply.code(400).send({ error: 'invalid-query', issues: error.issues });
+      if (error instanceof TaskTableError) return reply.code(error.status).send({ error: error.code });
       if (error instanceof TableValidationError)
         return reply
           .code(400)
@@ -494,7 +497,7 @@ export function registerTableChanges(
                   id: z.uuid(),
                   revision: z.string(),
                   definition: definitionSchema,
-                  systemKind: z.literal('workspace-members').optional(),
+                  systemKind: z.enum(['workspace-members', 'tasks']).optional(),
                   appliedAt: z.iso.datetime().nullable(),
                   recordCount: z.string(),
                 }),
@@ -504,9 +507,10 @@ export function registerTableChanges(
           ),
         },
       },
-      request => {
+      async request => {
         const p = workspaceParams.parse(request.params),
           query = tablePage.parse(request.query);
+        const tasks = await isFeatureEnabled('assignable-tasks', null, { id: p.workspaceId });
         return records
           .definitions(p.workspaceId, user(request), {
             limit: query.limit,
@@ -518,7 +522,9 @@ export function registerTableChanges(
           })
           .then(result => ({
             ...result,
-            tables: result.tables.map(item => ({ ...item, appliedAt: item.appliedAt?.toISOString() ?? null })),
+            tables: result.tables
+              .filter(item => tasks || item.systemKind !== 'tasks')
+              .map(item => ({ ...item, appliedAt: item.appliedAt?.toISOString() ?? null })),
           }));
       },
     );

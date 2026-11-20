@@ -384,7 +384,9 @@ export function packageCompiler(pkg: SystemPackage, bindings: PackageBindings, i
                             ? parsed.optionIds
                             : parsed.kind === 'relationship'
                               ? parsed.recordIds
-                              : parsed.fileIds;
+                              : parsed.kind === 'actor'
+                                ? `${parsed.actor.type}:${parsed.actor.id}`
+                                : parsed.fileIds;
                   return [targetId, { kind: 'literal', value: literal }];
                 }),
               ),

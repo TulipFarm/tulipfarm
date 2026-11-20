@@ -9,7 +9,7 @@ import {
 } from '@tulipfarm/access';
 import { definitionSchema } from '@tulipfarm/tables/definition';
 import { executionCompatibility } from '@tulipfarm/tables/execution';
-import { workspaceMembersTable } from '@tulipfarm/tables/store';
+import { tasksTable, workspaceMembersTable } from '@tulipfarm/tables/store';
 import {
   executionReceiptSchema,
   proposalManifestSchema,
@@ -48,7 +48,7 @@ export const schemaHistorySchema = z.object({
 });
 export const definitionStateSchema = z.object({
   id: z.uuid(),
-  systemKind: z.literal('workspace-members').optional(),
+  systemKind: z.enum(['workspace-members', 'tasks']).optional(),
   saved: schemaHistoryEntrySchema.nullable(),
   applied: z
     .object({ revision: z.string(), definition: definitionSchema, appliedAt: z.iso.datetime().nullable() })
@@ -240,6 +240,7 @@ export function createTableSchemaHistory(
           delete: await canAccessTable(tx, actor, tableId, 'table.row.delete'),
         };
         const memberTableId = (await workspaceMembersTable(tx))?.coreDefinition.id;
+        const tasksTableId = (await tasksTable(tx))?.coreDefinition.id;
         const archived = !!(
           await tx.client.query(
             `SELECT 1 FROM "${tx.schema}".tf_table_catalog WHERE id=$1 AND archived_at IS NOT NULL`,
@@ -249,11 +250,13 @@ export function createTableSchemaHistory(
         const manages =
           applied !== null &&
           tableId !== memberTableId &&
+          tableId !== tasksTableId &&
           tx.commonVersion >= (archived ? pageRestoreVersion : pageArchiveVersion) &&
           (await canAccessTable(tx, actor, tableId, 'table.schema.manage'));
         return {
           id: tableId,
           ...(tableId === memberTableId ? { systemKind: 'workspace-members' as const } : {}),
+          ...(tableId === tasksTableId ? { systemKind: 'tasks' as const } : {}),
           saved,
           applied: applied
             ? {

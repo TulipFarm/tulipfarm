@@ -33,6 +33,8 @@ export const tableDefinitionMessages = {
   duplicateUniqueKey: 'Duplicate unique key identity or fields',
   uniqueKeyScalarFields: 'Unique keys require existing scalar fields',
   reverseFieldUsed: 'Reverse field identity is already used',
+  oneAssignee: 'At most one Person or agent field can be the Assignee',
+  markdownLength: 'Text longer than 10000 characters requires Display as Markdown',
 } as const;
 export type TableRule = { message: string; rule: string };
 export const tableDefinitionRules: readonly TableRule[] = [
@@ -61,6 +63,11 @@ export const tableDefinitionRules: readonly TableRule[] = [
     message: tableDefinitionMessages.reverseFieldUsed,
     rule: 'Relationship reverse field IDs must be unique per target table and must not reuse a field ID of a self-referencing table.',
   },
+  { message: tableDefinitionMessages.oneAssignee, rule: 'At most one Person or agent field may set assignee to true.' },
+  {
+    message: tableDefinitionMessages.markdownLength,
+    rule: 'A text field with maxLength above 10000 must set markdown to true; the limit is 100000.',
+  },
 ];
 export const teamIdSchema = z
   .uuid()
@@ -82,9 +89,12 @@ export const uniqueKeyIdSchema = z
   .toLowerCase()
   .brand<'UniqueKeyId'>()
   .meta({ description: 'Stable UUID identifying a unique key; input is normalized to lowercase.' });
+/** Plain text fields hold at most this many characters; Markdown text fields hold up to {@link markdownTextLimit}. */
+export const plainTextLimit = 10000;
+export const markdownTextLimit = 100000;
 export const textSchema = z
   .string()
-  .max(10000)
+  .max(markdownTextLimit)
   .refine(value => !value.includes('\u0000') && !/[\uD800-\uDFFF]/u.test(value), tableDefinitionMessages.wellFormedText)
   .meta({
     description: 'Text stored in one row. Use maxLength on the field to limit its value.',
@@ -146,13 +156,15 @@ const textFieldSchema = z
     maxLength: z
       .int()
       .min(1)
-      .max(10000)
+      .max(markdownTextLimit)
       .meta({
         description:
           'Maximum number of characters allowed in a text value. Use a title-sized limit such as 120–255 for short names.',
         examples: [255],
       }),
+    markdown: z.boolean().meta({ description: 'Show as Markdown; allows maxLength up to 100000.' }).optional(),
   })
+  .refine(field => field.markdown === true || field.maxLength <= plainTextLimit, tableDefinitionMessages.markdownLength)
   .meta({ description: 'A text field with a maximum value length.' });
 const numericFieldSchema = z
   .strictObject({
@@ -260,6 +272,13 @@ const fileFieldSchema = z
     }),
   })
   .meta({ description: 'A field that stores one or more independently authorized file references.' });
+const actorFieldSchema = z
+  .strictObject({
+    ...base,
+    kind: z.literal('actor').meta({ description: 'A Person or agent field.' }),
+    assignee: z.boolean().meta({ description: 'The table Assignee; at most one per table.' }),
+  })
+  .meta({ description: 'Holds one workspace member or saved agent.' });
 export const fieldSchema = z
   .discriminatedUnion('kind', [
     textFieldSchema,
@@ -271,6 +290,7 @@ export const fieldSchema = z
     multiSelectFieldSchema,
     relationshipFieldSchema,
     fileFieldSchema,
+    actorFieldSchema,
   ])
   .meta({
     description: 'One field in the table shape; kind selects the field-specific properties and row value type.',
@@ -334,6 +354,8 @@ export const definitionSchema = z
         }
       }
     }
+    if (definition.fields.filter(field => field.kind === 'actor' && field.assignee).length > 1)
+      context.addIssue({ code: 'custom', message: tableDefinitionMessages.oneAssignee, path: ['fields'] });
     const reverseIds = new Set<string>();
     for (const [index, field] of definition.fields.entries()) {
       if (field.kind !== 'relationship' || field.reverse === null) continue;
@@ -364,6 +386,16 @@ const fileIdsSchema = z
   .array(fileIdSchema)
   .max(256)
   .refine(ids => new Set(ids).size === ids.length, 'Duplicate file identity');
+export const actorSchema = z
+  .strictObject({ type: z.enum(['member', 'agent']), id: z.uuid().toLowerCase() })
+  .meta({ description: 'A membership ID (member) or saved agent ID (agent).' });
+export type Actor = z.infer<typeof actorSchema>;
+/** The stored and query form of an actor, such as `member:<uuid>` or `agent:<uuid>`. */
+export const actorKey = (actor: Actor) => `${actor.type}:${actor.id}`;
+export function parseActorKey(key: unknown): Actor {
+  const [type, id] = z.string().parse(key).split(':');
+  return actorSchema.parse({ type, id });
+}
 export const valueSchema = z.union([
   z.null(),
   z.discriminatedUnion('kind', [
@@ -376,6 +408,7 @@ export const valueSchema = z.union([
     z.strictObject({ kind: z.literal('multi-select'), optionIds: optionIdsSchema }),
     z.strictObject({ kind: z.literal('relationship'), tableId: tableIdSchema, recordIds: recordIdsSchema }),
     z.strictObject({ kind: z.literal('file'), fileIds: fileIdsSchema }),
+    z.strictObject({ kind: z.literal('actor'), actor: actorSchema }),
   ]),
 ]);
 export const valuesSchema = z

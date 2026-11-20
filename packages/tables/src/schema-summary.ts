@@ -12,6 +12,7 @@ const kindNames: Record<TableField['kind'], string> = {
   'multi-select': 'multi select',
   relationship: 'link',
   file: 'file',
+  actor: 'person or agent',
 };
 
 function options(field: TableField): Option[] {

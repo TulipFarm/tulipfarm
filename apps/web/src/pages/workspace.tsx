@@ -98,6 +98,7 @@ import { useSecretsCapabilities } from '@/features/secrets/queries';
 import type { RecentSection } from '@/features/navigation/recent-queries';
 import { ReauthorizationBanner } from '@/features/integrations/reauthorization-banner';
 import { ReconnectBanner } from '@/features/workspaces/reconnect-banner';
+import { InboxCount, InboxList } from '@/features/inbox/inbox';
 
 export type WorkspacePath =
   | '/$workspaceSlug/settings/soul'
@@ -333,6 +334,30 @@ function StandardNavItem({ page }: { page: Page }) {
         onClick={() => setOpenMobile(false)}
       >
         {page.label}
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+}
+
+/** Inbox shows in the sidebar, with its open count, only while assignable tasks are on. */
+function InboxNavItem({ workspaceId }: { workspaceId: string }) {
+  const { workspace } = workspaceRoute.useRouteContext();
+  const { setOpenMobile } = useSidebar();
+  const active = useCurrentPage() === inbox;
+  if (!useFlag('assignable-tasks')) return null;
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        icon={<Inbox size={16} aria-hidden="true" />}
+        tooltip={inbox.label}
+        isActive={active}
+        aria-current={active ? 'page' : undefined}
+        badge={<InboxCount workspaceId={workspaceId} />}
+        nativeButton={false}
+        render={<Link to={inbox.to} params={{ workspaceSlug: workspace.slug }} preload={false} />}
+        onClick={() => setOpenMobile(false)}
+      >
+        {inbox.label}
       </SidebarMenuButton>
     </SidebarMenuItem>
   );
@@ -618,6 +643,7 @@ function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                     <StandardNavItem page={chats} />
+                    {workspace.status === 'ready' && <InboxNavItem workspaceId={workspace.id} />}
                     <StandardNavItem page={agents} />
                     <SidebarMenuItem>
                       <SidebarMenuButton
@@ -861,10 +887,13 @@ function WorkspaceShellContent() {
   );
 }
 
-/** Inbox has no backend yet, so a direct link explains that and points to where waiting work lives today. */
+/** Without assignable tasks there is no Inbox, so a direct link explains that and points to where waiting work lives today. */
 export function InboxPage() {
   const { workspace } = workspaceRoute.useRouteContext();
   const params = { workspaceSlug: workspace.slug };
+  const assignable = useFlag('assignable-tasks');
+  if (assignable && workspace.status === 'ready')
+    return <InboxList workspaceId={workspace.id} workspaceSlug={workspace.slug} />;
   return (
     <section aria-label={inbox.label} className="flex min-h-0 flex-1 items-center justify-center overflow-auto">
       <StatePanel

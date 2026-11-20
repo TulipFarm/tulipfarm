@@ -35,6 +35,7 @@ import { queryDefinition, uniqueKeyWhere } from './table-view';
 import { useWorkspaceMembers } from './hooks';
 import { MemberPhoto } from './member-profile';
 import { workspaceMemberAccess, workspaceMemberFields } from '@tulipfarm/tables/workspace-members';
+import { taskFields } from '@tulipfarm/tables/tasks-table';
 import type { TableDataRow, TableDefinition, TableApi, WorkspaceMemberState } from './api';
 import type { TableWorkspace } from './references';
 import type { TableValues } from './review-contracts';
@@ -64,6 +65,7 @@ export function RecordEditor({
   finalFocus?: SheetContentProps['finalFocus'];
 }) {
   const isMember = table.systemKind === 'workspace-members';
+  const isTasks = table.systemKind === 'tasks';
   const [recordId] = useState(() => record?.id ?? repair?.id ?? crypto.randomUUID());
   const memberRead = useWorkspaceMembers(workspace.id, table.id, { ids: [recordId] }, isMember && record !== null);
   const member =
@@ -230,7 +232,8 @@ export function RecordEditor({
                       (isMember &&
                         (field.id === workspaceMemberFields.accountEmail ||
                           field.id === workspaceMemberFields.access ||
-                          (field.id === workspaceMemberFields.name && record !== null && !member?.canEditProfile)))
+                          (field.id === workspaceMemberFields.name && record !== null && !member?.canEditProfile))) ||
+                      (isTasks && field.id === taskFields.runState)
                     }
                     change={value => setValues(previous => ({ ...previous, [field.id]: value }))}
                     api={api}

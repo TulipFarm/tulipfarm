@@ -62,6 +62,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ToggleGroup, ToggleGroupItem } from '@tulipfarm/sprout/toggle-group';
 import { rowLabel, rowTitle } from './definition-view';
 import { workspaceMemberFields } from '@tulipfarm/tables/workspace-members';
+import { RowThreadPanel } from './row-thread';
+import { taskFields } from '@tulipfarm/tables/tasks-table';
+import { printRsql } from '@tulipfarm/tables/query';
+import { useFlag } from '@/lib/feature-flags';
 import {
   fixedGroups,
   groupLink,
@@ -643,7 +647,7 @@ export function Records({
       onClick={event => select({ kind: 'create' }, event.currentTarget)}
     >
       <Add size={size === 'sm' ? 14 : 16} aria-hidden="true" />
-      {systemKind ? 'Add member' : 'Add row'}
+      {systemKind === 'workspace-members' ? 'Add member' : 'Add row'}
     </Button>
   );
   const headerAdd = permissions.create && read.state.kind === 'ready' && !firstUse;
@@ -1047,6 +1051,21 @@ export function Records({
           {systemKind === 'workspace-members' && (
             <MemberDirectoryStatus table={table} api={api} workspace={workspace} refresh={refresh} />
           )}
+          {systemKind === 'tasks' && (
+            <TaskPresets
+              table={table}
+              where={view.where}
+              layout={layout}
+              disabled={editing}
+              workspaceSlug={workspace.slug}
+              pick={(next, where, board) => {
+                setLayout(next);
+                storeLayout(tableId, next);
+                changeSearch({ ...viewSearch({ ...view, where, search: undefined }), view: next, board });
+                pages.first();
+              }}
+            />
+          )}
         </div>
         {!firstUse && read.state.kind !== 'unavailable' && (
           <QueryBar
@@ -1263,6 +1282,76 @@ function GroupLinkProblem({
   );
 }
 
+/** Tasks' three starting views: rows assigned to me, a board grouped by Status, and every task. */
+function TaskPresets({
+  table,
+  where,
+  layout,
+  disabled,
+  workspaceSlug,
+  pick,
+}: {
+  table: TableDefinition;
+  where: string;
+  layout: Layout;
+  disabled: boolean;
+  workspaceSlug: string;
+  pick: (layout: Layout, where: string, board?: string) => void;
+}) {
+  const mine = printRsql(queryDefinition(table.definition), {
+    kind: 'rule',
+    fieldId: taskFields.assignee,
+    op: 'is-me',
+    values: [],
+  });
+  const status = table.definition.fields.find(
+    field => field.kind === 'single-select' && field.label.trim().toLowerCase() === 'status',
+  );
+  const current = where === mine ? 'mine' : !where && layout === 'board' ? 'board' : !where ? 'all' : null;
+  return (
+    <div role="group" aria-label="Task views" className="flex flex-wrap items-center gap-2">
+      <Button
+        size="sm"
+        variant={current === 'mine' ? 'secondary' : 'ghost'}
+        aria-pressed={current === 'mine'}
+        disabled={disabled}
+        onClick={() => pick('table', mine)}
+      >
+        My tasks
+      </Button>
+      {status ? (
+        <Button
+          size="sm"
+          variant={current === 'board' ? 'secondary' : 'ghost'}
+          aria-pressed={current === 'board'}
+          disabled={disabled}
+          onClick={() => pick('board', '', status.id)}
+        >
+          Board
+        </Button>
+      ) : (
+        <Button
+          size="sm"
+          variant="ghost"
+          nativeButton={false}
+          render={<Link to="/$workspaceSlug/tables/$tableId/edit" params={{ workspaceSlug, tableId: table.id }} />}
+        >
+          Add a Status field to group tasks
+        </Button>
+      )}
+      <Button
+        size="sm"
+        variant={current === 'all' && layout !== 'board' ? 'secondary' : 'ghost'}
+        aria-pressed={current === 'all' && layout !== 'board'}
+        disabled={disabled}
+        onClick={() => pick('table', '')}
+      >
+        All tasks
+      </Button>
+    </div>
+  );
+}
+
 /** The row menu's items, shared by the table and list menu button and the board card menu. */
 function RowActionItems({ record, permissions, select, systemKind }: RowActionProps) {
   return (
@@ -1347,6 +1436,7 @@ function AddressedRecord({
   refresh: () => Promise<void>;
 }) {
   const read = useTableRow(api, table, recordId);
+  const threads = useFlag('assignable-tasks');
   const [selection, setSelection] = useState<{ kind: 'edit' | 'delete' | 'profile'; record: TableDataRow } | null>(
     null,
   );
@@ -1418,6 +1508,7 @@ function AddressedRecord({
               </p>
             )}
             <IncomingLinkedRows table={table} record={record} api={api} workspaceSlug={workspace.slug} />
+            {threads && <RowThreadPanel workspaceId={workspace.id} tableId={table.id} rowId={record.id} />}
             <RecordHistory
               key={`${table.revision}/${record.id}/${record.token}`}
               table={table}

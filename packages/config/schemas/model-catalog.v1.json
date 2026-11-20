@@ -163,6 +163,7 @@
                 "enum": [
                   "app-hosting",
                   "app-key-required",
+                  "assignable-tasks",
                   "hosted-mcp",
                   "images",
                   "default-connection-knowledge",
@@ -526,6 +527,7 @@
                 "enum": [
                   "app-hosting",
                   "app-key-required",
+                  "assignable-tasks",
                   "hosted-mcp",
                   "images",
                   "default-connection-knowledge",

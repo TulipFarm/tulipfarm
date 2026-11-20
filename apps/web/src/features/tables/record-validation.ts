@@ -6,7 +6,7 @@ import type { TableDefinition, TableField, TableValue, TableValues } from './rev
 export function fieldHint(field: TableField): string {
   switch (field.kind) {
     case 'text':
-      return `Up to ${field.maxLength.toLocaleString()} characters.`;
+      return `Up to ${field.maxLength.toLocaleString()} characters${field.markdown ? ' of Markdown' : ''}.`;
     case 'numeric':
       return `Use up to ${field.precision - field.scale} whole-number digits and ${field.scale} decimal places.`;
     case 'date':
@@ -23,6 +23,8 @@ export function fieldHint(field: TableField): string {
       return field.cardinality === 'one' ? 'Choose one linked row.' : 'Choose linked rows.';
     case 'file':
       return field.cardinality === 'one' ? 'Attach one available file.' : 'Attach available files.';
+    case 'actor':
+      return field.assignee ? 'Choose one person or agent to do this work.' : 'Choose one person or agent.';
   }
 }
 
@@ -36,6 +38,7 @@ const kindNames: Record<TableField['kind'], string> = {
   'multi-select': 'a list of options',
   relationship: 'linked rows',
   file: 'files',
+  actor: 'a person or agent',
 };
 
 /** Asks for a missing required value the way the field takes it: typed, chosen or attached. */
@@ -59,6 +62,8 @@ function requiredMessage(field: TableField): string {
       return `Choose a linked row for ${label}.`;
     case 'file':
       return `Attach a file for ${label}.`;
+    case 'actor':
+      return `Choose a person or agent for ${label}.`;
   }
 }
 
@@ -156,7 +161,7 @@ export function validateRowDraft(
   definition: TableDefinition,
   values: TableValues,
   initial?: TableValues,
-  systemKind?: 'workspace-members',
+  systemKind?: 'workspace-members' | 'tasks',
 ): Record<string, string> {
   const errors: Record<string, string> = {};
   const changed = initial ? changedValues(values, initial) : values;

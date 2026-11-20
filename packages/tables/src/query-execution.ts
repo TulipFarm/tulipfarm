@@ -4,7 +4,7 @@ import { escapeLiteral } from 'pg';
 import { queryHumanContext, requireTablePermission, type Actor } from '@tulipfarm/access';
 import type { TableTransaction } from './service-store.ts';
 import { table } from './service-store.ts';
-import { recordIdSchema, TableValidationError, type TableField } from './definition.ts';
+import { plainTextLimit, recordIdSchema, TableValidationError, type TableField } from './definition.ts';
 import {
   scalarQueryKinds,
   TableQueryError,
@@ -46,6 +46,11 @@ function textOf(field: TableField, expression: string) {
 /** Single-choice fields order by the author's option order, not by label or ID. */
 function orderExpression(field: TableField) {
   const column = columnOf(field.id);
+  // Markdown text can hold 100000 characters; ordering by a prefix keeps cursors bounded.
+  if (field.kind === 'text' && field.maxLength > plainTextLimit) {
+    const sql = `left(${column},${plainTextLimit})`;
+    return { sql, cast: 'text', key: sql };
+  }
   if (field.kind !== 'single-select')
     return { sql: column, cast: casts[field.kind] ?? 'text', key: textOf(field, column) };
   const options = field.options.map(option => `${escapeLiteral(option.id)}::uuid`).join(',');
@@ -81,6 +86,29 @@ export function compileWhere(fields: readonly TableField[], where: QueryNode | n
         throw new TableValidationError('Unsupported collection filter');
     }
   }
+  if (field.kind === 'actor') {
+    switch (where.op) {
+      case 'empty':
+        return `${column} IS NULL`;
+      case 'not-empty':
+        return `${column} IS NOT NULL`;
+      case 'is-person':
+        return `${column} LIKE 'member:%'`;
+      case 'is-agent':
+        return `${column} LIKE 'agent:%'`;
+      case 'eq':
+        return `${column} = ${bind(where.values[0])}::text`;
+      // Like scalar inequality, "is not" never matches an empty value.
+      case 'ne':
+        return `${column} <> ${bind(where.values[0])}::text`;
+      case 'in':
+        return `${column} = ANY(${bind(where.values)}::text[])`;
+      case 'out':
+        return `${column} <> ALL(${bind(where.values)}::text[])`;
+      default:
+        throw new TableValidationError('Unsupported person or agent filter');
+    }
+  }
   if (field.kind === 'relationship' || field.kind === 'file') {
     switch (where.op) {
       case 'empty':
@@ -111,6 +139,9 @@ export function compileWhere(fields: readonly TableField[], where: QueryNode | n
       return `${column} = ANY(${bind(where.values)}::${cast}[])`;
     case 'out':
       return `${column} <> ALL(${bind(where.values)}::${cast}[])`;
+    case 'is-person':
+    case 'is-agent':
+      throw new TableValidationError('Unsupported filter field');
     default: {
       const operators = { eq: '=', ne: '<>', lt: '<', lte: '<=', gt: '>', gte: '>=' } as const;
       return `${column} ${operators[where.op]} ${bind(first)}::${cast}`;
@@ -155,17 +186,6 @@ export async function bindCurrentMemberQuery(
     !node ? [] : node.kind === 'rule' ? (node.op === 'is-me' ? [node.fieldId] : []) : node.nodes.flatMap(fields);
   const selected = fields(query.where);
   if (!selected.length) return { query, identityScope: undefined };
-  const registration = await store.workspaceMembersTable(tx);
-  if (!registration) throw new WorkspaceMemberError('member-unavailable');
-  const tableId = registration.coreDefinition.id;
-  for (const id of selected) {
-    const field = generation.definition.fields.find(field => field.id === id);
-    if (field?.kind !== 'relationship' || field.targetTableId !== tableId) {
-      throw new TableQueryError([
-        { code: 'unsupported-operator', fieldId: id, message: 'Is me requires a link to Workspace members.' },
-      ]);
-    }
-  }
   const human = await queryHumanContext(tx, actor);
   if (!human)
     throw new TableQueryError([
@@ -174,6 +194,30 @@ export async function bindCurrentMemberQuery(
         message: 'Is me needs a current human request. Use an explicit member for an autonomous run.',
       },
     ]);
+  const actorFields = new Set(
+    selected.filter(id => generation.definition.fields.find(field => field.id === id)?.kind === 'actor'),
+  );
+  const bindActor = (node: QueryNode): QueryNode =>
+    node.kind !== 'rule'
+      ? { ...node, nodes: node.nodes.map(bindActor) }
+      : node.op === 'is-me' && actorFields.has(node.fieldId)
+        ? { ...node, op: 'eq', values: [`member:${human.membershipId}`] }
+        : node;
+  const identityScope = JSON.stringify([tx.workspaceId, human.userId, human.membershipId]);
+  if (actorFields.size === selected.length)
+    return { query: { ...query, where: query.where ? bindActor(query.where) : null }, identityScope };
+  query = { ...query, where: query.where ? bindActor(query.where) : null };
+  const registration = await store.workspaceMembersTable(tx);
+  if (!registration) throw new WorkspaceMemberError('member-unavailable');
+  const tableId = registration.coreDefinition.id;
+  for (const id of selected.filter(id => !actorFields.has(id))) {
+    const field = generation.definition.fields.find(field => field.id === id);
+    if (field?.kind !== 'relationship' || field.targetTableId !== tableId) {
+      throw new TableQueryError([
+        { code: 'unsupported-operator', fieldId: id, message: 'Is me requires a link to Workspace members.' },
+      ]);
+    }
+  }
   await requireTablePermission(tx, actor, tableId, 'table.row.read');
   const member = z
     .object({ member_id: recordIdSchema, live: z.boolean() })
@@ -197,10 +241,7 @@ export async function bindCurrentMemberQuery(
       : node.op === 'is-me'
         ? { ...node, op: 'in', values: [member.member_id] }
         : node;
-  return {
-    query: { ...query, where: query.where ? bind(query.where) : null },
-    identityScope: JSON.stringify([tx.workspaceId, human.userId, human.membershipId]),
-  };
+  return { query: { ...query, where: query.where ? bind(query.where) : null }, identityScope };
 }
 
 const rowCursorSchema = z

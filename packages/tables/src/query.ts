@@ -41,9 +41,11 @@ export const queryOps = [
   'empty',
   'not-empty',
   'is-me',
+  'is-person',
+  'is-agent',
 ] as const;
 export type QueryOp = (typeof queryOps)[number];
-const valuelessOps: readonly QueryOp[] = ['empty', 'not-empty', 'is-me'];
+const valuelessOps: readonly QueryOp[] = ['empty', 'not-empty', 'is-me', 'is-person', 'is-agent'];
 const listOps: readonly QueryOp[] = ['in', 'out'];
 
 const ordered = [
@@ -71,6 +73,7 @@ export const kindQueryOps: Record<TableField['kind'], readonly QueryOp[]> = {
   'multi-select': membership,
   relationship: [...membership, 'is-me'],
   file: ['empty', 'not-empty'],
+  actor: [...equality, 'is-me', 'is-person', 'is-agent'],
 };
 export const scalarQueryKinds: readonly TableField['kind'][] = [
   'text',
@@ -229,6 +232,8 @@ export const rsqlOperators: Record<QueryOp, string> = {
   empty: '=isnull=true',
   'not-empty': '=isnull=false',
   'is-me': '=isme=true',
+  'is-person': '=isperson=true',
+  'is-agent': '=isagent=true',
 };
 const fromRsql: Record<string, QueryOp> = {
   '==': 'eq',
@@ -282,7 +287,10 @@ export function queryCapabilities(
       label: field.label,
       kind: field.kind,
       ops: kindQueryOps[field.kind].filter(
-        op => op !== 'is-me' || (field.kind === 'relationship' && field.targetTableId === memberTableId),
+        op =>
+          op !== 'is-me' ||
+          field.kind === 'actor' ||
+          (field.kind === 'relationship' && field.targetTableId === memberTableId),
       ),
       sortable: scalar,
       groupable: scalar,
@@ -394,6 +402,12 @@ export function normalizeLiteral(
             null));
     case 'file':
       return invalid(`${field.label} can only be checked for being empty.`);
+    case 'actor': {
+      const match = /^(member|agent):([0-9a-f-]{36})$/i.exec(raw);
+      return match && uuidPattern.test(match[2]!)
+        ? `${match[1]!.toLowerCase()}:${match[2]!.toLowerCase()}`
+        : invalid(`${field.label} accepts member:<membership ID> or agent:<agent ID>.`);
+    }
     default: {
       const exhaustive: never = field;
       return exhaustive;
@@ -462,6 +476,14 @@ function fromAst(
       return null;
     }
     op = 'is-me';
+    literals = [];
+  }
+  if (node.operator === '=isperson=' || node.operator === '=isagent=') {
+    if (Array.isArray(raw) || raw.toLowerCase() !== 'true') {
+      issues.push({ code: 'invalid-value', selector, message: `${node.operator} accepts true.` });
+      return null;
+    }
+    op = node.operator === '=isperson=' ? 'is-person' : 'is-agent';
     literals = [];
   }
   if (!op || !kindQueryOps[field.kind].includes(op)) {
@@ -639,6 +661,12 @@ export function printRsql(definition: Pick<TableDefinition, 'fields'>, where: Qu
       ]);
     const selector = createSelectorNode(capability.selector, true);
     if (node.op === 'is-me') return createComparisonNode(selector, '=isme=', createValueNode('true', true));
+    if (node.op === 'is-person' || node.op === 'is-agent')
+      return createComparisonNode(
+        selector,
+        node.op === 'is-person' ? '=isperson=' : '=isagent=',
+        createValueNode('true', true),
+      );
     if (node.op === 'empty' || node.op === 'not-empty')
       return createComparisonNode(selector, '=isnull=', createValueNode(node.op === 'empty' ? 'true' : 'false', true));
     const values = node.values.map(value => {
@@ -672,6 +700,8 @@ export const opLabels: Record<QueryOp, string> = {
   empty: 'is empty',
   'not-empty': 'is not empty',
   'is-me': 'is me',
+  'is-person': 'is a person',
+  'is-agent': 'is an agent',
 };
 const timeLabels: Partial<Record<QueryOp, string>> = {
   lt: 'is before',

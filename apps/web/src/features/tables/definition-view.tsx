@@ -29,6 +29,8 @@ export function formatTableValue(value: TableValue | undefined, definition: Labe
       return value.recordIds.join(', ') || 'None';
     case 'file':
       return value.fileIds.join(', ') || 'None';
+    case 'actor':
+      return value.actor.type === 'agent' ? 'Agent' : 'Person';
     default: {
       const exhaustive: never = value;
       return exhaustive;
@@ -47,7 +49,11 @@ const labelKinds = new Set<TableField['kind']>([
 ]);
 
 /** Tables have no display field, so a row reads as its first two set values that are not references. */
-export function rowLabel(definition: TableDefinition, values: TableValues, systemKind?: 'workspace-members'): string {
+export function rowLabel(
+  definition: TableDefinition,
+  values: TableValues,
+  systemKind?: 'workspace-members' | 'tasks',
+): string {
   if (systemKind === 'workspace-members') return workspaceMemberLabel(values);
   return (
     definition.fields
@@ -62,7 +68,7 @@ export function rowLabel(definition: TableDefinition, values: TableValues, syste
 export function rowTitle(
   definition: TableDefinition,
   record: { id: string; values: TableValues },
-  systemKind?: 'workspace-members',
+  systemKind?: 'workspace-members' | 'tasks',
 ): string {
   if (systemKind === 'workspace-members') return workspaceMemberLabel(record.values);
   const field = definition.fields.find(item => item.kind === 'text') ?? definition.fields[0];
@@ -75,7 +81,13 @@ export function rowTitle(
 function FieldDetails({ field }: { field: TableField }) {
   switch (field.kind) {
     case 'text':
-      return <>Up to {field.maxLength} characters</>;
+      return (
+        <>
+          Up to {field.maxLength} characters{field.markdown ? ', shown as Markdown' : ''}
+        </>
+      );
+    case 'actor':
+      return <>One person or agent{field.assignee ? '. The Assignee: assigning an agent starts its work.' : ''}</>;
     case 'numeric':
       return (
         <>
