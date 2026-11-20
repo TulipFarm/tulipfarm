@@ -35,6 +35,73 @@ export type KeepResult<T> = { readonly status: 'ok'; readonly value: T } | KeepU
 
 export type KeepScope = { readonly user: string; readonly project?: string };
 
+/** Keep's answer to a memory request. Every refusal is typed; none of them is an empty successful answer. */
+export type KeepMemoryResult<T> =
+  | KeepResult<T>
+  /** The file changed since the expected revision, or exists when a create expected none. */
+  | {
+      readonly status: 'conflict';
+      readonly reason?: string;
+      readonly current?: KeepHead;
+    }
+  | { readonly status: 'not_found' }
+  /** Keep refused the request itself, such as a size limit or an invalid path. Retrying will not help. */
+  | { readonly status: 'rejected'; readonly code: KeepErrorCode; readonly reason?: string };
+
+export type KeepHead = { readonly revisionId: string; readonly version: string };
+
+export type KeepMemoryFile = {
+  readonly memoryId: string;
+  readonly path: string;
+  readonly revisionId: string;
+  readonly version: string;
+  readonly isHead: boolean;
+  readonly head: KeepHead;
+  readonly text: string;
+};
+
+export type KeepWriteOutcome = {
+  readonly memoryId: string;
+  readonly head: KeepHead;
+  /** The ledger sequence of this change; it only grows. */
+  readonly seq: number;
+  readonly changed: boolean;
+  readonly replayed: boolean;
+  readonly revisionId: string;
+};
+
+export type KeepRevision = {
+  readonly revisionId: string;
+  readonly seq: number;
+  readonly change: string;
+  readonly createdAt: string;
+  readonly version: string;
+  readonly path: string;
+  readonly isHead: boolean;
+};
+
+export type KeepHistory = { readonly memoryId: string; readonly revisions: readonly KeepRevision[] };
+
+export type KeepForgetReceipt = {
+  readonly erasureSeq: number;
+  readonly filesAffected: readonly string[];
+  readonly filesPurged: readonly string[];
+  readonly revisionsPurged: number;
+};
+
+export type KeepListedFile = {
+  readonly memoryId: string;
+  readonly path: string;
+  readonly revisionId: string;
+  readonly version: string;
+  readonly trashed: boolean;
+};
+
+export type KeepList = { readonly files: readonly KeepListedFile[]; readonly nextAfter: string | null };
+
+/** One file in a scope's memory tree, by path or by id. */
+export type KeepTarget = { readonly path: string } | { readonly memoryId: string };
+
 export type KeepMemoryContext = {
   readonly text: string;
   readonly tokens: number;
@@ -61,6 +128,69 @@ const contextSchema = z.object({
   scope: z.string(),
   notes: z.array(z.string()),
 });
+
+const headSchema = z.object({ revisionId: z.string(), version: z.string() });
+const seqSchema = z.number().int().nonnegative();
+const fileSchema = z.object({
+  memoryId: z.string(),
+  path: z.string(),
+  revisionId: z.string(),
+  version: z.string(),
+  isHead: z.boolean(),
+  head: headSchema,
+  text: z.string(),
+});
+const writeSchema = z.object({
+  memoryId: z.string(),
+  head: headSchema,
+  seq: seqSchema,
+  changed: z.boolean(),
+  replayed: z.boolean(),
+  revisionId: z.string(),
+});
+const historySchema = z.object({
+  memoryId: z.string(),
+  revisions: z.array(
+    z.object({
+      revisionId: z.string(),
+      seq: seqSchema,
+      change: z.string(),
+      createdAt: z.string(),
+      version: z.string(),
+      path: z.string(),
+      isHead: z.boolean(),
+    }),
+  ),
+});
+const forgetSchema = z.object({
+  receipt: z.object({
+    erasureSeq: seqSchema,
+    filesAffected: z.array(z.string()),
+    filesPurged: z.array(z.string()),
+    revisionsPurged: seqSchema,
+  }),
+});
+const listSchema = z.object({
+  files: z.array(
+    z.object({
+      memoryId: z.string(),
+      path: z.string(),
+      revisionId: z.string(),
+      version: z.string(),
+      trashed: z.boolean(),
+    }),
+  ),
+  nextAfter: z.string().nullable().optional(),
+});
+const refusalSchema = z.object({
+  error: z.object({
+    code: z.enum(keepErrorCodes),
+    reason: z.string().optional(),
+    details: z.object({ current: headSchema.optional() }).passthrough().nullish(),
+  }),
+});
+
+const target = (value: KeepTarget) => ('path' in value ? { path: value.path } : { memory_id: value.memoryId });
 
 const unavailable = (reason: KeepUnavailableReason, code?: KeepErrorCode): KeepUnavailable =>
   code ? { status: 'unavailable', reason, code } : { status: 'unavailable', reason };
@@ -124,6 +254,10 @@ export function createKeepClient(options: KeepClientOptions) {
       readonly scope: KeepScope;
       readonly query?: string;
       readonly budgetTokens?: number;
+      /** Whether workspace knowledge joins the block. Keep's default is true. */
+      readonly includeKnowledge?: boolean;
+      /** Whether the user's personal memory joins a project's block. Keep's default is true. */
+      readonly includePersonal?: boolean;
     }): Promise<KeepResult<KeepMemoryContext>> {
       const result = await request('/v1/memory/context', {
         method: 'POST',
@@ -131,6 +265,8 @@ export function createKeepClient(options: KeepClientOptions) {
           scope: input.scope,
           ...(input.query === undefined ? {} : { query: input.query }),
           ...(input.budgetTokens === undefined ? {} : { budget_tokens: input.budgetTokens }),
+          ...(input.includeKnowledge === undefined ? {} : { include_knowledge: input.includeKnowledge }),
+          ...(input.includePersonal === undefined ? {} : { include_personal: input.includePersonal }),
         },
       });
       if ('status' in result) return result;
@@ -138,7 +274,129 @@ export function createKeepClient(options: KeepClientOptions) {
       const context = contextSchema.safeParse(result.body);
       return context.success ? { status: 'ok', value: context.data } : unavailable('invalid_response');
     },
+
+    /** `POST /v1/memory/read`: one file's head, or an exact earlier revision. A trashed file is `not_found`. */
+    read: (input: { readonly scope: KeepScope; readonly revisionId?: string } & KeepTarget) =>
+      memory('read', fileSchema, {
+        scope: input.scope,
+        ...target(input),
+        ...(input.revisionId === undefined ? {} : { revision_id: input.revisionId }),
+      }),
+
+    /**
+     * `POST /v1/memory/write`: replaces a file's text. Without `expectedRevisionId` it only creates a file; with one, it
+     * is compare-and-swap and a newer head is a `conflict`. A repeated `idempotencyKey` replays the first answer.
+     */
+    write: (input: {
+      readonly scope: KeepScope;
+      readonly path: string;
+      readonly text: string;
+      readonly expectedRevisionId?: string;
+      readonly description?: string;
+      readonly idempotencyKey?: string;
+    }) =>
+      memory('write', writeSchema, {
+        scope: input.scope,
+        path: input.path,
+        text: input.text,
+        ...(input.expectedRevisionId === undefined ? {} : { expected_revision_id: input.expectedRevisionId }),
+        ...(input.description === undefined ? {} : { description: input.description }),
+        ...(input.idempotencyKey === undefined ? {} : { idempotency_key: input.idempotencyKey }),
+      }),
+
+    /** `POST /v1/memory/history`: retained revisions, including those of a trashed file. */
+    history: (input: { readonly scope: KeepScope } & KeepTarget) =>
+      memory('history', historySchema, { scope: input.scope, ...target(input) }),
+
+    /** `POST /v1/memory/undo`: writes an earlier text as a new revision (the previous one by default). */
+    undo: (
+      input: {
+        readonly scope: KeepScope;
+        readonly expectedRevisionId: string;
+        readonly targetRevisionId?: string;
+      } & KeepTarget,
+    ) =>
+      memory('undo', writeSchema, {
+        scope: input.scope,
+        ...target(input),
+        expected_revision_id: input.expectedRevisionId,
+        ...(input.targetRevisionId === undefined ? {} : { target_revision_id: input.targetRevisionId }),
+      }),
+
+    /** `POST /v1/memory/delete`: moves a file to the trash, where `restore` can bring it back for 7 days. */
+    delete: (input: { readonly scope: KeepScope; readonly expectedRevisionId: string } & KeepTarget) =>
+      memory('delete', writeSchema, {
+        scope: input.scope,
+        ...target(input),
+        expected_revision_id: input.expectedRevisionId,
+      }),
+
+    /** `POST /v1/memory/restore`: brings a file back from the trash. */
+    restore: (input: { readonly scope: KeepScope } & KeepTarget) =>
+      memory('restore', writeSchema, { scope: input.scope, ...target(input) }),
+
+    /**
+     * `POST /v1/memory/forget`: permanent erasure from every revision and the trash; it cannot be undone. Without
+     * `text`, the whole file goes. Without a target, `text` is erased everywhere in the scope.
+     */
+    forget: (input: {
+      readonly scope: KeepScope;
+      readonly path?: string;
+      readonly memoryId?: string;
+      readonly text?: string;
+    }): Promise<KeepMemoryResult<KeepForgetReceipt>> =>
+      memory('forget', forgetSchema, {
+        scope: input.scope,
+        ...(input.path === undefined ? {} : { path: input.path }),
+        ...(input.memoryId === undefined ? {} : { memory_id: input.memoryId }),
+        ...(input.text === undefined ? {} : { text: input.text }),
+      }).then(result => (result.status === 'ok' ? { status: 'ok', value: result.value.receipt } : result)),
+
+    /** `POST /v1/memory/list`: one page of a scope's files. */
+    list: (input: {
+      readonly scope: KeepScope;
+      readonly includeTrashed?: boolean;
+      readonly after?: string;
+      readonly limit?: number;
+    }) =>
+      memory('list', listSchema, {
+        scope: input.scope,
+        ...(input.includeTrashed === undefined ? {} : { include_trashed: input.includeTrashed }),
+        ...(input.after === undefined ? {} : { after: input.after }),
+        ...(input.limit === undefined ? {} : { limit: input.limit }),
+      }).then(result =>
+        result.status === 'ok'
+          ? { status: 'ok' as const, value: { files: result.value.files, nextAfter: result.value.nextAfter ?? null } }
+          : result,
+      ),
   };
+
+  async function memory<T>(route: string, schema: z.ZodType<T>, body: unknown): Promise<KeepMemoryResult<T>> {
+    const result = await request(`/v1/memory/${route}`, { method: 'POST', body });
+    if ('status' in result) return result;
+    if (result.response.ok) {
+      const value = schema.safeParse(result.body);
+      return value.success ? { status: 'ok', value: value.data } : unavailable('invalid_response');
+    }
+    const refused = refusalSchema.safeParse(result.body);
+    if (!refused.success) return unavailable('invalid_response');
+    const { code, reason, details } = refused.data.error;
+    const why = reason === undefined ? {} : { reason };
+    switch (code) {
+      case 'conflict':
+        return { status: 'conflict', ...why, ...(details?.current ? { current: details.current } : {}) };
+      case 'not_found':
+        return { status: 'not_found' };
+      case 'unavailable':
+        return unavailable('not_ready', code);
+      case 'unauthorized':
+      case 'internal':
+        return unavailable('rejected', code);
+      default:
+        return { status: 'rejected', code, ...why };
+    }
+  }
 }
 
 export type KeepClient = ReturnType<typeof createKeepClient>;
+export * from './scope.ts';

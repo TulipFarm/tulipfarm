@@ -83,7 +83,7 @@ import { projectReaders, requireProjectAccess } from './project-membership.ts';
 import { projectPassageFileSources } from './project-file-sources.ts';
 import { captureProjectContext, recheckProjectContext } from './projects.ts';
 import { projectContextSchema, RequiredProjectContextTooLarge, type ProjectContext } from './project-context.ts';
-import { readPersonalMemory } from './personal-memory.ts';
+import { readPersonalMemoryContext } from './personal-memory.ts';
 import {
   insertSkillPart,
   requestedSkill,
@@ -2029,7 +2029,7 @@ export function createConversationExecutor(
             chat.project_id || chat.slack || chat.context || compaction?.command
               ? undefined
               : await requireGitHubSources(tx, chat.requester, inherited).then(() =>
-                  readPersonalMemory(tx, chat.requester),
+                  readPersonalMemoryContext(tx, chat.requester),
                 );
           return {
             personalMemory,
@@ -2248,8 +2248,8 @@ export function createConversationExecutor(
             await requireGoogleFileSources(tx, chat.requester, inheritedSources);
             await requireFileSources(tx, chat.requester, fileSources);
             await requireReplyMcpSources(tx, chat.requester, fence.conversationId, inheritedSources);
-            const memory = await readPersonalMemory(tx, chat.requester);
-            if (memory.content)
+            const memory = await readPersonalMemoryContext(tx, chat.requester);
+            if (memory?.content)
               inheritedSources.push({ kind: 'personal-memory', membershipId: chat.requester.membershipId });
             return memory;
           }),

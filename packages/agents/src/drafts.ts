@@ -46,7 +46,11 @@ import { createFileDrafts } from './file-drafts.ts';
 import { createFileShareDrafts } from './file-share-drafts.ts';
 import { createKnowledgeDrafts } from './knowledge-drafts.ts';
 import { applyMemory, forgetMemoryText, memoryStale, requireMemoryChat } from './memory-drafts.ts';
-import { readPersonalMemory, replaceOwnPersonalMemory } from '@tulipfarm/conversations/personal-memory';
+import {
+  personalMemoryMode,
+  readPersonalMemory,
+  replaceOwnPersonalMemory,
+} from '@tulipfarm/conversations/personal-memory';
 import type { FileBytes } from '@tulipfarm/files';
 import type { GitHubSubscriptions } from '@tulipfarm/workflows/github-triggers';
 import type { Work } from '@tulipfarm/workflows/contracts';
@@ -1094,7 +1098,9 @@ export function createAuthoringDrafts(
   }
   /**
    * Removes the exact text from the requester's memory now, and keeps the previous document on an Undo card under
-   * this draft ID. The card holds the removed content, so the model never receives it again.
+   * this draft ID. The card holds the removed content, so the model never receives it again. With history (Keep),
+   * forgetting erases the text from every revision and cannot be undone, so nothing changes yet: the card asks the
+   * member to confirm first.
    */
   async function forgetMemory(workspaceId: string, actor: HumanActor, id: string, origin: Origin, text: string) {
     id = uuidSchema.parse(id);
@@ -1109,16 +1115,25 @@ export function createAuthoringDrafts(
       const current = await readPersonalMemory(tx, actor);
       const next = forgetMemoryText(current.content, text);
       if (next === undefined) return undefined;
-      const saved = await replaceOwnPersonalMemory(tx, actor, next, current.revision);
+      const permanent = (await personalMemoryMode(tx, actor)).kind === 'keep';
+      const saved = permanent ? current : await replaceOwnPersonalMemory(tx, actor, next, current.revision);
       const proposal = authoringProposalSchema.parse({
         kind: 'memory',
-        input: {
-          operation: 'restore',
-          expectedRevision: saved.revision,
-          previousContent: saved.content,
-          content: current.content,
-          forgotten: text,
-        },
+        input: permanent
+          ? {
+              operation: 'forget',
+              expectedRevision: current.revision,
+              previousContent: current.content,
+              content: next,
+              forgotten: text,
+            }
+          : {
+              operation: 'restore',
+              expectedRevision: saved.revision,
+              previousContent: saved.content,
+              content: current.content,
+              forgotten: text,
+            },
       });
       await requireSources(tx, workspaceId, actor, proposal, sources);
       await tx.client.query(
@@ -1134,7 +1149,7 @@ export function createAuthoringDrafts(
           JSON.stringify(sources),
         ],
       );
-      return { draftId: id, revision: saved.revision };
+      return { draftId: id, revision: saved.revision, confirm: permanent };
     });
   }
   return { propose, read, decide, readMemory, forgetMemory };

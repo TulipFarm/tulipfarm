@@ -1,0 +1,30 @@
+import type { KeepScope } from './index.ts';
+
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * A UUID as 25 base-36 characters. Keep user ids are at most 64 characters, too short for two UUIDs written out, and
+ * this fixed-width form keeps every id distinct and reversible.
+ */
+function id(value: string, name: string) {
+  if (!uuid.test(value)) throw new TypeError(`${name} must be a UUID`);
+  return BigInt(`0x${value.replaceAll('-', '')}`)
+    .toString(36)
+    .padStart(25, '0');
+}
+
+/** The Keep user that holds a workspace's shared memory and knowledge, such as its projects. */
+export function keepWorkspaceUser(workspaceId: string) {
+  return `ws-${id(workspaceId, 'workspaceId')}`;
+}
+
+/**
+ * The Keep scope of one member's personal memory. It is keyed by membership, not by person, so a member who leaves and
+ * rejoins starts with a new, empty tree. Personal memory never has a project.
+ */
+export function keepMemberScope(workspaceId: string, membershipId: string): KeepScope {
+  return { user: `${keepWorkspaceUser(workspaceId)}-m-${id(membershipId, 'membershipId')}` };
+}
+
+/** The file that holds a member's personal memory: Keep's "You" profile, always considered for context. */
+export const keepProfilePath = '/profile.md';

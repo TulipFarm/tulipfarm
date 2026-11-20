@@ -160,7 +160,7 @@ export const featureFlags = {
   },
   'keep-memory': {
     description:
-      'Checks that the optional Keep memory service (KEEP_ENDPOINT) answers when a member reads personal memory, and records its availability. Replies, prompts and personal memory are unchanged; personal memory stays the source of truth.',
+      "Keeps members' personal memory in the Keep memory service (KEEP_ENDPOINT), with history, recoverable delete and permanent forget. Nothing is migrated: members start with empty memory. Turning it off after first use hides Keep memory; it never returns to the earlier memory.",
     default: false,
     scope: 'workspace',
     env: 'FEATURE_FLAG_KEEP_MEMORY',

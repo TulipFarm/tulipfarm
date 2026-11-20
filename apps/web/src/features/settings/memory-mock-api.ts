@@ -11,13 +11,17 @@ if (import.meta.env.DEV && /^\/memory-mock(?:\/|$)/.test(window.location.pathnam
   const scenario = new URLSearchParams(window.location.search).get('memoryScenario');
   // `passwordScenario=credential|link` turns on self-hosted password sign-in for this demo account.
   const passwordScenario = new URLSearchParams(window.location.search).get('passwordScenario');
-  let memory = {
+  // `memoryScenario=keep` adds history (undo, delete, forget); `hidden` and `keep-unavailable` show Keep's states.
+  const keep = scenario === 'keep';
+  let memory: { content: string; revision: number; history?: { trashed: boolean; undo: boolean } } = {
+    ...(keep ? { history: { trashed: false, undo: true } } : {}),
     content:
       scenario === 'empty'
         ? ''
         : 'Use short, friendly replies with emojis when they help.\n\nGreet me for my time of day. Explain unfamiliar terms in plain words.',
     revision: 1,
   };
+  let previous = '';
   let failed = false;
   let readFailures = 0;
   const original = window.fetch.bind(window);
@@ -26,8 +30,29 @@ if (import.meta.env.DEV && /^\/memory-mock(?:\/|$)/.test(window.location.pathnam
     if (!url.pathname.startsWith('/v1/')) return original(input, init);
     const path = url.pathname,
       method = init?.method ?? (input instanceof Request ? input.method : 'GET');
+    if (keep && /\/personal-memory\/(?:undo|forget)$/.test(path) && method === 'POST') {
+      const value = JSON.parse(String(init?.body)) as { expectedRevision: number };
+      if (value.expectedRevision !== memory.revision)
+        return Response.json({ error: 'personal_memory_conflict' }, { status: 409 });
+      memory = path.endsWith('/forget')
+        ? { content: '', revision: memory.revision + 2, history: { trashed: false, undo: false } }
+        : {
+            content: memory.history?.trashed ? previous : 'Use short, friendly replies.',
+            revision: memory.revision + 2,
+            history: { trashed: false, undo: true },
+          };
+      return Response.json(memory);
+    }
     if (path.endsWith('/personal-memory')) {
       if (scenario === 'denied') return Response.json({ error: 'personal-memory-not-found' }, { status: 404 });
+      if (scenario === 'hidden') return Response.json({ error: 'personal-memory-hidden' }, { status: 409 });
+      if (scenario === 'keep-unavailable')
+        return Response.json({ error: 'personal-memory-unavailable' }, { status: 503 });
+      if (keep && method === 'DELETE') {
+        previous = memory.content;
+        memory = { content: '', revision: memory.revision + 1, history: { trashed: true, undo: true } };
+        return Response.json(memory);
+      }
       if (method === 'GET') {
         // Reads resend a 503 once, so the first load fails only when both answers do.
         if (scenario === 'error' && readFailures < 2) {
@@ -50,7 +75,11 @@ if (import.meta.env.DEV && /^\/memory-mock(?:\/|$)/.test(window.location.pathnam
           return Response.json({ error: 'personal_memory_conflict' }, { status: 409 });
         if (Array.from(value.content).length > 10000)
           return Response.json({ error: 'invalid-request' }, { status: 400 });
-        memory = { content: value.content.trim() ? value.content : '', revision: memory.revision + 1 };
+        memory = {
+          ...(keep ? { history: { trashed: false, undo: true } } : {}),
+          content: value.content.trim() ? value.content : '',
+          revision: memory.revision + 1,
+        };
         if (scenario === 'lost-save' && !failed) {
           failed = true;
           throw new TypeError('Local fixture lost the save response');

@@ -74,7 +74,7 @@ import {
   withTaskTelemetry,
 } from './task-telemetry.ts';
 import { errorAttributes, log } from '@tulipfarm/observability';
-import { readPersonalMemory } from '@tulipfarm/conversations/personal-memory';
+import { readPersonalMemoryContext } from '@tulipfarm/conversations/personal-memory';
 import { messageLinks } from '@tulipfarm/conversations/links';
 import { defaultImageInputLimits, type ResolvedModel } from '@tulipfarm/config';
 import { readTaskFiles, taskFileStopMessage, type TaskFileReading, type TaskReadingFamily } from './task-files.ts';
@@ -909,7 +909,7 @@ export function createTaskRuntime(
           `UPDATE ${relation(tx, 'tf_agent_task_steps')} SET mcp_sources=$3 WHERE run_id=$1 AND step=$2`,
           [runId, step.step, JSON.stringify(await taskMcpSources(tx, owner, taskId, runId))],
         );
-      const personalMemory = await readPersonalMemory(tx, owner);
+      const personalMemory = await readPersonalMemoryContext(tx, owner);
       const input = agentModelInputSchema.parse({
         prompt,
         definition: c.definition,
@@ -1181,7 +1181,7 @@ export function createTaskRuntime(
           );
           if (canonicalJson(current.model) !== canonicalJson(claim.input.mcp)) throw new AccessDenied();
         }
-        const personalMemory = await readPersonalMemory(tx, c.owner);
+        const personalMemory = await readPersonalMemoryContext(tx, c.owner);
         const input = { ...claim.input, personalMemory };
         // A concurrent edit may enlarge the request beyond its admitted credit/context reservation.
         if (Buffer.byteLength(JSON.stringify(input)) > Buffer.byteLength(JSON.stringify(claim.input)))

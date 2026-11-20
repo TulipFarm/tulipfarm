@@ -118,7 +118,10 @@ const knowledgeDraftInput = z.discriminatedUnion('operation', [
 ]);
 const memoryContent = savePersonalMemorySchema.shape.content;
 const memoryRevision = savePersonalMemorySchema.shape.expectedRevision;
-/** The requester's own personal memory. A restore card undoes a chat forget: `forgotten` is the text it removed. */
+/**
+ * The requester's own personal memory. A restore card undoes a chat forget: `forgotten` is the text it removed. With
+ * history (Keep), forget is permanent instead: a forget card asks first and erases `forgotten` only once confirmed.
+ */
 const memoryDraftInput = z.discriminatedUnion('operation', [
   z.strictObject({
     operation: z.literal('edit'),
@@ -132,6 +135,13 @@ const memoryDraftInput = z.discriminatedUnion('operation', [
     previousContent: z.string(),
     content: memoryContent,
     forgotten: z.string(),
+  }),
+  z.strictObject({
+    operation: z.literal('forget'),
+    expectedRevision: memoryRevision,
+    previousContent: z.string(),
+    content: memoryContent,
+    forgotten: z.string().min(1),
   }),
 ]);
 const shareSubject = { kind: z.enum(['individual', 'team']), id: uuidSchema, name: z.string() };
@@ -280,7 +290,7 @@ export const draftOutcomeSchema = z.discriminatedUnion('kind', [
     operation: z.enum(['add', 'update', 'remove']),
     documentId: z.uuid(),
   }),
-  z.object({ kind: z.literal('memory'), operation: z.enum(['edit', 'restore']), revision: z.number().int() }),
+  z.object({ kind: z.literal('memory'), operation: z.enum(['edit', 'restore', 'forget']), revision: z.number().int() }),
 ]);
 export const agentDraftChangeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('create') }),

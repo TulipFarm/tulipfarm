@@ -29,7 +29,7 @@ test('memory contracts bound Unicode characters, reject invalid text and caller 
 test('runtime reader checks current membership before any personal content read', async () => {
   const queries = [];
   const tx = {
-    schema: 'ws_test',
+    schema: 'ws_0123456789ab4def8123456789abcdef',
     client: {
       query: async (sql, values) => {
         queries.push({ sql, values });
@@ -56,7 +56,7 @@ test('invalid saves never open a storage transaction', () => {
 test('runtime reader treats not-yet-migrated workspaces as empty after checking membership', async () => {
   const actor = { kind: 'human', userId: 'current', membershipId: randomUUID() };
   const tx = {
-    schema: 'ws_test',
+    schema: 'ws_0123456789ab4def8123456789abcdef',
     commonVersion: 0,
     client: {
       query: async sql => {

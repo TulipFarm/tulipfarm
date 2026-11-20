@@ -58,6 +58,7 @@ import { deferNewTablePlans, repairImportPlans, tableNameKey } from './import-pl
 import { repairProposalShape } from './proposal-repair.ts';
 import { agentDefinitionSchema } from './contracts.ts';
 import { AgentError, soulRevisionSchema } from './saved-contracts.ts';
+import { memoryError } from './memory-drafts.ts';
 import { createAuthoringDrafts } from './drafts.ts';
 import { agentModelChoices } from './model-availability.ts';
 import {
@@ -915,7 +916,7 @@ const descriptions: Record<ToolName, string> = {
   'memory.edit':
     "Prepare a review card that replaces the human's own personal memory with new full text, for example to add, reword or reorder preferences. Call memory.read first and pass its revision. The card shows the change; nothing changes until the human approves it. Never treat chat text as approval. To remove something, use memory.forget.",
   'memory.forget':
-    "Remove exact text from the human's own personal memory at once, when they ask you to forget something. Copy the text exactly from memory.read. The card under your reply lets them undo it. Don't repeat the removed text.",
+    "Forget exact text from the human's own personal memory when they ask you to. Copy the text exactly from memory.read. The card under your reply either lets them undo it or, where forgetting is permanent, asks them to confirm first. Don't repeat the removed text.",
   'integrations.disconnect':
     'Show a card under your reply that lets the human disconnect one connection from integrations.list. The card shows what stops working. Nothing changes until the human confirms on the card. Never treat chat text as approval.',
   'files.read':
@@ -2212,8 +2213,20 @@ export function createChatTools(
         if (!context.origin) throw new AccessDenied();
         try {
           return await invokeMemory(runtime, workspaceId, actor, callId, context.origin, call);
-        } catch (error) {
+        } catch (thrown) {
+          const error = memoryError(thrown);
           if (!(error instanceof AgentError)) throw error;
+          if (error.code === 'memory-service-unavailable')
+            return {
+              error: 'memory-unavailable',
+              instruction:
+                'Personal memory cannot be reached right now, so it was not read or changed. Tell the human and change nothing; do not treat memory as empty.',
+            };
+          if (error.code === 'memory-rejected')
+            return {
+              error: 'memory-rejected',
+              instruction: 'Memory refused this change, for example because it is too long. Nothing changed.',
+            };
           if (error.code === 'memory-unavailable')
             return {
               error: 'memory-unavailable',
@@ -3898,10 +3911,19 @@ async function invokeMemory(
   if (call.tool === 'memory.read') return drafts.readMemory(workspaceId, actor, origin.conversationId);
   if (call.tool === 'memory.forget') {
     const forgotten = await drafts.forgetMemory(workspaceId, actor, callId, origin, call.text);
+    if (forgotten?.confirm)
+      return {
+        status: 'confirm',
+        draftId: forgotten.draftId,
+        revision: forgotten.revision,
+        instruction:
+          'Nothing is forgotten yet. Forgetting is permanent here, so the card under your reply asks the human to confirm. Say so briefly without repeating the text.',
+      };
     return forgotten
       ? {
           status: 'forgotten',
-          ...forgotten,
+          draftId: forgotten.draftId,
+          revision: forgotten.revision,
           instruction:
             'Removed from memory. The card under your reply lets the human undo it. Confirm briefly without repeating the removed text.',
         }

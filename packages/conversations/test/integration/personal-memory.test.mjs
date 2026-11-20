@@ -4,7 +4,14 @@ import { test } from 'node:test';
 import { AccessDenied } from '@tulipfarm/access';
 import { createWorkspaceRuntime, commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
 import { fixture, connect, denied } from '../../../workspace-storage/test/integration/fixture.mjs';
-import { createPersonalMemoryService, readPersonalMemory, PersonalMemoryConflict } from '../../src/personal-memory.ts';
+import {
+  configureKeepPersonalMemory,
+  createPersonalMemoryService,
+  readPersonalMemory,
+  PersonalMemoryConflict,
+  PersonalMemoryUnavailable,
+} from '../../src/personal-memory.ts';
+import { fakeKeep } from '../fake-keep.mjs';
 
 test(
   'membership-owned memory has strict revisions, content-free deletion and restricted capabilities',
@@ -162,3 +169,59 @@ test(
     }
   },
 );
+
+test('Keep replaces the old store per workspace and hides its memory when turned off', { timeout: 60000 }, async t => {
+  const db = await fixture();
+  let runtime;
+  t.after(async () => {
+    await runtime?.close();
+    await db.close();
+  });
+  const w = await db.create();
+  const table = name => qualified(w.names.schema, name);
+  runtime = createWorkspaceRuntime({
+    replicaCount: 1,
+    reservedConnections: 2,
+    databaseConnectionBudget: 30,
+    resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
+  });
+  const service = createPersonalMemoryService(runtime);
+  const keep = fakeKeep();
+  let enabled = false;
+  t.after(configureKeepPersonalMemory({ client: keep.client, enabled: async () => enabled }));
+  const firstUse = async () =>
+    (await db.platform.query(`SELECT count(*)::int AS n FROM ${table('tf_keep_memory')}`)).rows[0].n;
+
+  await service.save(w.id, w.userId, { content: 'Old store.', expectedRevision: 0 });
+  assert.deepEqual(keep.calls, [], 'Keep is not called before the flag is on');
+  assert.equal(await firstUse(), 0);
+
+  enabled = true;
+  const empty = await service.read(w.id, w.userId);
+  assert.deepEqual(empty, { content: '', revision: 0, history: { trashed: false, undo: false } });
+  assert.equal(await firstUse(), 1);
+  const saved = await service.save(w.id, w.userId, { content: 'Keep store.', expectedRevision: 0 });
+  assert.equal(saved.content, 'Keep store.');
+  await assert.rejects(service.save(w.id, w.userId, { content: 'stale', expectedRevision: 0 }), PersonalMemoryConflict);
+  assert.deepEqual(
+    (await db.platform.query(`SELECT content,revision FROM ${table('tf_personal_memory')}`)).rows,
+    [{ content: 'Old store.', revision: 1 }],
+    'the old store is neither migrated nor written',
+  );
+
+  enabled = false;
+  const calls = keep.calls.length;
+  await assert.rejects(
+    service.read(w.id, w.userId),
+    error => error instanceof PersonalMemoryUnavailable && error.reason === 'hidden',
+  );
+  await assert.rejects(
+    service.save(w.id, w.userId, { content: 'back?', expectedRevision: 1 }),
+    PersonalMemoryUnavailable,
+  );
+  assert.equal(keep.calls.length, calls);
+  assert.equal(
+    (await db.platform.query(`SELECT content FROM ${table('tf_personal_memory')}`)).rows[0].content,
+    'Old store.',
+  );
+});
