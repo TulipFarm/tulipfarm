@@ -6,6 +6,7 @@ import { FileError } from '@tulipfarm/files';
 import {
   KnowledgeAdminRequired,
   KnowledgeError,
+  KnowledgeSearchUnavailable,
   knowledgeSettingsSchema,
   knowledgeSettingsUpdateSchema,
   knowledgeSaveSchema,
@@ -156,6 +157,8 @@ export function registerKnowledge(
       if (requestBoundaryError(error, reply)) return;
       if (error instanceof SourceAuthorizationUnavailable || error instanceof StorageUnavailableError)
         return reply.code(503).send({ error: 'knowledge-unavailable' });
+      if (error instanceof KnowledgeSearchUnavailable)
+        return reply.code(503).send({ error: 'knowledge-search-unavailable' });
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'knowledge-not-found' });
       if (error instanceof KnowledgeAdminRequired) return reply.code(403).send({ error: 'knowledge-admin-required' });
       if (error instanceof KnowledgeError) {

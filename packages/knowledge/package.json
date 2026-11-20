@@ -48,7 +48,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --test-concurrency=1 test/*.test.mjs",
-    "test:integration": "node --test test/storage.integration.mjs test/local.integration.mjs test/media.integration.mjs test/google-media.integration.mjs"
+    "test:integration": "node --test test/storage.integration.mjs test/local.integration.mjs test/media.integration.mjs test/google-media.integration.mjs test/keep.integration.mjs"
   },
   "dependencies": {
     "@tulipfarm/access": "workspace:*",
@@ -57,6 +57,7 @@
     "@tulipfarm/files": "workspace:*",
     "@tulipfarm/google-workspace": "workspace:*",
     "@tulipfarm/memory-core": "workspace:*",
+    "@tulipfarm/memory-keep": "workspace:*",
     "@tulipfarm/memory-postgres": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/workspace-storage": "workspace:*",

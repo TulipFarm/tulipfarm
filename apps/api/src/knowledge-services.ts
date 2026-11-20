@@ -9,6 +9,7 @@ import {
   createGitHubKnowledge,
   createGoogleKnowledge,
   createKnowledgeEmbeddings,
+  createKnowledgeKeepFeed,
   createKnowledgeSearch,
   createLocalKnowledge,
   createSlackKnowledge,
@@ -29,6 +30,7 @@ import { atlassianCorpusFromEnvironment } from '@tulipfarm/atlassian/corpus';
 import type { createTemporalClient } from './temporal.ts';
 import { githubKnowledgeEventsFromEnvironment } from './knowledge-github-events.ts';
 import { registerKnowledgeEmbeddingDispatch } from './knowledge-embedding-dispatch.ts';
+import { registerKnowledgeKeepDispatch } from './knowledge-keep-dispatch.ts';
 import { registerGoogleKnowledgeDispatch } from './knowledge-google-dispatch.ts';
 import { registerSlackKnowledgeDispatch } from './knowledge-slack-dispatch.ts';
 import { registerGitHubKnowledgeDispatch } from './knowledge-github-dispatch.ts';
@@ -136,7 +138,21 @@ export function createKnowledgeServices(dependencies: KnowledgeServiceDependenci
   });
   const search = createKnowledgeSearch({ runtime: dependencies.runtime, embeddings, google, slack, github, atlassian });
   const githubEvents = githubKnowledgeEventsFromEnvironment(dependencies.pool, dependencies.env ?? process.env);
-  return { gate, service, conversations, google, slack, github, atlassian, defaults, embeddings, search, githubEvents };
+  const keep = createKnowledgeKeepFeed({ runtime: dependencies.runtime });
+  return {
+    gate,
+    service,
+    conversations,
+    google,
+    slack,
+    github,
+    atlassian,
+    defaults,
+    embeddings,
+    search,
+    githubEvents,
+    keep,
+  };
 }
 
 export function registerKnowledgeSweeps(
@@ -147,6 +163,7 @@ export function registerKnowledgeSweeps(
   const { pool, temporal } = dependencies;
   registerDefaultKnowledgeDispatch(app, { pool, temporal, service: services.defaults });
   registerKnowledgeEmbeddingDispatch(app, { pool, temporal, service: services.embeddings });
+  registerKnowledgeKeepDispatch(app, { pool, temporal, feed: services.keep });
   registerGoogleKnowledgeDispatch(app, { pool, temporal, service: services.google });
   registerSlackKnowledgeDispatch(app, { pool, temporal, service: services.slack });
   registerGitHubKnowledgeDispatch(app, { pool, temporal, service: services.github, events: services.githubEvents });

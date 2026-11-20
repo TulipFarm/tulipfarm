@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import Fastify from 'fastify';
 import { AccessDenied } from '@tulipfarm/access';
+import { KnowledgeSearchUnavailable } from '@tulipfarm/knowledge';
 import { registerKnowledge } from '../dist/knowledge.js';
 
 test('source failures route lists failed and raw-text items for the source owner only', async () => {
@@ -81,5 +82,32 @@ test('source failures route lists failed and raw-text items for the source owner
     assert.equal((await disabled.inject({ url, headers: { cookie: 'owner' } })).statusCode, 404);
   } finally {
     await disabled.close();
+  }
+});
+
+test('search reports an unavailable Knowledge index as 503, not as an empty result', async () => {
+  const app = Fastify();
+  const workspaceId = randomUUID();
+  registerKnowledge(app, {
+    auth: { api: { getSession: async () => ({ user: { id: 'owner' } }) } },
+    service: {},
+    search: {
+      search: async () => {
+        throw new KnowledgeSearchUnavailable('unreachable');
+      },
+      close: async () => {},
+    },
+  });
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: `/workspaces/${workspaceId}/knowledge/search`,
+      headers: { cookie: 'owner', origin: 'http://localhost:5173' },
+      payload: { kind: 'submitted', commandId: randomUUID(), query: 'supplier' },
+    });
+    assert.equal(response.statusCode, 503, response.body);
+    assert.deepEqual(response.json(), { error: 'knowledge-search-unavailable' });
+  } finally {
+    await app.close();
   }
 });

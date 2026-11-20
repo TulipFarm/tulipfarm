@@ -4,6 +4,7 @@ import test from 'node:test';
 import { z } from 'zod';
 import { createRetrievalEngine } from '../dist/retrieval/retrieval.js';
 import { knowledgeRetrievalLimits } from '../dist/contracts/retrieval.js';
+import { KnowledgeSearchUnavailable } from '../dist/documents/contracts.js';
 
 class AccessDenied extends Error {}
 class SourceAuthorizationUnavailable extends AccessDenied {}
@@ -200,6 +201,7 @@ test('retrieval distinguishes inaccessible sources, unavailable storage, and une
     [new AccessDenied(), 'unavailable', 'source-unavailable'],
     [new SourceAuthorizationUnavailable(), 'failed', 'source-authorization-unavailable'],
     [new StorageUnavailableError('storage-hibernated'), 'failed', 'storage-hibernated'],
+    [new KnowledgeSearchUnavailable('unreachable'), 'failed', 'knowledge-search-unavailable'],
   ]) {
     const f = fixture();
     f.state.failure = error;

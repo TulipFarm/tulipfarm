@@ -8,6 +8,7 @@ export {
   citationSchema,
   KnowledgeAccountChanged,
   KnowledgeError,
+  KnowledgeSearchUnavailable,
 } from './internal/contracts.ts';
 export type { KnowledgeCitation, EmbeddingProfile } from './internal/contracts.ts';
 export { createLocalKnowledge } from './internal/local.ts';
@@ -31,6 +32,16 @@ export * from './retrieval-contracts.ts';
 export * from './embeddings.ts';
 export { createKnowledgeEmbeddings } from './internal/embeddings.ts';
 export { createKnowledgeSearch } from './internal/search.ts';
+export {
+  createKnowledgeKeepFeed,
+  createKnowledgeKeepIndex,
+  keepKnowledgeVersion,
+  KnowledgeKeepUnavailable,
+  type KnowledgeKeepDependencies,
+  type KnowledgeKeepFeed,
+  type KnowledgeKeepOutcome,
+  type KnowledgeKeepWork,
+} from './internal/keep.ts';
 export {
   createKnowledgeSourceFailures,
   knowledgeSourceFailureLimit,

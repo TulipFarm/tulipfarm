@@ -26,5 +26,13 @@ export function keepMemberScope(workspaceId: string, membershipId: string): Keep
   return { user: `${keepWorkspaceUser(workspaceId)}-m-${id(membershipId, 'membershipId')}` };
 }
 
+/**
+ * The Keep scope of a workspace's Knowledge corpus: every published Knowledge document, whatever its source. Searches
+ * in it always pass the ids of the documents the reader may see, so the scope itself grants nothing.
+ */
+export function keepWorkspaceKnowledgeScope(workspaceId: string): KeepScope {
+  return { user: `${keepWorkspaceUser(workspaceId)}-kb` };
+}
+
 /** The file that holds a member's personal memory: Keep's "You" profile, always considered for context. */
 export const keepProfilePath = '/profile.md';

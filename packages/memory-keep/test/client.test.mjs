@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createKeepClient, keepMemberScope } from '../dist/index.js';
+import { createKeepClient, keepMemberScope, keepWorkspaceKnowledgeScope } from '../dist/index.js';
 
 const endpoint = new URL('http://keep.test');
 const json = (status, body) =>
@@ -201,4 +201,89 @@ test('member scopes are keyed by workspace and membership and reject other ids',
   assert.ok(keepMemberScope(widest, widest).user.length <= 64);
   assert.throws(() => keepMemberScope(workspaceId, '../other'), TypeError);
   assert.throws(() => keepMemberScope('ws', membershipId), TypeError);
+});
+
+test('knowledge ingest, search and forget_source send snake_case bodies and map answers', async () => {
+  const requests = [];
+  const answers = [
+    json(200, {
+      captured: true,
+      sourceId: 'doc-1',
+      replaced: true,
+      report: { episodes_added: 2, episodes_unchanged: 0, chunks_added: 2 },
+    }),
+    json(200, {
+      hits: [
+        {
+          item: { id: 'chunk_1', kind: 'chunk' },
+          rank: 1,
+          score: 0.5,
+          source_id: 'doc-1',
+          text: '[undated] user: Vacation is 25 days.',
+          citation: {
+            reference: 'keep:chunk_1',
+            source_id: 'doc-1',
+            source_title: 'Handbook',
+            episode_id: 'doc-1#3',
+            char_start: 0,
+            char_end: 20,
+            quote: 'Vacation is 25 days.',
+            source_metadata: { publicationId: 'p-1' },
+          },
+        },
+      ],
+      omitted: 0,
+    }),
+    json(404, { error: { code: 'not_found', message: 'source', retryable: false } }),
+  ];
+  const client = createKeepClient({
+    endpoint,
+    token: 'secret-token',
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), body: JSON.parse(init.body) });
+      return answers.shift();
+    },
+  });
+  const scope = keepWorkspaceKnowledgeScope('7c1f2c4e-8e0e-4b7c-9a45-2f6a1c3d9b10');
+  assert.match(scope.user, /^ws-[0-9a-z]{25}-kb$/);
+  assert.deepEqual(
+    await client.ingestKnowledge({
+      scope,
+      sourceId: 'doc-1',
+      title: 'Handbook',
+      collection: 'file',
+      kind: 'document',
+      episodes: [{ id: '0', text: 'Vacation is 25 days.' }],
+      metadata: { publicationId: 'p-1' },
+      replace: true,
+    }),
+    { status: 'ok', value: { sourceId: 'doc-1', replaced: true, episodesAdded: 2, episodesUnchanged: 0 } },
+  );
+  assert.deepEqual(requests[0], {
+    url: 'http://keep.test/v1/knowledge/ingest',
+    body: {
+      scope,
+      source_id: 'doc-1',
+      title: 'Handbook',
+      collection: 'file',
+      kind: 'document',
+      episodes: [{ id: '0', text: 'Vacation is 25 days.' }],
+      metadata: { publicationId: 'p-1' },
+      replace: true,
+    },
+  });
+  const found = await client.searchKnowledge({ scope, query: 'vacation', sourceIds: ['doc-1'], limit: 5 });
+  assert.deepEqual(requests[1].body, { scope, query: 'vacation', source_ids: ['doc-1'], limit: 5 });
+  assert.equal(found.status, 'ok');
+  assert.deepEqual(found.value.hits[0].citation, {
+    sourceId: 'doc-1',
+    sourceTitle: 'Handbook',
+    episodeId: 'doc-1#3',
+    charStart: 0,
+    charEnd: 20,
+    quote: 'Vacation is 25 days.',
+    sourceMetadata: { publicationId: 'p-1' },
+  });
+  assert.deepEqual(await client.forgetKnowledgeSource({ scope, sourceId: 'doc-1' }), { status: 'not_found' });
+  assert.deepEqual(requests[2].body, { scope, source_id: 'doc-1' });
 });
