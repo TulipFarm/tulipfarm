@@ -47,7 +47,7 @@ export const featureFlags = {
   'assignable-tasks': {
     description:
       'Assign rows to people or agents: the Tasks table, Person or agent fields, Markdown text, row threads, assignment runs, limits and the Inbox.',
-    default: 'development',
+    default: false,
     scope: 'workspace',
     env: 'FEATURE_FLAG_ASSIGNABLE_TASKS',
   },
