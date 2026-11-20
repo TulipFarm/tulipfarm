@@ -1,0 +1,135 @@
+name: Evals
+
+# Runs the internal agent eval suites against live models. Pull requests run only the suites their changes affect;
+# the nightly run covers every suite on the default model and the weekly run adds the comparison models.
+on:
+  pull_request:
+    paths:
+      - packages/agents/src/**
+      - packages/config/catalog/**
+      - packages/evals/**
+      - .github/workflows/evals.yml
+  schedule:
+    - cron: '17 3 * * *'
+    - cron: '41 4 * * 0'
+  workflow_dispatch:
+    inputs:
+      suites:
+        description: Comma-separated suites (empty for all)
+        required: false
+      models:
+        description: Comma-separated catalog model IDs (empty for the default)
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evals-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  evals:
+    name: evals
+    # Forks get no secrets, so their pull requests would only skip.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: read
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: local-postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      TEST_ADMIN_DATABASE_URL: postgres://postgres:local-postgres@127.0.0.1:5432/postgres
+      EVALS_COPILOT_TOKEN: ${{ secrets.EVALS_COPILOT_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.EVALS_ANTHROPIC_API_KEY || 'eval-placeholder' }}
+      OPENAI_API_KEY: ${{ secrets.EVALS_OPENAI_API_KEY }}
+      EVALS_MAX_REQUESTS: ${{ vars.EVALS_MAX_REQUESTS || '500' }}
+      EVALS_MAX_COST: ${{ vars.EVALS_MAX_COST || '5' }}
+      EVALS_REPORT_DIR: ${{ github.workspace }}/reports/evals
+    steps:
+      - name: Check credentials
+        id: credentials
+        run: |
+          if [[ -z "$EVALS_COPILOT_TOKEN" ]]; then
+            echo "::notice::EVALS_COPILOT_TOKEN is not set; skipping evals."
+            echo "ready=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >>"$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: steps.credentials.outputs.ready == 'true'
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        if: steps.credentials.outputs.ready == 'true'
+        with:
+          node-version-file: .node-version
+      - name: Install pnpm
+        if: steps.credentials.outputs.ready == 'true'
+        run: npm install --global pnpm@11.5.3
+      - name: Cache pnpm store
+        if: steps.credentials.outputs.ready == 'true'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.pnpm-store
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', '.node-version') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-${{ runner.arch }}-
+      - name: Install repository dependencies
+        if: steps.credentials.outputs.ready == 'true'
+        run: pnpm install --frozen-lockfile --store-dir "$HOME/.pnpm-store"
+      - name: Create the local database roles
+        if: steps.credentials.outputs.ready == 'true'
+        run: psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/postgres/init.sql
+      - name: Build the eval engine and runtime
+        if: steps.credentials.outputs.ready == 'true'
+        run: pnpm exec turbo run build --filter='@tulipfarm/evals^...' --filter=@tulipfarm/conversations --concurrency=2
+      - name: Choose suites and models
+        if: steps.credentials.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          REPOSITORY: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          INPUT_SUITES: ${{ inputs.suites }}
+          INPUT_MODELS: ${{ inputs.models }}
+          WEEKLY_MODELS: ${{ vars.EVALS_WEEKLY_MODELS }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT" == pull_request ]]; then
+            {
+              echo 'EVALS_CHANGED_FILES<<EOF'
+              gh api --paginate "repos/$REPOSITORY/pulls/$PR/files" --jq '.[].filename'
+              echo EOF
+            } >>"$GITHUB_ENV"
+          fi
+          if [[ -n "${INPUT_SUITES:-}" ]]; then echo "EVALS_SUITES=$INPUT_SUITES" >>"$GITHUB_ENV"; fi
+          if [[ -n "${INPUT_MODELS:-}" ]]; then
+            echo "EVALS_MODELS=$INPUT_MODELS" >>"$GITHUB_ENV"
+          elif [[ "$SCHEDULE" == '41 4 * * 0' && -n "${WEEKLY_MODELS:-}" ]]; then
+            echo "EVALS_MODELS=$WEEKLY_MODELS" >>"$GITHUB_ENV"
+          fi
+      - name: Run evals
+        if: steps.credentials.outputs.ready == 'true'
+        run: pnpm --filter @tulipfarm/evals eval
+      - name: Upload reports
+        if: always() && steps.credentials.outputs.ready == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: eval-reports
+          path: reports/evals
+          if-no-files-found: ignore

@@ -4,6 +4,7 @@
   "test/agent-administration.browser.mjs": 32,
   "test/agent-builder-defaults.browser.mjs": 26,
   "test/agent-editor.browser.mjs": 15,
+  "test/agent-evals.browser.mjs": 30,
   "test/agent-flow-names.browser.mjs": 89,
   "test/agent-form.browser.mjs": 76,
   "test/agent-list-count.browser.mjs": 20,

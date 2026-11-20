@@ -45,6 +45,7 @@
     "@tulipfarm/build-info": "workspace:*",
     "@tulipfarm/config": "workspace:*",
     "@tulipfarm/conversations": "workspace:*",
+    "@tulipfarm/evals": "workspace:*",
     "@tulipfarm/extensions": "workspace:*",
     "@tulipfarm/files": "workspace:*",
     "@tulipfarm/github": "workspace:*",

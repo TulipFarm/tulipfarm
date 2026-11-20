@@ -45,6 +45,12 @@ export const agentTabs: readonly {
     description: 'See the workflows that start this agent.',
     requires: 'manage',
   },
+  {
+    value: 'evals',
+    label: 'Evals',
+    description: 'Check that this agent still handles your important requests after you change it.',
+    requires: 'invoke',
+  },
   { value: 'settings', label: 'Settings', description: 'Technical details and deletion.', requires: null },
 ];
 

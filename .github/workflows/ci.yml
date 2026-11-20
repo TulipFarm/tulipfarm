@@ -326,6 +326,11 @@ jobs:
         env:
           XAI_API_KEY: synthetic-not-secret
         run: pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/row-drafts.integration.mjs test/project-drafts.integration.mjs
+      - name: Check that agent evals run with metered credits and change no workspace data
+        if: matrix.group == 'workspace'
+        env:
+          ANTHROPIC_API_KEY: synthetic-not-secret
+        run: pnpm --filter @tulipfarm/evals run test:integration
       - name: Check API call approvals and per-turn limits
         if: matrix.group == 'workspace'
         env:

@@ -15,6 +15,7 @@ export { agentPlanStep, agentPlanRecovery } from './plan-workflows.ts';
 export { planDocument } from './plan-document-workflows.ts';
 export { knowledgeIngest } from './knowledge-workflows.ts';
 export { skillImport } from './skill-workflows.ts';
+export { agentEvalRun } from './eval-workflows.ts';
 export { workspaceMcpDiscovery } from './workspace-mcp-workflows.ts';
 export { codingRun } from './coding-run-workflows.ts';
 export { workflowCodingStepV1 } from './workflow-coding-step-workflows.ts';

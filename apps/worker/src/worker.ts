@@ -62,6 +62,7 @@ import { createDefaultKnowledgeWorker } from './knowledge-defaults-composition.t
 import { createDefaultKnowledgeGate, withKnowledgeSourceAuthorization } from '@tulipfarm/knowledge';
 import { createWorkflowAgentTasks } from './workflow-agent-tasks.ts';
 import { createSkillActivities } from './skill-activities.ts';
+import { createEvalActivities } from './eval-activities.ts';
 import { createWorkspaceMcpDiscoveryActivities, createWorkspaceMcpHostedSweep } from './workspace-mcp-composition.ts';
 import { configuredSkillClient } from '@tulipfarm/workflow-snippets/client';
 import { createSkillExecutionFactory } from '@tulipfarm/agents/skill-execution';
@@ -336,6 +337,13 @@ async function run() {
       guarded && chatObjects
         ? createSkillActivities(guarded, chatObjects, () => skillClient?.available?.() ?? false)
         : undefined;
+    const evalRuns = guarded
+      ? createEvalActivities(
+          guarded,
+          createKnowledgeTools({ runtime: guarded }),
+          chatObjects ? { attachments: chatObjects, snapshots: chatObjects } : undefined,
+        )
+      : undefined;
     codingDispatch = coreResources && coding ? createCodingRunDispatcher() : undefined;
     workflowCoding = coreResources && coding ? createWorkflowCodingDispatcher() : undefined;
     const codingRuns =
@@ -416,6 +424,7 @@ async function run() {
               ...apps?.activities,
               ...gmail,
               ...skillImports,
+              ...evalRuns,
               ...(coreResources ? createWorkspaceMcpDiscoveryActivities(coreResources.runtime) : {}),
               ...(coreResources && coding
                 ? createCodingRunActivities(

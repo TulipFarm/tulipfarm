@@ -111,10 +111,10 @@ test('sections appear only to people who can use them', () => {
   );
   assert.deepEqual(
     visibleTabs(['read', 'invoke']).map(tab => tab.label),
-    ['Overview', 'Slack', 'Settings'],
+    ['Overview', 'Slack', 'Evals', 'Settings'],
   );
   assert.deepEqual(
     visibleTabs([...manager, 'invoke']).map(tab => tab.label),
-    ['Overview', 'Instructions', 'Access', 'Execution', 'Slack', 'Triggers', 'Settings'],
+    ['Overview', 'Instructions', 'Access', 'Execution', 'Slack', 'Triggers', 'Evals', 'Settings'],
   );
 });

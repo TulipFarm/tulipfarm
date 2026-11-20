@@ -1465,6 +1465,7 @@ export const backgroundJobs = [
   'knowledge-defaults-dispatch',
   'knowledge-embedding-dispatch',
   'skill-import-dispatch',
+  'agent-eval-dispatch',
   'google-heartbeat-dispatch',
   'recommendation-dispatch',
   'chat-latency-scan',

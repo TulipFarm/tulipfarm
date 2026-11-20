@@ -1,0 +1,44 @@
+{
+  "name": "@tulipfarm/evals",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts.d.ts",
+      "default": "./dist/contracts.js"
+    },
+    "./agent-driver": {
+      "types": "./dist/agent-driver.d.ts",
+      "default": "./dist/agent-driver.js"
+    },
+    "./workspace": {
+      "types": "./dist/workspace.d.ts",
+      "default": "./dist/workspace.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test:integration": "node --test test/*.integration.mjs",
+    "eval": "node suites/run.mjs"
+  },
+  "dependencies": {
+    "@tulipfarm/access": "workspace:*",
+    "@tulipfarm/agents": "workspace:*",
+    "@tulipfarm/config": "workspace:*",
+    "@tulipfarm/extensions": "workspace:*",
+    "@tulipfarm/workspace-storage": "workspace:*",
+    "zod": "4.6.6"
+  },
+  "devDependencies": {
+    "@tulipfarm/conversations": "workspace:*",
+    "@tulipfarm/typescript-config": "workspace:*",
+    "@tulipfarm/workspaces": "workspace:*",
+    "@types/node": "26.6.3"
+  }
+}

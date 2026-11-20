@@ -74,6 +74,7 @@ export function AgentEditor({
   concealed,
   refresh,
   onAccepted,
+  suggestedModel,
 }: {
   api: ReturnType<typeof agentApi>;
   workspaceId: string;
@@ -84,8 +85,16 @@ export function AgentEditor({
   concealed: boolean;
   refresh: () => Promise<void>;
   onAccepted?: ((receipt: AgentCommand) => void) | undefined;
+  /** A model family chosen elsewhere, such as from an eval comparison. It changes the draft but is not saved. */
+  suggestedModel?: { id: string; at: number } | null | undefined;
 }) {
   const [draft, setDraft] = useState(() => savedDraft(detail));
+  const appliedSuggestion = useRef<number | null>(null);
+  useEffect(() => {
+    if (!suggestedModel || appliedSuggestion.current === suggestedModel.at) return;
+    appliedSuggestion.current = suggestedModel.at;
+    setDraft(current => ({ ...current, modelFamilyId: suggestedModel.id }));
+  }, [suggestedModel]);
   const [teamId, setTeamId] = useState(detail?.owningTeamId ?? 'personal');
   const [command, setCommand] = useState<AgentCommand | null>(null);
   const [finished, setFinished] = useState(false);
