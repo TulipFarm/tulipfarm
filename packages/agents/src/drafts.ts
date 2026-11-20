@@ -1082,6 +1082,9 @@ export function createAuthoringDrafts(
         `INSERT INTO ${relation(tx, 'tf_chat_authoring_decisions')} (draft_id,membership_id,command_id,input,outcome) VALUES ($1,$2,$3,$4,$5)`,
         [id, actor.membershipId, input.commandId, input, outcome],
       );
+      // Confirmed or not, the card stops holding the text the member asked to forget.
+      if (row.proposal.kind === 'memory' && row.proposal.input.operation === 'forget')
+        await tx.client.query(`SELECT ${relation(tx, 'tf_clear_memory_forget')}($1)`, [id]);
       return outcome;
     });
     if (!decided) throw new AccessDenied();
@@ -1120,13 +1123,7 @@ export function createAuthoringDrafts(
       const proposal = authoringProposalSchema.parse({
         kind: 'memory',
         input: permanent
-          ? {
-              operation: 'forget',
-              expectedRevision: current.revision,
-              previousContent: current.content,
-              content: next,
-              forgotten: text,
-            }
+          ? { operation: 'forget', expectedRevision: current.revision, forgotten: text }
           : {
               operation: 'restore',
               expectedRevision: saved.revision,
@@ -1145,7 +1142,10 @@ export function createAuthoringDrafts(
           actor.membershipId,
           actor.userId,
           proposal,
-          createHash('sha256').update(canonicalJson(proposal)).digest('hex'),
+          // A permanent forget's digest must not depend on the text, which is blanked once the card is decided.
+          createHash('sha256')
+            .update(canonicalJson(permanent ? { id, operation: 'forget', revision: current.revision } : proposal))
+            .digest('hex'),
           JSON.stringify(sources),
         ],
       );

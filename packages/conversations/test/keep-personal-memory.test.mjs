@@ -6,6 +6,7 @@ import {
   createPersonalMemoryService,
   forgetOwnPersonalMemory,
   PersonalMemoryConflict,
+  PersonalMemoryRejected,
   PersonalMemoryUnavailable,
   readPersonalMemory,
   readPersonalMemoryContext,
@@ -129,6 +130,18 @@ test('delete is recoverable, undo reverts edits, and forget erases text from eve
     file.revisions.some(revision => revision.text.includes('Secret line.')),
     false,
   );
+});
+
+test('a failed save over deleted memory leaves it deleted, not restored', async t => {
+  const { client, calls } = fakeKeep();
+  t.after(keep(true, client));
+  const { tx, actor } = storage();
+  const saved = await replaceOwnPersonalMemory(tx, actor, 'Deleted on purpose.', 0);
+  const deleted = await replaceOwnPersonalMemory(tx, actor, '', saved.revision);
+  client.failWrite = { status: 'rejected', code: 'limit_exceeded' };
+  await assert.rejects(replaceOwnPersonalMemory(tx, actor, 'Too long.', deleted.revision), PersonalMemoryRejected);
+  assert.deepEqual(calls.slice(-3), ['restore', 'write', 'delete']);
+  assert.deepEqual(await readPersonalMemory(tx, actor), { content: '', revision: deleted.revision });
 });
 
 test('flag off after first use hides Keep memory instead of falling back to the old store', async t => {

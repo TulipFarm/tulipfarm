@@ -206,13 +206,25 @@ export function MemoryDraftCard({
         </>
       }
     >
-      {restore ? (
+      {input.operation === 'forget' ? (
+        input.forgotten ? (
+          <>
+            <div
+              role="group"
+              aria-label="Text to forget"
+              className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words rounded-md border bg-destructive/10 p-2 font-mono text-xs"
+            >
+              {input.forgotten}
+            </div>
+            <p className="text-sm">This erases the text from your memory and its history. You can’t undo it.</p>
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">The text from this request is no longer stored.</p>
+        )
+      ) : input.operation === 'restore' ? (
         <MemoryDiff before={input.content} after={input.previousContent} />
       ) : (
         <MemoryDiff before={input.previousContent} after={input.content} />
-      )}
-      {forget && (
-        <p className="text-sm">This erases the removed text from your memory and its history. You can’t undo it.</p>
       )}
       <p className="text-xs text-muted-foreground">
         Only you can see your memory. Chat uses it in your private chats outside projects.

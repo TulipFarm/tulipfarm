@@ -285,7 +285,12 @@ export async function replaceKeepMemory(keep: Keep, nextContent: string, expecte
       idempotencyKey,
     }),
   );
-  if (written.status !== 'ok') failed(written, 'write');
+  if (written.status !== 'ok') {
+    // A deleted memory is restored only to be overwritten; if the write fails, put it back in the trash.
+    if (profile.kind === 'trashed' && expectedRevisionId !== undefined)
+      await keep.client.delete({ scope: keep.scope, path: keepProfilePath, expectedRevisionId });
+    failed(written, 'write');
+  }
   return { previous, memory: await readKeepMemory(keep) };
 }
 
