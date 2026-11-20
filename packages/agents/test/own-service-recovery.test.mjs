@@ -96,7 +96,6 @@ for (const model of ['grok-4.3', 'Kimi-K2.6'])
 test('own-service corrections use only admitted tools, cap the list and ignore unknown URL families', () => {
   const names = discoverToolNames({ kind: 'chat' });
   const correction = ownService.ownServiceCorrection;
-  assert.equal(typeof correction, 'function');
   const limited = correction('https://api.tulipfarm.ai/api/v1/projects', ['api.request', 'projects.read']);
   assert.match(limited, /projects_read/);
   assert.doesNotMatch(limited, /projects_list|projects_draft/);

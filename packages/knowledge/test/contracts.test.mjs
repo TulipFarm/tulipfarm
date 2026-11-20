@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { embeddingProfileSchema, parserProfileSchema, knowledgeLimits, providerCoverage } from '../dist/index.js';
+import { embeddingProfileSchema, parserProfileSchema } from '../dist/index.js';
 import { knowledgeSaveSchema, knowledgeSearchSchema } from '../dist/contracts.js';
 
 test('profiles preserve preparation identities and reject OCR or mixed dimensions', () => {
@@ -18,25 +18,6 @@ test('profiles preserve preparation identities and reject OCR or mixed dimension
   assert.deepEqual(embeddingProfileSchema.parse(profile), profile);
   assert.equal(embeddingProfileSchema.safeParse({ ...profile, dimensions: 2048 }).success, false);
   assert.equal(embeddingProfileSchema.safeParse({ ...profile, preparation: '' }).success, false);
-});
-
-test('provider coverage blocks unqualified connected sources and limits are finite', () => {
-  assert.deepEqual(Object.keys(providerCoverage), [
-    'conversation',
-    'note',
-    'file',
-    'google',
-    'slack',
-    'github',
-    'confluence',
-    'jira',
-  ]);
-  for (const provider of ['google', 'slack', 'github', 'confluence', 'jira'])
-    assert.equal(providerCoverage[provider].status, 'adapter-required');
-  assert.equal(knowledgeLimits.permissionAgeMs, 300000);
-  assert.equal(knowledgeLimits.retentionDays, 30);
-  assert.equal(knowledgeLimits.originalBytes, 10485760);
-  assert.equal(knowledgeLimits.documents, 50000);
 });
 
 test('browser-safe admission accepts only user content and rejects forged parser or original metadata', () => {

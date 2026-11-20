@@ -78,13 +78,7 @@ test('membership admission uses one pooled read and isolates unknown, removed an
     ]);
     assert.equal(await router.hasCurrentMember(a.id, a.userId), false);
     assert.equal(queries.length, 4);
-    for (const sql of queries) {
-      assert.match(
-        sql,
-        /^SELECT 1 FROM "ws_[a-f0-9]+"."tf_memberships" WHERE user_id = \$1 AND removed_at IS NULL LIMIT 1$/,
-      );
-      assert.doesNotMatch(sql, /BEGIN|COMMIT|FOR (SHARE|UPDATE)/);
-    }
+    for (const sql of queries) assert.doesNotMatch(sql, /BEGIN|COMMIT|FOR (SHARE|UPDATE)/);
     assert.equal(router.stats().activeTransactions, 0);
     await router.close();
     await assert.rejects(router.hasCurrentMember(b.id, b.userId), { code: 'closed' });

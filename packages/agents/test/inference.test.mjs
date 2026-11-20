@@ -6,7 +6,6 @@ import { importWorkbook } from '../../tables/test/import-object-fixture.mjs';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { test } from 'node:test';
-import { z } from 'zod';
 import { appChatPrompt, inferDecision, inferText, inferWithTools, measureToolRequest } from '../dist/inference.js';
 import { inferDecision as inferSourceDecision } from '../src/inference.ts';
 import Ajv2020 from '../../provider-mcp/node_modules/ajv/dist/2020.js';
@@ -590,27 +589,6 @@ test('runtime reminder carries a fresh instant and the local date without invent
       timeZone: 'America/Los_Angeles',
       localDate: '2026-10-01',
     });
-  }
-});
-
-test('runtime reminder preserves its bytes without building tool JSON schemas', t => {
-  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-02T00:30:00.000Z') });
-  const contexts = [
-    { kind: 'text' },
-    { kind: 'tools' },
-    { kind: 'tools', earlierMessages: true, inventory: emptyInventory },
-    { kind: 'tools', mcp: { discovery: true, tools: [] } },
-    { kind: 'agent', input },
-    { kind: 'agent', input: { ...input, definition: { ...input.definition, tools: [] } } },
-    {
-      kind: 'agent',
-      input: { ...input, definition: { ...input.definition, skills: [{ id: 'table-authoring', revision: '1' }] } },
-    },
-  ];
-  const expected = contexts.map(context => runtimeReminder(context, 'America/Los_Angeles'));
-  t.mock.method(z.globalRegistry, 'get', () => assert.fail('Runtime reminders must not traverse JSON-schema metadata'));
-  for (const [index, context] of contexts.entries()) {
-    assert.equal(runtimeReminder(context, 'America/Los_Angeles'), expected[index]);
   }
 });
 

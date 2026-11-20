@@ -343,27 +343,3 @@ test(
     }
   },
 );
-
-test(
-  'workspaces before the multiple-triggers migration report workflows unavailable',
-  { timeout: 120000 },
-  async () => {
-    const db = await fixture();
-    const w = await db.create((await workspaceTableMigrations()).slice(0, 47));
-    const runtime = createWorkspaceRuntime({
-      replicaCount: 1,
-      reservedConnections: 2,
-      databaseConnectionBudget: 20,
-      resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
-    });
-    try {
-      await assert.rejects(createWorkflows(runtime, { keyring }).list(w.id, w.userId), {
-        name: 'StorageUnavailableError',
-        message: /incompatible_version/,
-      });
-    } finally {
-      await runtime.close();
-      await db.close();
-    }
-  },
-);

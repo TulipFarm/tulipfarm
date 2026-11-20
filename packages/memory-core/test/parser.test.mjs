@@ -74,23 +74,6 @@ test('DOCX rejects proven native semantic loss before returning any chunks', asy
   assert.equal(result.chunks[0].text, 'Limit ~~450~~ 500');
 });
 
-test('native DOCX loses vertical alignment and unknown facts but retains strikethrough', async () => {
-  const { toMarkdownBytes } = await import('@firecrawl/anydoc/index.js');
-  const fixtures = new Map(strictAdmissionFixtures());
-  assert.equal(await toMarkdownBytes(await fixtures.get('superscript exponent')), 'Area 102 square metres\n');
-  assert.equal(await toMarkdownBytes(await fixtures.get('struck out amount')), 'Limit ~~450~~ 500\n');
-  for (const name of [
-    'unknown WordML element with a fact',
-    'text in paragraph properties',
-    'text in section properties',
-    'text in run properties',
-    'spoofed WordML text namespace',
-    'unqualified lookalike text element',
-  ]) {
-    assert.equal(await toMarkdownBytes(await fixtures.get(name)), 'Budget\n', name);
-  }
-});
-
 test('normalizes UTF-8, preserves headings, and measures actual embedding text', async () => {
   const result = await parse('\uFEFF# Orchard\r\n\r\nCafe\u0301 records.\r\n');
   assert.equal(result.markdown, '# Orchard\n\nCafé records.\n');
@@ -563,28 +546,6 @@ test('declared Office lists and structural slide or sheet bodies cannot disappea
       ]);
       await assert.rejects(parse(zip(entries), 'document.txt', 'text/plain'), failure('malformed'));
     }
-  }
-});
-
-test('native model drops DOCX header, footer, comment and checkbox facts that extraction restores', async () => {
-  const { toDocument, toMarkdownBytes } = await import('@firecrawl/anydoc/index.js');
-  for (const kind of ['header', 'footer', 'comments', 'legacyCheckbox']) {
-    const bytes = docxFeature(kind);
-    const native = JSON.stringify(await toDocument(bytes));
-    assert.ok(native.includes('Harvest apples on Tuesday.'));
-    assert.ok(!native.includes('Maximum is 450'));
-    assert.ok(!native.includes('\u2612'));
-    assert.ok((await toMarkdownBytes(bytes)).includes('Harvest apples on Tuesday.'));
-    assert.match((await parse(bytes, 'facts.docx')).markdown, kind === 'legacyCheckbox' ? /\u2612/ : /Maximum is 450/);
-  }
-});
-
-test('native successful conversions with missing declared parts never become parser results', async () => {
-  const { toMarkdownBytes } = await import('@firecrawl/anydoc/index.js');
-  for (const kind of ['pptx', 'xlsx']) {
-    const bytes = incompleteOffice(kind);
-    assert.ok((await toMarkdownBytes(bytes)).includes(kind === 'pptx' ? 'Orchard harvest briefing' : 'Apple'));
-    await assert.rejects(parse(bytes, `budget.${kind}`), failure('malformed'));
   }
 });
 

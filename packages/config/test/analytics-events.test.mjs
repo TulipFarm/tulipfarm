@@ -1,11 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import {
-  analyticsEventNames,
-  analyticsEventProperties,
-  analyticsEvents,
-  isAnalyticsEvent,
-} from '../dist/analytics-events.js';
+import { analyticsEventProperties, analyticsEvents, isAnalyticsEvent } from '../dist/analytics-events.js';
 
 test('every event is snake_case with a description and typed properties', () => {
   for (const [name, definition] of Object.entries(analyticsEvents)) {
@@ -14,7 +9,6 @@ test('every event is snake_case with a description and typed properties', () => 
     for (const type of Object.values(definition.properties))
       assert.ok(['boolean', 'number', 'id'].includes(type) || type.enum || type.identifier, name);
   }
-  assert.deepEqual(analyticsEventNames, Object.keys(analyticsEvents));
   assert.equal(isAnalyticsEvent('task_completed'), true);
   assert.equal(isAnalyticsEvent('toString'), false);
 });

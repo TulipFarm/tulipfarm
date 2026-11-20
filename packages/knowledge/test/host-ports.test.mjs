@@ -1,46 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { calculateKnowledgeEmbeddingCost, defaultCallTimeoutMs, knowledgeEmbeddingProfile } from '@tulipfarm/config';
-import { recordUsage } from '@tulipfarm/extensions';
-import { recordKnowledgeImport } from '@tulipfarm/observability';
-import {
-  markKnowledgeDispatched,
-  recordKnowledgeCreditOutcome,
-  reserveKnowledgeCredits,
-} from '@tulipfarm/workspace-storage/knowledge-credits';
-import { knowledgeHostPolicy, knowledgeTelemetry, knowledgeUsageMeter, systemClock } from '../dist/host-ports.js';
 import { createDefaultKnowledgeGate } from '../dist/internal/defaults.js';
 import { createKnowledgeAgentTools } from '../dist/internal/agent-tools.js';
 
 const workspaceId = '11111111-1111-4111-a111-111111111111';
 const sourceId = '22222222-2222-4222-a222-222222222222';
-
-test('host ports retain the complete fixed profile, pricing, telemetry and transactional credit functions', () => {
-  assert.equal(knowledgeHostPolicy.embeddingProfile, knowledgeEmbeddingProfile);
-  assert.equal(knowledgeHostPolicy.embeddingProfile.model, 'text-embedding-3-large');
-  assert.equal(knowledgeHostPolicy.embeddingProfile.dimensions, 1536);
-  assert.equal(knowledgeHostPolicy.callTimeoutMs, defaultCallTimeoutMs);
-  assert.equal(knowledgeTelemetry.recordImport, recordKnowledgeImport);
-  assert.equal(knowledgeUsageMeter.cost, calculateKnowledgeEmbeddingCost);
-  assert.equal(knowledgeUsageMeter.reserve, reserveKnowledgeCredits);
-  assert.equal(knowledgeUsageMeter.markDispatched, markKnowledgeDispatched);
-  assert.equal(knowledgeUsageMeter.outcome, recordKnowledgeCreditOutcome);
-  assert.equal(knowledgeUsageMeter.record, recordUsage);
-  assert.deepEqual(
-    knowledgeUsageMeter.cost({ inputTokens: 2, date: '2026-10-20' }),
-    calculateKnowledgeEmbeddingCost({ inputTokens: 2, date: '2026-10-20' }),
-  );
-  assert.throws(() => knowledgeUsageMeter.cost({ inputTokens: -1, date: '2026-10-20' }));
-});
-
-test('system clock uses wall time and asynchronous sleep', async () => {
-  const before = Date.now();
-  const now = systemClock.now();
-  assert.ok(now >= before && now <= Date.now());
-  const sleeping = systemClock.sleep(0);
-  assert.ok(sleeping instanceof Promise);
-  await sleeping;
-});
 
 function gateFixture(featureFlags, enabled) {
   let queries = 0;

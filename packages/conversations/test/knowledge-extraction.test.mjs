@@ -3,8 +3,8 @@ import { test } from 'node:test';
 import { crc32 } from 'node:zlib';
 import { extractKnowledge as extractWithGaps } from '../src/knowledge-extraction.ts';
 
-async function extractKnowledge(filename, bytes, api = { extractKnowledge: extractWithGaps }) {
-  const result = await api.extractKnowledge(filename, bytes);
+async function extractKnowledge(filename, bytes) {
+  const result = await extractWithGaps(filename, bytes);
   assert.equal(result.gaps, null, filename);
   return result.content;
 }
@@ -91,12 +91,6 @@ test('reads UTF-8 text, Markdown and source code without removing content', asyn
 test('extracts a real text PDF and DOCX as normalized Markdown', async () => {
   assert.equal((await extractKnowledge('brief.pdf', pdf('Marketing budget 450'))).trim(), '## Marketing budget 450');
   assert.equal((await extractKnowledge('brief.docx', docx('Marketing budget 450'))).trim(), 'Marketing budget 450');
-});
-
-test('compiled export uses the shared parser for real document bytes', async () => {
-  const compiled = await import('../dist/knowledge-extraction.js');
-  assert.equal((await extractKnowledge('brief.pdf', pdf('Compiled PDF'), compiled)).trim(), '## Compiled PDF');
-  assert.equal((await extractKnowledge('brief.docx', docx('Compiled DOCX'), compiled)).trim(), 'Compiled DOCX');
 });
 
 test('rejects scans, corrupt documents, invalid text and unsupported formats', async () => {

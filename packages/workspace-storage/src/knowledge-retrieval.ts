@@ -7,7 +7,7 @@ export const knowledgeRootSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('task'), id: z.uuid(), sequence: z.number().int().nonnegative() }),
 ]);
 export type KnowledgeRoot = z.infer<typeof knowledgeRootSchema>;
-export const knowledgeEpisodeCitationLimit = 8 * 32 + 2 * 3 * 4 * 32;
+const knowledgeEpisodeCitationLimit = 8 * 32 + 2 * 3 * 4 * 32;
 const operationSchema = z.strictObject({
   id: z.string().max(128),
   hash: z.string().length(64),

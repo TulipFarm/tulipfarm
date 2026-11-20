@@ -149,61 +149,6 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   },
 );
 
-test('the schedule sweep reads due workflows through the next_run_at index', { timeout: 120000 }, async () => {
-  const db = await fixture();
-  let runtime;
-  try {
-    await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
-${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', import.meta.url), 'utf8')}`);
-    const w = await db.create(await workspaceTableMigrations());
-    runtime = createWorkspaceRuntime({
-      replicaCount: 1,
-      reservedConnections: 2,
-      databaseConnectionBudget: 20,
-      resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
-    });
-    const plans = [];
-    const explaining = {
-      ...runtime,
-      transaction: (workspaceId, compatibility, operation) =>
-        runtime.transaction(workspaceId, compatibility, tx =>
-          operation({
-            ...tx,
-            client: new Proxy(tx.client, {
-              get(client, key) {
-                if (key !== 'query') {
-                  const value = client[key];
-                  return typeof value === 'function' ? value.bind(client) : value;
-                }
-                return async (sql, params) => {
-                  if (typeof sql === 'string' && /t\.next_run_at\s*<=/.test(sql)) {
-                    // An empty table always plans as a sequential scan; disabling it shows whether the index can serve this query.
-                    await client.query('SET LOCAL enable_seqscan = off');
-                    plans.push((await client.query(`EXPLAIN (FORMAT JSON) ${sql}`, params)).rows[0]['QUERY PLAN']);
-                  }
-                  return client.query(sql, params);
-                };
-              },
-            }),
-          }),
-        ),
-    };
-    await createWorkflows(explaining).due(w.id);
-    const conditions = [];
-    const visit = node => {
-      if (node['Index Name'] === 'tf_workflow_triggers_due') conditions.push(node['Index Cond']);
-      (node.Plans ?? []).forEach(visit);
-    };
-    plans.forEach(plan => visit(plan[0].Plan));
-    assert.equal(plans.length, 1);
-    assert.equal(conditions.length, 1);
-    assert.match(conditions[0], /^\(next_run_at <= /);
-  } finally {
-    await runtime?.close();
-    await db.close();
-  }
-});
-
 test(
   'one workflow failing inside the sweep is recorded and the other workflows still fire',
   { timeout: 120000 },

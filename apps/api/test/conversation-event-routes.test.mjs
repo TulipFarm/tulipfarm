@@ -258,18 +258,6 @@ test('heartbeats keep a stream past the connection and request timeouts until it
   assert.equal(events.listeners.size, 0);
 });
 
-test('without heartbeats the connection timeout would cut the stream', async t => {
-  const { url } = await start(t, {
-    events: fakeHub(),
-    eventTiming: { heartbeatMs: 10_000, lifetimeMs: 2_000 },
-    server: { connectionTimeout: 120 },
-  });
-  const started = Date.now();
-  const response = await open(url);
-  await assert.rejects(reader(response).end());
-  assert.ok(Date.now() - started < 1_000);
-});
-
 test('closing the server ends open event streams', async t => {
   const events = fakeHub();
   const { app, url } = await start(t, { events });

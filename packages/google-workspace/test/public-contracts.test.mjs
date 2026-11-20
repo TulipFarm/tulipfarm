@@ -2,10 +2,8 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { googleCallbackOutcomeSchema, googleCallbackResultSchema } from '../src/callback-contracts.ts';
-import { googleCallbackResultSchema as publicCallbackSchema } from '../src/public-contracts.ts';
 
-test('standalone callback contracts preserve public exports, outcomes, and strict input checks', () => {
-  assert.equal(googleCallbackResultSchema, publicCallbackSchema);
+test('callback results accept every outcome and reject unknown outcomes, bad workspaces and extra fields', () => {
   const workspaceId = '11111111-1111-4111-8111-111111111111';
   for (const outcome of googleCallbackOutcomeSchema.options) {
     assert.deepEqual(googleCallbackResultSchema.parse({ outcome }), { outcome });

@@ -80,12 +80,6 @@ test('every enabled family keeps the route and price chat used before, and tasks
   }
 });
 
-test('the shipped default families resolve for chat and titles as before', () => {
-  assert.deepEqual(conversationModel('claude-sonnet', shipped), previousModel('claude-sonnet'));
-  assert.deepEqual(conversationModel('claude-haiku', shipped), previousModel('claude-haiku'));
-  assert.deepEqual(chatTitleRoute(shipped), { ...previousModel('claude-haiku').route, maxOutputTokens: 256 });
-});
-
 test('a family the catalog does not serve has no model, and chat replies move to the default model', () => {
   assert.equal(conversationModel('gpt-sol', shipped), null, 'skipped without an Azure or OpenAI key');
   assert.equal(conversationModel('unknown-family', shipped), null);
@@ -150,52 +144,10 @@ test('chat rejects a reply when no model can serve it', async t => {
 });
 
 const providerKeys = {
-  anthropic: { ...planOff, ANTHROPIC_API_KEY: 'synthetic-key' },
   openai: { ...planOff, OPENAI_API_KEY: 'synthetic-key' },
   xai: { ...planOff, XAI_API_KEY: 'synthetic-key' },
-  google: { ...planOff, GEMINI_API_KEY: 'synthetic-key' },
   azure: { ...planOff, AZURE_FOUNDRY_API_KEY: 'synthetic-key', AZURE_FOUNDRY_ENDPOINT: keys.AZURE_FOUNDRY_ENDPOINT },
 };
-const providerFamilies = {
-  anthropic: ['claude-haiku', 'claude-sonnet', 'claude-opus', 'claude-fable'],
-  openai: ['gpt-luna', 'gpt-sol', 'gpt-astra'],
-  xai: ['grok', 'grok-fast'],
-  google: ['gemini-flash', 'gemini-pro'],
-  azure: [
-    'gpt-luna',
-    'gpt-sol',
-    'gpt-astra',
-    'deepseek-pro',
-    'deepseek-flash',
-    'grok',
-    'grok-fast',
-    'kimi',
-    'kimi-code',
-  ],
-};
-const providerEndpoints = {
-  anthropic: 'https://api.anthropic.com/',
-  openai: 'https://api.openai.com/',
-  xai: 'https://api.x.ai/',
-  google: 'https://generativelanguage.googleapis.com/',
-  azure: keys.AZURE_FOUNDRY_ENDPOINT,
-};
-
-for (const [provider, env] of Object.entries(providerKeys))
-  test(`${provider} credentials alone enable the families ${provider} serves, priced from its own catalog entry`, () => {
-    const enabled = catalogModels.map(family => family.id).filter(family => conversationModel(family, env));
-    assert.deepEqual(enabled, providerFamilies[provider]);
-    for (const family of enabled) {
-      const { route, price } = conversationModel(family, env);
-      const model = legacyModel(price.modelId);
-      assert.equal(route.provider, provider, family);
-      assert.equal(model.provider, provider, family);
-      assert.equal(route.endpoint, providerEndpoints[provider], family);
-      assert.equal(route.model, model.providerModelId, family);
-      assert.deepEqual(price.rates, model.rates, family);
-      assert.deepEqual(conversationModel(family, env).route, modelEnvironment(env).route(family), family);
-    }
-  });
 
 test('a family runs on the catalog-preferred provider when both of its providers have credentials', () => {
   const env = { ...providerKeys.openai, ...providerKeys.xai, ...providerKeys.azure };

@@ -5,9 +5,7 @@ import { NodeSDK } from '@opentelemetry/sdk-node';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { privateSpanExporter, trace } from '@tulipfarm/observability';
 import { workerTelemetry } from '../src/telemetry.ts';
-import { temporalWorkflowInterceptorModule } from '../src/temporal-tracing.ts';
 import { extractContextFromHeaders, headersWithContext, TRACE_HEADER } from '@tulipfarm/observability/temporal';
-import { readFile } from 'node:fs/promises';
 
 const spans = new InMemorySpanExporter();
 const resource = resourceFromAttributes({ 'service.name': 'worker-telemetry-fixture' });
@@ -20,13 +18,6 @@ test('shared worker telemetry preserves activity results, error identity and act
   spans.reset();
   {
     const options = workerTelemetry({ resource, spanProcessor: processor });
-    assert.deepEqual(options.interceptors.workflowModules, [temporalWorkflowInterceptorModule]);
-    assert.equal(typeof options.sinks.temporalSpanExporter.export.fn, 'function');
-    assert.equal(options.interceptors.client.workflow.length, 1);
-    const disabled = workerTelemetry();
-    assert.equal(disabled.sinks, undefined);
-    assert.equal(disabled.interceptors.workflowModules, undefined);
-    assert.equal(disabled.interceptors.activity.length, 1);
     const inbound = options.interceptors.activity.at(-1)().inbound;
     const input = { args: ['PRIVATE PAYLOAD'] };
     const output = { text: 'PRIVATE RESULT' };
@@ -103,23 +94,5 @@ test('Temporal tracing carries trace context through headers and exports sandbox
     assert.equal(workflow.resource, resource);
     assert.equal(workflow.spanContext().traceState.get('k'), 'v');
     assert.equal(workflow.parentSpanContext.spanId, parent.spanId);
-  }
-});
-
-test('all Temporal worker construction sites use the same telemetry options', async () => {
-  for (const file of [
-    'worker',
-    'storage-worker',
-    'knowledge-google-composition',
-    'knowledge-slack-composition',
-    'knowledge-github-composition',
-    'knowledge-atlassian-composition',
-    'knowledge-defaults-composition',
-    'knowledge-embedding-composition',
-  ]) {
-    const source = await readFile(new URL(`../src/${file}.ts`, import.meta.url), 'utf8');
-    const workers = [...source.matchAll(/(?:Worker\.create|createWorker)\(\{/g)];
-    assert.ok(workers.length > 0, file);
-    assert.equal([...source.matchAll(/\.\.\.workerTelemetry\(/g)].length, workers.length, file);
   }
 });

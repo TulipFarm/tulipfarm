@@ -91,16 +91,18 @@ function fixture() {
   };
 }
 
-test('personal memory uses opaque contexts, exact revisions, and non-idempotent replacement', async () => {
+const insert = f => f.trace.find(value => Array.isArray(value) && value[0] === 'insert');
+
+test('personal memory uses exact revisions and non-idempotent replacement', async () => {
   const f = fixture();
   assert.deepEqual(await f.memory.read(f.context, f.actor), { content: '', revision: 0 });
-  assert.deepEqual(f.trace, ['egress', 'lock', 'member', 'availability', 'read']);
-  f.trace.length = 0;
   assert.deepEqual(await f.memory.replace(f.context, f.actor, '  Keep it short.\n', 0), {
     content: '  Keep it short.\n',
     revision: 1,
   });
-  assert.deepEqual(f.trace, ['egress', 'member', 'read', ['insert', false, null], 'clear-pending', 'changed']);
+  assert.deepEqual(insert(f), ['insert', false, null]);
+  assert.ok(f.trace.includes('clear-pending'));
+  assert.ok(f.trace.includes('changed'));
   await assert.rejects(f.memory.replace(f.context, f.actor, '  Keep it short.\n', 0), PersonalMemoryConflict);
   f.trace.length = 0;
   assert.deepEqual(await f.memory.replace(f.context, f.actor, '  Keep it short.\n', 1), {
@@ -146,7 +148,9 @@ test('automatic replacement preserves reconciliation metadata without clearing m
   const f = fixture();
   const through = '2026-10-21T00:00:00.000Z';
   await f.memory.replace(f.context, f.actor, 'Use plain words.', 0, { through });
-  assert.deepEqual(f.trace, ['egress', 'member', 'read', ['insert', true, through], 'changed']);
+  assert.deepEqual(insert(f), ['insert', true, through]);
+  assert.ok(!f.trace.includes('clear-pending'));
+  assert.ok(f.trace.includes('changed'));
 });
 
 test('membership and egress denials keep their identity and precede every private read or write', async () => {

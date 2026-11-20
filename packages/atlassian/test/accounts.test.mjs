@@ -9,7 +9,6 @@ import {
   rejectReflectedCredentials,
 } from '../dist/account-provider.js';
 import { accountCredentialCipher } from '../dist/account-credentials.js';
-import { AccountError } from '../src/account-contracts.ts';
 
 const config = {
   clientId: 'test-client',
@@ -177,13 +176,6 @@ test('credential envelope binds workspace, account, protocol, generation and pur
     () => cipher.decrypt(binding, { ...encrypted, tag: Buffer.alloc(16).toString('base64') }),
     /account-unavailable/,
   );
-});
-
-test('AccountError runs through native Node TypeScript without parameter-property transforms', () => {
-  const error = new AccountError('account-authorization-denied');
-  assert.equal(error.code, 'account-authorization-denied');
-  assert.equal(error.message, 'account-authorization-denied');
-  assert.ok(error instanceof Error);
 });
 
 test('identity outputs reject reflected tokens after JSON, URL, HTML and base64 decoding', async () => {

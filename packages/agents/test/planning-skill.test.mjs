@@ -49,5 +49,4 @@ test('explicit Planning accepts current and legacy built-in revisions without qu
     null,
   );
   assert.match(toolSystemPrompt, /load skills\.read\(planning\)/);
-  assert.doesNotMatch(toolSystemPrompt, /Leave them unassigned|before you start the work/);
 });

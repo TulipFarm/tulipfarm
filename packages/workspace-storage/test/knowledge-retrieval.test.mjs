@@ -4,7 +4,6 @@ import {
   knowledgeBudgetSchema,
   reserveKnowledgeOperation,
   knowledgeBudgetMetadata,
-  knowledgeEpisodeCitationLimit,
 } from '../src/knowledge-retrieval.ts';
 
 const fresh = () => knowledgeBudgetSchema.parse({ version: 1, operations: [] });
@@ -69,7 +68,6 @@ test('branch and phase admission is atomic and refuses oversized rounds', () => 
 });
 
 test('dedup references retain the entire derived 1024-passage episode without text copies', () => {
-  assert.equal(knowledgeEpisodeCitationLimit, 1024);
   const citations = Array.from({ length: 1024 }, (_, index) => `00000000-0000-4000-8000-000000000000:${index}`);
   const state = knowledgeBudgetSchema.parse({ ...fresh(), completeCitationIds: citations });
   const reserved = reserve(state, 'initial');

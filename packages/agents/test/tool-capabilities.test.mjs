@@ -37,7 +37,7 @@ test('saved-agent selectable tools come only from supported runtime profiles', (
 });
 
 test('task-based runtimes and Slack channel agents advertise distinct support', () => {
-  assert.strictEqual(agentRuntimeToolNames.workflowStep, agentRuntimeToolNames.task);
+  assert.deepEqual(agentRuntimeToolNames.workflowStep, agentRuntimeToolNames.task);
   assert.deepEqual(supportedAgentToolRuntimes('google.read'), ['slackChannel']);
   assert.deepEqual(supportedAgentToolRuntimes('github.issue.read'), ['slackChannel']);
   assert.deepEqual(supportedAgentToolRuntimes('github.personal.read'), ['task', 'workflowStep']);

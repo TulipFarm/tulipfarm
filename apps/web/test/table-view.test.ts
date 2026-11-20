@@ -24,13 +24,8 @@ import {
   viewSearch,
   type QueryDefinition,
 } from '../src/features/tables/table-view.ts';
-import {
-  linkGroupFields,
-  tableRowsSearchSchema as routeSearchSchema,
-  tableListSearchSchema,
-} from '../src/features/tables/table-search.ts';
+import { linkGroupFields, tableListSearchSchema } from '../src/features/tables/table-search.ts';
 import { queryLimits } from '@tulipfarm/tables/query-limits';
-import { queryLimits as engineLimits } from '@tulipfarm/tables/query';
 import { definitionSchema } from '@tulipfarm/tables/definition';
 
 const title = '11111111-1111-4111-8111-111111111111';
@@ -58,9 +53,7 @@ const definition = {
 } as unknown as QueryDefinition;
 const parse = (search: Record<string, unknown>) => tableRowsSearchSchema.parse(search);
 
-test('lightweight route schemas retain the same view schema and query-engine limits', () => {
-  assert.equal(routeSearchSchema, tableRowsSearchSchema);
-  assert.equal(queryLimits, engineLimits);
+test('table list and row links keep valid search values and drop invalid or oversized ones', () => {
   assert.deepEqual(tableListSearchSchema.parse({ q: false, extra: 'ignored' }), { q: 'false' });
   assert.deepEqual(tableListSearchSchema.parse({ archived: true, sort: '-records' }), {
     archived: true,

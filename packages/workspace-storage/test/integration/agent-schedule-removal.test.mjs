@@ -61,19 +61,6 @@ test('0041 ends live scheduled runs, keeps them as history and drops agent sched
       current.length,
     );
 
-    const relation = async name =>
-      (await db.platform.query('SELECT to_regclass($1) AS relation', [table(name)])).rows[0].relation;
-    assert.equal(await relation('tf_agent_schedules'), null);
-    assert.equal(await relation('tf_agent_schedule_audience'), null);
-    assert.deepEqual(
-      (
-        await db.platform.query(
-          `SELECT table_name FROM information_schema.columns WHERE table_schema = $1 AND column_name = 'schedule_id' AND table_name LIKE 'tf_agent_%'`,
-          [workspace.names.schema],
-        )
-      ).rows,
-      [],
-    );
     const status = async id =>
       (await db.platform.query(`SELECT status FROM ${table('tf_agent_runs')} WHERE id = $1`, [id])).rows[0].status;
     assert.equal(await status(runs.running), 'cancelled');

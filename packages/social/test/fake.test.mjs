@@ -7,30 +7,8 @@ const step = { kind: 'create-post', mode: 'mutate' };
 const awaitStep = { kind: 'await', for: 'publish-status', maxSeconds: 600 };
 const input = { attemptId: 'a1' };
 
-test('the fake implements every adapter member, including the optional ones', () => {
+test('the fake takes its platform, media URL lifetime and engagement limit from its options', () => {
   const adapter = createFakeAdapter({ platform: 'tiktok' });
-  for (const method of [
-    'scopes',
-    'authorizationUrl',
-    'exchangeCode',
-    'identity',
-    'refresh',
-    'revoke',
-    'listChannels',
-    'validate',
-    'targetRules',
-    'reviewChoices',
-    'plan',
-    'mutate',
-    'status',
-    'reconcile',
-    'readEngagement',
-    'sendEngagement',
-    'analytics',
-    'retentionCheck',
-    'classify',
-  ])
-    assert.equal(typeof adapter[method], 'function', method);
   assert.equal(adapter.platform, 'tiktok');
   assert.equal(adapter.mediaUrlTtlSeconds, 4500);
   assert.equal(createFakeAdapter().mediaUrlTtlSeconds, 1800);

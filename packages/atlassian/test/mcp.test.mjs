@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import test from 'node:test';
-import { createAtlassianMcpClient, AtlassianMcpError, atlassianMcpEndpoint, toolContractDigest } from '../src/mcp.ts';
+import { createAtlassianMcpClient, AtlassianMcpError, toolContractDigest } from '../src/mcp.ts';
 
 const cloudId = '12345678-1234-4234-8234-123456789abc';
 const foreignCloudId = '12345678-1234-4234-8234-123456789def';
@@ -121,8 +121,6 @@ test('all nine reviewed operations dispatch their official name and server-owned
     authorized.map(r => [r.cloudId, r.context, r.operation, r.arguments.cloudId]),
     Object.keys(operations).map(operation => [cloudId, context, operation, cloudId]),
   );
-  assert.deepEqual(Object.keys(client).sort(), ['close', 'discover', 'execute']);
-  assert.equal(atlassianMcpEndpoint, 'https://mcp.atlassian.com/v2/mcp?tools=all');
 });
 
 test('invalid credentials, context, digests, duplicate bindings and renamed operations fail before network', () => {

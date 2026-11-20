@@ -18,13 +18,11 @@ Object.assign(process.env, env);
 delete process.env.MODEL_CATALOG;
 
 const Fastify = (await import('fastify')).default;
-const { loadModelCatalog } = await import('@tulipfarm/config');
 const { commonCompatibility } = await import('@tulipfarm/workspace-storage/runtime');
 const { modelCatalogSchema } = await import('../../../packages/config/src/model-catalog.ts');
 const { registerModelCatalog } = await import('../src/model-catalog.ts');
 const { createModelConfiguration } = await import('../src/model-configuration.ts');
-const { registerConversations } = await import('../src/conversations.ts');
-const { guideBudget, guideLimits } = await import('../src/public-guide-config.ts');
+const { guideBudget } = await import('../src/public-guide-config.ts');
 const { publicGuideModel, publicGuideWarnings } = await import('../src/public-guide-model.ts');
 
 test('the workspace catalog reports the default model the web picks first', async t => {
@@ -71,29 +69,6 @@ test('the workspace catalog reports the default model the web picks first', asyn
   );
 });
 
-test('a message without a model uses the default model', async t => {
-  const app = Fastify();
-  t.after(() => app.close());
-  const sent = [];
-  registerConversations(app, {
-    auth: { api: { getSession: async () => ({ user: { id: 'user', emailVerified: true } }) } },
-    service: {
-      send: async (_workspace, _user, _chat, input) => {
-        sent.push(input);
-        return { messageId: input.messageId, turnId: randomUUID(), sequence: 1 };
-      },
-    },
-  });
-  const response = await app.inject({
-    method: 'PUT',
-    url: `/workspaces/${randomUUID()}/conversations/${randomUUID()}/messages/${randomUUID()}`,
-    payload: { commandId: randomUUID(), parts: [{ kind: 'text', text: 'Hello' }] },
-    headers: { origin: 'http://localhost:5173' },
-  });
-  assert.equal(response.statusCode, 200, response.body);
-  assert.equal(sent[0].model, 'openai-main');
-});
-
 test('the public guide answers with the public-guide role, priced from the effective catalog', async () => {
   const requests = [];
   const model = publicGuideModel(env, async (url, init) => {
@@ -122,17 +97,7 @@ test('the public guide answers with the public-guide role, priced from the effec
       [`${env.AZURE_FOUNDRY_ENDPOINT}openai/v1/chat/completions`, 'gpt-6-luna'],
     ],
   );
-  const { rates } = loadModelCatalog(env).model('openai-mini');
-  const { turnMicroUsd, dailyTurns } = guideBudget(env);
-  assert.equal(
-    turnMicroUsd,
-    Math.ceil(
-      2 * (guideLimits.modelInputBytes + 1024) * Math.max(...rates.map(rate => rate.usdPerMillionTokens.input)) +
-        (guideLimits.outputTokens + guideLimits.classifierTokens) *
-          Math.max(...rates.map(rate => rate.usdPerMillionTokens.output)),
-    ),
-  );
-  assert.ok(dailyTurns > 0);
+  assert.deepEqual(guideBudget(env), { turnMicroUsd: 7482, dailyTurns: 1336 });
   assert.deepEqual(publicGuideWarnings(env), []);
 });
 

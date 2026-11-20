@@ -77,7 +77,7 @@ test('workspace MCP human commands cannot carry model authority or OAuth access 
   );
 });
 
-test('requester metadata serializer cannot expose a private payload or provider result, and orphan views no longer exist', () => {
+test('requester metadata serializer cannot expose a private payload or provider result', () => {
   const metadata = {
     id: randomUUID(),
     digest: 'b'.repeat(64),
@@ -93,7 +93,6 @@ test('requester metadata serializer cannot expose a private payload or provider 
     visibility: 'requester-metadata',
   };
   assert.deepEqual(mcpActionSchema.parse(metadata), metadata);
-  assert.equal(mcpActionSchema.safeParse({ ...metadata, visibility: 'orphan-metadata' }).success, false);
   assert.equal(mcpActionSchema.safeParse({ ...metadata, exact: { arguments: { private: 'content' } } }).success, false);
   assert.equal(mcpActionSchema.safeParse({ ...metadata, receipt: { text: 'private result' } }).success, false);
   assert.equal(mcpActionSchema.safeParse({ ...metadata, canDecide: true }).success, false);

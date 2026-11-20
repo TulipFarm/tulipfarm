@@ -2,21 +2,12 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { filesSearchSchema, viewerSearchSchema } from '../src/features/files/search.ts';
-import {
-  fileTypeSchema,
-  libraryOwnerFilterSchema,
-  librarySectionSchema,
-  librarySortSchema,
-} from '@tulipfarm/files/library-search-contracts';
-import * as fileContracts from '@tulipfarm/files/contracts';
 import { accountCallbackResultSchema, accountProtocolSchema } from '@tulipfarm/atlassian/callback-contracts';
-import * as accountContracts from '@tulipfarm/atlassian/account-contracts';
 import { workflowPageSearch } from '../src/features/workflows/page-search.ts';
 import { agentTabValues } from '../src/features/agents/tab-values.ts';
-import { agentTabs, agentTabValues as setupTabValues } from '../src/features/agents/setup.ts';
+import { agentTabs } from '../src/features/agents/setup.ts';
 
 test('URL contracts retain shared values, validation, fallbacks and viewer cursor omission', () => {
-  assert.equal(agentTabValues, setupTabValues);
   assert.deepEqual(
     agentTabValues,
     agentTabs.map(tab => tab.value),
@@ -26,10 +17,6 @@ test('URL contracts retain shared values, validation, fallbacks and viewer curso
     workflow: undefined,
     run: undefined,
   });
-  assert.equal(fileTypeSchema, fileContracts.fileTypeSchema);
-  assert.equal(libraryOwnerFilterSchema, fileContracts.libraryOwnerFilterSchema);
-  assert.equal(librarySectionSchema, fileContracts.librarySectionSchema);
-  assert.equal(librarySortSchema, fileContracts.librarySortSchema);
   const search = {
     section: 'google',
     q: 'invoice',
@@ -56,8 +43,6 @@ test('URL contracts retain shared values, validation, fallbacks and viewer curso
     after: 'x'.repeat(4097),
   });
   assert.ok(Object.values(invalid).every(value => value === undefined));
-  assert.equal(accountCallbackResultSchema, accountContracts.accountCallbackResultSchema);
-  assert.equal(accountProtocolSchema, accountContracts.accountProtocolSchema);
   for (const outcome of ['connected', 'denied', 'error', 'sign-in-required']) {
     for (const protocol of accountProtocolSchema.options)
       assert.deepEqual(accountCallbackResultSchema.parse({ outcome, protocol, ignored: true }), { outcome, protocol });

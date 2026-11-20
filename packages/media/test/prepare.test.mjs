@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { crc32, deflateSync } from 'node:zlib';
 import sharp from 'sharp';
 import { bigEndianTiff, bmp24, bmp8Palette } from './encoders.mjs';
-import { ImagePreparationError, modelImageMediaTypes, prepareImageForModel, sniffMediaType } from '../src/index.ts';
+import { ImagePreparationError, prepareImageForModel, sniffMediaType } from '../src/index.ts';
 
 const fixture = name => readFile(new URL(`fixtures/${name}`, import.meta.url));
 const generous = { maxBytes: 10_000_000 };
@@ -66,10 +66,6 @@ async function rejection(promise) {
   assert.ok(error instanceof ImagePreparationError);
   return error.code;
 }
-
-test('lists the media types a model accepts', () => {
-  assert.deepEqual(modelImageMediaTypes, ['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
-});
 
 test('returns a model-ready image as an unchanged copy', async () => {
   for (const [input, mediaType] of [

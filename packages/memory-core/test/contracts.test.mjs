@@ -1,19 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as core from '../dist/index.js';
-import * as knowledge from '../dist/contracts/knowledge.js';
-import * as memory from '../dist/contracts/personal-memory.js';
-import * as compaction from '../dist/contracts/compaction.js';
-
-test('the core entry point preserves all contract values', () => {
-  for (const contracts of [knowledge, memory, compaction]) {
-    for (const [name, value] of Object.entries(contracts)) assert.strictEqual(core[name], value, name);
-  }
-  assert.deepEqual(
-    Object.keys(core).sort(),
-    [...Object.keys(knowledge), ...Object.keys(memory), ...Object.keys(compaction)].sort(),
-  );
-});
 
 test('Knowledge request defaults and Unicode checks are unchanged', () => {
   assert.deepEqual(core.knowledgeSearchRequestSchema.parse({ kind: 'typing', query: '  records  ' }), {
@@ -42,9 +29,7 @@ test('personal memory keeps its character, Unicode, and revision limits', () => 
   assert.equal(core.personalMemorySchema.safeParse({ content: '', revision: 2147483647 }).success, true);
 });
 
-test('compaction keeps its states, triggers, and strict command shape', () => {
-  assert.deepEqual(core.compactionStateSchema.options, ['compacted', 'cleaned', 'unchanged', 'failed']);
-  assert.deepEqual(core.compactionTriggerSchema.options, ['manual', 'automatic', 'handoff-retry', 'inactivity']);
+test('compaction commands keep a strict shape', () => {
   const command = { kind: 'compact', prompt: null, compactionId: null };
   assert.deepEqual(core.compactCommandPartSchema.parse(command), command);
   assert.equal(core.compactCommandPartSchema.safeParse({ ...command, extra: true }).success, false);
