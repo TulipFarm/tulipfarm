@@ -87,6 +87,10 @@
     "./public-web": {
       "types": "./dist/public-web.d.ts",
       "default": "./dist/public-web.js"
+    },
+    "./keep": {
+      "types": "./dist/keep.d.ts",
+      "default": "./dist/keep.js"
     }
   },
   "scripts": {
