@@ -359,6 +359,73 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   },
 );
 
+test('chat approval saves a coding step when an execution backend is configured', { timeout: 60000 }, async t => {
+  const previous = process.env.TULIPFARM_EXECUTION_BACKEND;
+  process.env.TULIPFARM_EXECUTION_BACKEND = 'extension';
+  const db = await fixture();
+  let runtime;
+  t.after(async () => {
+    if (previous === undefined) delete process.env.TULIPFARM_EXECUTION_BACKEND;
+    else process.env.TULIPFARM_EXECUTION_BACKEND = previous;
+    await runtime?.close();
+    await db.close();
+  });
+  await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
+${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', import.meta.url), 'utf8')}`);
+  const w = await db.create(await workspaceTableMigrations());
+  runtime = createWorkspaceRuntime({
+    replicaCount: 1,
+    reservedConnections: 2,
+    databaseConnectionBudget: 20,
+    resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
+  });
+  const definition = {
+    version: 1,
+    name: 'Fix the readme',
+    triggers: [],
+    steps: [
+      {
+        id: 'fix',
+        kind: 'coding',
+        agent: 'claude-code',
+        repository: { kind: 'literal', value: 'octo/app' },
+        prompt: { kind: 'literal', value: 'Add a blank line at the end of README.md.' },
+        pullRequest: true,
+      },
+    ],
+  };
+  const chats = createConversations(runtime),
+    drafts = createAuthoringDrafts(runtime),
+    workflows = createWorkflows(runtime, { codingSteps: true });
+  const chatId = randomUUID();
+  await chats.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+  const sent = await chats.send(w.id, w.userId, chatId, {
+    messageId: randomUUID(),
+    commandId: randomUUID(),
+    parts: [{ kind: 'text', text: 'Prepare a workflow that has Claude Code fix the readme and open a pull request.' }],
+  });
+  let proposed;
+  const executor = createConversationExecutor(runtime, async ({ executeTool }) => {
+    proposed = await executeTool('workflows.draft', false, context =>
+      createChatTools(context.runtime).invoke(context, {
+        tool: 'workflows.draft',
+        definition: JSON.stringify(definition),
+        activate: false,
+      }),
+    );
+    return { text: 'Review the workflow card.', sources: [] };
+  });
+  assert.equal(
+    await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
+    'completed',
+  );
+  assert.equal(proposed.status, 'review-required');
+  const approval = { commandId: randomUUID(), digest: proposed.digest, decision: 'save' };
+  await drafts.decide(w.id, w.userId, chatId, proposed.draftId, approval);
+  const [saved] = await workflows.list(w.id, w.userId);
+  assert.deepEqual(saved.definition, definition);
+});
+
 function newYorkTime(iso) {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat('en-US', {

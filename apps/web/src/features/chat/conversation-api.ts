@@ -372,6 +372,12 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
           code,
           'Code steps cannot run here yet because no execution backend is configured. Ask chat for a draft without code steps.',
         );
+      if (code === 'coding-steps-unavailable')
+        throw new TableRequestError(
+          response.status,
+          code,
+          'Coding steps cannot run here yet because no execution backend is configured. Ask chat for a draft without coding steps.',
+        );
       if (code === 'memory-unavailable')
         throw new TableRequestError(
           response.status,

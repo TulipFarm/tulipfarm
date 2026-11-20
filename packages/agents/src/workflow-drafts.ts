@@ -168,6 +168,12 @@ export function workflowDefinitionProblem(
       instruction:
         'No execution backend is configured, so code steps cannot run. Draft the workflow without code steps, and tell the human why.',
     };
+  if (!codeSteps && definition.steps.some(step => step.kind === 'coding'))
+    return {
+      error: 'coding-steps-unavailable',
+      instruction:
+        'No execution backend is configured, so coding steps cannot run. Draft the workflow without coding steps, and tell the human why.',
+    };
   for (const trigger of definition.triggers) {
     try {
       nextWorkflowRun(trigger, now);
@@ -208,7 +214,8 @@ export function createWorkflowDrafts(
   options: { wake?: (work: Work) => Promise<void>; githubSubscriptions?: GitHubSubscriptions } = {},
 ): WorkflowDrafts {
   const codeSteps = workflowCodeStepsEnabled();
-  const service = createWorkflows(storage, { codeSteps, agentSteps: true, ...options });
+  // Coding steps run on the same execution backend as code steps; the worker owns the runner.
+  const service = createWorkflows(storage, { codeSteps, codingSteps: codeSteps, agentSteps: true, ...options });
   const list = (actor: HumanActor) => service.list(workspaceId, actor.userId);
   const read = (actor: HumanActor, id: string) => service.definition(workspaceId, actor.userId, id);
   const providers = async (actor: HumanActor) =>

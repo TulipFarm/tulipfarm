@@ -1294,6 +1294,7 @@ function commandError(error: RequestError) {
     'record-field-unavailable': 'The table, fields or filter are no longer available. Edit the trigger in chat.',
     'record-source-denied': recordSourceDenied,
     'code-steps-unavailable': 'Code steps cannot run until an execution backend is configured.',
+    'coding-steps-unavailable': 'Coding steps cannot run until an execution backend is configured.',
     'workflow-archived': 'This workflow is archived. Restore it from Archived before changing it.',
     'workflow-not-archived': 'This workflow was already restored. Refresh workflows.',
     'workflow-archive-unavailable':
