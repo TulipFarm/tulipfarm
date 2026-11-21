@@ -168,3 +168,33 @@ test('a worker whose lease was taken over is refused', { timeout: 120000 }, asyn
     await s.close();
   }
 });
+
+test('member reads share the workspace lock with other readers', { timeout: 120000 }, async () => {
+  const s = await setup();
+  try {
+    let free, held;
+    const locked = new Promise(resolve => (held = resolve)),
+      done = new Promise(resolve => (free = resolve));
+    const reader = s.runtime.transaction(s.ws.id, commonCompatibility, async tx => {
+      await lockAuthorization(tx, 'read');
+      held();
+      await done;
+    });
+    await locked;
+    try {
+      const listed = await Promise.race([s.github.list(s.ws.id, s.ws.userId), blocked()]);
+      assert.deepEqual(
+        listed.items?.map(item => item.sourceId),
+        [s.sourceId],
+        'listing sources is not held up by a reader',
+      );
+      const documents = await Promise.race([s.github.listDocuments(s.ws.id, s.ws.userId, s.sourceId), blocked()]);
+      assert.deepEqual(documents.items, [], 'listing documents is not held up by a reader');
+    } finally {
+      free();
+      await reader;
+    }
+  } finally {
+    await s.close();
+  }
+});

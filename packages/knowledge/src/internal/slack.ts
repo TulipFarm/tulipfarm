@@ -162,10 +162,15 @@ export function createSlackKnowledge({
     workspaceId: string,
     userId: string,
     operation: (tx: Tx, actor: HumanActor) => Promise<T>,
+    write = true,
   ) {
-    return store.transaction(workspaceId, userId, true, async (tx, actor) => {
+    return store.transaction(workspaceId, userId, write, async (tx, actor) => {
       return operation(tx, actor);
     });
+  }
+  /** Read-only callbacks take the workspace authorization lock shared, so they never queue behind or block other reads. */
+  function memberRead<T>(workspaceId: string, userId: string, operation: (tx: Tx, actor: HumanActor) => Promise<T>) {
+    return memberTransaction(workspaceId, userId, operation, false);
   }
   async function source(tx: Tx, sourceId: string) {
     const row = sourceSchema
@@ -257,19 +262,19 @@ export function createSlackKnowledge({
   }
   async function discover(workspaceId: string, userId: string, kind: SlackCorpusKind, cursor?: string) {
     denyMcpEgress();
-    await memberTransaction(workspaceId, userId, async () => undefined);
+    await memberRead(workspaceId, userId, async () => undefined);
     return provider.discover(workspaceId, userId, kind, cursor);
   }
   async function configure(workspaceId: string, userId: string, value: unknown) {
     denyMcpEgress();
     const input = slackKnowledgeConfigureSchema.parse(value);
     if (!windowValid(input.selection.after, now())) throw new SlackCorpusError('invalid-selection');
-    const actor = await memberTransaction(workspaceId, userId, async (_tx, a) => a);
+    const actor = await memberRead(workspaceId, userId, async (_tx, a) => a);
     const memberIds = [...new Set([...input.memberIds, actor.membershipId])].sort();
     if (input.selection.kind === 'personal' && memberIds.some(id => id !== actor.membershipId))
       throw new AccessDenied();
     const fingerprint = digest(JSON.stringify({ selection: input.selection, memberIds }));
-    const replay = await memberTransaction(workspaceId, userId, async (tx, human) => {
+    const replay = await memberRead(workspaceId, userId, async (tx, human) => {
       if (!(await tx.client.query(`SELECT 1 FROM ${table(tx, 'sources')} WHERE id=$1`, [input.commandId])).rowCount)
         return null;
       const prior = await manager(tx, human, input.commandId);
@@ -345,7 +350,7 @@ export function createSlackKnowledge({
     });
   }
   async function list(workspaceId: string, userId: string) {
-    return memberTransaction(workspaceId, userId, async (tx, actor) => {
+    return memberRead(workspaceId, userId, async (tx, actor) => {
       const rows = z
         .array(z.object({ id: uuidSchema }))
         .parse(
@@ -423,13 +428,13 @@ export function createSlackKnowledge({
       if (replay.fingerprint !== fingerprint) throw new KnowledgeError('conflict');
       return dto(tx, s);
     };
-    const prior = await memberTransaction(workspaceId, userId, async (tx, actor) =>
+    const prior = await memberRead(workspaceId, userId, async (tx, actor) =>
       replayed(tx, await manager(tx, actor, sourceId)),
     );
     if (prior) return prior;
     const inspected =
       input.action === 'retry'
-        ? await memberTransaction(workspaceId, userId, async (tx, actor) => manager(tx, actor, sourceId)).then(s =>
+        ? await memberRead(workspaceId, userId, async (tx, actor) => manager(tx, actor, sourceId)).then(s =>
             provider.inspectSelection(workspaceId, userId, s.selection),
           )
         : null;
@@ -610,7 +615,7 @@ export function createSlackKnowledge({
     });
   }
   async function renew(workspaceId: string, userId: string, sourceId: string, limit: number, staleOnly: boolean) {
-    const captured = await memberTransaction(workspaceId, userId, async (tx, actor) => {
+    const captured = await memberRead(workspaceId, userId, async (tx, actor) => {
       await store.source(tx, actor, sourceId);
       const rows = z.array(z.object({ conversation_id: z.string() })).parse(
         (
@@ -1104,7 +1109,7 @@ export function createSlackKnowledge({
   }
   async function evidence(workspaceId: string, userId: string, value: unknown) {
     const citation = citationSchema.parse(value);
-    return memberTransaction(workspaceId, userId, async (tx, actor) => {
+    return memberRead(workspaceId, userId, async (tx, actor) => {
       const { revision } = await store.eligible(tx, actor, citation);
       const row = z
         .object({ passage: z.string(), heading: z.string(), expires_at: z.date() })
@@ -1130,7 +1135,7 @@ export function createSlackKnowledge({
   async function original(workspaceId: string, userId: string, documentId: string, revisionId: string) {
     documentId = uuidSchema.parse(documentId);
     revisionId = uuidSchema.parse(revisionId);
-    return memberTransaction(workspaceId, userId, async (tx, actor) => {
+    return memberRead(workspaceId, userId, async (tx, actor) => {
       const doc = await store.document(tx, documentId);
       await store.source(tx, actor, doc.source_id);
       await requireExternalProof(tx, actor, doc.id);
@@ -1157,7 +1162,7 @@ export function createSlackKnowledge({
   }
   async function status(workspaceId: string, userId: string, documentId: string) {
     documentId = uuidSchema.parse(documentId);
-    return memberTransaction(workspaceId, userId, async (tx, actor) => {
+    return memberRead(workspaceId, userId, async (tx, actor) => {
       const doc = await store.document(tx, documentId);
       await store.source(tx, actor, doc.source_id);
       await requireExternalProof(tx, actor, doc.id);
@@ -1180,7 +1185,7 @@ export function createSlackKnowledge({
   async function listDocuments(workspaceId: string, userId: string, sourceId: string, cursor?: string) {
     sourceId = uuidSchema.parse(sourceId);
     const after = cursor === undefined ? null : uuidSchema.parse(cursor);
-    return memberTransaction(workspaceId, userId, async (tx, actor) => {
+    return memberRead(workspaceId, userId, async (tx, actor) => {
       const s = await source(tx, sourceId);
       await store.source(tx, actor, sourceId);
       const rows = z.array(z.object({ id: uuidSchema })).parse(

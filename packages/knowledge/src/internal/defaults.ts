@@ -730,11 +730,27 @@ export function createDefaultKnowledge({
         const page = await adapter.discover(work.workspaceId, claim, cursor.page);
         if (page.nextCursor && page.nextCursor === cursor.page) throw new KnowledgeError('incomplete');
         limited = await fenced(work, token, async (tx, i) => {
-          for (const scope of page.scopes)
+          // One statement per page keeps the exclusive lock short however many scopes the provider returns; a repeated key keeps its last entry.
+          const scopes = [
+            ...new Map(
+              page.scopes.map(scope => [
+                scope.key.slice(0, 512),
+                { group: scope.group.slice(0, 256), title: scope.title.slice(0, 512) },
+              ]),
+            ),
+          ];
+          if (scopes.length)
             await tx.client.query(
-              `INSERT INTO ${table(tx, 'default_scopes')} (intent_id,scope_key,group_key,title,seen_pass) VALUES ($1,$2,$3,$4,$5)
+              `INSERT INTO ${table(tx, 'default_scopes')} (intent_id,scope_key,group_key,title,seen_pass)
+            SELECT $1,s.scope_key,s.group_key,s.title,$5 FROM unnest($2::text[],$3::text[],$4::text[]) AS s(scope_key,group_key,title)
             ON CONFLICT (intent_id,scope_key) DO UPDATE SET title=EXCLUDED.title,group_key=EXCLUDED.group_key,seen_pass=EXCLUDED.seen_pass`,
-              [i.id, scope.key.slice(0, 512), scope.group.slice(0, 256), scope.title.slice(0, 512), i.pass],
+              [
+                i.id,
+                scopes.map(([key]) => key),
+                scopes.map(([, scope]) => scope.group),
+                scopes.map(([, scope]) => scope.title),
+                i.pass,
+              ],
             );
           if (page.groupFailure)
             await tx.client.query(
@@ -824,12 +840,17 @@ export function createDefaultKnowledge({
     workspaceId: string,
     userId: string,
     operation: (tx: Tx, actor: HumanActor) => Promise<T>,
+    mode: 'read' | 'write' = 'write',
   ) {
     return runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async tx => {
-      await lockAuthorization(tx, 'write');
+      await lockAuthorization(tx, mode);
       const actor = await resolveHuman(tx, userId);
       return operation(tx, actor);
     });
+  }
+  /** Read-only callbacks take the workspace authorization lock shared, so they never queue behind or block other reads. */
+  function memberRead<T>(workspaceId: string, userId: string, operation: (tx: Tx, actor: HumanActor) => Promise<T>) {
+    return memberTransaction(workspaceId, userId, operation, 'read');
   }
   async function dto(tx: Tx, i: Intent): Promise<DefaultKnowledgeIntent> {
     const scopes = z
@@ -917,7 +938,7 @@ export function createDefaultKnowledge({
     });
   }
   async function list(workspaceId: string, userId: string) {
-    return memberTransaction(workspaceId, userId, async (tx, actor) => {
+    return memberRead(workspaceId, userId, async (tx, actor) => {
       if (!(await installed(tx))) return { items: [] as DefaultKnowledgeIntent[] };
       const ids = z
         .array(z.object({ id: uuidSchema }))
@@ -1088,7 +1109,7 @@ export function createDefaultKnowledge({
           /* The source keeps its failure, which its row shows with its own Retry. */
         }
       }
-    return memberTransaction(workspaceId, userId, async (tx, actor) => dto(tx, await owned(tx, actor)));
+    return memberRead(workspaceId, userId, async (tx, actor) => dto(tx, await owned(tx, actor)));
   }
   return { due, process, held, list, manage, record: recordDefaultKnowledgeIntent };
 }
