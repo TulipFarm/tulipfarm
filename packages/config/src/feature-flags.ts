@@ -25,6 +25,12 @@ export type FeatureFlagDefinition = {
 };
 
 export const featureFlags = {
+  'external-access': {
+    description: 'Personal access tokens, the public REST API and the TulipFarm MCP server for outside tools.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_EXTERNAL_ACCESS',
+  },
   'openai-models': {
     description:
       'Model catalog entries with "featureFlag": "openai-models", such as GPT models on the OpenAI API. Off hides them from the picker and workspace settings and refuses work on them.',

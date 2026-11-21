@@ -33,6 +33,7 @@
     "@fastify/rate-limit": "11.2.0",
     "@fastify/swagger": "9.9.0",
     "@fastify/swagger-ui": "6.1.1",
+    "@modelcontextprotocol/sdk": "1.32.0",
     "@temporalio/client": "1.24.0",
     "@tulipfarm/access": "workspace:*",
     "@tulipfarm/agents": "workspace:*",

@@ -61,6 +61,11 @@ import { registerPreviewTickets } from './app-preview-tickets.ts';
 import { appDataLookupPool, registerAppData } from './app-data.ts';
 import { createIdentityPool } from './identity-pool.ts';
 import { createTableService } from '@tulipfarm/tables/service';
+import { createAccessTokens, type AccessTokens } from './access-tokens.ts';
+import { registerAccessTokenSettings } from './access-token-routes.ts';
+import { createExternalApi } from './external-api.ts';
+import { registerPublicApi } from './public-api.ts';
+import { registerPublicMcp } from './public-mcp.ts';
 
 export function buildApp(
   options: {
@@ -97,7 +102,19 @@ export function buildApp(
         description: 'Version 1 of the TulipFarm HTTP API. Breaking changes receive a new URL version.',
       },
       servers: [{ url: '/', description: 'Current API host' }],
-      tags: [{ name: 'Health', description: 'Service diagnostics and API liveness' }],
+      tags: [
+        { name: 'Health', description: 'Service diagnostics and API liveness' },
+        { name: 'Public API', description: 'Stable API for outside tools, authenticated with an access token' },
+      ],
+      components: {
+        securitySchemes: {
+          accessToken: {
+            type: 'http',
+            scheme: 'bearer',
+            description: 'A TulipFarm access token (tfp_…) from Settings → API and MCP. Public API and MCP only.',
+          },
+        },
+      },
     },
   });
   app.register(swaggerUi, {
@@ -118,6 +135,8 @@ export function buildApp(
       protectExpectedSession(v1, auth.auth);
       registerFlagSubjectResolver(apiFlagSubjects(auth.pool));
       let workspaceStorage: ReturnType<typeof registerWorkspaces>;
+      let accessTokens: AccessTokens | undefined;
+      let externalServices: ReturnType<typeof registerStorageComposition>;
       registerViewer(v1, auth.auth, userId => {
         if (!workspaceStorage) throw new Error('Workspace storage is unavailable');
         return getLastWorkspace({ pool: auth.pool, runtime: workspaceStorage }, userId);
@@ -133,6 +152,8 @@ export function buildApp(
         if (storage) protectWorkspaceRequests(business, auth.auth, storage);
         workspaceStorage = storage;
         if (storage) {
+          accessTokens = createAccessTokens({ pool: auth.pool, runtime: storage });
+          registerAccessTokenSettings(business, auth.auth, accessTokens);
           appPlatform = auth.pool;
           const start = temporalAppWorkflows(temporal);
           registerApps(business, {
@@ -199,7 +220,7 @@ export function buildApp(
         );
         if (runtime && github)
           registerGitHubInvestigation(business, auth.auth, createGitHubInvestigation({ runtime, accounts: github }));
-        registerStorageComposition(
+        externalServices = registerStorageComposition(
           business,
           auth,
           temporal,
@@ -242,6 +263,25 @@ export function buildApp(
                 }
               : {}),
           });
+      });
+      // Outside tools: token-authenticated REST under /v1/public and the MCP server at /v1/mcp. No session or origin
+      // check applies here, and these routes accept no session.
+      v1.register(async external => {
+        if (!accessTokens || !externalServices) return;
+        const api = createExternalApi({
+          runtime: externalServices.runtime,
+          files: externalServices.files,
+          wakeTask: externalServices.wakeTask,
+          claimMcpSelection: externalServices.claimMcpSelection,
+          appOrigin: authConfig().webOrigin,
+          workspaceSlug: async id =>
+            (await auth.pool.query<{ slug: string }>('SELECT slug FROM app.workspaces WHERE id = $1', [id])).rows[0]
+              ?.slug ?? null,
+        });
+        external.register(async routes => registerPublicApi(routes, { tokens: accessTokens!, api }), {
+          prefix: '/public',
+        });
+        registerPublicMcp(external, { tokens: accessTokens, api });
       });
       v1.register(async data => {
         if (!workspaceStorage) return;
