@@ -1481,12 +1481,15 @@ try {
     .getByRole('button', { name: 'Review deleted row “Restored deleted subject”', exact: true })
     .waitFor();
   deletedStatus = 503;
+  const retryDeletedRefresh = deletedPanel.getByRole('button', { name: 'Retry refresh', exact: true });
   await deletedPanel.getByRole('button', { name: 'Refresh deleted rows', exact: true }).click();
-  await deletedPanel.getByRole('button', { name: 'Retry refresh', exact: true }).click();
-  await deletedPanel.getByRole('button', { name: 'Retry refresh', exact: true }).waitFor();
+  await retryDeletedRefresh.click();
+  // Retry stays hidden while the read and its automatic retries run; the server recovers only after they fail.
+  await retryDeletedRefresh.waitFor({ state: 'hidden' });
+  await retryDeletedRefresh.waitFor();
   deletedStatus = 200;
   deletedSecondPage = true;
-  await deletedPanel.getByRole('button', { name: 'Retry refresh', exact: true }).click();
+  await retryDeletedRefresh.click();
   await deletedPanel.getByRole('button', { name: 'Next deleted rows', exact: true }).click();
   await deletedPanel.getByText('No deleted rows on this page', { exact: true }).waitFor();
   assert.equal(deletedCursors.at(-1), recordId);
