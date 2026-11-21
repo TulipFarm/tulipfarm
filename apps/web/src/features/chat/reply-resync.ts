@@ -18,6 +18,8 @@ export function createReplyResync(refresh: () => Promise<boolean | void>) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let checks = 0;
   let confirmed = false;
+  // Counts new work, so a read that started before the latest progress cannot confirm it.
+  let progressed = 0;
   let checking = false;
   let visible = true;
   let online = true;
@@ -58,12 +60,14 @@ export function createReplyResync(refresh: () => Promise<boolean | void>) {
     }
     checking = true;
     if (input.recovery) checks++;
+    const since = progressed;
+    let succeeded = false;
     try {
-      confirmed = (await refresh()) === true;
+      succeeded = (await refresh()) === true;
     } catch {
       // The history reader owns request errors; this budget also bounds unsuccessful recovery.
-      confirmed = false;
     } finally {
+      confirmed = succeeded && since === progressed;
       if (confirmed) {
         checks = 0;
         publish(false);
@@ -93,6 +97,7 @@ export function createReplyResync(refresh: () => Promise<boolean | void>) {
       if (newAttempt || advanced) {
         checks = 0;
         confirmed = false;
+        progressed++;
         publish(false);
       }
       input = next;
@@ -117,6 +122,7 @@ export function createReplyResync(refresh: () => Promise<boolean | void>) {
     retry() {
       checks = 0;
       confirmed = false;
+      progressed++;
       clear();
       publish(false);
       void check();

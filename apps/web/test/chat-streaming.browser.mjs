@@ -462,6 +462,34 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 240000 
     );
 
     await scenario(
+      'a silent reply the server still reports as running is never shown as unconfirmed',
+      async ({ page, state, turnId, open }) => {
+        await page.clock.install();
+        const answer = 'This reply is still working.';
+        state.events = {
+          status: 200,
+          body: `event: text\ndata: ${JSON.stringify({ turnId, generation: 0, epoch: 1, step: 0, seq: 0, offset: 0, text: answer, reset: true })}\n\n`,
+        };
+        await open();
+        await page.getByText(answer, { exact: true }).waitFor();
+        await page.clock.runFor(200);
+        const reads = state.historyReads;
+        const notice = page.getByRole('alert').filter({ hasText: "We couldn't confirm whether this reply finished." });
+        for (let second = 0; second < 180; second++) {
+          await page.clock.fastForward(1000);
+          if (second % 10 === 0) await delay(50);
+        }
+        await delay(100);
+        assert.equal(await notice.count(), 0, 'a reply confirmed as running is not reported unconfirmed');
+        assert.ok(state.historyReads - reads >= 5, 'a confirmed reply keeps a slow backup check');
+        assert.ok(state.historyReads - reads <= 20, 'a confirmed reply does not poll quickly');
+        await page
+          .getByText('This step is taking longer than usual. The reply continues, or you can stop it.', { exact: true })
+          .waitFor();
+      },
+    );
+
+    await scenario(
       'unconfirmed completion keeps the answer and Stop, bounds checks, and recovers with Retry',
       async ({ page, state, turnId, complete, open }) => {
         await page.clock.install();
@@ -475,14 +503,16 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 240000 
         await page.clock.runFor(200);
         const reads = state.historyReads;
         await page.getByLabel('Message', { exact: true }).fill('Keep this draft');
-        for (const ms of [1000, 2000, 5000]) {
-          await page.clock.fastForward(ms);
-          await delay(100);
-        }
+        // Only failed history reads leave a reply unconfirmed; a read that shows it running confirms it.
+        state.historyStatus = 503;
         const notice = page.getByRole('alert').filter({ hasText: "We couldn't confirm whether this reply finished." });
+        for (let second = 0; second < 60 && (await notice.count()) === 0; second++) {
+          await page.clock.fastForward(1000);
+          await delay(50);
+        }
         await notice.waitFor();
         const recoveryReads = state.historyReads - reads;
-        assert.ok(recoveryReads <= 3);
+        assert.ok(recoveryReads > 0, 'failed history reads come before the notice');
         assert.equal(await page.getByRole('button', { name: 'Stop reply', exact: true }).count(), 1);
         assert.equal(await page.getByText(answer, { exact: true }).count(), 1);
         assert.equal(
@@ -507,6 +537,7 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 240000 
         await page.emulateMedia({ colorScheme: 'light' });
         await screenshot(page, 'completion-unconfirmed-mobile');
         complete(answer);
+        state.historyStatus = 200;
         await notice.getByRole('button', { name: 'Retry', exact: true }).click();
         await notice.waitFor({ state: 'detached' });
         await page.getByRole('button', { name: 'Stop reply', exact: true }).waitFor({ state: 'detached' });

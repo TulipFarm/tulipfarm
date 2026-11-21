@@ -766,14 +766,20 @@ try {
       await setTimeout(20);
     }
   };
-  // The live stream is unavailable here, so the chat checks the pending reply a few times, then says it is unsure
-  // instead of polling for ever.
-  await advance(10_000);
   const uncertain = later.getByText("We couldn't confirm whether this reply finished.", { exact: true });
+  // The live stream is unavailable here, but saved history still shows the reply running, so it is not reported
+  // unconfirmed.
+  await advance(60_000);
+  assert.equal(await uncertain.count(), 0, 'a reply the server reports as running is not unconfirmed');
+  // When history cannot be read either, the chat checks a few times, then says it is unsure instead of polling for
+  // ever.
+  historyStatus = 503;
+  await advance(45_000);
   await uncertain.waitFor();
   const readsAfterRecovery = laterReads;
   await advance(115_000);
   assert.equal(laterReads, readsAfterRecovery, 'a lost stream stops checking after its recovery budget');
+  historyStatus = 200;
   history[1].turn.status = 'completed';
   history.push({
     id: randomUUID(),
