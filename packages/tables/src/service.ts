@@ -921,6 +921,15 @@ export function createTableService(
     return labels;
   }
 
+  /** One readable table's current revision and published definition. */
+  async function describe(workspaceId: string, principal: string | Actor, input: { tableId: string }) {
+    const request = z.object({ tableId: tableIdSchema }).parse(input);
+    return authorized(workspaceId, principal, async (tx, actor) => {
+      const generation = await activeFor(tx, actor, request.tableId);
+      return { id: request.tableId, revision: generation.revision, definition: generation.definition };
+    });
+  }
+
   async function capabilities(workspaceId: string, principal: string | Actor, input: { tableId: string }) {
     const request = z.object({ tableId: tableIdSchema }).parse(input);
     return authorized(workspaceId, principal, async (tx, actor) => {
@@ -1192,6 +1201,7 @@ export function createTableService(
     reverse,
     reverseFields,
     definitions,
+    describe,
     capabilities,
     validateQuery,
     query,

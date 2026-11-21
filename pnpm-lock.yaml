@@ -62,6 +62,9 @@ importers:
       '@fastify/swagger-ui':
         specifier: 6.1.1
         version: 6.1.1
+      '@modelcontextprotocol/sdk':
+        specifier: 1.32.0
+        version: 1.32.0(zod@4.6.6)
       '@temporalio/client':
         specifier: 1.24.0
         version: 1.24.0
@@ -2840,45 +2843,53 @@ packages:
     resolution: {integrity: sha512-f2j/j32hBY6jmJ4raxDQqh7om+TUrMP9vWDmSPT/6RWOCuVhG9uMcNkR7M6rvBhGnyNTPa/dHvFNwb+jc9V3qg==}
     cpu: [arm64]
     os: [darwin]
+    deprecated: 'Legacy platform dependency. Migrate the parent SDK to @microsoft/copilot-sdk. Migration docs: https://github.com/microsoft/copilot-sdk/blob/main/docs/v2-breaking-changes.md'
 
   '@github/copilot-sdk-darwin-x64@1.0.31':
     resolution: {integrity: sha512-LDZ2r5U33QWO+MQEQnsYADBbOfEpv/78FWzATVRKeBAb9Gj3xhvkQq3UzUf9CEiqYe1RzWhnJSXnCqAm0I58vA==}
     cpu: [x64]
     os: [darwin]
+    deprecated: 'Legacy platform dependency. Migrate the parent SDK to @microsoft/copilot-sdk. Migration docs: https://github.com/microsoft/copilot-sdk/blob/main/docs/v2-breaking-changes.md'
 
   '@github/copilot-sdk-linux-arm64@1.0.31':
     resolution: {integrity: sha512-W+IOLlx5qIY9i2Mn4TI132zZL/N3/04aORiYnrhQ5/jUqSRFOVhkDbKhSVAWQ/Q0AwtB+3gpXC0ka7s5N7TECw==}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
+    deprecated: 'Legacy platform dependency. Migrate the parent SDK to @microsoft/copilot-sdk. Migration docs: https://github.com/microsoft/copilot-sdk/blob/main/docs/v2-breaking-changes.md'
 
   '@github/copilot-sdk-linux-x64@1.0.31':
     resolution: {integrity: sha512-VEdvff9vPcfejvewV4ZCGIC44Nyd8zH/6T7gWZB+qWfiAQxZYkluJLN7ECtnSi5w7g+UFdRmPATl3GIXXyztkw==}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
+    deprecated: 'Legacy platform dependency. Migrate the parent SDK to @microsoft/copilot-sdk. Migration docs: https://github.com/microsoft/copilot-sdk/blob/main/docs/v2-breaking-changes.md'
 
   '@github/copilot-sdk-linuxmusl-arm64@1.0.31':
     resolution: {integrity: sha512-ckO/I7+6f15AAl/Jcesqnx16ktXryobwlmdSYa/qwoRmA43OYO5FdtX9fbWsO0d6wQIyNZzfmTrsaAtTzFx2hA==}
     cpu: [arm64]
     os: [linux]
     libc: [musl]
+    deprecated: 'Legacy platform dependency. Migrate the parent SDK to @microsoft/copilot-sdk. Migration docs: https://github.com/microsoft/copilot-sdk/blob/main/docs/v2-breaking-changes.md'
 
   '@github/copilot-sdk-linuxmusl-x64@1.0.31':
     resolution: {integrity: sha512-5ikcJEbe/i06pVKvgVqpNPU9PxsyiF9U/Pwb4qBSzLMB0JTsGVur2571kIVFwEevrIXZ36qDpK6Y+7/RLNOsQQ==}
     cpu: [x64]
     os: [linux]
     libc: [musl]
+    deprecated: 'Legacy platform dependency. Migrate the parent SDK to @microsoft/copilot-sdk. Migration docs: https://github.com/microsoft/copilot-sdk/blob/main/docs/v2-breaking-changes.md'
 
   '@github/copilot-sdk-win32-arm64@1.0.31':
     resolution: {integrity: sha512-LfaSJRo3+Mlp/mLXgPJMHDXzJUKK4h3XqthQm6qZanBQp34TyVZa8+nAadJ06t0R7Po14dZl/GYOAEiIGI9xIA==}
     cpu: [arm64]
     os: [win32]
+    deprecated: 'Legacy platform dependency. Migrate the parent SDK to @microsoft/copilot-sdk. Migration docs: https://github.com/microsoft/copilot-sdk/blob/main/docs/v2-breaking-changes.md'
 
   '@github/copilot-sdk-win32-x64@1.0.31':
     resolution: {integrity: sha512-IRJiXxXjtdzNIejwAKmVJDvmIIw+U1+lDMjrGCXuyPkBBNwWP+tetHJuAL/A3bLOarIa/Wt027g9tF8rU5Hw1w==}
     cpu: [x64]
     os: [win32]
+    deprecated: 'Legacy platform dependency. Migrate the parent SDK to @microsoft/copilot-sdk. Migration docs: https://github.com/microsoft/copilot-sdk/blob/main/docs/v2-breaking-changes.md'
 
   '@github/copilot-sdk@1.0.31':
     resolution: {integrity: sha512-PLspvOp5ZEA89ZxNmSgBmwwGszo3OHJcOFkOrsYhHuWrS8wrJAoorsXOjV10aYgucxRaXrC+TkSH2B1mxeQjCQ==}

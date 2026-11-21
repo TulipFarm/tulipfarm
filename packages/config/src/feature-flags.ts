@@ -51,6 +51,12 @@ export const featureFlags = {
     scope: 'workspace',
     env: 'FEATURE_FLAG_ASSIGNABLE_TASKS',
   },
+  'external-access': {
+    description: 'Personal access tokens, the public REST API and the TulipFarm MCP server for outside tools.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_EXTERNAL_ACCESS',
+  },
   'hosted-mcp': {
     description: 'Set up MCP connections that run an npm or PyPI package on a sandbox host.',
     default: false,

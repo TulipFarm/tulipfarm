@@ -332,4 +332,5 @@ export function registerStorageComposition(
     approve: googleApproval.approve,
   });
   if (files) registerFilesGoogleCopy(app, { auth: dependencies.auth, files, google });
+  return { runtime, files: files ?? null, wakeTask, claimMcpSelection: mcp.claimTaskSelection };
 }
