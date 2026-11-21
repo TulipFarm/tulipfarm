@@ -42,6 +42,10 @@ activity list. Stop clearing it.
   the access-denied and `google.read` gates.
 - Check retention and deletion against how tool rows are deleted today.
 - Old rows have no note. This is fine.
+- In an app chat, step text can say an edit or build is done before any tool
+  made it, and some models think aloud about the prompt in plain text. App
+  chats therefore neither stream nor save step text; only a reply that passes
+  the app claim check is shown.
 
 ## Open item
 

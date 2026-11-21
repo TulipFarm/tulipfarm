@@ -601,6 +601,79 @@ test('reasoning tags a chat-completions model leaks never reach streamed text, s
   assert.deepEqual(updates.at(-1), { step: 1, text: 'Done now.' });
 });
 
+test('an app chat shows no model text before its reply passes the claim check', async t => {
+  const base = { id: 'chatcmpl-1', object: 'chat.completion.chunk', model: 'grok-fast' };
+  const round = (text, call) =>
+    streamed(
+      [
+        ...(text ? [{ ...base, choices: [{ index: 0, delta: { content: text }, finish_reason: null }] }] : []),
+        ...(call
+          ? [
+              {
+                ...base,
+                choices: [
+                  {
+                    index: 0,
+                    delta: {
+                      tool_calls: [
+                        {
+                          index: 0,
+                          id: `call_${call.name}`,
+                          type: 'function',
+                          function: { name: call.name, arguments: JSON.stringify(call.input) },
+                        },
+                      ],
+                    },
+                    finish_reason: null,
+                  },
+                ],
+              },
+            ]
+          : []),
+        { ...base, choices: [{ index: 0, delta: {}, finish_reason: call ? 'tool_calls' : 'stop' }] },
+      ]
+        .map(chunk => `data: ${JSON.stringify(chunk)}\n\n`)
+        .concat('data: [DONE]\n\n')
+        .map(line => encoder.encode(line)),
+    );
+  const early = 'The heading is updated. The app builds successfully. (I must follow the style guide strictly now.)';
+  const unbacked = 'The heading now reads Orders v3. The build succeeded.';
+  const answer = 'I changed the heading to Orders v3 and rebuilt the app.';
+  provider(t, [
+    () => round(early, { name: 'apps_status', input: { activity: 'Checking the app' } }),
+    () => round(unbacked),
+    () =>
+      round('Writing the new heading.', {
+        name: 'apps_files_write',
+        input: { activity: 'Editing an app file', path: 'index.html', content: '<h1>Orders v3</h1>' },
+      }),
+    () => round('Rebuilding now.', { name: 'apps_preview_build', input: { activity: 'Building the app' } }),
+    () => round(answer),
+  ]);
+  const { updates, answerText } = recorder();
+  const notes = [];
+  const result = await inferWithTools(
+    routes.azure,
+    [{ role: 'user', text: 'Change the heading to Orders v3 and rebuild.' }],
+    async (call, _activity, narration) => {
+      notes.push(narration);
+      return call.tool === 'apps.status'
+        ? { draft: { state: 'built' }, files: [{ path: 'index.html', bytes: 40 }] }
+        : {};
+    },
+    undefined,
+    false,
+    null,
+    { earlierMessages: false, sources: () => [], apps: 'public', answerText },
+  );
+  assert.equal(result.text, answer);
+  assert.deepEqual(notes, [undefined, undefined, undefined]);
+  assert.deepEqual(
+    updates.filter(update => update.text).map(update => update.text),
+    [answer],
+  );
+});
+
 test('reasoning markup removal keeps the only text a model wrote and leaves ordinary angle brackets alone', () => {
   assert.equal(withoutReasoningMarkup('Next I will propose the import.</think>'), 'Next I will propose the import.');
   assert.equal(withoutReasoningMarkup('<think>Only reasoning'), 'Only reasoning');

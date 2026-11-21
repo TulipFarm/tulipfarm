@@ -4220,7 +4220,13 @@ export async function inferWithTools(
   let request = rowReviewCandidate ?? (latest ? textTurn(latest).text : '');
   let rowReviewRequested = false;
   const fileRequest = latest ? textTurn(latest).text : '';
-  const fileJob = createFileJobGuard(fileRequest, tools?.priorFileResults, Boolean(tools?.apps));
+  /**
+   * An app chat shows no model text until a reply passes the app claim check. Text written before a tool call, or a reply
+   * the check sends back, can report an edit or build no tool has made, or think aloud about the prompt. Such text is
+   * neither streamed, which would also keep it as a stopped reply, nor saved as a step's note.
+   */
+  const appChat = Boolean(tools?.apps);
+  const fileJob = createFileJobGuard(fileRequest, tools?.priorFileResults, appChat);
   const fileQuery = fileListingQuery(fileRequest);
   const earlier = messages
     .filter(turn => turn !== latest)
@@ -4272,7 +4278,8 @@ export async function inferWithTools(
             !activeBuiltinSkills.has('agent-authoring') &&
             !((inventoryCheckNeeded() || rowWriteRequested) && !inventoryAnswerChecked) &&
             !fileJob.holdPreview &&
-            !fileJob.needsCheck(update.text)
+            !fileJob.needsCheck(update.text) &&
+            !appChat
           )
             tools?.answerText?.(update);
         };
@@ -4607,7 +4614,7 @@ export async function inferWithTools(
         },
         settled,
         signal,
-        renderer?.name === replyRenderToolName ? tools?.layoutPreview : undefined,
+        renderer?.name === replyRenderToolName && !appChat ? tools?.layoutPreview : undefined,
       );
     } catch (error) {
       // An aborted request fails as a transport error; the reply ends with the reason it was stopped instead.
@@ -5909,7 +5916,7 @@ export async function inferWithTools(
           inventoryAnswerChecked = true;
           preview(candidate);
         }
-        if (fileCheckNeeded) preview(candidate, true);
+        if (fileCheckNeeded || appChat) preview(candidate, true);
         return rendered
           ? finish(rendered.input.summary, true, { layout: rendered.input })
           : finish(selected.text, true);
@@ -6870,7 +6877,7 @@ export async function inferWithTools(
     if (work[0]) report('tool', toolDisplayName(work[0].call.tool));
     const narrated = work[0];
     const narration =
-      narrated && carried && !directoryExpected && !fileJob.holdPreview && !fileJob.needsCheck(carried)
+      narrated && carried && !appChat && !directoryExpected && !fileJob.holdPreview && !fileJob.needsCheck(carried)
         ? carried
         : undefined;
     if (narration) carried = '';
