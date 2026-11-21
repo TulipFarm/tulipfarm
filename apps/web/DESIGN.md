@@ -231,7 +231,7 @@ the main action within a region.
 
 The owner confirmed this description and the name "Action green" on
 29 September 2026, and the Linear-style depth hierarchy on 23 October 2026. This
-snapshot was refreshed from code on 25 October 2026 and checked against Sprout 0.15.4 on 6 November 2026. Every color, the font, the type scale,
+snapshot was refreshed from code on 25 October 2026 and checked against Sprout 0.19.0 on 21 November 2026. Every color, the font, the type scale,
 motion and shadows come from Sprout's `tulipfarm` theme
 (`@tulipfarm/sprout/themes/tulipfarm.css`), which is the source of truth shared
 with tulipfarm.ai. [`src/index.css`](src/index.css) only maps app token names
@@ -442,7 +442,9 @@ avatars, and glass chips can be pill-shaped. Glass banners use 20px corners.
 
 ## Components
 
-Icons come from `reicon-react` (per-icon imports such as
+Sprout's built-in icons come from Hugeicons through `@tulipfarm/sprout/icons`,
+with named sizes from `xs` (12px) to `2xl` (24px). App-owned icons still come
+from `reicon-react` (per-icon imports such as
 `reicon-react/icons/Add`), sized 16px in controls and navigation and 14px in
 dense rows; some older screens still use `lucide-react`. Third-party marks use
 `BrandIcon`.
