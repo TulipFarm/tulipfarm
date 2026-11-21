@@ -3699,6 +3699,8 @@ export function toolObservation(value: unknown, tool?: ToolName): ToolObservatio
   let outcome: ToolOutcome = 'success';
   if (!value || typeof value !== 'object') return { outcome };
   const envelope = value as Record<string, unknown>;
+  // Rows already in the table are not missing, so declining to add them again is no failure.
+  if (envelope.error === 'rows-already-added') return { outcome, errorCode: envelope.error };
   const nested = tool === undefined || tool === 'google.execute' || tool === 'google.status';
   const result =
     nested && envelope.data && typeof envelope.data === 'object'

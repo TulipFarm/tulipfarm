@@ -223,6 +223,7 @@ const rowReviewOutput = z.object({
   table: z.string().optional(),
   alreadyWritten: z.int().positive().optional(),
   waitingDraftId: z.uuid().optional(),
+  alreadyAdded: z.array(z.string()).optional(),
 });
 const rowReviewResult = (tool: string, output: unknown) => {
   if (!rowWriteTools.has(tool)) return undefined;
@@ -245,7 +246,7 @@ export function waitingRowDraft(tool: string, output: unknown) {
 export function rowReviewDetail(tool: string, output: unknown) {
   const parsed = rowReviewResult(tool, output);
   if (!parsed) return undefined;
-  const { error, draftId, reason, table, alreadyWritten } = parsed;
+  const { error, draftId, reason, table, alreadyWritten, alreadyAdded } = parsed;
   const why = reason ? rowReviewReasons[reason]?.(table) : undefined;
   if (error === 'review-unavailable')
     return 'Not written: this chat used content that can’t be shown for review, so it can’t change rows. Make the change in the table.';
@@ -253,6 +254,10 @@ export function rowReviewDetail(tool: string, output: unknown) {
     return `Not written. ${why ?? 'This chat used outside content, so each row change needs your approval on a chat card.'}`;
   if (error === 'approval-pending')
     return `Not written: a row change${table ? ` to ${table.slice(0, 80)}` : ''} in this chat is still waiting for your approval. Approve or dismiss that card first.`;
+  if (error === 'rows-already-added')
+    return alreadyAdded?.length
+      ? `Not added again: ${alreadyAdded.length === 1 ? 'this row is' : 'these rows are'} already in ${table ? table.slice(0, 80) : 'the table'}.`
+      : 'Not added: you dismissed these rows on an earlier card.';
   if (error === 'batch-required')
     return 'Not written: several new rows in one reply go together in one change, so they can be approved together.';
   if (draftId && why && alreadyWritten)

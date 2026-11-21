@@ -107,13 +107,27 @@ export function replyFailure(code: string | null | undefined, retry: RetryAction
 }
 
 /**
- * A failed reply that already saved a table change proposal lost only its text: the proposal card is valid and can
- * be approved, so the reply doesn't read as failed.
+ * A failed reply that already saved a table change proposal or wrote rows lost only its text: the proposal card is
+ * valid and the rows are in the table, so the reply doesn't read as failed.
  */
-export function proposalKeptNote(tools: readonly { tableProposal?: true | undefined }[]): string | null {
-  return tools.some(tool => tool.tableProposal)
-    ? 'Reply text missing. The table change proposal from this reply is still valid.'
-    : null;
+export function proposalKeptNote(
+  tools: readonly {
+    tableProposal?: true | undefined;
+    rowChange?: { kind: 'created' | 'updated'; recordIds: readonly string[] } | undefined;
+  }[],
+): string | null {
+  if (tools.some(tool => tool.tableProposal))
+    return 'Reply text missing. The table change proposal from this reply is still valid.';
+  const count = (kind: 'created' | 'updated') =>
+    new Set(tools.flatMap(tool => (tool.rowChange?.kind === kind ? tool.rowChange.recordIds : []))).size;
+  const rows = (n: number) => `${n} ${n === 1 ? 'row' : 'rows'}`;
+  const created = count('created'),
+    updated = count('updated');
+  if (!created && !updated) return null;
+  const saved = [created && `${rows(created)} this reply added`, updated && `${rows(updated)} it changed`]
+    .filter(Boolean)
+    .join(' and the ');
+  return `Reply text missing. The ${saved} ${created + updated === 1 ? 'is' : 'are'} saved.`;
 }
 
 // Retrying sends the same request to the same model, so these failures would only repeat.

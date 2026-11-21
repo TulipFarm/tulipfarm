@@ -221,6 +221,18 @@ test('a failed reply that saved a table proposal says only its text is missing',
   assert.equal(proposalKeptNote([]), null);
 });
 
+test('a failed reply that wrote rows says the rows are saved instead of reading as failed', () => {
+  const created = (...recordIds: string[]) => ({ rowChange: { kind: 'created' as const, recordIds } });
+  assert.equal(
+    proposalKeptNote([{}, created('a', 'b', 'c')]),
+    'Reply text missing. The 3 rows this reply added are saved.',
+  );
+  assert.equal(
+    proposalKeptNote([created('a'), created('a'), { rowChange: { kind: 'updated', recordIds: ['d'] } }]),
+    'Reply text missing. The 1 row this reply added and the 1 row it changed are saved.',
+  );
+});
+
 test('a run of replies the same fallback wrote shows its chip once, and again after the chat model answers', () => {
   const messages: unknown[] = [];
   const exchange = (id: string, errorCode: string | null, status = 'completed') =>
