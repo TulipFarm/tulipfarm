@@ -56,9 +56,6 @@ export class PersonalMemoryRejected extends Error {
 /** The common migration that lets a decided forget card drop the text it asked to forget. */
 export const keepForgetScrubVersion = 94;
 const writeTimeoutMs = 5000;
-/** Keeps the context block inside the 16,000-character personal memory a model input accepts. */
-const contextBudgetTokens = 2500;
-const contextMaximumCharacters = 16000;
 
 type Dependencies = {
   readonly client: () => KeepClient | undefined;
@@ -133,7 +130,7 @@ export function keepRevision(profile: KeepProfile) {
   return revision;
 }
 
-function failed(result: Exclude<KeepMemoryResult<unknown>, { status: 'ok' }>, operation: string): never {
+export function failed(result: Exclude<KeepMemoryResult<unknown>, { status: 'ok' }>, operation: string): never {
   // The log names the operation and Keep's answer only: never memory text, scope or token.
   log('warn', 'dependency', 'call_failed', {
     operation: `keep.memory.${operation}`,
@@ -147,7 +144,7 @@ function failed(result: Exclude<KeepMemoryResult<unknown>, { status: 'ok' }>, op
 }
 
 /** Retries a keyed write once when Keep may not have seen it; the idempotency key makes it apply at most once. */
-async function once<T>(operation: () => Promise<KeepMemoryResult<T>>) {
+export async function once<T>(operation: () => Promise<KeepMemoryResult<T>>) {
   const result = await operation();
   return result.status === 'unavailable' && (result.reason === 'timeout' || result.reason === 'unreachable')
     ? operation()
@@ -281,26 +278,4 @@ export async function forgetKeepMemory(keep: Keep, expectedRevision: number, tex
   });
   if (forgotten.status !== 'ok') failed(forgotten, 'forget');
   return { previous: profile.kind === 'active' ? profile.text : '', memory: await readKeepMemory(keep) };
-}
-
-/**
- * The member's standing memory block for a private chat or task, from Keep's context builder with only personal
- * memory: never workspace knowledge. Empty memory skips the call.
- */
-export async function keepMemoryContext(keep: Keep): Promise<PersonalMemory> {
-  const memory = await readKeepMemory(keep);
-  if (!memory.content) return memory;
-  const context = await keep.client.memoryContext({
-    scope: keep.scope,
-    budgetTokens: contextBudgetTokens,
-    includeKnowledge: false,
-    includePersonal: true,
-  });
-  if (context.status !== 'ok') failed(context, 'context');
-  // Keep's header names its own file tool; here the whole memory is read with memory.read.
-  const text = context.value.text.replaceAll('in full with memory.view.', 'in full with memory.read.');
-  return {
-    content: Array.from(text).slice(0, contextMaximumCharacters).join(''),
-    revision: memory.revision,
-  };
 }

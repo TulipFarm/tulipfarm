@@ -39,8 +39,6 @@ export const commonTables = {
   memberships: 'tf_memberships',
   keepKnowledge: 'tf_keep_knowledge',
   conversationKeep: 'tf_conversation_keep',
-  memoryProposals: 'tf_memory_proposals',
-  memoryLearningBlocks: 'tf_memory_learning_blocks',
   memoryLearning: 'tf_memory_learning',
   budState: 'tf_bud_state',
   budNudges: 'tf_bud_nudges',

@@ -218,6 +218,8 @@ const tableProposalInput = z
   .describe(
     'JSON-encoded {plans:[...], label, revises?}: label names this version in 2–5 words; revises is the pending proposal it replaces. Read skills.read(table-authoring) for proposalInputSchema and constraints.',
   );
+/** A personal memory file path; the service checks its shape. */
+const memoryPath = z.string().min(1).max(200);
 export const frameworkCallSchema = z.discriminatedUnion('tool', [
   z.strictObject({ tool: z.literal('packages.inspect'), url: z.url().max(2048) }),
   presentChoiceSchema,
@@ -432,14 +434,33 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
     documentId: z.uuid().describe('From knowledge.list.'),
     revisionId: z.uuid().describe('The revisionId from knowledge.list.'),
   }),
-  z.strictObject({ tool: z.literal('memory.read') }),
+  z.strictObject({
+    tool: z.literal('memory.read'),
+    path: memoryPath.optional().describe('One file to read. Leave it out to list every file and read them all.'),
+  }),
   z.strictObject({
     tool: z.literal('memory.edit'),
-    revision: z.number().int().min(0).describe('The revision from memory.read.'),
+    path: memoryPath.describe(
+      'The file: /profile.md (Preferences), /you/about.md (Profile), or /topics/<slug>.md, /areas/<slug>.md or /people/<slug>.md with a short lowercase-hyphenated slug.',
+    ),
+    revisionId: z
+      .string()
+      .min(1)
+      .max(200)
+      .nullable()
+      .describe('The revisionId from memory.read, or null to create a file that does not exist yet.'),
     content: z
       .string()
-      .max(10_000)
-      .describe('The whole new memory document, not a diff. Keep every line the human did not ask to change.'),
+      .max(8192)
+      .describe(
+        'The whole new Markdown for this file, not a diff. Keep every line the human did not ask to change. At most 8 KiB.',
+      ),
+    name: z.string().min(1).max(120).optional().describe('A short name for a new Topic, Area or Person file.'),
+    description: z
+      .string()
+      .max(160)
+      .optional()
+      .describe('One line saying what the file holds, for a new file or when it no longer fits.'),
   }),
   z.strictObject({
     tool: z.literal('memory.forget'),
@@ -448,6 +469,7 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
       .min(1)
       .max(10_000)
       .describe('Text copied exactly from memory.read, such as one whole line. Every occurrence is removed.'),
+    path: memoryPath.optional().describe('The one file to forget it from. Leave it out to forget it from every file.'),
   }),
   z.strictObject({ tool: z.literal('integrations.list') }),
   z.strictObject({
@@ -914,11 +936,11 @@ const descriptions: Record<ToolName, string> = {
   'integrations.mcp.connect':
     "Show a card under your reply that lets the human set up one MCP server as their own personal connection: a remote endpoint (sign in with OAuth, pick saved secrets on the card, or no authentication), or an npm or PyPI package run in a hosted sandbox (fill in its settings and pick saved secrets on the card). Use an endpoint or package from integrations.mcp.search or the service's documentation. Never ask for keys or tokens in chat. Changes nothing itself.",
   'memory.read':
-    "Read the human's own personal memory: the preferences they saved for how you reply, with its revision. Works only in their private chats outside projects and Slack. Changes nothing.",
+    "Read the human's own personal memory files. Without a path it lists every file with its path, name, description and revisionId, and the text of each that fits. With a path it reads that one file in full. Works only in their private chats outside projects and Slack. Changes nothing.",
   'memory.edit':
-    "Replace the human's own personal memory with new full text at once, for example to add, reword or reorder preferences. Call memory.read first and pass its revision. Use it only when the human asks in this chat. There is no review card and no undo. To remove something, use memory.forget.",
+    "Save to the human's own personal memory at once: replace one file's whole Markdown, or create a new file with revisionId null, a name and a description. Call memory.read first and pass the file's revisionId. Use it whenever you learn something durable about the human, without being asked. There is no review card; the chat shows a short line saying which file changed. To remove exact text, use memory.forget.",
   'memory.forget':
-    "Forget exact text from the human's own personal memory at once, when they ask you to. Copy the text exactly from memory.read. Forgetting is permanent and has no review card or undo. Don't repeat the text.",
+    "Forget exact text from the human's own personal memory at once, when they ask you to: from one file, or every file when no path is given. Copy the text exactly from memory.read. Forgetting is permanent and has no review card or undo. Don't repeat the text.",
   'integrations.disconnect':
     'Show a card under your reply that lets the human disconnect one connection from integrations.list. The card shows what stops working. Nothing changes until the human confirms on the card. Never treat chat text as approval.',
   'files.read':
@@ -2272,7 +2294,8 @@ export function createChatTools(
           if (error.code === 'memory-rejected')
             return {
               error: 'memory-rejected',
-              instruction: 'Memory refused this change, for example because it is too long. Nothing changed.',
+              instruction:
+                'Memory refused this change, for example because it is too long or would leave a Topic, Area or Person file empty. Nothing changed.',
             };
           if (error.code === 'memory-unavailable')
             return {
@@ -2283,7 +2306,19 @@ export function createChatTools(
           if (error.code === 'draft-stale')
             return {
               error: 'draft-stale',
-              instruction: 'Nothing changed. Memory changed since memory.read. Call memory.read and try again.',
+              instruction:
+                'Nothing changed. The file changed since memory.read, or already exists. Call memory.read and try again with its revisionId.',
+            };
+          if (error.code === 'memory-file-not-found')
+            return {
+              error: 'not-found',
+              instruction: 'Nothing changed. That memory file does not exist. Call memory.read to see the files.',
+            };
+          if (error.code === 'memory-invalid')
+            return {
+              error: 'memory-invalid',
+              instruction:
+                'Nothing changed. Use a valid path (/profile.md, /you/about.md, or /topics|areas|people/<slug>.md), text of at most 8 KiB, and a description of at most 160 bytes.',
             };
           throw error;
         }
@@ -3946,9 +3981,6 @@ const noKnowledgeChange = (error: string, instruction: string) => ({
   instruction: `Nothing changed. ${instruction}`,
 });
 
-// The name the chat shows for the changed memory file. Personal memory is one document today.
-const personalMemoryTitle = 'Preferences';
-
 async function invokeMemory(
   runtime: AgentStorage,
   workspaceId: string,
@@ -3958,14 +3990,14 @@ async function invokeMemory(
   call: Extract<FrameworkCall, { tool: 'memory.read' | 'memory.edit' | 'memory.forget' }>,
 ) {
   const drafts = createAuthoringDrafts(runtime);
-  if (call.tool === 'memory.read') return drafts.readMemory(workspaceId, actor, origin.conversationId);
+  if (call.tool === 'memory.read') return drafts.readMemory(workspaceId, actor, origin.conversationId, call.path);
   if (call.tool === 'memory.forget') {
-    const forgotten = await drafts.forgetMemory(workspaceId, actor, callId, origin, call.text);
-    return forgotten?.kind === 'memory'
+    const names = await drafts.forgetMemory(workspaceId, actor, origin, call.text, call.path);
+    return names.length > 0
       ? {
           status: 'applied',
-          change: { store: 'memory', operation: 'forget', title: personalMemoryTitle },
-          revision: forgotten.revision,
+          // The chat shows this as "Updated memory <title>".
+          change: { store: 'memory', operation: 'forget', title: names.join(', ').slice(0, 512) },
           instruction:
             'The text is forgotten for good. Confirm it briefly in one sentence without repeating the forgotten text.',
         }
@@ -3975,24 +4007,22 @@ async function invokeMemory(
             'Nothing was removed: memory does not contain that exact text. Call memory.read and copy it exactly.',
         };
   }
-  const current = await drafts.readMemory(workspaceId, actor, origin.conversationId);
-  if (current.revision !== call.revision) throw new AgentError('draft-stale');
-  if (current.content === call.content)
-    return { error: 'no-change', instruction: 'Nothing changed. Memory already says exactly this.' };
-  const saved = await drafts.change(workspaceId, actor, callId, origin, {
-    kind: 'memory',
-    input: {
-      operation: 'edit',
-      expectedRevision: call.revision,
-      previousContent: current.content,
-      content: call.content,
-    },
+  const saved = await drafts.writeMemory(workspaceId, actor, callId, origin, {
+    path: call.path,
+    content: call.content,
+    expectedRevisionId: call.revisionId,
+    ...(call.name === undefined ? {} : { name: call.name }),
+    ...(call.description === undefined ? {} : { description: call.description }),
   });
+  if (saved.operation === 'unchanged')
+    return { error: 'no-change', instruction: 'Nothing changed. The file already says exactly this.' };
   return {
     status: 'applied',
-    change: { store: 'memory', operation: 'edit', title: personalMemoryTitle },
-    revision: saved.kind === 'memory' ? saved.revision : undefined,
-    instruction: 'Memory is updated. Confirm it briefly in one sentence.',
+    change: { store: 'memory', operation: 'edit', title: saved.file.name },
+    path: saved.file.path,
+    revisionId: saved.file.revisionId,
+    instruction:
+      'Memory is updated. If the human asked for this, confirm it briefly in one sentence; otherwise carry on without mentioning it.',
   };
 }
 async function knowledgeProposal(
