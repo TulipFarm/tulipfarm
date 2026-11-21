@@ -37,7 +37,7 @@ import {
   type EvalsApi,
   type EvalSet,
 } from './evals-api';
-import { toolLabels } from './labels';
+import { describeCheck, statusLabels, toolLabel } from './eval-labels';
 
 type CheckKind = EvalCheck['kind'];
 const checkKinds: readonly { value: CheckKind; label: string }[] = [
@@ -49,12 +49,6 @@ const checkKinds: readonly { value: CheckKind; label: string }[] = [
   { value: 'text-excludes', label: 'Reply does not contain text' },
   { value: 'judge', label: 'AI judge' },
 ];
-const statusLabels: Record<(typeof completionStatuses)[number], string> = {
-  completed: 'Completed',
-  waiting: 'Waiting',
-  blocked: 'Blocked',
-  refused: 'Refused',
-};
 const runStatus: Record<EvalRun['status'], { label: string; variant: 'secondary' | 'info' | 'success' | 'warning' }> = {
   queued: { label: 'Queued', variant: 'secondary' },
   running: { label: 'Running', variant: 'info' },
@@ -70,29 +64,9 @@ const stopReasons: Partial<Record<string, string>> = {
   cancelled: 'Someone stopped this run. Results so far are kept.',
   interrupted: 'The run stopped unexpectedly. Run again.',
 };
-const toolLabel = (tool: string) => (toolLabels as Record<string, string>)[tool] ?? tool;
 const dateFormat = new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' });
 const errorText = (error: unknown) =>
   error instanceof TableRequestError ? error.message : 'Evals could not be updated. Your input is retained. Try again.';
-
-function describeCheck(check: EvalCheck) {
-  switch (check.kind) {
-    case 'tool-called':
-      return `Calls ${toolLabel(check.tool)}${check.args ? ` with ${JSON.stringify(check.args)}` : ''}`;
-    case 'tool-not-called':
-      return `Does not call ${toolLabel(check.tool)}`;
-    case 'approval-requested':
-      return 'Asks for approval';
-    case 'status':
-      return `Ends as ${statusLabels[check.status].toLowerCase()}`;
-    case 'text-contains':
-      return `Reply contains “${check.text}”`;
-    case 'text-excludes':
-      return `Reply does not contain “${check.text}”`;
-    case 'judge':
-      return `AI judge: ${check.rubric}`;
-  }
-}
 
 /** The Evals tab: an agent's eval cases, its runs, and the AI judge model. */
 export function AgentEvals({

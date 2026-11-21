@@ -1,60 +1,27 @@
 import { z } from 'zod';
 
-/** Limits from the evals specification, shared by the API, the worker and the web app. */
-export const evalLimits = {
-  casesPerSet: 100,
-  checksPerCase: 10,
-  priorTurns: 20,
-  pinsPerCase: 20,
-  repliesPerRun: 300,
-  runsKept: 50,
-  modelsCompared: 3,
-  repeats: [1, 3] as const,
-} as const;
+import {
+  completionStatuses,
+  evalCaseInputSchema,
+  evalCheckSchema,
+  evalLimits,
+} from '@tulipfarm/agents/eval-case-contracts';
 
-export const completionStatuses = ['completed', 'waiting', 'blocked', 'refused'] as const;
-export type CompletionStatus = (typeof completionStatuses)[number];
-
-const toolNameSchema = z.string().regex(/^[a-z][a-zA-Z0-9_.-]{0,99}$/);
-const jsonRecordSchema = z.record(z.string().min(1).max(100), z.json());
-
-export const evalCheckSchema = z.discriminatedUnion('kind', [
-  /** The tool was called; with `args`, at least one call's arguments contain these values. */
-  z.strictObject({ kind: z.literal('tool-called'), tool: toolNameSchema, args: jsonRecordSchema.optional() }),
-  z.strictObject({ kind: z.literal('tool-not-called'), tool: toolNameSchema }),
-  z.strictObject({ kind: z.literal('approval-requested') }),
-  z.strictObject({ kind: z.literal('status'), status: z.enum(completionStatuses) }),
-  z.strictObject({ kind: z.literal('text-contains'), text: z.string().trim().min(1).max(500) }),
-  z.strictObject({ kind: z.literal('text-excludes'), text: z.string().trim().min(1).max(500) }),
-  z.strictObject({ kind: z.literal('judge'), rubric: z.string().trim().min(1).max(2000) }),
-]);
-export type EvalCheck = z.infer<typeof evalCheckSchema>;
-
-export const evalTurnSchema = z.strictObject({
-  role: z.enum(['user', 'assistant']),
-  text: z.string().trim().min(1).max(8000),
-});
-export type EvalTurn = z.infer<typeof evalTurnSchema>;
-
-/** A fixed result for a tool, used instead of running it. `match` narrows it to calls whose arguments contain these values. */
-export const toolResultPinSchema = z.strictObject({
-  tool: toolNameSchema,
-  match: jsonRecordSchema.optional(),
-  result: z.json(),
-});
-export type ToolResultPin = z.infer<typeof toolResultPinSchema>;
-
-export const evalCaseInputSchema = z.strictObject({
-  name: z.string().trim().min(1).max(120),
-  message: z.string().trim().min(1).max(8000),
-  priorTurns: z.array(evalTurnSchema).max(evalLimits.priorTurns).default([]),
-  checks: z.array(evalCheckSchema).min(1).max(evalLimits.checksPerCase),
-  /** Results returned for read-only tools instead of live data. */
-  pinnedReads: z.array(toolResultPinSchema).max(evalLimits.pinsPerCase).default([]),
-  /** Results returned for simulated effects instead of the generic success. */
-  effectOverrides: z.array(toolResultPinSchema).max(evalLimits.pinsPerCase).default([]),
-});
-export type EvalCaseInput = z.input<typeof evalCaseInputSchema>;
+export {
+  completionStatuses,
+  draftEvalCaseSchema,
+  evalCaseInputSchema,
+  evalCheckSchema,
+  evalLimits,
+  evalTurnSchema,
+  toolResultPinSchema,
+  type CompletionStatus,
+  type DraftEvalCase,
+  type EvalCaseInput,
+  type EvalCheck,
+  type EvalTurn,
+  type ToolResultPin,
+} from '@tulipfarm/agents/eval-case-contracts';
 
 export const evalCaseSchema = evalCaseInputSchema.extend({ id: z.string().min(1).max(100) });
 export type EvalCase = z.infer<typeof evalCaseSchema>;

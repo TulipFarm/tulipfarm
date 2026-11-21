@@ -175,6 +175,10 @@
       "types": "./dist/drafts.d.ts",
       "default": "./dist/drafts.js"
     },
+    "./eval-case-contracts": {
+      "types": "./dist/eval-case-contracts.d.ts",
+      "default": "./dist/eval-case-contracts.js"
+    },
     "./draft-contracts": {
       "types": "./dist/draft-contracts.d.ts",
       "default": "./dist/draft-contracts.js"

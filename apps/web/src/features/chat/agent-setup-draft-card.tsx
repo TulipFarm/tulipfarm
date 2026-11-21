@@ -18,6 +18,7 @@ import { UnsavedChanges } from '@/features/tables/feedback';
 import { agentApi } from '@/features/agents/api';
 import { setupErrorText, setupRetryable } from '@/features/agents/setup-errors';
 import { AgentSetupReview } from '@/features/agents/setup-review';
+import { DraftEvalCases } from '@/features/agents/draft-eval-cases';
 import { workspaceRoute } from '@/router';
 import type { ConversationCommand } from './conversation-api';
 
@@ -221,6 +222,13 @@ export function AgentSetupDraftCard({
           : 'Creates a new agent. Review the exact setup below before activating it.'}
       </p>
       <AgentSetupReview workspaceId={workspace.id} setup={setup} />
+      <DraftEvalCases
+        workspaceId={workspace.id}
+        workspaceSlug={workspace.slug}
+        agentId={proposal.targetId}
+        cases={proposal.input.evalCases}
+        saved={receipt?.status === 'saved' || receipt?.status === 'active' || receipt?.status === 'blocked'}
+      />
       {draft.status === 'pending' && (
         <fieldset disabled={locked} className="grid gap-3">
           <legend className="sr-only">Activation consent</legend>

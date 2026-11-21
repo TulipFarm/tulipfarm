@@ -62,6 +62,17 @@ Agents have no schedules of their own. Each item in `setup.triggers` becomes its
 - Do not put consent in model input. The human decision carries exact digest/version and explicit replacement choices.
 - If the person wants only a saved definition, historical definition-only input is still supported, but it cannot activate anything.
 
+### Starter test cases
+
+When `agents.context` reports `evals.available`, also pass `evalCases`: 3 to 5 test cases for the job this agent was set up for. Write them from the person's request and the agent's instructions; do not ask questions just to write them.
+
+- Cover the main request, one variation or edge case, and one request the agent should decline, refer elsewhere or ask about. When the agent makes changes, add a case that should ask for approval.
+- Each case has a short `name`, one realistic `message` a person would send, and 1 to 5 `checks`.
+- Prefer a `judge` check with a plain rubric that states what a good reply does. Add rule checks only when they are certain: `tool-called` or `tool-not-called` with a tool the agent has, `approval-requested`, `status`, or `text-contains`/`text-excludes` for exact text the reply must or must not include.
+- Never put private data, secrets or real customer details in a case.
+
+The cases appear on the card. They are not saved with the agent; after saving, the person chooses **Add to Evals**. When changing an existing agent, write cases only for the new or changed behaviour.
+
 ## 4. Hand over for review
 
 Tell the person whether the card creates a new agent or updates an existing one. Ask them to review Basics, Skills, Access and Triggers on the immutable card.
