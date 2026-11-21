@@ -186,6 +186,9 @@ function safeMediaAttribute(key: string, value: unknown) {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
+export const authorizationLockOutcomes = ['acquired', 'retried', 'failed'] as const;
+export type AuthorizationLockOutcome = (typeof authorizationLockOutcomes)[number];
+
 const spanAttributes = new Set([
   'http.request.method',
   'http.route',
@@ -248,6 +251,10 @@ const spanAttributes = new Set([
   'chat.app.tools',
   'chat.app.state_read',
   'chat.app.claim_replaced',
+  'authorization_lock.mode',
+  'authorization_lock.outcome',
+  'authorization_lock.retries',
+  'authorization_lock.waited_ms',
   'attempt',
   'provider',
   'status_class',
@@ -397,6 +404,10 @@ function safeAttribute(key: string, value: unknown, logLine = false): boolean {
   if (key === 'chat.stop.reason') return (chatStopReasons as readonly unknown[]).includes(value);
   if (key === 'chat.app.tools') return (chatAppTurnTools as readonly unknown[]).includes(value);
   if (key === 'chat.app.state_read' || key === 'chat.app.claim_replaced') return value === 'true' || value === 'false';
+  if (key === 'authorization_lock.mode') return value === 'read' || value === 'write';
+  if (key === 'authorization_lock.outcome') return (authorizationLockOutcomes as readonly unknown[]).includes(value);
+  if (key.startsWith('authorization_lock.'))
+    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
   if (key === 'http.response.status_code' || key.startsWith('catalog.')) return safeDiagnosticNumber(key, value);
   if (key.startsWith('media.')) return safeMediaAttribute(key, value);
   return true;
@@ -886,6 +897,7 @@ type Event =
   | 'call_completed'
   | 'call_failed'
   | 'reply_marker_stripped'
+  | 'authorization_lock_failed'
   | 'task_status_changed';
 type Level = 'debug' | 'info' | 'warn' | 'error';
 const severity = {
@@ -1100,6 +1112,45 @@ export function recordAppKeyCheck(outcome: AppKeyOutcome) {
     .getMeter(scope)
     .createCounter('cloud_app_key_checks', { description: 'App data calls by app key outcome' })
     .add(1, { ...dimensions, outcome });
+}
+
+/**
+ * Counts one workspace authorization lock acquisition by mode and outcome, and the lock waits it retried. `failed`
+ * means the wait still timed out once its retries were spent, so the request saw the lock error. A lock that needed
+ * retries is also marked on the active span, and a failure is logged.
+ */
+export function recordAuthorizationLock(
+  mode: 'read' | 'write',
+  outcome: AuthorizationLockOutcome,
+  retries: number,
+  waitedMs: number,
+) {
+  try {
+    const meter = metrics.getMeter(scope);
+    const labels = { ...dimensions, mode, outcome };
+    meter
+      .createCounter('cloud_authorization_lock_acquisitions', {
+        description: 'Workspace authorization lock acquisitions, by mode and outcome',
+      })
+      .add(1, labels);
+    if (retries > 0)
+      meter
+        .createCounter('cloud_authorization_lock_retries', {
+          description: 'Workspace authorization lock waits that timed out and were retried',
+        })
+        .add(retries, labels);
+    if (outcome === 'acquired') return;
+    const attributes = {
+      'authorization_lock.mode': mode,
+      'authorization_lock.outcome': outcome,
+      'authorization_lock.retries': retries,
+      'authorization_lock.waited_ms': Math.round(waitedMs),
+    };
+    trace.getActiveSpan()?.setAttributes(attributes);
+    if (outcome === 'failed') log('warn', 'dependency', 'authorization_lock_failed', attributes);
+  } catch {
+    /* Telemetry must not replace the lock result. */
+  }
 }
 
 export interface KnowledgeSyncSnapshot {

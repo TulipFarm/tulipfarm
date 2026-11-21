@@ -90,7 +90,7 @@ function fixture(t, eligible, resolve = trustedResolution, snapshot, extra = {})
             async query(sql, values) {
               if (sql.includes('tf_model_availability')) return { rows: [], rowCount: 0 };
               if (sql.includes('tf_authorization_lock')) {
-                assert.match(sql, /FOR SHARE OF authorization_lock$/);
+                assert.match(sql, /FOR SHARE OF authorization_lock SKIP LOCKED$/);
                 return { rows: [{ id: 1 }], rowCount: 1 };
               }
               assert.match(sql, /"ws_11111111111141118111111111111111"\."tf_memberships"/);
