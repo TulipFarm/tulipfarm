@@ -7,12 +7,19 @@ type ReplyCheck = { key: string | null; progress: ReadonlyMap<string, number>; r
 const recoveryDelays = [1000, 2000, 5000];
 const statusPosition = { thinking: 0, tool: 1, finishing: 2, done: 3 };
 
-/** A silent period has a bounded budget. Only new work, not replayed state, renews it. */
-export function createReplyResync(refresh: () => Promise<void>) {
+/**
+ * A silent period has a bounded budget. Only new work, not replayed state, renews it. A history read that succeeds
+ * while the turn is still active confirms the server is still working on it, so the reply keeps a slow backup check
+ * instead of being reported unconfirmed; replies on plan models can stay silent for minutes.
+ */
+export function createReplyResync(refresh: () => Promise<boolean | void>) {
   let input: ReplyCheck = { key: null, progress: new Map(), recovery: false };
   const observed = new Map<string, number>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let checks = 0;
+  let confirmed = false;
+  // Counts new work, so a read that started before the latest progress cannot confirm it.
+  let progressed = 0;
   let checking = false;
   let visible = true;
   let online = true;
@@ -33,7 +40,7 @@ export function createReplyResync(refresh: () => Promise<void>) {
       publish(true);
       return;
     }
-    if (input.recovery && checks >= recoveryDelays.length) {
+    if (input.recovery && !confirmed && checks >= recoveryDelays.length) {
       publish(true);
       return;
     }
@@ -42,7 +49,7 @@ export function createReplyResync(refresh: () => Promise<void>) {
         timer = undefined;
         void check();
       },
-      input.recovery ? recoveryDelays[checks] : 15_000,
+      input.recovery && !confirmed ? recoveryDelays[checks] : 15_000,
     );
   };
   async function check() {
@@ -53,11 +60,18 @@ export function createReplyResync(refresh: () => Promise<void>) {
     }
     checking = true;
     if (input.recovery) checks++;
+    const since = progressed;
+    let succeeded = false;
     try {
-      await refresh();
+      succeeded = (await refresh()) === true;
     } catch {
       // The history reader owns request errors; this budget also bounds unsuccessful recovery.
     } finally {
+      confirmed = succeeded && since === progressed;
+      if (confirmed) {
+        checks = 0;
+        publish(false);
+      }
       checking = false;
       schedule();
     }
@@ -82,6 +96,8 @@ export function createReplyResync(refresh: () => Promise<void>) {
       if (!newAttempt && !advanced && next.recovery === input.recovery) return;
       if (newAttempt || advanced) {
         checks = 0;
+        confirmed = false;
+        progressed++;
         publish(false);
       }
       input = next;
@@ -105,6 +121,8 @@ export function createReplyResync(refresh: () => Promise<void>) {
     },
     retry() {
       checks = 0;
+      confirmed = false;
+      progressed++;
       clear();
       publish(false);
       void check();
@@ -119,7 +137,7 @@ export function createReplyResync(refresh: () => Promise<void>) {
 export function useReplyResync(
   history: ConversationHistory | undefined,
   stream: ConversationStreamSnapshot,
-  refresh: () => Promise<void>,
+  refresh: () => Promise<boolean | void>,
 ) {
   const recovery = useMemo(() => createReplyResync(refresh), [refresh]);
   const messages = reconcileLiveTools(history?.messages ?? [], stream.tools);

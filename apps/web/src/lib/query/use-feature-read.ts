@@ -43,18 +43,23 @@ export function useFeatureRead<T>(input: FeatureReadOptions<T>) {
     () => runtime.polling.delayed(key),
     () => false,
   );
-  const refresh = useCallback(async () => {
-    if (input.enabled === false || !current()) return;
+  /** Reads again and resolves whether that read succeeded. */
+  const check = useCallback(async () => {
+    if (input.enabled === false || !current()) return false;
     if (input.pollLoad) await runtime.client.cancelQueries({ queryKey: key, exact: true });
     runtime.polling.reset(key);
-    await result.refetch({ cancelRefetch: false });
+    return !(await result.refetch({ cancelRefetch: false })).isError;
   }, [runtime, key, current, input.enabled, input.pollLoad, result.refetch]);
+  const refresh = useCallback(async () => {
+    await check();
+  }, [check]);
   const restart = useCallback(() => {
     runtime.polling.reset(key);
   }, [runtime, key]);
   return {
     state: current() ? readState(result) : readState<T>({ data: undefined, error: { status: 403 }, isFetching: false }),
     refresh,
+    check,
     delayed,
     restart,
   };
