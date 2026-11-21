@@ -46,6 +46,8 @@ function buildModelEnvironment(catalog: ServedModelCatalog, credentials: readonl
       endpoint: model.route.endpoint,
       model: model.route.model,
       maxOutputTokens: route.maxOutputTokens,
+      // Catalog models may share a deployment with different capabilities, so the route carries its own model's.
+      ...(model.capabilities ? { capabilities: model.capabilities } : {}),
     };
     const inference = inferenceRouteSchema.safeParse(
       model.route.type === 'azure'
