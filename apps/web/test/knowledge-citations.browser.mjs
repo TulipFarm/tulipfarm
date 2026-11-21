@@ -235,7 +235,15 @@ test(
                     createdAt: workspace.createdAt,
                     parts: [{ kind: 'text', text: 'Remove the old supplier note.' }],
                     turn: { id: removeId, status: 'completed', generation: 0 },
-                    tools: [{ id: removeId, tool: 'knowledge.remove', status: 'completed' }],
+                    tools: [
+                      { id: removeId, tool: 'knowledge.remove', status: 'completed' },
+                      {
+                        id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+                        tool: 'memory.edit',
+                        status: 'completed',
+                        memoryChange: { store: 'memory', operation: 'edit', title: 'Preferences' },
+                      },
+                    ],
                   },
                 ],
                 nextBefore: null,
@@ -250,6 +258,9 @@ test(
             await page.getByText(recovery, { exact: true }).waitFor({ timeout: 60000 });
             const trigger = page.getByRole('button', { name: 'Source: Supplier policy', exact: true });
             await trigger.waitFor();
+            const change = page.getByRole('list', { name: 'Changes' }).getByRole('listitem');
+            assert.equal(await change.textContent(), 'Updated memory Preferences');
+            assert.equal(await page.getByRole('button', { name: /undo/i }).count(), 0);
             assert.deepEqual(state.reads, [], 'evidence is not read until the citation opens');
 
             state.gate = Promise.withResolvers();

@@ -37,9 +37,9 @@ const requests = [
   },
   {
     family: 'knowledge',
-    text: 'Prepare a Knowledge note titled Launch with the text Prepare.',
+    text: 'Add a Knowledge note titled Launch with the text Prepare.',
     call: { tool: 'knowledge.add', title: 'Launch', text: 'Prepare' },
-    receipt: { id: randomUUID(), status: 'pending', kind: 'add' },
+    receipt: { status: 'applied', change: { store: 'knowledge', operation: 'add', title: 'Launch' } },
   },
   {
     family: 'projects',

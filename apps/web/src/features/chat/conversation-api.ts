@@ -186,6 +186,13 @@ const messageSchema = z.object({
         workflows: z.array(workflowReferenceSchema).optional(),
         subagents: subagentResultSchema.optional(),
         images: imageReceiptSchema.optional(),
+        memoryChange: z
+          .object({
+            store: z.enum(['memory', 'knowledge']),
+            operation: z.enum(['edit', 'forget', 'add', 'update', 'remove']),
+            title: z.string().optional(),
+          })
+          .optional(),
       }),
     )
     .default([]),

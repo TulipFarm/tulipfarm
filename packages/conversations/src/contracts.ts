@@ -386,6 +386,11 @@ export const integrationCardSchema = z.discriminatedUnion('action', [
     egress: z.array(z.string().max(253)).max(20),
   }),
 ]);
+export const memoryChangeSchema = z.object({
+  store: z.enum(['memory', 'knowledge']),
+  operation: z.enum(['edit', 'forget', 'add', 'update', 'remove']),
+  title: z.string().max(512).optional(),
+});
 export const toolReceiptSchema = z.object({
   id: uuidSchema,
   tool: z.string(),
@@ -429,6 +434,8 @@ export const toolReceiptSchema = z.object({
   subagents: subagentResultSchema.optional(),
   /** One entry per image of an `images.generate` call, pending until it is saved, refused, failed or cancelled. */
   images: imageReceiptSchema.optional(),
+  /** A memory or Knowledge change a chat tool applied, shown as one line above the reply. */
+  memoryChange: memoryChangeSchema.optional(),
 });
 /** Stops one sub-agent of a running `agents.delegate` call. `id` is the call's receipt ID. */
 export const stopSubagentSchema = z.strictObject({ id: uuidSchema, key: subagentCardSchema.shape.key });

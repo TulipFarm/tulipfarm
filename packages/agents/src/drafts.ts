@@ -33,6 +33,8 @@ import {
   type AgentDraftChange,
   type AuthoringProposal,
   type DraftOutcome,
+  type KnowledgeProposal,
+  type MemoryProposal,
   type RowProposal,
   type WorkflowProposal,
 } from './draft-contracts.ts';
@@ -45,12 +47,8 @@ import { createProjectDrafts } from './project-drafts.ts';
 import { createFileDrafts } from './file-drafts.ts';
 import { createFileShareDrafts } from './file-share-drafts.ts';
 import { createKnowledgeDrafts } from './knowledge-drafts.ts';
-import { applyMemory, forgetMemoryText, memoryStale, requireMemoryChat } from './memory-drafts.ts';
-import {
-  keepForgetScrubVersion,
-  PersonalMemoryUnavailable,
-  readPersonalMemory,
-} from '@tulipfarm/conversations/personal-memory';
+import { applyMemory, forgetMemoryText, memoryError, memoryStale, requireMemoryChat } from './memory-drafts.ts';
+import { keepForgetScrubVersion, readPersonalMemory } from '@tulipfarm/conversations/personal-memory';
 import type { FileBytes } from '@tulipfarm/files';
 import type { GitHubSubscriptions } from '@tulipfarm/workflows/github-triggers';
 import type { Work } from '@tulipfarm/workflows/contracts';
@@ -1104,47 +1102,65 @@ export function createAuthoringDrafts(
     });
   }
   /**
-   * Proposes forgetting the exact text from the requester's memory under this draft ID. Forgetting erases the text
-   * from every revision and cannot be undone, so nothing changes yet: the card asks the member to confirm first.
+   * Makes a memory or Knowledge change from chat at once, after the checks a saved card passes. No draft is kept, so
+   * text the member asked to forget is never stored.
+   */
+  async function applyChange(
+    tx: AgentTransaction,
+    actor: HumanActor,
+    bound: AgentStorage,
+    workspaceId: string,
+    id: string,
+    origin: Origin,
+    proposal: MemoryProposal | KnowledgeProposal,
+  ): Promise<DraftOutcome> {
+    const sources = sourcesSchema.parse(origin.sources);
+    await owned(tx, actor, origin.conversationId);
+    if (proposal.kind === 'memory') await requireMemoryChat(tx, actor, origin.conversationId);
+    await requireNoMcpDerived(tx, [
+      { kind: 'private-conversation', conversationId: origin.conversationId },
+      ...sources,
+    ]);
+    await requireSources(tx, workspaceId, actor, proposal, sources);
+    await writable(tx, actor, proposal, bound, workspaceId);
+    if (await stale(tx, proposal, actor, bound, workspaceId, id)) throw new AgentError('draft-stale');
+    return proposal.kind === 'memory'
+      ? applyMemory(tx, actor, proposal)
+      : createKnowledgeDrafts(bound, workspaceId, fileBytes).apply(actor, id, proposal);
+  }
+  /** Edits the requester's memory or Knowledge at once. `id` is the change's command, so a replay changes it once. */
+  async function change(workspaceId: string, actor: HumanActor, id: string, origin: Origin, value: unknown) {
+    id = uuidSchema.parse(id);
+    const proposal = authoringProposalSchema.parse(value);
+    if (
+      (proposal.kind !== 'memory' && proposal.kind !== 'knowledge') ||
+      (proposal.kind === 'memory' && proposal.input.operation !== 'edit')
+    )
+      throw new AgentError('invalid-request', 400);
+    return transaction(workspaceId, actor, true, (tx, _actor, bound) =>
+      applyChange(tx, actor, bound, workspaceId, id, origin, proposal),
+    );
+  }
+  /**
+   * Forgets every occurrence of the exact text in the requester's memory at once. Undefined, changing nothing, when
+   * memory does not contain it.
    */
   async function forgetMemory(workspaceId: string, actor: HumanActor, id: string, origin: Origin, text: string) {
     id = uuidSchema.parse(id);
-    const sources = sourcesSchema.parse(origin.sources);
-    return transaction(workspaceId, actor, true, async tx => {
+    return transaction(workspaceId, actor, true, async (tx, _actor, bound) => {
       await owned(tx, actor, origin.conversationId);
       await requireMemoryChat(tx, actor, origin.conversationId);
-      await requireNoMcpDerived(tx, [
-        { kind: 'private-conversation', conversationId: origin.conversationId },
-        ...sources,
-      ]);
-      const current = await readPersonalMemory(tx, actor);
+      const current = await readPersonalMemory(tx, actor).catch(error => {
+        throw memoryError(error);
+      });
       if (forgetMemoryText(current.content, text) === undefined) return undefined;
-      // The card could not drop the forgotten text once decided, so wait for the workspace's update.
-      if (((tx as { commonVersion?: number }).commonVersion ?? 0) < keepForgetScrubVersion)
-        throw new PersonalMemoryUnavailable('updating');
       const proposal = authoringProposalSchema.parse({
         kind: 'memory',
         input: { operation: 'forget', expectedRevision: current.revision, forgotten: text },
       });
-      await requireSources(tx, workspaceId, actor, proposal, sources);
-      await tx.client.query(
-        `INSERT INTO ${relation(tx, 'tf_chat_authoring_drafts')} (id,conversation_id,turn_id,membership_id,user_id,proposal,digest,sources) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [
-          id,
-          origin.conversationId,
-          origin.turnId,
-          actor.membershipId,
-          actor.userId,
-          proposal,
-          // The digest must not depend on the text, which is blanked once the card is decided.
-          createHash('sha256')
-            .update(canonicalJson({ id, operation: 'forget', revision: current.revision }))
-            .digest('hex'),
-          JSON.stringify(sources),
-        ],
-      );
-      return { draftId: id, revision: current.revision, confirm: true };
+      if (proposal.kind !== 'memory') throw new AgentError('invalid-request', 400);
+      return applyChange(tx, actor, bound, workspaceId, id, origin, proposal);
     });
   }
-  return { propose, read, decide, readMemory, forgetMemory };
+  return { propose, read, decide, readMemory, change, forgetMemory };
 }

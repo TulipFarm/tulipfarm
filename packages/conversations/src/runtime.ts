@@ -2140,6 +2140,10 @@ export function createConversationExecutor(
     const durable = source.durable;
     const interactiveChat = source.interactiveChat;
     const inheritedSources = source.inherited;
+    // Knowledge entries this turn changed at the requester's request no longer gate its own reply or later tool calls.
+    const changedKnowledge = new Set<string>();
+    const unchangedKnowledge = (list: SourceDependency[]) =>
+      list.filter(source => source.kind !== 'knowledge-document' || !changedKnowledge.has(source.documentId));
     let text = 'Attachment received.';
     let answerLayout: AnswerLayout;
     let fallback: string | undefined;
@@ -2378,7 +2382,11 @@ export function createConversationExecutor(
             if (chat.slack) await requireResultSources(tx, chat.requester, fence.conversationId, currentSources);
             await requireGitHubSources(tx, chat.requester, [...inheritedSources, ...currentSources]);
             await requireGoogleSources(tx, chat.requester, [...inheritedSources, ...currentSources]);
-            await requireKnowledgeSources(tx, chat.requester, [...inheritedSources, ...currentSources]);
+            await requireKnowledgeSources(
+              tx,
+              chat.requester,
+              unchangedKnowledge([...inheritedSources, ...currentSources]),
+            );
             await requireGoogleFileSources(tx, chat.requester, inheritedSources);
             await requireFileSources(tx, chat.requester, fileSources);
             await requireReplyMcpSources(tx, chat.requester, fence.conversationId, [
@@ -2502,12 +2510,21 @@ export function createConversationExecutor(
                 callId,
                 fence.turnId,
                 JSON.stringify(call),
-                JSON.stringify(mergeSources([...inheritedSources, ...currentSources])),
+                JSON.stringify(mergeSources(unchangedKnowledge([...inheritedSources, ...currentSources]))),
               ],
             );
         }
         async function saveOutput(tx: AuthorizationTransaction, output: unknown) {
           const protectedOutput = protectedOutputSchema.safeParse(output);
+          const knowledgeChange =
+            name.startsWith('knowledge.') &&
+            protectedOutput.success &&
+            z.object({ status: z.literal('applied'), documentId: uuidSchema }).safeParse(protectedOutput.data.result);
+          if (knowledgeChange && knowledgeChange.success) {
+            changedKnowledge.add(knowledgeChange.data.documentId);
+            const kept = unchangedKnowledge(inheritedSources);
+            inheritedSources.splice(0, inheritedSources.length, ...kept);
+          }
           if (protectedOutput.success) {
             const requester = await turnRequester(tx, fence.conversationId, fence.turnId);
             await requireGoogleSources(tx, requester, protectedOutput.data.sources);
@@ -2656,7 +2673,11 @@ export function createConversationExecutor(
                     if (name !== 'github.personal.execute')
                       await requireGitHubSources(current, chat.requester, [...inheritedSources, ...currentSources]);
                     await requireGoogleSources(current, chat.requester, [...inheritedSources, ...currentSources]);
-                    await requireKnowledgeSources(current, chat.requester, [...inheritedSources, ...currentSources]);
+                    await requireKnowledgeSources(
+                      current,
+                      chat.requester,
+                      unchangedKnowledge([...inheritedSources, ...currentSources]),
+                    );
                     await requireGoogleFileSources(current, chat.requester, [...inheritedSources, ...fileSources]);
                     await requireReplyMcpSources(current, chat.requester, fence.conversationId, [
                       ...inheritedSources,
@@ -3239,6 +3260,7 @@ export function createConversationExecutor(
         if (chat.slack) await requireResultSources(tx, chat.requester, fence.conversationId, sources);
         await requireGitHubSources(tx, chat.requester, [...source.inherited, ...sources]);
         await requireGoogleSources(tx, chat.requester, [...source.inherited, ...sources]);
+        sources = unchangedKnowledge(sources);
         await requireKnowledgeSources(tx, chat.requester, [...source.inherited, ...sources]);
         await requireGoogleFileSources(tx, chat.requester, source.inherited);
         await requireFileSources(tx, chat.requester, fileSources);

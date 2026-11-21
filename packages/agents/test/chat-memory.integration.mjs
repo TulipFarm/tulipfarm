@@ -38,7 +38,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   const chats = createConversations(runtime),
     chatId = randomUUID();
   await chats.create(w.id, w.userId, { chatId, commandId: randomUUID() });
-  async function tool(call, conversationId = chatId) {
+  async function tool(
+    call,
+    conversationId = chatId,
+    invoke = context => createChatTools(context.runtime).invokeWithSources(context, call),
+  ) {
     const sent = await chats.send(w.id, w.userId, conversationId, {
       messageId: randomUUID(),
       commandId: randomUUID(),
@@ -46,15 +50,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     });
     let output;
     const executor = createConversationExecutor(runtime, async ({ executeTool }) => {
-      output = (
-        await executeTool(
-          call.tool,
-          false,
-          context => createChatTools(context.runtime).invokeWithSources(context, call),
-          [],
-          call,
-        )
-      ).result;
+      output = (await executeTool(call.tool, false, invoke, [], call)).result;
       return { text: 'Done.', sources: [] };
     });
     await executor.process({ workspaceId: w.id, conversationId, turnId: sent.turnId, generation: 0 });
@@ -66,11 +62,39 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     await drafts.decide(w.id, w.userId, chatId, draftId, { commandId: randomUUID(), digest: pending.digest, decision });
     return drafts.read(w.id, w.userId, chatId, draftId);
   }
-  return { db, w, runtime, chats, chatId, drafts, tool, decide, keep, memory: createPersonalMemoryService(runtime) };
+  /** A card from before chat changed memory at once, as older chats still hold. */
+  async function legacyCard(input) {
+    const draftId = await tool({ tool: 'memory.edit' }, chatId, async context => ({
+      result: (
+        await createAuthoringDrafts(context.runtime).propose(
+          context.workspaceId,
+          context.actor,
+          context.callId,
+          context.origin,
+          { kind: 'memory', input },
+        )
+      ).draftId,
+      sources: [],
+    }));
+    return { draftId };
+  }
+  return {
+    db,
+    w,
+    runtime,
+    chats,
+    chatId,
+    drafts,
+    tool,
+    decide,
+    legacyCard,
+    keep,
+    memory: createPersonalMemoryService(runtime),
+  };
 }
 
-test('chat reads memory and edits it only through an approved card', async t => {
-  const { tool, decide, memory, drafts, chatId, w } = await setup(t);
+test('chat reads memory and edits it at once, refusing a stale revision', async t => {
+  const { tool, memory, runtime, w } = await setup(t);
   assert.deepEqual(await tool({ tool: 'memory.read' }), { content: '', revision: 0 });
   const first = await memory.save(w.id, w.userId, { content: 'I prefer short replies.', expectedRevision: 0 });
   assert.deepEqual(await tool({ tool: 'memory.read' }), {
@@ -83,31 +107,33 @@ test('chat reads memory and edits it only through an approved card', async t => 
     'no-change',
   );
   assert.equal((await tool({ tool: 'memory.edit', revision: 0, content: 'Other.' })).error, 'draft-stale');
+  assert.equal((await memory.read(w.id, w.userId)).content, 'I prefer short replies.');
 
   const edit = await tool({
     tool: 'memory.edit',
     revision: first.revision,
     content: 'I prefer short replies.\nI work in sales.',
   });
-  assert.equal(edit.status, 'review-required');
-  assert.equal((await memory.read(w.id, w.userId)).revision, first.revision);
-  const saved = await decide(edit.draftId);
-  assert.equal(saved.status, 'saved');
   const current = await memory.read(w.id, w.userId);
-  assert.deepEqual(saved.outcome, { kind: 'memory', operation: 'edit', revision: current.revision });
+  assert.equal(edit.status, 'applied');
+  assert.deepEqual(edit.change, { store: 'memory', operation: 'edit', title: 'Preferences' });
+  assert.equal(edit.revision, current.revision);
   assert.equal(current.content, 'I prefer short replies.\nI work in sales.');
-
-  const late = await tool({ tool: 'memory.edit', revision: current.revision, content: 'Replaced.' });
-  await memory.save(w.id, w.userId, { content: 'Changed in settings.', expectedRevision: current.revision });
-  assert.equal((await drafts.read(w.id, w.userId, chatId, late.draftId)).status, 'stale');
-  await assert.rejects(decide(late.draftId), { code: 'draft-stale' });
-  assert.equal((await memory.read(w.id, w.userId)).content, 'Changed in settings.');
+  const drafts = await runtime.transaction(w.id, commonCompatibility, tx =>
+    tx.client.query(`SELECT count(*)::int AS n FROM "${tx.schema}".tf_chat_authoring_drafts`),
+  );
+  assert.equal(drafts.rows[0].n, 0, 'no review card is made');
 });
 
 test('restore cards from the earlier memory never change Keep memory, even at a matching revision', async t => {
-  const { db, tool, decide, memory, drafts, chatId, runtime, w } = await setup(t);
+  const { db, legacyCard, decide, memory, drafts, chatId, runtime, w } = await setup(t);
   const live = await memory.save(w.id, w.userId, { content: 'Current memory.', expectedRevision: 0 });
-  const card = await tool({ tool: 'memory.edit', revision: live.revision, content: 'Current memory.\nMore.' });
+  const card = await legacyCard({
+    operation: 'edit',
+    expectedRevision: live.revision,
+    previousContent: 'Current memory.',
+    content: 'Current memory.\nMore.',
+  });
   const schema = await runtime.transaction(w.id, commonCompatibility, async tx => tx.schema);
   // The runtime role cannot rewrite a card, so plant the earlier store's restore card as the database owner.
   await db.databaseAdmin.query(
@@ -144,10 +170,10 @@ test('memory tools refuse project chats', async t => {
   assert.equal((await memory.read(w.id, w.userId)).content, 'Private note.');
 });
 
-test('chat forget asks first, is permanent, clears Bud preferences, and project chats never reach Keep', async t => {
-  const { tool, decide, memory, chats, runtime, w, keep } = await setup(t);
+test('chat forget is permanent at once, keeps no copy, clears Bud preferences, and project chats never reach Keep', async t => {
+  const { tool, memory, chats, runtime, w, keep } = await setup(t);
   const { calls } = keep;
-  const saved = await memory.save(w.id, w.userId, { content: '- Lives in Berlin\n- Prefers tea', expectedRevision: 0 });
+  await memory.save(w.id, w.userId, { content: '- Lives in Berlin\n- Prefers tea', expectedRevision: 0 });
   await runtime.transaction(w.id, commonCompatibility, tx =>
     tx.client.query(
       `INSERT INTO "${tx.schema}".tf_bud_preferences
@@ -156,44 +182,27 @@ test('chat forget asks first, is permanent, clears Bud preferences, and project 
       [randomUUID(), w.membershipId, randomUUID(), randomUUID()],
     ),
   );
-  const preferences = async () =>
-    (
-      await runtime.transaction(w.id, commonCompatibility, tx =>
-        tx.client.query(`SELECT count(*)::int AS n FROM "${tx.schema}".tf_bud_preferences`),
+  const count = table =>
+    runtime
+      .transaction(w.id, commonCompatibility, tx =>
+        tx.client.query(`SELECT count(*)::int AS n FROM "${tx.schema}".${table}`),
       )
-    ).rows[0].n;
+      .then(result => result.rows[0].n);
 
-  const stored = draftId =>
-    runtime.transaction(w.id, commonCompatibility, async tx =>
-      JSON.stringify(
-        (
-          await tx.client.query(`SELECT proposal,digest FROM "${tx.schema}".tf_chat_authoring_drafts WHERE id=$1`, [
-            draftId,
-          ])
-        ).rows[0],
-      ),
-    );
+  const missing = await tool({ tool: 'memory.forget', text: 'Lives in Paris' });
+  assert.equal(missing.error, 'not-found');
+  assert.equal(await count('tf_bud_preferences'), 1);
 
-  assert.equal((await tool({ tool: 'memory.forget', text: 'Lives in Paris' })).error, 'not-found');
-  const asked = await tool({ tool: 'memory.forget', text: 'Lives in Berlin' });
-  assert.equal(asked.status, 'confirm');
-  assert.equal(await preferences(), 1, 'nothing changes before the member confirms');
-  assert.equal((await memory.read(w.id, w.userId)).content, saved.content);
-  const pending = await stored(asked.draftId);
-  assert.ok(pending.includes('Lives in Berlin'));
-  assert.equal(pending.includes('Prefers tea'), false, 'the card holds no copy of the memory');
-  const forgotten = await decide(asked.draftId);
-  assert.equal(forgotten.status, 'saved');
-  assert.equal(forgotten.outcome.operation, 'forget');
-  assert.equal(forgotten.proposal.input.forgotten, '');
-  assert.equal((await stored(asked.draftId)).includes('Lives in Berlin'), false);
-  assert.equal((await memory.read(w.id, w.userId)).content.includes('Lives in Berlin'), false);
-  assert.equal(await preferences(), 0);
-
-  const declined = await tool({ tool: 'memory.forget', text: 'Prefers tea' });
-  assert.equal((await decide(declined.draftId, 'dismiss')).status, 'dismissed');
-  assert.equal((await stored(declined.draftId)).includes('Prefers tea'), false);
-  assert.match((await memory.read(w.id, w.userId)).content, /Prefers tea/);
+  const forgotten = await tool({ tool: 'memory.forget', text: 'Lives in Berlin' });
+  const current = await memory.read(w.id, w.userId);
+  assert.equal(forgotten.status, 'applied');
+  assert.deepEqual(forgotten.change, { store: 'memory', operation: 'forget', title: 'Preferences' });
+  assert.equal(forgotten.revision, current.revision);
+  assert.equal(JSON.stringify(forgotten).includes('Lives in Berlin'), false, 'the result never repeats the text');
+  assert.equal(current.content.includes('Lives in Berlin'), false);
+  assert.match(current.content, /Prefers tea/);
+  assert.equal(await count('tf_bud_preferences'), 0);
+  assert.equal(await count('tf_chat_authoring_drafts'), 0, 'no card holds the forgotten text');
 
   const projectId = randomUUID(),
     projectChat = randomUUID();
@@ -201,5 +210,6 @@ test('chat forget asks first, is permanent, clears Bud preferences, and project 
   await chats.create(w.id, w.userId, { chatId: projectChat, commandId: randomUUID(), projectId });
   const before = calls.length;
   assert.equal((await tool({ tool: 'memory.read' }, projectChat)).error, 'memory-unavailable');
+  assert.equal((await tool({ tool: 'memory.forget', text: 'Prefers tea' }, projectChat)).error, 'memory-unavailable');
   assert.equal(calls.length, before);
 });
