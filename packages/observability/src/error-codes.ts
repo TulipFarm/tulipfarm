@@ -88,6 +88,7 @@ const codes = new Set<string>([
   // Chat row guard refusals and table import results the model gets back instead of a write.
   'approval-pending',
   'batch-required',
+  'rows-already-added',
   'import-file-failed',
   'import-paste-failed',
   'empty-paste',

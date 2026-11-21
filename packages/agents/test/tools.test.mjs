@@ -299,6 +299,10 @@ test('tool outcomes include returned failures and waiting without using payload 
     outcome: 'result_error',
     errorCode: 'approval-pending',
   });
+  assert.deepEqual(toolObservation({ error: 'rows-already-added', table: 'PRIVATE' }, 'rows.create.batch'), {
+    outcome: 'success',
+    errorCode: 'rows-already-added',
+  });
   for (const value of [
     { error: 'PRIVATE ERROR' },
     { data: { status: 'failed', result: 'PRIVATE RESULT' } },

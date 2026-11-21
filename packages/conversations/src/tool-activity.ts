@@ -583,6 +583,8 @@ export function toolOutcomeStatus(output: unknown): z.infer<typeof activityStatu
   if (!parsed.success) return 'completed';
   const value = parsed.data;
   if (value.status === 'pending') return value.error === 'execution-outcome-unknown' ? 'unknown' : 'waiting';
+  // Chat declined to add rows that are already in the table: nothing was missing, so nothing failed.
+  if (value.error === 'rows-already-added') return 'completed';
   if (value.error != null || value.code === 'access-denied' || value.code === 'tool-failed')
     return value.error === 'access-denied' || value.code === 'access-denied' ? 'blocked' : 'failed';
   const statuses = [
