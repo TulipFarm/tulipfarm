@@ -733,6 +733,57 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.equal((await api.documentStatus(w.ws.id, w.ws.userId, saved.documentId)).state, 'ready');
       assert.deepEqual(await api.due(w.ws.id), []);
     });
+    await t.test('a stopped ingestion job publishes once another job embeds its inputs', async () => {
+      const w = await workspace();
+      const local = createLocalKnowledge({
+        runtime: firstRuntime,
+        files: createFiles(firstRuntime, {
+          putIfAbsent: async () => {},
+          read: async () => {
+            throw new Error('unexpected object read');
+          },
+        }),
+      });
+      const save = () =>
+        local.save(w.ws.id, w.ws.userId, {
+          commandId: randomUUID(),
+          documentId: randomUUID(),
+          expectedRevisionId: null,
+          title: 'Shared input',
+          input: { kind: 'note', text: '# Tulips\nPlant in autumn.' },
+        });
+      const first = await save();
+      const second = await save();
+      for (const work of await local.due(w.ws.id)) await local.process(work);
+      let calls = 0;
+      const api = w.make(async () => {
+        calls++;
+        return success();
+      });
+      await api.due(w.ws.id);
+      await api.due(w.ws.id);
+      const job = async documentId =>
+        (
+          await db.platform.query(`SELECT id,generation FROM ${w.table('embedding_jobs')} WHERE document_id=$1`, [
+            documentId,
+          ])
+        ).rows[0];
+      const running = await job(first.documentId);
+      const stopped = await job(second.documentId);
+      await db.platform.query(`UPDATE ${w.table('embedding_jobs')} SET state='failed' WHERE id=$1`, [stopped.id]);
+      assert.equal(
+        (await api.process({ workspaceId: w.ws.id, jobId: running.id, generation: running.generation })).disposition,
+        'ready',
+      );
+      const published = async documentId =>
+        (await db.platform.query(`SELECT vector_publication_id FROM ${w.table('documents')} WHERE id=$1`, [documentId]))
+          .rows[0].vector_publication_id;
+      assert.ok(await published(first.documentId));
+      assert.equal(await published(second.documentId), null);
+      assert.deepEqual(await api.due(w.ws.id), []);
+      assert.ok(await published(second.documentId));
+      assert.equal(calls, 1);
+    });
     await t.test('document retries cannot retarget a newer publication at the same generation', async () => {
       const w = await workspace();
       const local = createLocalKnowledge({
