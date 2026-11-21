@@ -2485,12 +2485,13 @@ export function unbackedAppClaim(candidate: string, apps: AppKind | undefined, r
       };
     }),
   ];
-  // An edit request answered after only checking status changed nothing, whatever the reply says.
+  // An edit request answered after only checking, reading or building changed nothing, whatever the reply says.
   const untouched =
     editAsked &&
-    ran.size === 1 &&
-    ran.has('apps.status') &&
+    looked &&
+    !changed &&
     !candidate.includes('?') &&
+    !alreadyClaim.test(candidate) &&
     (claimsActionOutcome(candidate) || doneClaim.test(candidate))
       ? { clause: candidate.trim(), missing: 'edit' as const }
       : undefined;
