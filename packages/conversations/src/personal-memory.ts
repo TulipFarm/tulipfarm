@@ -38,6 +38,7 @@ import {
   deleteMemoryFile,
   forgetMemoryFileText,
   listMemoryFiles,
+  listMemoryFilesWithContent,
   memoryEditFormat,
   memoryFilesContext,
   memoryFingerprint,
@@ -201,6 +202,11 @@ export async function listOwnMemoryFiles(tx: PersonalMemoryTransaction, actor: H
   return listMemoryFiles(await keepMode(tx, actor));
 }
 
+/** The member's memory files with their text, You first. */
+export async function listOwnMemoryFilesWithContent(tx: PersonalMemoryTransaction, actor: HumanActor) {
+  return listMemoryFilesWithContent(await keepMode(tx, actor));
+}
+
 /** All of the member's files as a model reads them: You files in full, the others while they fit. */
 export async function readOwnMemoryForModel(tx: PersonalMemoryTransaction, actor: HumanActor) {
   return memoryForModel(await keepMode(tx, actor), 16000);
@@ -351,9 +357,9 @@ export function createPersonalMemoryService(
       const input = deletePersonalMemorySchema.parse(value);
       return change(workspaceId, userId, (tx, actor) => undoOwnPersonalMemory(tx, actor, input.expectedRevision));
     },
-    /** The member's memory files, You first. */
+    /** The member's memory files with their text, You first. */
     files: (workspaceId: string, userId: string) =>
-      human(workspaceId, userId, async (tx, actor) => ({ files: await listOwnMemoryFiles(tx, actor) })),
+      human(workspaceId, userId, async (tx, actor) => ({ files: await listOwnMemoryFilesWithContent(tx, actor) })),
     readFile: async (workspaceId: string, userId: string, value: unknown) => {
       const { path } = memoryFilePathSchema.parse(value);
       return human(workspaceId, userId, (tx, actor) => readOwnMemoryFile(tx, actor, path));
@@ -367,7 +373,7 @@ export function createPersonalMemoryService(
       const input = deleteMemoryFileSchema.parse(value);
       return human(workspaceId, userId, async (tx, actor) => {
         await deleteOwnMemoryFile(tx, actor, input.path, input.expectedRevisionId);
-        return { files: await listOwnMemoryFiles(tx, actor) };
+        return { files: await listOwnMemoryFilesWithContent(tx, actor) };
       });
     },
     /**

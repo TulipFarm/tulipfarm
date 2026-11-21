@@ -109,6 +109,35 @@ export async function readMemoryFile(keep: Keep, path: string): Promise<MemoryFi
   return { ...file, ...(head ? { revisionId: head.revisionId } : {}), content: head?.text ?? '' };
 }
 
+const contentReads = 8;
+/**
+ * Every listed file with its text, read a few at a time. A file deleted between the list and its read is left out; a
+ * You file that was never written reads as empty.
+ */
+export async function listMemoryFilesWithContent(keep: Keep): Promise<MemoryFileContent[]> {
+  const files = await listMemoryFiles(keep);
+  const read: (MemoryFileContent | undefined)[] = Array.from({ length: files.length });
+  let next = 0;
+  async function worker() {
+    while (next < files.length) {
+      const index = next++;
+      const file = files[index]!;
+      if (!file.revisionId) {
+        read[index] = { ...file, content: '' };
+        continue;
+      }
+      const head = await readHead(keep, file.path);
+      read[index] = head
+        ? { ...file, revisionId: head.revisionId, content: head.text }
+        : fixed(file.path)
+          ? { ...file, revisionId: null, updatedAt: null, size: 0, content: '' }
+          : undefined;
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(contentReads, files.length) }, worker));
+  return read.filter(file => file !== undefined);
+}
+
 async function remove(keep: Keep, path: string, expectedRevisionId: string) {
   const deleted = await keep.client.delete({ scope: keep.scope, path, expectedRevisionId });
   if (deleted.status !== 'ok') failed(deleted, 'delete');

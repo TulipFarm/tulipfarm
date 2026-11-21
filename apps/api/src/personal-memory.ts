@@ -142,7 +142,7 @@ export function registerPersonalMemory(
     routes.get(
       files,
       {
-        schema: schema('listMemoryFilesV1', 'List your personal memory files, You first.', undefined, {
+        schema: schema('listMemoryFilesV1', 'List your personal memory files with their text, You first.', undefined, {
           response: memoryFilesSchema,
         }),
       },

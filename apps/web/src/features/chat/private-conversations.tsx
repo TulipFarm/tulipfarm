@@ -1182,6 +1182,8 @@ function ConversationDetail({
         </li>
       )
     );
+  const trailingReply = (messages: ConversationMessage[]) =>
+    replyAfter === null ? liveReply(messages, messages.length - 1) : null;
   return (
     <ChatKeywords value={integrations.keywords}>
       <div className="flex min-h-0 flex-1 flex-col">
@@ -1406,145 +1408,162 @@ function ConversationDetail({
                     >
                       <ol aria-label="Messages" className={compact ? 'space-y-3' : 'space-y-8'}>
                         {[
-                          ...history.messages.flatMap((message, index) => [
-                            answerOnly(message) ? null : (
-                              <li
-                                key={
-                                  message.id === sentId.current
-                                    ? 'pending'
-                                    : message.turn
-                                      ? `turn:${message.turn.id}`
-                                      : message.id
-                                }
-                                className="space-y-3"
-                              >
-                                <ConversationEntry
-                                  api={api}
-                                  chatId={chatId}
-                                  slug={workspaceSlug}
-                                  message={message}
-                                  latest={index === history.messages.length - 1}
-                                  rowViews={entryDetails(history.messages, modelFamilies).rowViews[index]!}
-                                  stats={entryDetails(history.messages, modelFamilies).stats[index]}
-                                  modelName={entryModelName}
-                                  fallbackTurn={entryDetails(history.messages, modelFamilies).fallbacks.get(message.id)}
-                                  fallbackControls={
-                                    entryDetails(history.messages, modelFamilies).fallbacks.has(message.id)
-                                      ? fallbackControls
-                                      : undefined
+                          ...history.messages.flatMap((message, index) => {
+                            const live = index === replyAfter ? liveReply(history.messages, index) : null;
+                            const next = history.messages[index + 1];
+                            // A turn's activity and its reply read as one block, so they sit as close as the
+                            // activity lines do; separate exchanges keep the list's wider gap.
+                            const answered =
+                              message.author === 'human' &&
+                              !!message.turn &&
+                              (live
+                                ? true
+                                : index === history.messages.length - 1
+                                  ? !pending && !incomingTurns.length && !!trailingReply(history.messages)
+                                  : next?.author === 'assistant' && !answerOnly(next));
+                            return [
+                              answerOnly(message) ? null : (
+                                <li
+                                  key={
+                                    message.id === sentId.current
+                                      ? 'pending'
+                                      : message.turn
+                                        ? `turn:${message.turn.id}`
+                                        : message.id
                                   }
-                                  disabled={locked}
-                                  retryHandoff={retryHandoff}
-                                  control={controlEntry}
-                                />
-                                {queuedMessages.includes(message) && message.turn && (
-                                  <div className="flex flex-col items-end gap-2">
-                                    <p role="status" className="text-sm text-muted-foreground">
-                                      {queueLabel}
-                                    </p>
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      disabled={locked}
-                                      onClick={() =>
-                                        submit({
-                                          kind: 'cancel',
-                                          chatId,
-                                          commandId: crypto.randomUUID(),
-                                          turnId: message.turn!.id,
-                                          expectedGeneration: message.turn!.generation,
-                                        })
-                                      }
-                                    >
-                                      Remove queued message
-                                    </Button>
-                                  </div>
-                                )}
-                                <ToolActivity
-                                  key="activity"
-                                  variant="transcript"
-                                  items={toolActivityItems(message.tools, { admin })}
-                                  active={
-                                    thinking &&
-                                    !read.uncertain &&
-                                    !!turn &&
-                                    message.turn?.id === turn.id &&
-                                    !continuesBelow
-                                  }
-                                  activityLabel={
-                                    message.turn?.id === turn?.id && !continuesBelow ? activityLabel : undefined
-                                  }
-                                  onToggle={() => inspectActivity(thinking && !!turn && message.turn?.id === turn.id)}
-                                />
-                                <MemoryChanges tools={message.tools} />
-                                {message.turn?.id === turn?.id && !continuesBelow && (
-                                  <LiveNarration text={narration} saved={savedNarration} />
-                                )}
-                                {message.turn?.status === 'waiting' &&
-                                  (() => {
-                                    const note = message.tools.filter(tool => tool.narration).at(-1)?.narration;
-                                    return note ? <StepNarration text={note} /> : null;
-                                  })()}
-                                {message.parts.map((part, index) =>
-                                  part.kind === 'request' ? (
-                                    <InteractionCard key={index} api={api} chatId={chatId} reference={part} />
-                                  ) : null,
-                                )}
-                                {message.tools.map(tool => {
-                                  const replyTurn = message.turn;
-                                  return tool.tool === 'agents.delegate' ? (
-                                    <SubagentFanout
-                                      key={`subagents:${tool.id}`}
-                                      tool={tool}
-                                      live={stream.subagents?.get(tool.id)}
-                                      families={modelFamilies}
-                                      stop={
-                                        replyTurn?.status === 'processing'
-                                          ? key =>
-                                              api.stopSubagent(
-                                                chatId,
-                                                replyTurn.id,
-                                                tool.id,
-                                                key,
-                                                AbortSignal.timeout(15_000),
-                                              )
-                                          : undefined
-                                      }
-                                    />
-                                  ) : null;
-                                })}
-                                <ConversationTools
-                                  api={api}
-                                  chatId={chatId}
-                                  slug={workspaceSlug}
-                                  message={message}
-                                  changed={read.refresh}
-                                  githubLocked={
-                                    locked ||
-                                    history.messages.some(
-                                      item =>
-                                        item.turn && !['completed', 'cancelled', 'blocked'].includes(item.turn.status),
-                                    )
-                                  }
-                                  pickGitHub={pickGitHub}
-                                  correct={() => composerInput.current?.focus()}
-                                />
-                                {message.turn?.status === 'cancelled' &&
-                                  !history.messages.some(item => item.stoppedTurnId === message.turn?.id) && (
-                                    <Message align="start">
-                                      <MessageContent>
-                                        <p className="text-xs text-muted-foreground">{turnLabels.cancelled}</p>
-                                      </MessageContent>
-                                    </Message>
+                                  className={answered ? 'mb-3 space-y-3' : 'space-y-3'}
+                                >
+                                  <ConversationEntry
+                                    api={api}
+                                    chatId={chatId}
+                                    slug={workspaceSlug}
+                                    message={message}
+                                    latest={index === history.messages.length - 1}
+                                    rowViews={entryDetails(history.messages, modelFamilies).rowViews[index]!}
+                                    stats={entryDetails(history.messages, modelFamilies).stats[index]}
+                                    modelName={entryModelName}
+                                    fallbackTurn={entryDetails(history.messages, modelFamilies).fallbacks.get(
+                                      message.id,
+                                    )}
+                                    fallbackControls={
+                                      entryDetails(history.messages, modelFamilies).fallbacks.has(message.id)
+                                        ? fallbackControls
+                                        : undefined
+                                    }
+                                    disabled={locked}
+                                    retryHandoff={retryHandoff}
+                                    control={controlEntry}
+                                  />
+                                  {queuedMessages.includes(message) && message.turn && (
+                                    <div className="flex flex-col items-end gap-2">
+                                      <p role="status" className="text-sm text-muted-foreground">
+                                        {queueLabel}
+                                      </p>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        disabled={locked}
+                                        onClick={() =>
+                                          submit({
+                                            kind: 'cancel',
+                                            chatId,
+                                            commandId: crypto.randomUUID(),
+                                            turnId: message.turn!.id,
+                                            expectedGeneration: message.turn!.generation,
+                                          })
+                                        }
+                                      >
+                                        Remove queued message
+                                      </Button>
+                                    </div>
                                   )}
-                              </li>
-                            ),
-                            index === replyAfter ? liveReply(history.messages, index) : null,
-                          ]),
+                                  <ToolActivity
+                                    key="activity"
+                                    variant="transcript"
+                                    items={toolActivityItems(message.tools, { admin })}
+                                    active={
+                                      thinking &&
+                                      !read.uncertain &&
+                                      !!turn &&
+                                      message.turn?.id === turn.id &&
+                                      !continuesBelow
+                                    }
+                                    activityLabel={
+                                      message.turn?.id === turn?.id && !continuesBelow ? activityLabel : undefined
+                                    }
+                                    onToggle={() => inspectActivity(thinking && !!turn && message.turn?.id === turn.id)}
+                                  />
+                                  <MemoryChanges tools={message.tools} />
+                                  {message.turn?.id === turn?.id && !continuesBelow && (
+                                    <LiveNarration text={narration} saved={savedNarration} />
+                                  )}
+                                  {message.turn?.status === 'waiting' &&
+                                    (() => {
+                                      const note = message.tools.filter(tool => tool.narration).at(-1)?.narration;
+                                      return note ? <StepNarration text={note} /> : null;
+                                    })()}
+                                  {message.parts.map((part, index) =>
+                                    part.kind === 'request' ? (
+                                      <InteractionCard key={index} api={api} chatId={chatId} reference={part} />
+                                    ) : null,
+                                  )}
+                                  {message.tools.map(tool => {
+                                    const replyTurn = message.turn;
+                                    return tool.tool === 'agents.delegate' ? (
+                                      <SubagentFanout
+                                        key={`subagents:${tool.id}`}
+                                        tool={tool}
+                                        live={stream.subagents?.get(tool.id)}
+                                        families={modelFamilies}
+                                        stop={
+                                          replyTurn?.status === 'processing'
+                                            ? key =>
+                                                api.stopSubagent(
+                                                  chatId,
+                                                  replyTurn.id,
+                                                  tool.id,
+                                                  key,
+                                                  AbortSignal.timeout(15_000),
+                                                )
+                                            : undefined
+                                        }
+                                      />
+                                    ) : null;
+                                  })}
+                                  <ConversationTools
+                                    api={api}
+                                    chatId={chatId}
+                                    slug={workspaceSlug}
+                                    message={message}
+                                    changed={read.refresh}
+                                    githubLocked={
+                                      locked ||
+                                      history.messages.some(
+                                        item =>
+                                          item.turn &&
+                                          !['completed', 'cancelled', 'blocked'].includes(item.turn.status),
+                                      )
+                                    }
+                                    pickGitHub={pickGitHub}
+                                    correct={() => composerInput.current?.focus()}
+                                  />
+                                  {message.turn?.status === 'cancelled' &&
+                                    !history.messages.some(item => item.stoppedTurnId === message.turn?.id) && (
+                                      <Message align="start">
+                                        <MessageContent>
+                                          <p className="text-xs text-muted-foreground">{turnLabels.cancelled}</p>
+                                        </MessageContent>
+                                      </Message>
+                                    )}
+                                </li>
+                              ),
+                              live,
+                            ];
+                          }),
                           pending ? (
                             <li
                               key="pending"
-                              className={`space-y-3 ${!compact && visible ? 'chat-sent-transition' : ''}`.trim()}
+                              className={`space-y-3 ${trailingReply(history.messages) && !incomingTurns.length ? 'mb-3' : ''} ${!compact && visible ? 'chat-sent-transition' : ''}`.trim()}
                             >
                               <Message align="end">
                                 <MessageContent>
@@ -1632,7 +1651,7 @@ function ConversationDetail({
                             </li>
                           )),
                         ]}
-                        {replyAfter === null && liveReply(history.messages, history.messages.length - 1)}
+                        {trailingReply(history.messages)}
                         {read.uncertain && (
                           <li>
                             <Alert>
