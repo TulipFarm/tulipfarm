@@ -599,6 +599,7 @@ export function createWorkspaceMembersMock(scenario?: string) {
               revisionId: null,
               updatedAt: null,
               size: 0,
+              content: '',
             },
             {
               path: '/you/about.md',
@@ -608,6 +609,7 @@ export function createWorkspaceMembersMock(scenario?: string) {
               revisionId: null,
               updatedAt: null,
               size: 0,
+              content: '',
             },
           ],
         });

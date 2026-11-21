@@ -81,6 +81,7 @@ if (import.meta.env.DEV && /^\/memory-mock(?:\/|$)/.test(window.location.pathnam
   let failed = false;
   let readFailures = 0;
   const listed = () => files.map(({ content: _content, ...entry }) => entry);
+  const withContent = () => files.map(entry => ({ ...entry }));
   const original = window.fetch.bind(window);
   window.fetch = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input), window.location.origin);
@@ -101,7 +102,7 @@ if (import.meta.env.DEV && /^\/memory-mock(?:\/|$)/.test(window.location.pathnam
           failed = true;
           await new Promise(resolve => setTimeout(resolve, 1800));
         }
-        return Response.json({ files: listed() });
+        return Response.json({ files: withContent() });
       }
       if (path.endsWith('/files/read')) {
         const found = files.find(entry => entry.path === url.searchParams.get('path'));
@@ -137,7 +138,7 @@ if (import.meta.env.DEV && /^\/memory-mock(?:\/|$)/.test(window.location.pathnam
           found.group === 'you'
             ? files.map(entry => (entry === found ? file(found.path, found.name, found.description, '', 0) : entry))
             : files.filter(entry => entry !== found);
-        return Response.json({ files: listed() });
+        return Response.json({ files: withContent() });
       }
       if (path.endsWith('/instruct') && method === 'POST') {
         await new Promise(resolve => setTimeout(resolve, 900));

@@ -198,6 +198,7 @@ test(
     await service.save(w.id, memberUser, { content: '- Reply in French.', expectedRevision: 0 });
     const [preferences] = (await service.files(w.id, memberUser)).files;
     assert.equal(preferences.name, 'Preferences', 'earlier memory shows as Preferences');
+    assert.equal(preferences.content, '- Reply in French.', 'the list carries each file’s text');
     assert.equal(preferences.description, 'How you want Bud to respond');
     assert.ok(preferences.updatedAt);
 
@@ -274,10 +275,10 @@ test(
       expectedRevisionId: profile.revisionId,
     });
     assert.deepEqual(
-      left.files.map(file => [file.path, file.revisionId === null]),
+      left.files.map(file => [file.path, file.revisionId === null, file.content]),
       [
-        ['/profile.md', false],
-        ['/you/about.md', true],
+        ['/profile.md', false, '- Reply in French.'],
+        ['/you/about.md', true, ''],
       ],
       'a cleared You file stays listed',
     );

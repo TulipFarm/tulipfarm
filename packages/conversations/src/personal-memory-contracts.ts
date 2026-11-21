@@ -67,9 +67,10 @@ export const memoryFileSchema = z.strictObject({
   size: z.number().int().nonnegative(),
 });
 export type MemoryFile = z.infer<typeof memoryFileSchema>;
-export const memoryFilesSchema = z.strictObject({ files: z.array(memoryFileSchema) });
 export const memoryFileContentSchema = memoryFileSchema.extend({ content: z.string() });
 export type MemoryFileContent = z.infer<typeof memoryFileContentSchema>;
+/** Every file with its text; files are small and capped, so the memory page loads in one request. */
+export const memoryFilesSchema = z.strictObject({ files: z.array(memoryFileContentSchema) });
 export const memoryFilePathSchema = z.strictObject({ path: memoryPathSchema });
 
 export const saveMemoryFileSchema = z.strictObject({

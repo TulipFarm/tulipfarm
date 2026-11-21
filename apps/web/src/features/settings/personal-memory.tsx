@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { cn } from 'cn';
 import {
   memoryFileContentSchema,
   memoryFileMaximumBytes,
@@ -20,16 +21,9 @@ import {
   AlertDialogTitle,
 } from '@tulipfarm/sprout/alert-dialog';
 import { Button } from '@tulipfarm/sprout/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@tulipfarm/sprout/dialog';
 import { Field } from '@tulipfarm/sprout/field';
 import { Form, FormSection } from '@tulipfarm/sprout/form';
+import { MessageResponse } from '@tulipfarm/sprout/message-response';
 import { SettingsGroup, SettingsRow } from '@tulipfarm/sprout/settings-list';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Textarea } from '@tulipfarm/sprout/textarea';
@@ -100,18 +94,18 @@ export function describeChanges(changed: MemoryFileChange[], files: MemoryFile[]
 type Load = { kind: 'loading' } | { kind: 'load-error' } | { kind: 'unavailable' } | { kind: 'service-unavailable' };
 
 export function PersonalMemoryEditor({ workspaceId, workspaceName }: { workspaceId: string; workspaceName: string }) {
-  const [files, setFiles] = useState<MemoryFile[] | null>(null);
+  const [files, setFiles] = useState<MemoryFileContent[] | null>(null);
   const [load, setLoad] = useState<Load | null>({ kind: 'loading' });
-  const [open, setOpen] = useState<MemoryFile | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
   const active = useRef<AbortController | null>(null);
   const path = `/workspaces/${encodeURIComponent(workspaceId)}/personal-memory`;
 
-  async function read() {
+  async function read(quiet = false) {
     active.current?.abort();
     const controller = new AbortController();
     active.current = controller;
-    setLoad({ kind: 'loading' });
+    if (!quiet) setLoad({ kind: 'loading' });
     try {
       const result = memoryFilesSchema.parse(await settingsRequest(`${path}/files`, signalFor(controller)));
       if (controller.signal.aborted) return;
@@ -185,145 +179,156 @@ export function PersonalMemoryEditor({ workspaceId, workspaceName }: { workspace
               </p>
             )}
             {memoryGroups.map(group => (
-              <MemoryGroupList
-                key={group}
-                group={group}
-                files={files.filter(file => file.group === group)}
-                onOpen={file => {
-                  setNotice('');
-                  setOpen(file);
-                }}
-              />
+              <MemoryGroupList key={group} group={group} empty={files.every(file => file.group !== group)}>
+                {files
+                  .filter(file => file.group === group)
+                  .map(file => (
+                    <MemoryFileItem
+                      key={file.path}
+                      path={path}
+                      file={file}
+                      editing={editing === file.path}
+                      locked={editing !== null && editing !== file.path}
+                      onEditing={next => {
+                        setNotice('');
+                        setEditing(next ? file.path : null);
+                      }}
+                      onSaved={saved => setFiles(current => current && replace(current, saved))}
+                      onFiles={(next, message) => {
+                        setEditing(null);
+                        setFiles(next);
+                        setNotice(message);
+                      }}
+                    />
+                  ))}
+              </MemoryGroupList>
             ))}
             <MemoryInstruction
               path={path}
-              onFiles={next => {
+              onChanged={() => {
                 setNotice('');
-                setFiles(next);
+                void read(true);
               }}
               onLost={() => void read()}
             />
           </div>
         )
       )}
-      {open && (
-        <MemoryFileDialog
-          path={path}
-          file={open}
-          onClose={() => setOpen(null)}
-          onFiles={(next, message) => {
-            setFiles(next);
-            setOpen(null);
-            setNotice(message);
-          }}
-          onSaved={saved => setFiles(current => current && replace(current, saved))}
-        />
-      )}
     </FormSection>
   );
 }
 
-function replace(files: MemoryFile[], saved: MemoryFileContent): MemoryFile[] {
-  const { content: _content, ...file } = saved;
-  return files.some(entry => entry.path === file.path)
-    ? files.map(entry => (entry.path === file.path ? file : entry))
-    : [...files, file];
+function replace(files: MemoryFileContent[], saved: MemoryFileContent) {
+  return files.some(entry => entry.path === saved.path)
+    ? files.map(entry => (entry.path === saved.path ? saved : entry))
+    : [...files, saved];
 }
 
-function MemoryGroupList({
-  group,
-  files,
-  onOpen,
-}: {
-  group: MemoryGroup;
-  files: MemoryFile[];
-  onOpen: (file: MemoryFile) => void;
-}) {
+function MemoryGroupList({ group, empty, children }: { group: MemoryGroup; empty: boolean; children: ReactNode }) {
   const copy = groups[group];
-  const id = `memory-group-${group}`;
   return (
-    <SettingsGroup title={copy.title} titleId={id} heading="h3">
+    <SettingsGroup title={copy.title} titleId={`memory-group-${group}`} heading="h3">
       <p className="px-4 py-3 text-sm text-muted-foreground">{copy.hint}</p>
-      {files.length === 0 && <p className="px-4 py-3 text-sm">{copy.empty}</p>}
-      {files.map(file => (
-        <SettingsRow
-          key={file.path}
-          label={file.name}
-          description={
-            <>
-              {file.description && <span className="line-clamp-1">{file.description}</span>}
-              <span className="block text-xs">
-                {file.revisionId && file.updatedAt ? `Updated ${updatedAgo(file.updatedAt)}` : 'Empty'}
-              </span>
-            </>
-          }
-        >
-          <Button variant="outline" size="sm" aria-label={`Open ${file.name}`} onClick={() => onOpen(file)}>
-            Open
-          </Button>
-        </SettingsRow>
-      ))}
+      {empty && <p className="px-4 py-3 text-sm">{copy.empty}</p>}
+      {children}
     </SettingsGroup>
   );
 }
 
+/** Matches `max-h-40`. */
+const clampHeight = 160;
+
+/** The file's text as Markdown, cut to a few lines until the reader asks for the rest. */
+function MemoryText({ id, content }: { id: string; content: string }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [long, setLong] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (!element) return;
+    const measure = () => setLong(element.scrollHeight > clampHeight + 8);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [content]);
+  const clamped = long && !expanded;
+  return (
+    <div className="grid justify-items-start gap-1">
+      <div
+        ref={box}
+        id={id}
+        className={cn('w-full overflow-hidden', clamped && 'max-h-40 mask-b-from-60% mask-b-to-100%')}
+      >
+        <MessageResponse>{content}</MessageResponse>
+      </div>
+      {long && (
+        <Button
+          variant="link"
+          size="sm"
+          aria-controls={id}
+          aria-expanded={expanded}
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 type FileState =
-  | { kind: 'loading' }
-  | { kind: 'load-error' }
   | { kind: 'ready' }
   | { kind: 'saving' }
   | { kind: 'saved' }
+  | { kind: 'reloading' }
   | { kind: 'conflict' }
   | { kind: 'error'; message: string };
 
-function MemoryFileDialog({
+function MemoryFileItem({
   path,
   file,
-  onClose,
-  onFiles,
+  editing,
+  locked,
+  onEditing,
   onSaved,
+  onFiles,
 }: {
   path: string;
-  file: MemoryFile;
-  onClose: () => void;
-  onFiles: (files: MemoryFile[], message: string) => void;
+  file: MemoryFileContent;
+  editing: boolean;
+  locked: boolean;
+  onEditing: (editing: boolean) => void;
   onSaved: (file: MemoryFileContent) => void;
+  onFiles: (files: MemoryFileContent[], message: string) => void;
 }) {
-  const [state, setState] = useState<FileState>({ kind: 'loading' });
-  const [saved, setSaved] = useState<MemoryFileContent | null>(null);
+  const [state, setState] = useState<FileState>({ kind: 'ready' });
+  const [base, setBase] = useState(file);
   const [draft, setDraft] = useState('');
   const [confirming, setConfirming] = useState(false);
   const active = useRef<AbortController | null>(null);
+  const editButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => () => active.current?.abort(), []);
   const you = file.group === 'you';
-  const name = saved?.name ?? file.name;
+  const name = file.name;
   const size = encoder.encode(draft).length;
   const tooLong = size > memoryFileMaximumBytes;
-  const dirty = saved !== null && draft !== saved.content;
-  const pending = state.kind === 'saving';
+  const dirty = editing && draft !== base.content;
+  const pending = state.kind === 'saving' || state.kind === 'reloading';
+  const editorId = `memory-file-${file.path.replace(/[^a-z0-9]+/gi, '-')}`;
 
-  async function read() {
-    active.current?.abort();
-    const controller = new AbortController();
-    active.current = controller;
-    setState({ kind: 'loading' });
-    try {
-      const result = memoryFileContentSchema.parse(
-        await settingsRequest(`${path}/files/read?path=${encodeURIComponent(file.path)}`, signalFor(controller)),
-      );
-      if (controller.signal.aborted) return;
-      setSaved(result);
-      setDraft(result.content);
-      setState({ kind: 'ready' });
-    } catch {
-      if (!controller.signal.aborted) setState({ kind: 'load-error' });
-    } finally {
-      if (active.current === controller) active.current = null;
-    }
+  function start() {
+    setBase(file);
+    setDraft(file.content);
+    setState({ kind: 'ready' });
+    onEditing(true);
   }
-  useEffect(() => {
-    void read();
-    return () => active.current?.abort();
-  }, []);
+  function stop() {
+    active.current?.abort();
+    setState({ kind: 'ready' });
+    onEditing(false);
+    requestAnimationFrame(() => editButton.current?.focus());
+  }
 
   function failure(error: unknown, action: 'save' | 'delete' | 'clear') {
     const code = status(error);
@@ -339,8 +344,28 @@ function MemoryFileDialog({
     });
   }
 
+  async function reload() {
+    const controller = new AbortController();
+    active.current = controller;
+    setState({ kind: 'reloading' });
+    try {
+      const result = memoryFileContentSchema.parse(
+        await settingsRequest(`${path}/files/read?path=${encodeURIComponent(file.path)}`, signalFor(controller)),
+      );
+      if (controller.signal.aborted) return;
+      setBase(result);
+      setDraft(result.content);
+      onSaved(result);
+      setState({ kind: 'ready' });
+    } catch {
+      if (!controller.signal.aborted) setState({ kind: 'error', message: `Couldn’t load ${name}. Try again.` });
+    } finally {
+      if (active.current === controller) active.current = null;
+    }
+  }
+
   async function save() {
-    if (!saved || pending || tooLong || !dirty) return;
+    if (pending || tooLong || !dirty || state.kind === 'conflict') return;
     const controller = new AbortController();
     active.current = controller;
     setState({ kind: 'saving' });
@@ -349,14 +374,14 @@ function MemoryFileDialog({
         await settingsRequest(`${path}/files`, signalFor(controller), 'PUT', {
           path: file.path,
           content: draft,
-          expectedRevisionId: saved.revisionId,
+          expectedRevisionId: base.revisionId,
         }),
       );
       if (controller.signal.aborted) return;
-      setSaved(result);
-      setDraft(result.content);
       onSaved(result);
+      onEditing(false);
       setState({ kind: 'saved' });
+      requestAnimationFrame(() => editButton.current?.focus());
     } catch (error) {
       if (!controller.signal.aborted) failure(error, 'save');
     } finally {
@@ -365,7 +390,7 @@ function MemoryFileDialog({
   }
 
   async function remove() {
-    if (!saved?.revisionId || pending) return;
+    if (!base.revisionId || pending) return;
     const controller = new AbortController();
     active.current = controller;
     setState({ kind: 'saving' });
@@ -373,10 +398,11 @@ function MemoryFileDialog({
       const result = memoryFilesSchema.parse(
         await settingsRequest(`${path}/files`, signalFor(controller), 'DELETE', {
           path: file.path,
-          expectedRevisionId: saved.revisionId,
+          expectedRevisionId: base.revisionId,
         }),
       );
       if (controller.signal.aborted) return;
+      setState({ kind: 'ready' });
       onFiles(result.files, you ? `${name} cleared.` : `${name} deleted.`);
     } catch (error) {
       if (!controller.signal.aborted) failure(error, you ? 'clear' : 'delete');
@@ -387,106 +413,119 @@ function MemoryFileDialog({
   }
 
   return (
-    <Dialog
-      open
-      onOpenChange={next => {
-        if (!next && !pending) onClose();
-      }}
-    >
-      <DialogContent size="form">
-        <UnsavedChanges dirty={dirty && !pending} />
-        <DialogHeader>
-          <DialogTitle>{name}</DialogTitle>
-          <DialogDescription>{saved?.description ?? file.description}</DialogDescription>
-        </DialogHeader>
-        <div className="-mx-4 min-h-0 space-y-4 overflow-y-auto px-4 pb-1">
-          {state.kind === 'loading' && (
-            <p role="status" className="text-sm text-muted-foreground">
-              Loading {name}…
-            </p>
-          )}
-          {state.kind === 'load-error' && (
-            <Alert variant="destructive">
-              <AlertDescription>Couldn’t load {name}. Try again.</AlertDescription>
-            </Alert>
-          )}
-          {saved && (
-            <Form label={name} disabled={pending} onSubmit={() => void save()}>
+    <div data-memory-file={file.path}>
+      <SettingsRow
+        label={name}
+        description={
+          <>
+            {file.description && <span className="line-clamp-1">{file.description}</span>}
+            {file.revisionId && file.updatedAt && (
+              <span className="block text-xs">Updated {updatedAgo(file.updatedAt)}</span>
+            )}
+          </>
+        }
+      >
+        {!editing && (
+          <Button
+            ref={editButton}
+            variant="outline"
+            size="sm"
+            aria-label={`Edit ${name}`}
+            disabled={locked}
+            onClick={start}
+          >
+            Edit
+          </Button>
+        )}
+      </SettingsRow>
+      <div className="grid gap-3 px-4 pb-3">
+        {!editing ? (
+          <>
+            {file.content.trim() ? (
+              <MemoryText id={`${editorId}-text`} content={file.content} />
+            ) : (
+              <p className="text-sm text-muted-foreground">Empty</p>
+            )}
+            {state.kind === 'saved' && (
+              <p role="status" className="text-sm text-muted-foreground">
+                Saved. Bud uses the new version from now on.
+              </p>
+            )}
+          </>
+        ) : (
+          <Form label={name} disabled={pending} onSubmit={() => void save()}>
+            <UnsavedChanges dirty={dirty && !pending} />
+            <div className="grid gap-3">
               <Field
-                id="memory-file-content"
-                label="Contents"
+                id={editorId}
+                label={`${name} contents`}
                 optional
                 counter={`${size.toLocaleString()} / ${memoryFileMaximumBytes.toLocaleString()} bytes`}
                 helper="Markdown is supported. Changes apply as soon as you save."
                 error={tooLong ? 'This file is too long. Shorten it to under 8 KB, then save.' : undefined}
               >
                 <Textarea
-                  rows={14}
+                  rows={Math.min(14, Math.max(4, draft.split('\n').length + 1))}
                   value={draft}
+                  autoFocus
                   readOnly={state.kind === 'conflict'}
                   onChange={event => {
                     setDraft(event.target.value);
-                    if (state.kind === 'saved' || state.kind === 'error') setState({ kind: 'ready' });
+                    if (state.kind === 'error') setState({ kind: 'ready' });
+                  }}
+                  onKeyDown={event => {
+                    if (event.key === 'Escape' && !dirty && !pending) {
+                      event.preventDefault();
+                      stop();
+                    }
                   }}
                 />
               </Field>
-            </Form>
-          )}
-          {state.kind === 'saved' && (
-            <p role="status" className="text-sm text-muted-foreground">
-              Saved. Bud uses the new version from now on.
-            </p>
-          )}
-          {state.kind === 'error' && (
-            <Alert variant="destructive">
-              <AlertDescription>{state.message}</AlertDescription>
-            </Alert>
-          )}
-          {state.kind === 'conflict' && (
-            <Alert>
-              <AlertDescription>
-                This file changed after you opened it, so nothing was saved. Copy your edits if you want them, then
-                reload to see the latest version.
-              </AlertDescription>
-              <div className="mt-3">
-                <Button variant="outline" onClick={() => void read()}>
-                  Reload
+              {state.kind === 'error' && (
+                <Alert variant="destructive">
+                  <AlertDescription>{state.message}</AlertDescription>
+                </Alert>
+              )}
+              {state.kind === 'conflict' && (
+                <Alert>
+                  <AlertDescription>
+                    This file changed after you started editing, so nothing was saved. Copy your edits if you want them,
+                    then reload to see the latest version.
+                  </AlertDescription>
+                  <div className="mt-3">
+                    <Button variant="outline" onClick={() => void reload()}>
+                      Reload
+                    </Button>
+                  </div>
+                </Alert>
+              )}
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="submit"
+                  disabled={!dirty || tooLong || state.kind === 'conflict'}
+                  aria-busy={state.kind === 'saving'}
+                >
+                  {state.kind === 'saving' ? 'Saving…' : 'Save'}
                 </Button>
+                <Button variant="outline" disabled={pending} onClick={stop}>
+                  Cancel
+                </Button>
+                {base.revisionId && (
+                  <div className="ml-auto">
+                    <Button
+                      variant="ghost-destructive"
+                      disabled={pending || state.kind === 'conflict'}
+                      onClick={() => setConfirming(true)}
+                    >
+                      {you ? 'Clear' : 'Delete'}
+                    </Button>
+                  </div>
+                )}
               </div>
-            </Alert>
-          )}
-        </div>
-        <DialogFooter>
-          {state.kind === 'load-error' && (
-            <Button variant="outline" onClick={() => void read()}>
-              Try again
-            </Button>
-          )}
-          {saved?.revisionId && (
-            <div className="sm:mr-auto">
-              <Button
-                variant="ghost-destructive"
-                disabled={pending || state.kind === 'conflict'}
-                onClick={() => setConfirming(true)}
-              >
-                {you ? 'Clear' : 'Delete'}
-              </Button>
             </div>
-          )}
-          <Button variant="outline" disabled={pending} onClick={onClose}>
-            {dirty ? 'Cancel' : 'Close'}
-          </Button>
-          {saved && (
-            <Button
-              disabled={!dirty || tooLong || state.kind === 'conflict'}
-              aria-busy={pending}
-              onClick={() => void save()}
-            >
-              {pending ? 'Saving…' : 'Save'}
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
+          </Form>
+        )}
+      </div>
       {confirming && (
         <AlertDialog
           open
@@ -510,7 +549,7 @@ function MemoryFileDialog({
           </AlertDialogContent>
         </AlertDialog>
       )}
-    </Dialog>
+    </div>
   );
 }
 
@@ -525,15 +564,7 @@ function instructionError(error: unknown) {
   return 'Couldn’t update memory. Your text is kept. Try again.';
 }
 
-function MemoryInstruction({
-  path,
-  onFiles,
-  onLost,
-}: {
-  path: string;
-  onFiles: (files: MemoryFile[]) => void;
-  onLost: () => void;
-}) {
+function MemoryInstruction({ path, onChanged, onLost }: { path: string; onChanged: () => void; onLost: () => void }) {
   const [instruction, setInstruction] = useState('');
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<{ kind: 'done' | 'error'; message: string } | null>(null);
@@ -555,7 +586,7 @@ function MemoryInstruction({
         }),
       );
       if (controller.signal.aborted) return;
-      onFiles(value.files);
+      if (value.changed.length) onChanged();
       setInstruction('');
       setResult({
         kind: 'done',

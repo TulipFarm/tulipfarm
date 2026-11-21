@@ -82,6 +82,7 @@ function fixture(route) {
           revisionId: null,
           updatedAt: null,
           size: 0,
+          content: '',
         },
         {
           path: '/you/about.md',
@@ -91,6 +92,7 @@ function fixture(route) {
           revisionId: null,
           updatedAt: null,
           size: 0,
+          content: '',
         },
       ],
     });

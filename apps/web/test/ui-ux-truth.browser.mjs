@@ -131,6 +131,7 @@ function fixture(state) {
             revisionId: null,
             updatedAt: null,
             size: 0,
+            content: '',
           },
           {
             path: '/you/about.md',
@@ -140,6 +141,7 @@ function fixture(state) {
             revisionId: null,
             updatedAt: null,
             size: 0,
+            content: '',
           },
         ],
       });

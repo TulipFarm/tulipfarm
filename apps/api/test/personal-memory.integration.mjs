@@ -142,6 +142,11 @@ test(
       assert.deepEqual([career.name, career.group, career.content], ['Career', 'topics', '- Wants a COO role.']);
       assert.equal((await call('PUT', '/files', topic)).statusCode, 409, 'creating needs a free path');
       assert.equal(
+        (await call('GET', '/files')).json().files.find(file => file.path === '/topics/career.md').content,
+        '- Wants a COO role.',
+        'the list carries each file’s text',
+      );
+      assert.equal(
         (await call('GET', `/files/read?path=${encodeURIComponent('/topics/career.md')}`)).json().content,
         '- Wants a COO role.',
       );

@@ -260,6 +260,25 @@ test(
             await trigger.waitFor();
             const change = page.getByRole('list', { name: 'Changes' }).getByRole('listitem');
             assert.equal(await change.textContent(), 'Updated memory Preferences');
+            if (!mobile) {
+              const gaps = await page.evaluate(() => {
+                const items = [...document.querySelectorAll('ol[aria-label="Messages"] > li')];
+                const at = text => items.findIndex(item => item.textContent.includes(text));
+                const turn = items[at('Check the table definitions.')];
+                const reply = turn.nextElementSibling;
+                return {
+                  turnToReply: Math.round(reply.getBoundingClientRect().top - turn.getBoundingClientRect().bottom),
+                  betweenExchanges: Math.round(
+                    reply.nextElementSibling.getBoundingClientRect().top - reply.getBoundingClientRect().bottom,
+                  ),
+                };
+              });
+              assert.deepEqual(
+                gaps,
+                { turnToReply: 12, betweenExchanges: 32 },
+                'a turn and its reply read as one block',
+              );
+            }
             assert.equal(await page.getByRole('button', { name: /undo/i }).count(), 0);
             assert.deepEqual(state.reads, [], 'evidence is not read until the citation opens');
 

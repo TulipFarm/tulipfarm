@@ -113,6 +113,7 @@ export async function startFixture() {
               revisionId: 'r1',
               updatedAt: '2026-10-14T10:00:00.000Z',
               size: 44,
+              content: 'Use short, friendly replies.',
             },
             {
               path: '/you/about.md',
@@ -122,6 +123,7 @@ export async function startFixture() {
               revisionId: null,
               updatedAt: null,
               size: 0,
+              content: '',
             },
           ],
         };

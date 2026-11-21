@@ -165,6 +165,7 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 36
                 revisionId: 'r1',
                 updatedAt: '2026-10-14T10:00:00.000Z',
                 size: 44,
+                content: 'Use short, friendly replies.',
               },
               {
                 path: '/you/about.md',
@@ -174,6 +175,7 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 36
                 revisionId: null,
                 updatedAt: null,
                 size: 0,
+                content: '',
               },
             ],
           });
