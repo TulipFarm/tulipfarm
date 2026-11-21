@@ -57,16 +57,16 @@ export function createPostgresEmbeddingRepository(
         values,
       );
     },
-    changedEpochJobs(values: [providers: string[]]) {
+    changedEpochJobs(values: [providers: string[], ids: string[] | null]) {
       return client.query(
         `SELECT j.* FROM ${table('embedding_jobs')} j
       JOIN ${table('documents')} d ON d.id=j.document_id AND d.observed_revision_id=j.revision_id AND d.lexical_publication_id=j.publication_id
       JOIN ${table('sources')} s ON s.id=d.source_id
       WHERE s.provider=ANY($1::text[]) AND s.state='active' AND d.tombstoned_at IS NULL AND s.access_epoch<>j.access_epoch
-        AND j.state IN ('queued','capacity-blocked','failed','ready')
+        AND j.state IN ('queued','capacity-blocked','failed','ready') AND ($2::uuid[] IS NULL OR j.id=ANY($2::uuid[]))
         AND (SELECT count(*) FROM ${table('embedding_items')} i JOIN ${table('embedding_cache')} c USING(profile_id,input_hash)
           WHERE i.job_id=j.id AND c.state IN ('queued','ready'))=j.total_chunks
-      ORDER BY j.id LIMIT 100 FOR UPDATE OF j`,
+      ORDER BY j.id LIMIT 100${values[1] ? ' FOR UPDATE OF j' : ''}`,
         values,
       );
     },
@@ -306,17 +306,18 @@ export function createPostgresEmbeddingRepository(
         values,
       );
     },
-    dueJobs(values: [profileId: string, held: string[]]) {
+    dueJobs(values: [profileId: string, held: string[], ids: string[] | null]) {
       return client.query(
         `SELECT j.* FROM (
           SELECT j.* FROM ${table('embedding_jobs')} j
           WHERE j.state IN ('queued','capacity-blocked') AND j.dispatch_after<=clock_timestamp()
+            AND ($3::uuid[] IS NULL OR j.id=ANY($3::uuid[]))
           UNION
           SELECT j.* FROM ${table('documents')} d JOIN ${table('sources')} s ON s.id=d.source_id
           JOIN ${table('embedding_jobs')} j ON j.publication_id=d.lexical_publication_id AND j.profile_id=$1
           WHERE d.tombstoned_at IS NULL AND d.lexical_publication_id IS NOT NULL AND d.vector_publication_id IS NULL
             AND j.purpose='ingestion' AND j.document_id=d.id AND j.revision_id=d.observed_revision_id
-            AND s.state='active' AND s.access_epoch=j.access_epoch
+            AND s.state='active' AND s.access_epoch=j.access_epoch AND ($3::uuid[] IS NULL OR j.id=ANY($3::uuid[]))
             AND (SELECT count(*) FROM ${table('embedding_items')} i JOIN ${table('embedding_vectors')} v USING (profile_id,input_hash)
               WHERE i.job_id=j.id)=j.total_chunks) j
         WHERE NOT (j.purpose='ingestion' AND EXISTS (SELECT 1 FROM ${table('documents')} d WHERE d.id=j.document_id AND d.source_id=ANY($2::uuid[])))

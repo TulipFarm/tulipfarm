@@ -7,7 +7,8 @@ export interface EmbeddingRepository {
   forgetOtherProfileVectors(values: [profileId: string, limit: number]): Promise<RepositoryResult>;
   finishForgetting(values: [profileId: string]): Promise<RepositoryResult>;
   profileMatches(values: [id: string, profile: unknown]): Promise<RepositoryResult>;
-  changedEpochJobs(values: [providers: string[]]): Promise<RepositoryResult>;
+  /** Jobs whose source access changed; only `ids` when given, which are locked for update. */
+  changedEpochJobs(values: [providers: string[], ids: string[] | null]): Promise<RepositoryResult>;
   rebindEpoch(values: [id: string, epoch: number]): Promise<RepositoryResult>;
   lockJob(values: [id: string]): Promise<RepositoryResult>;
   lockQueryJob(values: [membershipId: string, commandId: string]): Promise<RepositoryResult>;
@@ -81,7 +82,8 @@ export interface EmbeddingRepository {
   expiredClaims(): Promise<RepositoryResult>;
   recoverClaim(values: [profileId: string, hash: string, state: string]): Promise<RepositoryResult>;
   rebindOwner(values: [jobId: string, membershipId: string, userId: string]): Promise<RepositoryResult>;
-  dueJobs(values: [profileId: string, held: string[]]): Promise<RepositoryResult>;
+  /** Jobs the sweep should dispatch or publish; only `ids` when given. */
+  dueJobs(values: [profileId: string, held: string[], ids: string[] | null]): Promise<RepositoryResult>;
   deferJob(values: [jobId: string]): Promise<RepositoryResult>;
   setJobState(values: [jobId: string, state: string]): Promise<RepositoryResult>;
   documentJob(
