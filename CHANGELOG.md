@@ -107,7 +107,7 @@ One version identifies all apps and images of a release.
 
 - The earlier personal memory system: its workspace storage, its direct
   learning into members' memory, and undoing a forget from chat. Workspace
-  migration 0099 drops its `tf_personal_memory` and `tf_keep_memory` tables.
+  migration 0100 drops its `tf_personal_memory` and `tf_keep_memory` tables.
 
 ### Fixed
 

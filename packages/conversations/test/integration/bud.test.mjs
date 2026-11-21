@@ -379,7 +379,7 @@ test('a preference saved in the earlier memory can no longer be undone over Keep
     await db.close();
   });
   const migrations = await workspaceTableMigrations();
-  const index = migrations.findIndex(item => item.name === '0099_drop_legacy_personal_memory.sql');
+  const index = migrations.findIndex(item => item.name === '0100_drop_legacy_personal_memory.sql');
   assert.ok(index > 0);
   const w = await db.create(migrations.slice(0, index));
   const table = name => qualified(w.names.schema, name);
