@@ -10,7 +10,7 @@ export type EffectiveCompactionPolicy = {
 };
 export type ContextMeasure = { tokens: number; window: number };
 /** `tool-results` summarises older tool results inside one reply; its steps are the reply's model rounds. */
-export type CompactionPurpose = 'summary' | 'handoff' | 'memory' | 'tool-results';
+export type CompactionPurpose = 'summary' | 'handoff' | 'memory' | 'knowledge' | 'tool-results';
 
 export type Summarizer<PolicyContext, Fence, ReplyFence = Fence> = {
   policy(context: PolicyContext): Promise<EffectiveCompactionPolicy>;

@@ -62,6 +62,8 @@ type Task = z.infer<typeof storedSchema>;
 type Sources = z.infer<typeof taskSourcesSchema>;
 type Scope = z.infer<typeof scopeSchema>;
 type TaskLimits = z.infer<typeof taskLimitsSchema>;
+/** The common schema version that records which owner messages the owner typed. */
+const typedVersion = 105;
 const maximumDelegationDepth = 3;
 const maximumChildTasks = 5;
 const googleIntegrationSchema = z.object({
@@ -118,6 +120,8 @@ export function createAgentTasks(
     actor: HumanActor,
     input: { selectionId: string; version: number; taskId: string; agentId: string },
   ) => Promise<unknown>,
+  /** Set only where the owner types the text themselves, so later learning can tell it from text the server wrote. */
+  options: { ownerTyped?: boolean } = {},
 ) {
   runtime = withTaskTelemetry(runtime);
   async function transaction<T>(
@@ -324,9 +328,11 @@ export function createAgentTasks(
     text: string,
     sources: Sources,
     role: 'owner' | 'agent' = 'owner',
+    typed = false,
   ) {
+    const marked = typed && role === 'owner' && 'commonVersion' in tx && Number(tx.commonVersion) >= typedVersion;
     await tx.client.query(
-      `INSERT INTO ${relation(tx, 'tf_agent_task_messages')} (task_id,sequence,generation,role,text,sources) SELECT $1,COALESCE(max(sequence)+1,0),$2,$3,$4,$5 FROM ${relation(tx, 'tf_agent_task_messages')} WHERE task_id=$1`,
+      `INSERT INTO ${relation(tx, 'tf_agent_task_messages')} (task_id,sequence,generation,role,text,sources${marked ? ',typed' : ''}) SELECT $1,COALESCE(max(sequence)+1,0),$2,$3,$4,$5${marked ? ',true' : ''} FROM ${relation(tx, 'tf_agent_task_messages')} WHERE task_id=$1`,
       [task.id, task.generation, role, text, JSON.stringify(sources)],
     );
     if (role === 'owner' && 'commonVersion' in tx && Number(tx.commonVersion) >= 1)
@@ -381,6 +387,7 @@ export function createAgentTasks(
       flowId?: string;
       /** A chat's sub-agent starts one level below the chat. */
       delegationDepth?: number;
+      typed?: boolean;
     },
   ) {
     const id = randomUUID();
@@ -404,7 +411,7 @@ export function createAgentTasks(
     );
     taskTransition(tx, 'started', inserted.rowCount);
     const task = await owned(tx, actor, id);
-    await append(tx, task, input.text, input.sources);
+    await append(tx, task, input.text, input.sources, 'owner', input.typed);
     return task;
   }
   /** `inherited` sources come from the server, such as plan results copied into the text, never from the person starting the task. */
@@ -462,6 +469,7 @@ export function createAgentTasks(
         const unavailable = await unavailableTableMessage(tx, actor, requested, scope);
         const task = await insert(tx, actor, activation, {
           ...input,
+          typed: options.ownerTyped === true && !knowledgeOrigin,
           scope,
           limits: await clampLimits(tx, input.agentId, input.limits),
           sources,
@@ -724,7 +732,7 @@ export function createAgentTasks(
       );
       taskTransition(tx, 'started', changed.rowCount);
       const reopened = await owned(tx, actor, id);
-      await append(tx, reopened, input.text, sources);
+      await append(tx, reopened, input.text, sources, 'owner', options.ownerTyped === true);
       return saveReceipt(tx, actor, input.requestId, command.digest, reopened);
     });
   }
@@ -802,7 +810,7 @@ export function createAgentTasks(
         [id, limits],
       );
       taskTransition(tx, 'started', changed.rowCount);
-      await append(tx, task, input.text, sources);
+      await append(tx, task, input.text, sources, 'owner', options.ownerTyped === true);
       await tx.client.query(
         `UPDATE ${relation(tx, 'tf_agent_task_steps')} s SET completed=true WHERE task_id=$1 AND generation=$2 AND NOT completed AND (decision->>'kind'='clarify' OR EXISTS (SELECT 1 FROM ${relation(tx, 'tf_model_generations')} g WHERE g.run_id=s.run_id AND g.generation=s.step AND g.status='failed'))`,
         [id, task.generation],

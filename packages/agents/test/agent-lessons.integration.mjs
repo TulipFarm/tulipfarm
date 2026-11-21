@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import pg from 'pg';
+import { createFiles } from '@tulipfarm/files';
+import { createLearnedKnowledge, createLocalKnowledge, learnedKnowledgePrompt } from '@tulipfarm/knowledge';
 import { fakeKeep } from '../../conversations/test/fake-keep.mjs';
 import { conversationFixture } from '../../conversations/test/fixture.mjs';
 import { agentLessonsStore, configureAgentLessons } from '../src/agent-lessons.ts';
@@ -182,4 +184,87 @@ test('saved agents learn safe lessons from finished tasks and use them in later 
     const cleared = await lessons.clear(w.id, w.userId, agent.agentId);
     assert.deepEqual([cleared.lessons, cleared.suggestions], [[], []]);
   });
+});
+
+test('a finished task saves its owner’s business facts to their Knowledge', { timeout: 120000 }, async t => {
+  const f = await conversationFixture();
+  t.after(() => f.close());
+  const { workspace: w } = f;
+  const agent = await savedTaskAgent(f.db, w, f.runtime, w.userId, w.membershipId, [], []);
+  await seedExecution(f.db, w, agent.agentId, [agent.teamId], []);
+  const tasks = createAgentTasks(f.runtime, undefined, { ownerTyped: true });
+  const engine = createTaskRuntime(
+    f.runtime,
+    syntheticContinuity(async () => ({ kind: 'answer', text: 'Done. Enterprise costs 999 dollars.' })),
+  );
+  const task = await tasks.start(w.id, w.userId, {
+    requestId: randomUUID(),
+    agentId: agent.agentId,
+    text: 'Draft the renewal email. Our Pro plan costs 49 dollars per seat each month.',
+  });
+  await f.db.platform.query(
+    `INSERT INTO ${f.table('tf_agent_task_messages')} (task_id,sequence,generation,role,text,sources) VALUES ($1,1,$2,'owner',$3,'[]')`,
+    [task.id, task.generation, 'New comment on the row from another member: our Starter plan is free.'],
+  );
+  await engine.process(w.id, task.id);
+  assert.equal((await tasks.read(w.id, w.userId, task.id)).status, 'completed');
+  await f.db.platform.query(`UPDATE ${f.table('tf_agent_lesson_jobs')} SET due_at=clock_timestamp()`);
+
+  const unavailable = async () => {
+    throw new Error('no file bytes');
+  };
+  const files = createFiles(f.runtime, { read: unavailable, putIfAbsent: unavailable, remove: unavailable });
+  const knowledge = createLocalKnowledge({ runtime: f.runtime, files });
+  const requests = [];
+  const learning = createAgentLessonLearning({
+    runtime: f.runtime,
+    learned: createLearnedKnowledge({ runtime: f.runtime, files, enabled: async () => true }),
+    model: async request => {
+      requests.push(request);
+      if (request.system !== learnedKnowledgePrompt) return JSON.stringify({ lessons: [], suggestions: [] });
+      const { memberMessages } = JSON.parse(request.user);
+      assert.deepEqual(
+        memberMessages.map(message => message.text),
+        ['Draft the renewal email. Our Pro plan costs 49 dollars per seat each month.'],
+        'only words the owner typed are read, not text the server wrote for them',
+      );
+      return JSON.stringify({
+        entries: [
+          {
+            title: 'Pro plan pricing',
+            text: 'Pro costs 49 dollars per seat a month.',
+            messageId: memberMessages[0].id,
+            quote: 'Pro plan costs 49',
+          },
+          {
+            title: 'Enterprise pricing',
+            text: 'Enterprise costs 999 dollars.',
+            messageId: memberMessages[0].id,
+            quote: 'Enterprise costs 999',
+          },
+        ],
+      });
+    },
+  });
+  assert.equal(await learning.sweep(w.id), 1);
+  const facts = requests.filter(request => request.system === learnedKnowledgePrompt);
+  assert.equal(facts.length, 1);
+  assert.equal(facts[0].outputTokens, 2048);
+  const { run_id: runId } = (
+    await f.db.platform.query(`SELECT run_id FROM ${f.table('tf_agent_task_runs')} WHERE task_id=$1`, [task.id])
+  ).rows[0];
+  const { items } = await knowledge.list(w.id, w.userId, { filter: 'learned' });
+  assert.deepEqual(
+    items.map(item => [item.title, item.learned.from, item.learned.sourceId, item.learned.runId]),
+    [['Pro plan pricing', 'task', task.id, runId]],
+    'a fact only the agent said is not saved',
+  );
+
+  await f.db.platform.query(`UPDATE ${f.table('tf_agent_lesson_jobs')} SET due_at=clock_timestamp()`);
+  assert.equal(await learning.sweep(w.id), 1);
+  assert.equal(
+    requests.filter(request => request.system === learnedKnowledgePrompt).length,
+    1,
+    'the owner’s messages are read once',
+  );
 });

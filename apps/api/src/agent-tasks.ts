@@ -44,7 +44,7 @@ export function registerAgentTasks(
     wake?: (workspaceId: string, taskId: string) => Promise<void>;
   },
 ) {
-  const service = createAgentTasks(dependencies.runtime, dependencies.claimMcpSelection);
+  const service = createAgentTasks(dependencies.runtime, dependencies.claimMcpSelection, { ownerTyped: true });
   const approvals = createTaskApprovals(dependencies.runtime);
   const workspace = z.strictObject({ workspaceId: uuidSchema });
   const task = workspace.extend({ taskId: uuidSchema });

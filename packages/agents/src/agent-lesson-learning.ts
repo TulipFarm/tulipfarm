@@ -1,7 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { AccessDenied } from '@tulipfarm/access';
 import { calculateUsageCost, reserveModelCost, usageTokenCounts, type ResolvedModel } from '@tulipfarm/config';
 import { recordUsage } from '@tulipfarm/extensions';
+import {
+  learnedKnowledgePrompt,
+  learnedKnowledgeVersion,
+  learnedParts,
+  learnedRequest,
+  parseLearnedEntries,
+  type LearnedKnowledge,
+  type LearnedMessage,
+} from '@tulipfarm/knowledge';
 import { log } from '@tulipfarm/observability';
 import {
   CreditsExhausted,
@@ -44,7 +54,13 @@ export type LessonModel = (request: {
   modelFamilyId: string | null;
   system: string;
   user: string;
+  /** The answer's token budget; lessons are short, so it defaults to 1024. */
+  outputTokens?: number;
 }) => Promise<string | null>;
+
+/** Saves the business facts a task's owner stated into their Knowledge as Learned entries. */
+export type LessonKnowledge = Pick<LearnedKnowledge, 'enabled' | 'entries' | 'apply'>;
+const factOutputTokens = 2048;
 
 type Evidence = { key: string; kind: 'rejection' | 'approval' | 'tool-failure' | 'follow-up'; detail: object };
 
@@ -134,10 +150,15 @@ function evidenceTexts(value: unknown): string[] {
 type Job = { task_id: string; agent_id: string; due_at: string; attempts: number; learned: string[] };
 
 /**
- * Learns lessons for saved agents from their finished task runs. A status change or a decision on a task makes its job
- * due; a sweep reads only evidence it has not learned before, so a run without new signals costs no model call.
+ * Learns lessons for saved agents from their finished task runs, and business facts the task's owner stated in it. A
+ * status change or a decision on a task makes its job due; a sweep reads only evidence and owner messages it has not
+ * learned from before, so a run without new signals costs no model call.
  */
-export function createAgentLessonLearning(options: { runtime: AgentStorage; model: LessonModel }) {
+export function createAgentLessonLearning(options: {
+  runtime: AgentStorage;
+  model: LessonModel;
+  learned?: LessonKnowledge;
+}) {
   const { runtime } = options;
   const transaction = <T>(workspaceId: string, operation: (tx: AgentTransaction) => Promise<T>) =>
     runtime.transaction(workspaceId, compatibility, operation);
@@ -163,21 +184,22 @@ export function createAgentLessonLearning(options: { runtime: AgentStorage; mode
    * Records what the job learned and clears it, unless a newer status change or decision made it due again meanwhile. A
    * failed job tries again later, up to three times.
    */
-  async function finish(workspaceId: string, job: Job, learned: readonly string[] | null) {
+  async function finish(workspaceId: string, job: Job, learned: readonly string[] | null, complete = learned !== null) {
+    const keys = learned === null ? null : JSON.stringify(learned.slice(-learnedKeys));
     await transaction(workspaceId, async tx => {
       const jobs = relation(tx, 'tf_agent_lesson_jobs');
-      if (learned !== null || job.attempts >= maxAttempts)
+      if (complete || job.attempts >= maxAttempts)
         await tx.client.query(
           `UPDATE ${jobs} SET lease_until=NULL, learned=COALESCE($3::jsonb, learned),
              due_at=CASE WHEN due_at=$2::timestamptz THEN NULL ELSE due_at END WHERE task_id=$1`,
-          [job.task_id, job.due_at, learned === null ? null : JSON.stringify(learned.slice(-learnedKeys))],
+          [job.task_id, job.due_at, keys],
         );
       else
         await tx.client.query(
-          `UPDATE ${jobs} SET lease_until=NULL,
+          `UPDATE ${jobs} SET lease_until=NULL, learned=COALESCE($3::jsonb, learned),
              due_at=CASE WHEN due_at=$2::timestamptz THEN clock_timestamp()+attempts*interval '5 minutes' ELSE due_at END
            WHERE task_id=$1`,
-          [job.task_id, job.due_at],
+          [job.task_id, job.due_at, keys],
         );
     });
   }
@@ -185,14 +207,14 @@ export function createAgentLessonLearning(options: { runtime: AgentStorage; mode
   async function gather(tx: AgentTransaction, taskId: string) {
     const task = (
       await tx.client.query(
-        `SELECT t.agent_id, d.definition,
+        `SELECT t.agent_id, t.owner_user_id, d.definition,
            (SELECT run_id FROM ${relation(tx, 'tf_agent_task_runs')} r WHERE r.task_id=t.id ORDER BY generation DESC LIMIT 1) AS run_id
          FROM ${relation(tx, 'tf_agent_tasks')} t
          JOIN ${relation(tx, 'tf_agent_definitions')} d ON d.agent_id=t.agent_id AND d.revision=t.definition_revision
          WHERE t.id=$1`,
         [taskId],
       )
-    ).rows[0] as { agent_id: string; definition: unknown; run_id: string | null } | undefined;
+    ).rows[0] as { agent_id: string; owner_user_id: string; definition: unknown; run_id: string | null } | undefined;
     if (!task) return null;
     const definition = definitionSchema.safeParse(task.definition);
     if (!definition.success) return null;
@@ -233,12 +255,13 @@ export function createAgentLessonLearning(options: { runtime: AgentStorage; mode
         detail: { tool: row.tool, failures: row.failures, codes },
       });
     }
+    const learnedVersion = Number((tx as { commonVersion?: number }).commonVersion ?? 0) >= learnedKnowledgeVersion;
     const messages = (
       await tx.client.query(
-        `SELECT sequence, role, text FROM ${relation(tx, 'tf_agent_task_messages')} WHERE task_id=$1 ORDER BY sequence`,
+        `SELECT sequence, role, text${learnedVersion ? ', typed' : ''} FROM ${relation(tx, 'tf_agent_task_messages')} WHERE task_id=$1 ORDER BY sequence`,
         [taskId],
       )
-    ).rows as { sequence: number; role: 'owner' | 'agent'; text: string }[];
+    ).rows as { sequence: number; role: 'owner' | 'agent'; text: string; typed?: boolean }[];
     const first = messages.findIndex(message => message.role === 'owner');
     messages.forEach((message, index) => {
       if (message.role !== 'owner' || index <= first) return;
@@ -252,15 +275,91 @@ export function createAgentLessonLearning(options: { runtime: AgentStorage; mode
         },
       });
     });
-    return { agentId: task.agent_id, runId: task.run_id, definition: definition.data, evidence };
+    const facts: LearnedMessage[] = learnedVersion
+      ? messages
+          .filter(message => message.role === 'owner' && message.typed === true)
+          .map(message => ({
+            id: String(message.sequence),
+            text: message.text,
+          }))
+      : [];
+    return {
+      agentId: task.agent_id,
+      ownerUserId: task.owner_user_id,
+      runId: task.run_id,
+      definition: definition.data,
+      evidence,
+      facts,
+    };
+  }
+
+  /**
+   * Saves business facts from the owner's own messages to the owner's Knowledge. Returns the keys of the messages it
+   * read, and whether every part got an answer.
+   */
+  async function learnFacts(
+    workspaceId: string,
+    job: Job,
+    gathered: NonNullable<Awaited<ReturnType<typeof gather>>>,
+    seen: ReadonlySet<string>,
+  ): Promise<{ keys: string[]; complete: boolean }> {
+    const { learned } = options;
+    const messages = gathered.facts.filter(message => !seen.has(`fact:${message.id}`));
+    if (!learned || !messages.length || !(await learned.enabled(workspaceId))) return { keys: [], complete: true };
+    const owner = gathered.ownerUserId;
+    const source = { kind: 'task' as const, id: job.task_id, runId: gathered.runId };
+    const keys: string[] = [];
+    try {
+      for (const part of learnedParts(messages)) {
+        const entries = await learned.entries(workspaceId, owner);
+        const answer = await options.model({
+          workspaceId,
+          taskId: job.task_id,
+          agentId: gathered.agentId,
+          modelFamilyId: gathered.definition.modelFamilyId ?? null,
+          system: learnedKnowledgePrompt,
+          user: learnedRequest(entries, part),
+          outputTokens: factOutputTokens,
+        });
+        if (answer === null) return { keys, complete: false };
+        await learned.apply(
+          workspaceId,
+          owner,
+          source,
+          `task:${job.task_id}:${part[0]!.id}`,
+          parseLearnedEntries(answer, part),
+        );
+        keys.push(...part.map(message => `fact:${message.id}`));
+      }
+    } catch (error) {
+      // The owner left the workspace, so nothing is learned for them.
+      if (!(error instanceof AccessDenied)) throw error;
+    }
+    // Messages past the last part are not read, so they are marked learned too.
+    return { keys: messages.map(message => `fact:${message.id}`), complete: true };
   }
 
   async function learn(workspaceId: string, job: Job) {
     const gathered = await transaction(workspaceId, tx => gather(tx, job.task_id));
-    if (!gathered) return [...job.learned];
+    if (!gathered) return { keys: [...job.learned], complete: true };
     const seen = new Set(job.learned);
+    const lessons = await learnLessons(workspaceId, job, gathered, seen);
+    const facts = await learnFacts(workspaceId, job, gathered, seen);
+    return {
+      keys: [...job.learned, ...(lessons ?? []), ...facts.keys],
+      complete: lessons !== null && facts.complete,
+    };
+  }
+
+  /** Returns the evidence keys it learned from, or null when no model answered. */
+  async function learnLessons(
+    workspaceId: string,
+    job: Job,
+    gathered: NonNullable<Awaited<ReturnType<typeof gather>>>,
+    seen: ReadonlySet<string>,
+  ) {
     const fresh = gathered.evidence.filter(item => !seen.has(item.key));
-    if (!fresh.length) return [...job.learned];
+    if (!fresh.length) return [];
     const store = agentLessonsStore(workspaceId, gathered.agentId);
     const current: AgentLessonBook = await store.read();
     const { definition } = gathered;
@@ -282,7 +381,7 @@ export function createAgentLessonLearning(options: { runtime: AgentStorage; mode
     });
     if (answer === null) return null;
     const output = parseLessonOutput(answer);
-    const keys = [...job.learned, ...fresh.map(item => item.key)];
+    const keys = fresh.map(item => item.key);
     if (!output) return keys;
     const safe = safeLessonOutput(output, {
       evidence: fresh.flatMap(item => evidenceTexts(item.detail)),
@@ -305,7 +404,7 @@ export function createAgentLessonLearning(options: { runtime: AgentStorage; mode
       }
       let done = 0;
       for (const job of jobs) {
-        let learned: readonly string[] | null = null;
+        let learned: { keys: string[]; complete: boolean } | null = null;
         try {
           learned = await learn(workspaceId, job);
         } catch (error) {
@@ -315,8 +414,8 @@ export function createAgentLessonLearning(options: { runtime: AgentStorage; mode
               outcome: error instanceof Error ? error.name : 'unknown',
             });
         }
-        await finish(workspaceId, job, learned);
-        if (learned) done++;
+        await finish(workspaceId, job, learned?.keys ?? null, learned?.complete ?? false);
+        if (learned?.complete) done++;
       }
       return done;
     },
@@ -325,13 +424,13 @@ export function createAgentLessonLearning(options: { runtime: AgentStorage; mode
 
 const outputTokens = 1024;
 const today = () => new Date().toISOString().slice(0, 10);
-function quoteOf(resolution: ResolvedModel, maxInputTokens: number) {
+function quoteOf(resolution: ResolvedModel, maxInputTokens: number, maxOutputTokens = outputTokens) {
   return {
     modelId: resolution.modelId,
     pricingRevision: resolution.pricingRevision,
     rates: resolution.rates,
     maxInputTokens: Math.min(maxInputTokens, resolution.route.maxInputTokens),
-    maxOutputTokens: Math.min(outputTokens, resolution.route.maxOutputTokens),
+    maxOutputTokens: Math.min(maxOutputTokens, resolution.route.maxOutputTokens),
     date: today(),
   };
 }
@@ -366,9 +465,10 @@ export function meteredLessonModel(options: {
     const resolution = environment.resolve(familyId);
     const base = resolution && environment.inference(resolution);
     if (!resolution || !base || isPlanRoute(base)) return null;
+    const answerTokens = request.outputTokens ?? outputTokens;
     const route: InferenceRoute = {
       ...base,
-      maxOutputTokens: Math.min(outputTokens, resolution.route.maxOutputTokens),
+      maxOutputTokens: Math.min(answerTokens, resolution.route.maxOutputTokens),
     };
     const id = randomUUID();
     const bytes = Buffer.byteLength(request.system) + Buffer.byteLength(request.user);
@@ -380,7 +480,7 @@ export function meteredLessonModel(options: {
         modelId: resolution.modelId,
         agentId: request.agentId,
         activity: 'other',
-        providerPicoUsd: reserveModelCost(quoteOf(resolution, bytes + 1024)),
+        providerPicoUsd: reserveModelCost(quoteOf(resolution, bytes + 1024, answerTokens)),
         pricingRevision: resolution.pricingRevision,
       });
       return true;

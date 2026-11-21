@@ -22,6 +22,14 @@ export const knowledgeEntrySchema = z.object({
   kind: z.enum(['note', 'file']),
   fileId: z.uuid().optional(),
   noteText: z.string().optional(),
+  learned: z
+    .object({
+      from: z.enum(['chat', 'task']),
+      sourceId: z.uuid(),
+      runId: z.uuid().nullable(),
+      learnedAt: z.string(),
+    })
+    .optional(),
 });
 export type KnowledgeEntry = z.infer<typeof knowledgeEntrySchema>;
 

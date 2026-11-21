@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { Button } from '@tulipfarm/sprout/button';
 import {
@@ -333,6 +333,7 @@ export default function KnowledgePage() {
   const { enabled, read } = useDefaultKnowledge(workspace.id);
   const api = useMemo(() => knowledgeApi(workspace.id), [workspace.id]);
   const entries = useFeatureRead(personalKnowledgeRead(api));
+  const [learnedOnly, setLearnedOnly] = useState(false);
   return (
     <PageContent>
       <PageHeader title="Knowledge" description="Your notes, files, and connected sources." />
@@ -345,6 +346,8 @@ export default function KnowledgePage() {
             refresh={entries.refresh}
             delayed={entries.delayed}
             restart={entries.restart}
+            learnedOnly={learnedOnly}
+            setLearnedOnly={setLearnedOnly}
           />
         )}
       </ReadResult>

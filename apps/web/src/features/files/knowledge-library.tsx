@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { knowledgeSaveSchema, type KnowledgeSave } from '@tulipfarm/knowledge/contracts';
 import { Button } from '@tulipfarm/sprout/button';
 import { Input } from '@tulipfarm/sprout/input';
@@ -29,6 +29,36 @@ const labels = {
   failed: 'Failed',
   'ocr-unavailable': 'OCR unavailable',
 };
+
+const learnedDate = (value: string) => new Date(value).toLocaleDateString(undefined, { dateStyle: 'medium' });
+
+function LearnedFrom({ entry, slug }: { entry: KnowledgeEntry; slug: string }) {
+  const { learned } = entry;
+  if (!learned) return null;
+  const link =
+    learned.from === 'chat' ? (
+      <Link
+        to="/$workspaceSlug/chat/$chatId"
+        params={{ workspaceSlug: slug, chatId: learned.sourceId }}
+        aria-label={`Open source chat for ${entry.title}`}
+      >
+        chat
+      </Link>
+    ) : (
+      <Link
+        to="/$workspaceSlug/agent-tasks/$taskId"
+        params={{ workspaceSlug: slug, taskId: learned.sourceId }}
+        aria-label={`Open source task for ${entry.title}`}
+      >
+        task
+      </Link>
+    );
+  return (
+    <p className="text-sm text-muted-foreground">
+      Learned from {link} · <time dateTime={learned.learnedAt}>{learnedDate(learned.learnedAt)}</time>
+    </p>
+  );
+}
 
 function EntryEditor({
   api,
@@ -302,6 +332,8 @@ export function KnowledgeLibrary({
   refresh,
   delayed,
   restart,
+  learnedOnly,
+  setLearnedOnly,
 }: {
   workspaceId: string;
   slug: string;
@@ -309,6 +341,8 @@ export function KnowledgeLibrary({
   refresh: () => Promise<void>;
   delayed: boolean;
   restart: () => void;
+  learnedOnly: boolean;
+  setLearnedOnly: (value: boolean) => void;
 }) {
   const api = useMemo(() => knowledgeApi(workspaceId), [workspaceId]);
   const navigate = useNavigate();
@@ -319,6 +353,7 @@ export function KnowledgeLibrary({
   const [selected, setSelected] = useState<FileSummary | null>(null);
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState('');
+  const shown = learnedOnly ? entries.filter(entry => entry.learned) : entries;
   const changed = () => {
     restart();
     return change({ kind: 'conceal', keys: [personalKnowledgeKeys] });
@@ -376,17 +411,43 @@ export function KnowledgeLibrary({
         </Button>
       </form>
       <CommandFeedback state={retry.state} retry={retry.retry} />
+      {!search && (
+        <div role="group" aria-label="Show entries" className="flex gap-2">
+          <Button
+            size="sm"
+            variant={learnedOnly ? 'ghost' : 'secondary'}
+            aria-pressed={!learnedOnly}
+            onClick={() => setLearnedOnly(false)}
+          >
+            All
+          </Button>
+          <Button
+            size="sm"
+            variant={learnedOnly ? 'secondary' : 'ghost'}
+            aria-pressed={learnedOnly}
+            onClick={() => setLearnedOnly(true)}
+          >
+            Learned
+          </Button>
+        </div>
+      )}
+      {!search && learnedOnly && shown.length > 0 && (
+        <p className="text-sm text-muted-foreground">
+          Bud adds business facts from your chats and agent tasks. Only you can see these.
+        </p>
+      )}
       {search ? (
         <SearchResults api={api} query={search} />
-      ) : entries.length ? (
+      ) : shown.length ? (
         <ul aria-label="Knowledge entries" className="divide-y rounded-lg border">
-          {entries.map(entry => (
+          {shown.map(entry => (
             <li key={entry.documentId} className="flex flex-wrap items-center justify-between gap-3 p-4">
               <div className="min-w-0">
                 <h3 className="break-words font-medium">{entry.title}</h3>
                 <p className="text-sm text-muted-foreground">
                   {entry.kind === 'note' ? 'Note' : 'File'} · <span role="status">{labels[entry.parsing]}</span>
                 </p>
+                <LearnedFrom entry={entry} slug={slug} />
                 {entry.failure && <p className="text-sm text-destructive">Reason: {entry.failure}</p>}
               </div>
               <div className="flex flex-wrap gap-2">
@@ -409,6 +470,13 @@ export function KnowledgeLibrary({
             </li>
           ))}
         </ul>
+      ) : learnedOnly ? (
+        <StatePanel
+          kind="empty"
+          heading="h3"
+          title="No learned entries yet"
+          description="Bud adds business facts you share in your chats and agent tasks here, where only you can see them."
+        />
       ) : (
         <StatePanel
           kind="empty"
@@ -448,7 +516,9 @@ export function KnowledgeLibrary({
             <DialogHeader>
               <DialogTitle>Remove {removing.title}?</DialogTitle>
               <DialogDescription>
-                This removes the Knowledge entry. The original in Files is not deleted.
+                {removing.learned
+                  ? 'This removes the entry from your Knowledge. Bud may learn it again if you share it in a later chat or task.'
+                  : 'This removes the Knowledge entry. The original in Files is not deleted.'}
               </DialogDescription>
             </DialogHeader>
             <RemoveEntry api={api} entry={removing} onClose={() => setRemoving(null)} onRemoved={changed} />

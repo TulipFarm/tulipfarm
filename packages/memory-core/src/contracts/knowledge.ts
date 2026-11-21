@@ -19,7 +19,7 @@ export const knowledgeSaveSchema = z.strictObject({
   ]),
 });
 export const knowledgeCommandSchema = z.strictObject({ commandId: uuid, documentId: uuid, expectedRevisionId: uuid });
-export const knowledgeListSchema = z.strictObject({ cursor: uuid.optional() });
+export const knowledgeListSchema = z.strictObject({ cursor: uuid.optional(), filter: z.literal('learned').optional() });
 export const knowledgeSearchSchema = z.strictObject({ query: z.string().trim().min(1).max(512).refine(validText) });
 export const knowledgeSearchFiltersSchema = z.strictObject({
   kinds: z
@@ -98,8 +98,20 @@ const documentBase = z.object({
   canRetry: z.boolean(),
   gaps: knowledgeGapsSchema.optional(),
 });
+/** Where Bud learned a note from, for notes it saved on its own from the member's chat or task. */
+export const knowledgeLearnedSchema = z.strictObject({
+  from: z.enum(['chat', 'task']),
+  sourceId: uuid,
+  runId: uuid.nullable(),
+  learnedAt: z.iso.datetime(),
+});
+export type KnowledgeLearned = z.infer<typeof knowledgeLearnedSchema>;
 export const knowledgeDocumentSchema = z.discriminatedUnion('kind', [
-  documentBase.extend({ kind: z.literal('note'), noteText: z.string().optional() }),
+  documentBase.extend({
+    kind: z.literal('note'),
+    noteText: z.string().optional(),
+    learned: knowledgeLearnedSchema.optional(),
+  }),
   documentBase.extend({ kind: z.literal('file'), fileId: uuid }),
 ]);
 // When the cited revision was indexed. sourceRevision is the provider's own version marker (absent for notes and Files);
