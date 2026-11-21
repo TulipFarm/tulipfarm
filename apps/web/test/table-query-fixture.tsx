@@ -16,3 +16,4 @@ export { tableKeys } from '../src/features/tables/queries';
 export { useRecordMutation } from '../src/features/tables/record-mutation';
 export { tableApi } from '../src/features/tables/api';
 export { proposalApi } from '../src/features/tables/proposal-api';
+export { DropdownMenuItem } from '@tulipfarm/sprout/dropdown-menu';

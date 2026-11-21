@@ -4,6 +4,119 @@ import { createServer } from 'vite';
 import { chromium } from 'playwright';
 import { fileURLToPath } from 'node:url';
 
+test('table boards keep dragging and row actions without unsaved title editing', { timeout: 90_000 }, async () => {
+  const server = await createServer({
+    root: fileURLToPath(new URL('..', import.meta.url)),
+    server: { host: '127.0.0.1', port: 0 },
+    plugins: [
+      {
+        name: 'board-adoption-test',
+        configureServer(server) {
+          server.middlewares.use('/board-adoption-test', async (_request, response) => {
+            response.setHeader('Content-Type', 'text/html');
+            response.end(await server.transformIndexHtml('/board-adoption-test', '<html><body></body></html>'));
+          });
+        },
+      },
+    ],
+  });
+  await server.listen();
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  const errors = [];
+  page.on('pageerror', error => errors.push(String(error)));
+  try {
+    await page.goto(`${server.resolvedUrls.local[0]}board-adoption-test`);
+    await page.evaluate(async () => {
+      await import('/src/index.css');
+      const { React, createRoot, SessionQueryProvider, WorkspaceQueryProvider, DropdownMenuItem } =
+        await import('/test/table-query-fixture.tsx');
+      const { BoardView } = await import('/src/features/tables/table-layouts.tsx');
+      const id = '11111111-1111-4111-8111-111111111111';
+      const definition = {
+        formatVersion: 2,
+        id,
+        owningTeamId: id,
+        label: 'Customers',
+        fields: [
+          { id: 'name', label: 'Name', kind: 'text', required: true, maxLength: 100 },
+          {
+            id: 'status',
+            label: 'Status',
+            kind: 'single-select',
+            required: false,
+            options: [{ id: 'active', label: 'Active', retired: false }],
+          },
+        ],
+        uniqueKeys: [],
+      };
+      const record = { id, token: id, values: { name: 'Customer', status: 'active' } };
+      const api = {
+        query: async (_table, request) =>
+          request.options.mode === 'summary'
+            ? { mode: 'summary', groups: [{ keys: ['active'], values: ['1'] }] }
+            : {
+                mode: 'rows',
+                records: request.rsql.toLowerCase().includes('active') ? [record] : [],
+                total: '1',
+                nextCursor: null,
+              },
+      };
+      const scope = { kind: 'workspace', userId: 'alice', workspaceId: id, membershipId: id };
+      const open = () => {
+        document.querySelector('output').textContent = 'Opened customer';
+      };
+      createRoot(document.body.appendChild(document.createElement('div'))).render(
+        React.createElement(
+          SessionQueryProvider,
+          { identity: { userId: 'alice', sessionId: 'session' } },
+          React.createElement(
+            WorkspaceQueryProvider,
+            { scope, admitted: () => true, subscribe: () => () => {} },
+            React.createElement(BoardView, {
+              api,
+              table: { id, revision: 'a'.repeat(40), definition },
+              view: { where: '', sort: [], groupBy: [], metrics: [] },
+              columns: definition.fields,
+              fieldId: 'status',
+              changeField: () => {},
+              openColumn: () => {},
+              workspace: { id },
+              canMove: true,
+              open,
+              menu: () => React.createElement(DropdownMenuItem, { onClick: open }, 'Edit row'),
+            }),
+            React.createElement('output'),
+          ),
+        ),
+      );
+    });
+    const card = page.getByRole('group', { name: 'Customer', exact: true });
+    await card.waitFor();
+    assert.equal(await card.getAttribute('aria-roledescription'), 'draggable card');
+    await card.getByRole('button', { name: 'Actions for Customer', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Edit row', exact: true }).waitFor();
+    assert.equal(await page.getByRole('menuitem', { name: 'Rename', exact: true }).count(), 0);
+    await page.getByRole('menuitem', { name: 'Edit row', exact: true }).click();
+    await page.getByText('Opened customer', { exact: true }).waitFor();
+    await page.locator('output').evaluate(element => {
+      element.textContent = '';
+    });
+    await card.focus();
+    await page.keyboard.press('F2');
+    assert.equal(await page.getByRole('textbox', { name: 'Card title', exact: true }).count(), 0);
+    await page.keyboard.press('Enter');
+    await page.getByText('Opened customer', { exact: true }).waitFor();
+    assert.deepEqual(errors, []);
+  } catch (error) {
+    console.error(await page.locator('body').innerText(), errors);
+    throw error;
+  } finally {
+    await browser.close();
+    await server.close();
+  }
+});
+
 test(
   'table readers reuse pages and relationships; accepted writes invalidate after editor unmount',
   { timeout: 90_000 },

@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Add } from 'reicon-react/icons/Add';
-import { ChevronDown } from 'reicon-react/icons/ChevronDown';
-import { ChartBar } from 'reicon-react/icons/ChartBar';
-import { Download } from 'reicon-react/icons/Download';
-import { Eye } from 'reicon-react/icons/Eye';
-import { Filter } from 'reicon-react/icons/Filter';
-import { Grid } from 'reicon-react/icons/Grid';
-import { Kanban } from 'reicon-react/icons/Kanban';
-import { List } from 'reicon-react/icons/List';
-import { Search } from 'reicon-react/icons/Search';
-import { SliderHorizontal } from 'reicon-react/icons/SliderHorizontal';
+import {
+  AddIcon,
+  ChevronDownIcon,
+  ChartBarIcon,
+  DownloadIcon,
+  EyeIcon,
+  FilterIcon,
+  GridIcon,
+  KanbanIcon,
+  ListIcon,
+  SearchIcon,
+  SlidersIcon,
+  TimelineIcon,
+} from '@tulipfarm/sprout/icons';
 import {
   describeWhere,
   kindQueryOps,
@@ -117,23 +120,11 @@ type ToolbarProps = Props & {
 const filterable = (definition: Definition) => definition.fields.filter(field => kindQueryOps[field.kind].length > 0);
 const fieldOf = (definition: Definition, id: string) => definition.fields.find(field => field.id === id);
 const tooLong = 'This search is too long to keep in the page link. Remove some conditions and apply it again.';
-// reicon has no gantt glyph, so this one is drawn on its 24px grid with its 1.5 stroke.
-function TimelineIcon({ size = 24 }: { size?: number }) {
-  const bar = { stroke: 'currentColor', strokeWidth: 1.5, strokeLinejoin: 'round' } as const;
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <rect x="2" y="2.75" width="8" height="4" rx="2" {...bar} />
-      <rect x="8" y="10" width="9" height="4" rx="2" {...bar} />
-      <rect x="15" y="17.25" width="7" height="4" rx="2" {...bar} />
-    </svg>
-  );
-}
-
 const layouts: (ViewSwitcherView & { id: Layout; description: string })[] = [
-  { id: 'table', label: 'Table', icon: Grid, description: 'Rows and columns. Edit, group and sum.' },
-  { id: 'list', label: 'List', icon: List, description: 'One item per row for quick reading.' },
-  { id: 'board', label: 'Board', icon: Kanban, description: 'Cards in lanes, one lane per choice.' },
-  { id: 'chart', label: 'Chart', icon: ChartBar, description: 'Counts for each choice of a field.' },
+  { id: 'table', label: 'Table', icon: GridIcon, description: 'Rows and columns. Edit, group and sum.' },
+  { id: 'list', label: 'List', icon: ListIcon, description: 'One item per row for quick reading.' },
+  { id: 'board', label: 'Board', icon: KanbanIcon, description: 'Cards in lanes, one lane per choice.' },
+  { id: 'chart', label: 'Chart', icon: ChartBarIcon, description: 'Counts for each choice of a field.' },
   { id: 'timeline', label: 'Timeline', icon: TimelineIcon, description: 'Rows placed on their dates.' },
 ];
 
@@ -286,7 +277,7 @@ function SearchMenu({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={<Button variant={view.search ? 'secondary' : 'outline'} size="sm" disabled={disabled} />}>
-        <Search size={14} aria-hidden="true" />
+        <SearchIcon size="sm" aria-hidden="true" />
         {view.search ? (
           <span title={view.search} className="max-w-40 truncate">
             “{view.search}”
@@ -533,7 +524,7 @@ function FilterChips({
             aria-controls="table-query-panel"
             onClick={toggleAdvanced}
           >
-            <Filter size={14} aria-hidden="true" />
+            <FilterIcon size="sm" aria-hidden="true" />
             Advanced filter · {chips.conditions} {chips.conditions === 1 ? 'condition' : 'conditions'}
           </Button>
         ) : (
@@ -567,11 +558,11 @@ function FilterChips({
                   <Button variant="outline" size="icon-sm" disabled={disabled} aria-label="More filter options" />
                 }
               >
-                <ChevronDown size={14} aria-hidden="true" />
+                <ChevronDownIcon size="sm" aria-hidden="true" />
               </DropdownMenuTrigger>
               <DropdownMenuContent size="menu" align="start">
                 <DropdownMenuItem onClick={toggleAdvanced}>
-                  <Filter size={14} aria-hidden="true" />
+                  <FilterIcon size="sm" aria-hidden="true" />
                   {advanced ? 'Close advanced filter' : 'Advanced filter…'}
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -665,7 +656,7 @@ function RuleChip({
           </span>
         ) : (
           <>
-            <Add size={14} aria-hidden="true" />
+            <AddIcon size="sm" aria-hidden="true" />
             Add filter
           </>
         )}
@@ -858,7 +849,7 @@ function ExportButton({
         </ToolbarStatus>
       ) : (
         <Button variant="outline" size="sm" disabled={disabled} onClick={() => void run()}>
-          <Download size={14} aria-hidden="true" />
+          <DownloadIcon size="sm" aria-hidden="true" />
           Export
         </Button>
       )}
@@ -1016,12 +1007,12 @@ function GroupEditor({
       {problems[group.key] && <p className="text-sm text-destructive">{problems[group.key]}</p>}
       <div className="flex flex-wrap gap-2">
         <Button variant="outline" size="sm" disabled={disabled || full || !first} onClick={addRule}>
-          <Add size={14} aria-hidden="true" />
+          <AddIcon size="sm" aria-hidden="true" />
           Add condition
         </Button>
         {depth < queryLimits.depth - 1 && (
           <Button variant="ghost" size="sm" disabled={disabled || full || !first} onClick={addGroup}>
-            <Add size={14} aria-hidden="true" />
+            <AddIcon size="sm" aria-hidden="true" />
             Add group
           </Button>
         )}
@@ -1439,7 +1430,7 @@ function SummaryMenu({
       <PopoverTrigger
         render={<Button variant={summarized(view) ? 'secondary' : 'outline'} size="sm" disabled={disabled} />}
       >
-        <SliderHorizontal size={14} aria-hidden="true" />
+        <SlidersIcon size="sm" aria-hidden="true" />
         {label}
       </PopoverTrigger>
       <PopoverContent size="menu">
@@ -1500,7 +1491,7 @@ function SummaryMenu({
                   set([...view.groupBy, groupable.find(field => !view.groupBy.includes(field.id))!.id], view.metrics)
                 }
               >
-                <Add size={14} aria-hidden="true" />
+                <AddIcon size="sm" aria-hidden="true" />
                 Add group
               </Button>
             )}
@@ -1586,7 +1577,7 @@ function SummaryMenu({
             ))}
             {view.metrics.length < queryLimits.metrics && (
               <Button variant="outline" size="sm" onClick={() => set(view.groupBy, [...view.metrics, nextMetric()])}>
-                <Add size={14} aria-hidden="true" />
+                <AddIcon size="sm" aria-hidden="true" />
                 Add calculation
               </Button>
             )}
@@ -1619,7 +1610,7 @@ function ColumnsMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger render={<Button variant="outline" size="sm" disabled={disabled} />}>
-        <Eye size={14} aria-hidden="true" />
+        <EyeIcon size="sm" aria-hidden="true" />
         Columns
         {view.select && (
           <Badge variant="secondary">

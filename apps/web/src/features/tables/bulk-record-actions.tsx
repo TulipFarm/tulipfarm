@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Download, Trash2 } from 'lucide-react';
+import { DeleteIcon, DownloadIcon } from '@tulipfarm/sprout/icons';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import {
   AlertDialog,
@@ -107,13 +107,13 @@ export function BulkRecordActions({
             aria-busy={state.kind === 'loading'}
             onClick={() => void run()}
           >
-            <Download size={16} aria-hidden="true" />
+            <DownloadIcon size="md" aria-hidden="true" />
             {state.kind === 'loading' ? 'Exporting...' : 'Export selected'}
           </Button>
         )}
         {canDelete && (
           <Button variant="destructive" size="sm" disabled={disabled} onClick={remove}>
-            <Trash2 size={16} aria-hidden="true" />
+            <DeleteIcon size="md" aria-hidden="true" />
             Delete selected
           </Button>
         )}

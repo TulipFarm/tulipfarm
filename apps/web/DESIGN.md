@@ -443,7 +443,8 @@ avatars, and glass chips can be pill-shaped. Glass banners use 20px corners.
 ## Components
 
 Sprout's built-in icons come from Hugeicons through `@tulipfarm/sprout/icons`,
-with named sizes from `xs` (12px) to `2xl` (24px). App-owned icons still come
+with named sizes from `xs` (12px) to `2xl` (24px). Table view controls, bulk row
+actions, and layout empty states use these shared icons too. Other app-owned icons come
 from `reicon-react` (per-icon imports such as
 `reicon-react/icons/Add`), sized 16px in controls and navigation and 14px in
 dense rows; some older screens still use `lucide-react`. Third-party marks use

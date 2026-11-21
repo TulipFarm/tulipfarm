@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Calendar } from 'reicon-react/icons/Calendar';
-import { ChartBar } from 'reicon-react/icons/ChartBar';
-import { Kanban } from 'reicon-react/icons/Kanban';
+import { CalendarIcon, ChartBarIcon, KanbanIcon } from '@tulipfarm/sprout/icons';
 import type { TableQueryResult, TableQueryRequest } from '@tulipfarm/tables/query';
 import { Board, type BoardColumn, type BoardItem } from '@tulipfarm/sprout/board';
 import { Button } from '@tulipfarm/sprout/button';
@@ -245,7 +243,7 @@ export function BoardView({
       <StatePanel
         kind="empty"
         heading="h3"
-        icon={Kanban}
+        icon={KanbanIcon}
         title="Board needs a choice field"
         description={`Boards group rows by a single-choice field, such as Status. ${table.definition.label} has none yet. Add one in chat, or use Table or List.`}
       />
@@ -362,6 +360,7 @@ export function BoardView({
         label={`Board by ${singleSelect.label}`}
         columns={boardColumns}
         items={items}
+        renamable={false}
         columnText={{ empty: 'No rows', showAll: total => `Show all ${total.toLocaleString('en-US')} in table` }}
         onColumnRetry={column => reads[column.id]?.refresh()}
         onColumnShowAll={column => {
@@ -471,7 +470,7 @@ export function ChartView({
       <StatePanel
         kind="empty"
         heading="h3"
-        icon={ChartBar}
+        icon={ChartBarIcon}
         title="Chart needs a choice field"
         description={`Charts count rows for each option of a single-choice field, such as Status. ${table.definition.label} has none yet. Add one in chat, or use Table or List.`}
       />
@@ -569,7 +568,7 @@ export function TimelineView({
       <StatePanel
         kind="empty"
         heading="h3"
-        icon={Calendar}
+        icon={CalendarIcon}
         title="Timeline needs a date field"
         description={`Timelines place rows on a date, such as a start or due date. ${table.definition.label} has none yet. Add one in chat, or use Table or List.`}
       />

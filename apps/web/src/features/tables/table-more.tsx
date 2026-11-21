@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { MoreH } from 'reicon-react/icons/MoreH';
+import { MoreIcon } from '@tulipfarm/sprout/icons';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import {
   AlertDialog,
@@ -67,7 +67,7 @@ export function TableMore({
     <>
       <DropdownMenu>
         <DropdownMenuTrigger render={<Button variant="outline" size="icon-sm" aria-label="More table options" />}>
-          <MoreH size={16} aria-hidden="true" />
+          <MoreIcon size="md" aria-hidden="true" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           {changeFields && (
