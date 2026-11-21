@@ -6,6 +6,8 @@ const { processConversationReply, deliverConversationReply } = proxyActivities<
   ReturnType<typeof createConversationActivities>
 >({
   startToCloseTimeout: '9 minutes',
+  // A reply beats every 10 seconds, so a worker that stopped mid-reply frees its turn for the sweep within a minute.
+  heartbeatTimeout: '1 minute',
   retry: { maximumAttempts: 1 },
 });
 // The title runs after the reply was delivered, so it has its own short budget and can never fail or delay that reply.

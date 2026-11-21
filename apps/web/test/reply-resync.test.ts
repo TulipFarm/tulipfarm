@@ -222,3 +222,34 @@ test('offline recovery is explicitly unconfirmed, including Retry, and resumes w
   assert.equal(reads, 1);
   recovery.stop();
 });
+
+test('a reply the server still reports as running stays confirmed through minutes of silence', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let reads = 0;
+  let reachable = true;
+  const recovery = createReplyResync(async () => {
+    reads++;
+    return reachable;
+  });
+  recovery.update({ key: 'turn:0', progress: progress(1), recovery: true });
+  for (let second = 1; second <= 600; second++) {
+    t.mock.timers.tick(1000);
+    await Promise.resolve();
+    assert.equal(recovery.snapshot(), false, `history still shows the reply running after ${second} seconds`);
+  }
+  assert.ok(
+    reads >= 40 && reads <= 45,
+    `silent running replies are checked about every 15 seconds, not ${reads} times`,
+  );
+  reachable = false;
+  for (const ms of [15_000, 1000, 2000, 5000]) {
+    t.mock.timers.tick(ms);
+    await Promise.resolve();
+  }
+  assert.equal(recovery.snapshot(), true, 'reads that fail still end in an unconfirmed reply');
+  reachable = true;
+  recovery.retry();
+  await Promise.resolve();
+  assert.equal(recovery.snapshot(), false);
+  recovery.stop();
+});
