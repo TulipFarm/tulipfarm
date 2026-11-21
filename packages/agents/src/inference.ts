@@ -2366,9 +2366,16 @@ const editRequest = new RegExp(
   String.raw`(?<!\b(?:the|a|an|last|latest|newest|new|this|that|my|your|our|its) )\b(?:add|change|create|write|rewrite|implement|put|include|insert|make|turn|set|rename|replace|remove|delete|fix|move|swap|update|edit|switch|restyle|style|redesign|refactor|convert|hook|wire|drop|hide|enable|disable|translate|resize|cent(?:er|re)|align|bold|capitali[sz]e|recolou?r|build(?! (?:it|this|that|again|the (?:app|site|preview|draft|page)\b)))\b`,
   'i',
 );
-/** A short reply that reports the work finished without naming it. */
-const doneClaim =
-  /^\s*(?:all )?(?:done|finished|complete|updated)\b|\b(?:is|are) (?:all )?(?:done|ready|live|updated|in place)\b/i;
+/** A reply that says the edit was not made, or hands a choice back to the person instead of making it. */
+const noEditMade = new RegExp(
+  [
+    String.raw`\b(?:i|we)(?: \w+)? (?:did not|didn(?:'|’)t|could not|couldn(?:'|’)t|cannot|can(?:'|’)t|can not|will not|won(?:'|’)t|have not|haven(?:'|’)t|was unable|am unable|stopped)\b`,
+    String.raw`\b(?:nothing|no (?:changes?|edits?|files?))(?: \w+)? (?:was|were|is|are|has been|have been) (?:changed|written|saved|edited|updated|made|needed)\b`,
+    String.raw`\b(?:not|nothing) (?:changed|written|saved|edited|updated|needed)\b`,
+    String.raw`\b(?:tell me|let me know|please (?:confirm|choose|pick|share|send))\b`,
+  ].join('|'),
+  'i',
+);
 const toReader = /\b(?:below|for you|here(?:'|’)?s|here is|here are)\b/i;
 /** Verbs that ask for a change, in any inflection. */
 const changeVerb = String.raw`(?:add(?:s|ed|ing)?|chang(?:e|es|ed|ing)|creat(?:e|es|ed|ing)|writ(?:e|es|ing)|wrote|written|rewrit(?:e|es|ing)|rewrote|implement(?:s|ed|ing)?|turn(?:s|ed|ing)?|mak(?:e|es|ing)|made|(?:re)?build(?:s|ing)?|(?:re)?built|set(?:s|ting)?|renam(?:e|es|ed|ing)|replac(?:e|es|ed|ing)|remov(?:e|es|ed|ing)|delet(?:e|es|ed|ing)|fix(?:es|ed|ing)?|insert(?:s|ed|ing)?|mov(?:e|es|ed|ing)|swap(?:s|ped|ping)?|publish(?:es|ed|ing)?|deploy(?:s|ed|ing)?|updat(?:e|es|ed|ing)|edit(?:s|ed|ing)?|switch(?:es|ed|ing)?|(?:re)?styl(?:e|es|ed|ing)|redesign(?:s|ed|ing)?|refactor(?:s|ed|ing)?|convert(?:s|ed|ing)?|hook(?:s|ed|ing)?|wir(?:e|es|ed|ing)|drop(?:s|ped|ping)?|hid(?:e|es|ing)|hidden|enabl(?:e|es|ed|ing)|disabl(?:e|es|ed|ing)|translat(?:e|es|ed|ing)|resiz(?:e|es|ed|ing)|cent(?:er|re)(?:s|ed|ing)?|align(?:s|ed|ing)?|put(?:s|ting)?|includ(?:e|es|ed|ing)|giv(?:e|es|ing)|gave|given|get(?:s|ting)?|got|us(?:e|es|ed|ing)|show(?:s|ed|ing|n)?)`;
@@ -2486,13 +2493,9 @@ export function unbackedAppClaim(candidate: string, apps: AppKind | undefined, r
     }),
   ];
   // An edit request answered after only checking, reading or building changed nothing, whatever the reply says.
+  // Claims come in endless wordings, so nothing short of saying no edit was made counts as an answer.
   const untouched =
-    editAsked &&
-    looked &&
-    !changed &&
-    !candidate.includes('?') &&
-    !alreadyClaim.test(candidate) &&
-    (claimsActionOutcome(candidate) || doneClaim.test(candidate))
+    editAsked && !changed && !candidate.includes('?') && !alreadyClaim.test(candidate) && !noEditMade.test(candidate)
       ? { clause: candidate.trim(), missing: 'edit' as const }
       : undefined;
   const unbacked = claims.find(claim => claim.missing) ?? untouched;
