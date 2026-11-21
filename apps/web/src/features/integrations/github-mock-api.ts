@@ -35,7 +35,7 @@ if (githubMockEnabled) {
             scopes: ['repo', 'read:org', 'read:user'],
             useForChat: true,
             useForCoding: true,
-            primaryForKnowledge: false,
+            primaryForKnowledge: true,
           },
           ...(scenario === 'multiple'
             ? [
