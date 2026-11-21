@@ -1070,6 +1070,9 @@ importers:
       '@tulipfarm/google-workspace':
         specifier: workspace:*
         version: link:../google-workspace
+      '@tulipfarm/knowledge':
+        specifier: workspace:*
+        version: link:../knowledge
       '@tulipfarm/media':
         specifier: workspace:*
         version: link:../media
@@ -1110,9 +1113,6 @@ importers:
       '@tulipfarm/extensions':
         specifier: workspace:*
         version: link:../extensions
-      '@tulipfarm/knowledge':
-        specifier: workspace:*
-        version: link:../knowledge
       '@tulipfarm/typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
