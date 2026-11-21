@@ -60,7 +60,7 @@ type Store = ReturnType<typeof createKnowledgeStore>;
 type Transaction = Parameters<Store['bind']>[0];
 const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, `tf_knowledge_${name}`);
 const digest = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex');
-const identity = (value: string) => {
+export const identity = (value: string) => {
   const hex = digest(value);
   return uuidSchema.parse(
     `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`,
@@ -87,6 +87,17 @@ const jobRow = z.object({
 });
 const retryable = (work: z.infer<typeof workRow>) =>
   work.parsing === 'failed' && work.failure === 'provider' && work.attempts < knowledgeLimits.attemptsPerRevision;
+/** The common migration that records where Bud learned a note from. */
+export const learnedKnowledgeVersion = 105;
+const learnedInstalled = (tx: object) =>
+  Number((tx as { commonVersion?: number }).commonVersion ?? 0) >= learnedKnowledgeVersion;
+const learnedRow = z.object({
+  source_kind: z.enum(['chat', 'task']),
+  source_id: uuidSchema,
+  run_id: uuidSchema.nullable(),
+  learned_at: z.date(),
+});
+export type LearnedSource = { kind: 'chat' | 'task'; id: string; runId: string | null };
 const hidden = (error: unknown) => error instanceof AccessDenied && !(error instanceof SourceAuthorizationUnavailable);
 
 export function createLocalKnowledge({ runtime, files, recognition, recognitionAvailable }: LocalKnowledgeOptions) {
@@ -165,9 +176,31 @@ export function createLocalKnowledge({ runtime, files, recognition, recognitionA
     const gaps = await publicationGaps(tx, doc.lexical_publication_id);
     if (gaps) Object.assign(base, { gaps });
     if (revision.original.kind === 'file') return { ...base, kind: 'file', fileId: revision.original.fileId };
+    const learned = learnedInstalled(tx)
+      ? learnedRow
+          .optional()
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT source_kind,source_id,run_id,learned_at FROM ${table(tx, 'learned')} WHERE document_id=$1 AND owner_membership_id=$2`,
+                [documentId, actor.membershipId],
+              )
+            ).rows[0],
+          )
+      : undefined;
     return {
       ...base,
       kind: 'note',
+      ...(learned
+        ? {
+            learned: {
+              from: learned.source_kind,
+              sourceId: learned.source_id,
+              runId: learned.run_id,
+              learnedAt: learned.learned_at.toISOString(),
+            },
+          }
+        : {}),
       ...(includeText
         ? { noteText: new TextDecoder('utf-8', { fatal: true }).decode(await noteBytes(tx, revision)) }
         : {}),
@@ -189,6 +222,87 @@ export function createLocalKnowledge({ runtime, files, recognition, recognitionA
     });
   }
   async function save(workspaceId: string, userId: string, value: unknown) {
+    return write(workspaceId, userId, value);
+  }
+  /**
+   * Saves a note Bud learned from the member's own chat or task and records its source. An update only targets a note
+   * that is already Learned, so learning never changes the member's own notes.
+   */
+  async function learn(
+    workspaceId: string,
+    userId: string,
+    value: { commandId: string; documentId: string; expectedRevisionId: string | null; title: string; text: string },
+    source: LearnedSource,
+  ) {
+    return write(
+      workspaceId,
+      userId,
+      {
+        commandId: value.commandId,
+        documentId: value.documentId,
+        expectedRevisionId: value.expectedRevisionId,
+        title: value.title,
+        input: { kind: 'note', text: value.text },
+      },
+      async (tx, human) => {
+        if (!learnedInstalled(tx)) throw new KnowledgeError('adapter-required');
+        const learned = table(tx, 'learned');
+        if (value.expectedRevisionId !== null) {
+          const owned = await tx.client.query(
+            `SELECT 1 FROM ${learned} WHERE document_id=$1 AND owner_membership_id=$2 FOR UPDATE`,
+            [value.documentId, human.membershipId],
+          );
+          if (!owned.rowCount) throw new AccessDenied();
+        }
+        await tx.client.query(
+          `INSERT INTO ${learned} (document_id,owner_membership_id,source_kind,source_id,run_id) VALUES ($1,$2,$3,$4,$5)
+          ON CONFLICT (document_id) DO UPDATE SET source_kind=EXCLUDED.source_kind,source_id=EXCLUDED.source_id,
+            run_id=EXCLUDED.run_id,learned_at=clock_timestamp()
+          WHERE ${learned}.owner_membership_id=EXCLUDED.owner_membership_id`,
+          [value.documentId, human.membershipId, source.kind, source.id, source.runId],
+        );
+      },
+    );
+  }
+  /** The member's Learned notes with their text, most recently learned first. */
+  async function learnedEntries(workspaceId: string, userId: string, limit: number) {
+    return transaction(workspaceId, userId, false, async (tx, actor) => {
+      if (!learnedInstalled(tx)) return [];
+      const rows = z.array(z.object({ id: uuidSchema })).parse(
+        (
+          await tx.client.query(
+            `SELECT d.id FROM ${table(tx, 'learned')} k
+        JOIN ${table(tx, 'documents')} d ON d.id=k.document_id
+        JOIN ${table(tx, 'local_revisions')} l ON l.revision_id=d.observed_revision_id
+        JOIN ${table(tx, 'sources')} s ON s.id=d.source_id
+        WHERE k.owner_membership_id=$1 AND l.owner_membership_id=$1 AND l.owner_user_id=$2 AND s.owner_membership_id=$1
+          AND d.tombstoned_at IS NULL AND s.state IN ('active','paused')
+        ORDER BY k.learned_at DESC, d.id LIMIT $3`,
+            [actor.membershipId, actor.userId, limit],
+          )
+        ).rows,
+      );
+      const items: KnowledgeDocument[] = [];
+      for (const row of rows) {
+        try {
+          items.push(await dto(tx, actor, row.id, true));
+        } catch (error) {
+          if (!hidden(error)) throw error;
+        }
+      }
+      return items.flatMap(item =>
+        item.kind === 'note'
+          ? [{ documentId: item.documentId, revisionId: item.revisionId, title: item.title, text: item.noteText ?? '' }]
+          : [],
+      );
+    });
+  }
+  async function write(
+    workspaceId: string,
+    userId: string,
+    value: unknown,
+    learned?: (tx: Transaction, human: HumanActor) => Promise<void>,
+  ) {
     denyMcpEgress();
     const input = knowledgeSaveSchema.parse(value);
     const fingerprint = digest(JSON.stringify(input));
@@ -305,12 +419,18 @@ export function createLocalKnowledge({ runtime, files, recognition, recognitionA
           bytes,
         ]);
       await tx.client.query(`INSERT INTO ${table(tx, 'jobs')} (revision_id) VALUES ($1)`, [input.commandId]);
+      if (learned) await learned(tx, human);
       return dto(tx, human, input.documentId, true);
     });
   }
   async function list(workspaceId: string, userId: string, value: unknown = {}) {
     const input = knowledgeListSchema.parse(value);
     return transaction(workspaceId, userId, false, async (tx, actor) => {
+      if (input.filter === 'learned' && !learnedInstalled(tx)) return { items: [], nextCursor: null };
+      const learnedOnly =
+        input.filter === 'learned'
+          ? `AND EXISTS (SELECT 1 FROM ${table(tx, 'learned')} k WHERE k.document_id=d.id AND k.owner_membership_id=$1)`
+          : '';
       const rows = z.array(z.object({ id: uuidSchema })).parse(
         (
           await tx.client.query(
@@ -318,7 +438,7 @@ export function createLocalKnowledge({ runtime, files, recognition, recognitionA
         JOIN ${table(tx, 'local_revisions')} l ON l.revision_id=d.observed_revision_id
         JOIN ${table(tx, 'sources')} s ON s.id=d.source_id
         WHERE l.owner_membership_id=$1 AND l.owner_user_id=$2 AND s.owner_membership_id=$1
-          AND d.tombstoned_at IS NULL AND s.state IN ('active','paused') AND ($3::uuid IS NULL OR d.id>$3)
+          AND d.tombstoned_at IS NULL AND s.state IN ('active','paused') AND ($3::uuid IS NULL OR d.id>$3) ${learnedOnly}
         ORDER BY d.id LIMIT 101`,
             [actor.membershipId, actor.userId, input.cursor ?? null],
           )
@@ -791,5 +911,7 @@ export function createLocalKnowledge({ runtime, files, recognition, recognitionA
     process,
     settings,
     updateSettings,
+    learn,
+    learnedEntries,
   };
 }

@@ -172,6 +172,13 @@ export const featureFlags = {
     scope: 'workspace',
     env: 'FEATURE_FLAG_AGENT_EVALS',
   },
+  'learned-knowledge': {
+    description:
+      "Bud saves business facts a member states in their own chats and tasks to that member's Knowledge as Learned entries. Off, nothing new is learned; existing entries stay.",
+    default: true,
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_LEARNED_KNOWLEDGE',
+  },
 } as const satisfies Record<string, FeatureFlagDefinition>;
 
 export type FeatureFlag = keyof typeof featureFlags;

@@ -411,3 +411,34 @@ test('stalled entries stop automatic checks and manual Refresh restarts them', {
   assert.equal(await library.getByText('Automatic checks stopped. Refresh entries to check again.').count(), 0);
   await captureBuilderScreenshot(page, 'knowledge-polling-refreshed');
 });
+
+test('the Learned filter shows entries Bud learned with a link to their source', { timeout: 60000 }, async t => {
+  const chatId = randomUUID();
+  const learnedEntry = entry('Pro plan pricing', {
+    noteText: 'Pro costs 49 dollars per seat a month.',
+    learned: { from: 'chat', sourceId: chatId, runId: null, learnedAt: '2026-05-03T10:00:00.000Z' },
+  });
+  const env = await environment(t, { entries: [entry('Team handbook'), learnedEntry] });
+  const { page, library } = env;
+  const rows = library.getByRole('list', { name: 'Knowledge entries' });
+  await rows.getByRole('heading', { name: 'Team handbook', exact: true }).waitFor();
+  const filter = library.getByRole('group', { name: 'Show entries' });
+  assert.equal(await filter.getByRole('button', { name: 'All', exact: true }).getAttribute('aria-pressed'), 'true');
+  await filter.getByRole('button', { name: 'Learned', exact: true }).click();
+  assert.equal(await filter.getByRole('button', { name: 'Learned', exact: true }).getAttribute('aria-pressed'), 'true');
+  await library.getByText('Only you can see these.', { exact: false }).waitFor();
+  assert.equal(await rows.getByRole('listitem').count(), 1);
+  const source = rows.getByRole('link', { name: 'Open source chat for Pro plan pricing' });
+  assert.equal(await source.getAttribute('href'), `/knowledge-demo/chat/${chatId}`);
+  assert.equal(await rows.locator('time').getAttribute('datetime'), '2026-05-03T10:00:00.000Z');
+  await rows.getByText(/^Learned from chat ·/).waitFor();
+
+  await rows.getByRole('button', { name: 'Remove Pro plan pricing' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Remove Pro plan pricing?' });
+  await dialog.getByText('Bud may learn it again if you share it in a later chat or task.', { exact: false }).waitFor();
+  await dialog.getByRole('button', { name: 'Remove entry', exact: true }).click();
+  await library.getByRole('heading', { name: 'Pro plan pricing', exact: true }).waitFor({ state: 'detached' });
+  await library.getByText('No learned entries yet').waitFor();
+  await filter.getByRole('button', { name: 'All', exact: true }).click();
+  await rows.getByRole('heading', { name: 'Team handbook', exact: true }).waitFor();
+});

@@ -39,6 +39,11 @@ import {
 } from './maintenance-contracts.ts';
 import { errorType, log, telemetryErrorCode } from '@tulipfarm/observability';
 import { reconcileMaintenanceMemory } from './memory-reconciliation.ts';
+import {
+  knowledgeLearningInstalled,
+  reconcileMaintenanceKnowledge,
+  type LearnedKnowledgePort,
+} from './knowledge-learning.ts';
 
 const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, name);
 export const maintenanceCompatibility = { minimum: 1, maximum: commonCompatibility.maximum };
@@ -215,6 +220,12 @@ export async function requireMaintenanceFence(tx: AuthorizationTransaction, fenc
   };
 }
 
+/** A ready job still learning from the chat: personal memory, then business facts once that pass is installed. */
+const learningPending = (tx: AuthorizationTransaction, alias: string) =>
+  knowledgeLearningInstalled(tx)
+    ? `(${alias}memory_complete AND ${alias}knowledge_complete)`
+    : `${alias}memory_complete`;
+
 export function createConversationMaintenance(runtime: ConversationRuntime) {
   const transaction = <T>(workspaceId: string, operation: (tx: AuthorizationTransaction) => Promise<T>) =>
     runtime.transaction(workspaceId, maintenanceCompatibility, async tx => {
@@ -295,7 +306,7 @@ export function createConversationMaintenance(runtime: ConversationRuntime) {
       const rows = (
         await tx.client
           .query(`SELECT j.id, j.conversation_id, j.generation, j.epoch FROM ${table(tx, 'tf_conversation_maintenance')} j
-        WHERE (j.state IN ('queued','failed','running','publishing') OR (j.state='ready' AND NOT j.memory_complete)
+        WHERE (j.state IN ('queued','failed','running','publishing') OR (j.state='ready' AND NOT ${learningPending(tx, 'j.')})
           OR (j.state='blocked' AND j.error_code='knowledge-capacity-blocked')) AND j.next_attempt_at<=clock_timestamp()
         AND (j.lease_until IS NULL OR j.lease_until<=clock_timestamp())
         AND (j.dispatched_at IS NULL OR j.dispatched_at<=clock_timestamp()-interval '10 minutes')
@@ -354,7 +365,7 @@ export function createConversationMaintenance(runtime: ConversationRuntime) {
           `UPDATE ${table(tx, 'tf_conversation_maintenance')} SET state=CASE WHEN recap IS NULL THEN 'running' ELSE 'publishing' END,
         epoch=epoch+1, attempts=attempts+1, lease_until=clock_timestamp()+$4*interval '1 second', updated_at=clock_timestamp()
         WHERE id=$1 AND conversation_id=$2 AND generation=$3 AND (state IN ('queued','failed','running','publishing')
-          OR (state='ready' AND NOT memory_complete) OR (state='blocked' AND error_code='knowledge-capacity-blocked'))
+          OR (state='ready' AND NOT ${learningPending(tx, '')}) OR (state='blocked' AND error_code='knowledge-capacity-blocked'))
         AND (lease_until IS NULL OR lease_until<=clock_timestamp()) AND next_attempt_at<=clock_timestamp() RETURNING epoch`,
           [work.jobId, work.conversationId, work.generation, leaseSeconds],
         )
@@ -363,7 +374,12 @@ export function createConversationMaintenance(runtime: ConversationRuntime) {
     });
   }
 
-  async function process(value: unknown, compactor: ConversationCompactor, publish: ConversationRecapPublisher) {
+  async function process(
+    value: unknown,
+    compactor: ConversationCompactor,
+    publish: ConversationRecapPublisher,
+    learned?: LearnedKnowledgePort,
+  ) {
     const work = maintenanceWorkSchema.parse(value);
     const fence = await claim(work);
     if (!fence) return 'idle';
@@ -557,16 +573,20 @@ export function createConversationMaintenance(runtime: ConversationRuntime) {
           await notifyConversationChange(tx, { workspaceId: work.workspaceId, conversationId: work.conversationId });
         });
       }
-      const memoryComplete = await reconcileMaintenanceMemory(
-        operation =>
-          transaction(work.workspaceId, async tx => {
-            const { actor, job } = await requireMaintenanceFence(tx, fence);
-            return operation(tx, { actor, coveredThrough: job.covered_through, policy: job.compaction_policy });
-          }),
-        fence,
-        compactor,
-      );
-      if (!memoryComplete) {
+      const learning = <T>(
+        operation: (
+          tx: AuthorizationTransaction,
+          current: { actor: HumanActor; coveredThrough: number | null; policy: EffectiveCompactionPolicy | null },
+        ) => Promise<T>,
+      ) =>
+        transaction(work.workspaceId, async tx => {
+          const { actor, job } = await requireMaintenanceFence(tx, fence);
+          return operation(tx, { actor, coveredThrough: job.covered_through, policy: job.compaction_policy });
+        });
+      const learningComplete =
+        (await reconcileMaintenanceMemory(learning, fence, compactor)) &&
+        (await reconcileMaintenanceKnowledge(learning, fence, compactor, learned));
+      if (!learningComplete) {
         await transaction(work.workspaceId, async tx => {
           await requireMaintenanceFence(tx, fence);
           await tx.client.query(

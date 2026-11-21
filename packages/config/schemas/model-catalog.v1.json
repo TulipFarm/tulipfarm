@@ -178,7 +178,8 @@
                   "claude-plan",
                   "copilot-plan",
                   "coding-runs",
-                  "agent-evals"
+                  "agent-evals",
+                  "learned-knowledge"
                 ]
               },
               {
@@ -541,7 +542,8 @@
                   "claude-plan",
                   "copilot-plan",
                   "coding-runs",
-                  "agent-evals"
+                  "agent-evals",
+                  "learned-knowledge"
                 ]
               },
               {

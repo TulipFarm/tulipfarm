@@ -89,3 +89,18 @@ export {
   type DefaultKnowledgeWork,
 } from './internal/defaults.ts';
 export type { KnowledgeSourceGate } from './internal/rolling.ts';
+export {
+  createLearnedKnowledge,
+  learnedKnowledgePrompt,
+  learnedLimits,
+  learnedParts,
+  learnedRequest,
+  parseLearnedEntries,
+  sensitiveLearnedText,
+  type LearnedEntry,
+  type LearnedKnowledge,
+  type LearnedMessage,
+  type LearnedProposal,
+  type LearnedSource,
+} from './internal/learned.ts';
+export { learnedKnowledgeVersion } from './internal/local.ts';

@@ -3,6 +3,7 @@ import { modelEnvironment } from '@tulipfarm/agents/model-environment';
 import { catalogEligibility } from '@tulipfarm/evals/workspace';
 import { createBackgroundJob } from '@tulipfarm/observability';
 import { workspaceSchemaPending } from '@tulipfarm/workspace-storage/runtime';
+import { learnedKnowledge } from './conversation-maintenance-activities.ts';
 
 /** Learns lessons for saved agents from their finished task runs, a few tasks per workspace at a time. */
 export function createAgentLessonComposition(options: {
@@ -14,6 +15,7 @@ export function createAgentLessonComposition(options: {
   const learning = createAgentLessonLearning({
     runtime: options.runtime,
     model: meteredLessonModel({ runtime: options.runtime, environment, eligible: catalogEligibility(environment) }),
+    learned: learnedKnowledge(options.runtime),
   });
   const job = createBackgroundJob('agent-lessons', 30);
   let after: string | null = null;
