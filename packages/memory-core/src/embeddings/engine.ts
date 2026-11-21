@@ -141,13 +141,19 @@ export function createEmbeddingEngine<Context, Source extends { kind: string }>(
   const { AccessDenied, CreditsExhausted } = errors;
   const { authority: createKnowledgeAuthorizer } = authorization;
   const vectorSchema = z.array(z.number().finite()).length(profile.dimensions);
-  async function transaction<T>(workspaceId: string, operation: (tx: Transaction) => Promise<T>, deadlineAt?: number) {
+  // Status reads take the lock shared, so polling them never queues chats and other reads behind it.
+  async function transaction<T>(
+    workspaceId: string,
+    operation: (tx: Transaction) => Promise<T>,
+    deadlineAt?: number,
+    mode: 'read' | 'write' = 'write',
+  ) {
     return runtime.transaction(
       uuidSchema.parse(workspaceId),
       deadlineAt === undefined ? {} : { deadlineAt },
       async raw => {
         const tx = store.bind(raw);
-        requireAccess(await lockKnowledgeAuthorization(tx, 'write'));
+        requireAccess(await lockKnowledgeAuthorization(tx, mode));
         return operation(tx);
       },
     );
@@ -505,6 +511,7 @@ export function createEmbeddingEngine<Context, Source extends { kind: string }>(
       workspaceId,
       async tx => queryDto(tx, await queryJob(tx, await member(tx, userId), commandId)),
       deadlineAt,
+      'read',
     );
   }
   async function retry(tx: Transaction, actor: HumanActor, job: Job, input: z.infer<typeof embeddingRetrySchema>) {
@@ -650,15 +657,20 @@ export function createEmbeddingEngine<Context, Source extends { kind: string }>(
   }
   async function documentStatus(workspaceId: string, userId: string, documentId: string) {
     documentId = uuidSchema.parse(documentId);
-    return transaction(workspaceId, async tx => {
-      const job = await documentJob(tx, await member(tx, userId), documentId);
-      return embeddingDocumentStatusSchema.parse({
-        ...(await state(tx, job)),
-        documentId,
-        revisionId: job.revision_id,
-        publicationId: job.publication_id,
-      });
-    });
+    return transaction(
+      workspaceId,
+      async tx => {
+        const job = await documentJob(tx, await member(tx, userId), documentId);
+        return embeddingDocumentStatusSchema.parse({
+          ...(await state(tx, job)),
+          documentId,
+          revisionId: job.revision_id,
+          publicationId: job.publication_id,
+        });
+      },
+      undefined,
+      'read',
+    );
   }
   async function retryDocument(workspaceId: string, userId: string, documentId: string, value: unknown) {
     knowledgeEgressPolicy.deny();
@@ -680,20 +692,25 @@ export function createEmbeddingEngine<Context, Source extends { kind: string }>(
   }
   async function documentResult(workspaceId: string, userId: string, documentId: string) {
     documentId = uuidSchema.parse(documentId);
-    return transaction(workspaceId, async tx => {
-      const job = await documentJob(tx, await member(tx, userId), documentId);
-      if ((await state(tx, job)).state !== 'ready') throw new KnowledgeError('incomplete');
-      const chunks = z
-        .array(z.object({ ordinal: z.number().int(), inputHash: z.string(), vector: vectorSchema }))
-        .parse((await repository(tx).documentVectors([job.id])).rows);
-      return {
-        documentId,
-        revisionId: job.revision_id,
-        publicationId: job.publication_id,
-        profileId: job.profile_id,
-        chunks,
-      };
-    });
+    return transaction(
+      workspaceId,
+      async tx => {
+        const job = await documentJob(tx, await member(tx, userId), documentId);
+        if ((await state(tx, job)).state !== 'ready') throw new KnowledgeError('incomplete');
+        const chunks = z
+          .array(z.object({ ordinal: z.number().int(), inputHash: z.string(), vector: vectorSchema }))
+          .parse((await repository(tx).documentVectors([job.id])).rows);
+        return {
+          documentId,
+          revisionId: job.revision_id,
+          publicationId: job.publication_id,
+          profileId: job.profile_id,
+          chunks,
+        };
+      },
+      undefined,
+      'read',
+    );
   }
   async function resumeDocument(workspaceId: string, userId: string, documentId: string, commandId: string) {
     knowledgeEgressPolicy.deny();

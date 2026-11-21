@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { test } from 'node:test';
 import { fixture, connect, denied } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createWorkspaceRuntime, qualified } from '@tulipfarm/workspace-storage/runtime';
 import { readKnowledgeCreditGroup } from '@tulipfarm/workspace-storage/knowledge-credits';
 import { knowledgeEmbeddingProfile } from '@tulipfarm/config';
-import { AccessDenied } from '@tulipfarm/access';
+import { AccessDenied, lockAuthorization } from '@tulipfarm/access';
 import { createFiles } from '@tulipfarm/files';
 import { workspaceTableMigrations } from '../../workspaces/dist/table-migrations.js';
 import { createKnowledgeEmbeddings, createLocalKnowledge, KnowledgeError } from '../dist/index.js';
@@ -81,7 +82,30 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       const process = (api, query) =>
         api.process({ workspaceId: ws.id, jobId: query.jobId, generation: query.generation });
       const status = (api, query) => api.queryStatus(ws.id, ws.userId, query.commandId);
-      return { ws, table, group, make, prepare, process, status };
+      // Runs `read` while another transaction holds the shared authorization lock, and fails if `read` has to wait.
+      const whileShared = async read => {
+        let release, held;
+        const holding = new Promise(resolve => (held = resolve));
+        const reader = secondRuntime.transaction(
+          ws.id,
+          { minimum: stream.length, maximum: stream.length },
+          async tx => {
+            await lockAuthorization(tx);
+            held();
+            await new Promise(resolve => (release = resolve));
+          },
+        );
+        await holding;
+        try {
+          const result = await Promise.race([read(), sleep(2_000).then(() => 'waited')]);
+          assert.notEqual(result, 'waited', 'A status read waited for a shared authorization lock');
+          return result;
+        } finally {
+          release();
+          await reader;
+        }
+      };
+      return { ws, table, group, make, prepare, process, status, whileShared };
     }
     await t.test('two runtime pools singleflight exact input, persist cache and keep command IDs private', async () => {
       const w = await workspace();
@@ -112,6 +136,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       release();
       assert.equal((await running).disposition, 'ready');
       assert.deepEqual((await w.status(other, b)).vector, vector);
+      assert.deepEqual((await w.whileShared(() => w.status(other, b))).vector, vector);
       assert.equal((await w.prepare(other, 'private exact query')).state, 'ready');
       assert.equal(calls, 1);
       assert.equal((await w.group()).known, '19500000');
@@ -545,8 +570,12 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.equal((await api.process(due[0])).disposition, 'retry');
       assert.equal((await api.process(due[0])).disposition, 'retry');
       assert.equal((await api.process(due[0])).disposition, 'ready');
-      const status = await api.documentStatus(w.ws.id, w.ws.userId, saved.documentId);
+      const status = await w.whileShared(() => api.documentStatus(w.ws.id, w.ws.userId, saved.documentId));
       assert.equal(status.state, 'ready');
+      assert.equal(
+        (await w.whileShared(() => api.documentResult(w.ws.id, w.ws.userId, saved.documentId))).chunks.length,
+        3,
+      );
       assert.equal(status.completedChunks, 3);
       assert.equal(status.totalChunks, 3);
       assert.deepEqual(inputs, [
