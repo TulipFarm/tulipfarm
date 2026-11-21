@@ -32,7 +32,7 @@ function logs(t) {
   return records;
 }
 
-test('a plan reply whose summed usage exceeds the held bound is charged its held cost and logged, not failed', t => {
+test('a plan reply whose summed usage exceeds the route limits is priced as reported and logged, not failed', t => {
   const records = logs(t);
   const cost = pricedUsage({ ...quote, usage: { kind: 'known', tokens: tokens(5000, 400) } }, 0n, {
     provider: 'copilot',
@@ -48,7 +48,7 @@ test('a plan reply whose summed usage exceeds the held bound is charged its held
   });
   const [warning] = records.filter(record => record.operation === 'chat.usage-cost');
   assert.equal(warning.level, 'warn');
-  assert.equal(warning.outcome, 'estimated');
+  assert.equal(warning.outcome, 'over_limit');
   assert.equal(warning['gen_ai.provider.name'], 'copilot');
   assert.equal(warning['billing.source'], 'plan');
   assert.equal(warning['gen_ai.usage.input_tokens'], 5000);
@@ -73,4 +73,41 @@ test('a hosted call on a day without a price is charged its held worst case', t 
     model: 'grok-4.3-fast',
   });
   assert.equal(cost.providerPicoUsd, '900');
+});
+
+const grok = {
+  ...quote,
+  modelId: 'grok-fast',
+  maxInputTokens: 200000,
+  maxOutputTokens: 8192,
+  rates: [
+    {
+      validFrom: null,
+      validUntilExclusive: null,
+      promptTokensAbove: null,
+      usdPerMillionTokens: { input: 1.25, output: 2.5, cacheRead: 0.2, cacheWrite: 0 },
+    },
+  ],
+};
+
+test('a call cut off at its output limit whose reasoning tokens exceed the limit is charged its reported tokens', t => {
+  const records = logs(t);
+  const worstCase = 178_000_000_000n;
+  const usage = { ...tokens(3336, 8247), cacheRead: 30000 };
+  const cost = pricedUsage({ ...grok, usage: { kind: 'known', tokens: usage } }, worstCase, {
+    provider: 'azure',
+    model: 'grok-4.3',
+  });
+  assert.equal(cost.providerPicoUsd, String(3336 * 1_250_000 + 30000 * 200_000 + 8247 * 2_500_000));
+  const [warning] = records.filter(record => record.operation === 'chat.usage-cost');
+  assert.equal(warning.outcome, 'over_limit');
+});
+
+test('reported usage priced above the held worst case is charged the worst case', t => {
+  logs(t);
+  const cost = pricedUsage({ ...grok, usage: { kind: 'known', tokens: tokens(3336, 8247) } }, 1000n, {
+    provider: 'azure',
+    model: 'grok-4.3',
+  });
+  assert.equal(cost.providerPicoUsd, '1000');
 });
