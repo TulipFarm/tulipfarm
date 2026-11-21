@@ -1,5 +1,16 @@
 import type { RepositoryResult } from './repository-result.ts';
 
+export type KnowledgeChunkRow = {
+  ordinal: number;
+  heading: string;
+  passage: string;
+  tokens: number;
+  offset: unknown;
+  hash: string;
+};
+
+export type KnowledgeSearchChunkRow = KnowledgeChunkRow & { title: string; identifiers: string[] };
+
 export interface KnowledgeRepository {
   readSource(values: [id: string]): Promise<RepositoryResult>;
   readDocument(values: [id: string]): Promise<RepositoryResult>;
@@ -41,29 +52,11 @@ export interface KnowledgeRepository {
       fingerprint: string,
     ],
   ): Promise<RepositoryResult>;
-  insertSearchChunk(
-    values: [
-      publicationId: string,
-      ordinal: number,
-      heading: string,
-      passage: string,
-      tokens: number,
-      offset: unknown,
-      hash: string,
-      title: string,
-      identifiers: string[],
-    ],
-  ): Promise<RepositoryResult>;
-  insertChunk(
-    values: [
-      publicationId: string,
-      ordinal: number,
-      heading: string,
-      passage: string,
-      tokens: number,
-      offset: unknown,
-      hash: string,
-    ],
+  /** Inserts every chunk of a publication in one statement. */
+  insertChunks(values: [publicationId: string, chunks: readonly KnowledgeChunkRow[]]): Promise<RepositoryResult>;
+  /** Like `insertChunks`, with the search title and exact identifiers local files index. */
+  insertSearchChunks(
+    values: [publicationId: string, chunks: readonly KnowledgeSearchChunkRow[]],
   ): Promise<RepositoryResult>;
   publishDocument(values: [documentId: string, publicationId: string]): Promise<RepositoryResult>;
   completeParsing(values: [revisionId: string]): Promise<RepositoryResult>;

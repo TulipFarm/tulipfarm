@@ -43,6 +43,7 @@ import {
   revisionInput,
 } from './contracts.ts';
 import { createKnowledgeStore, type KnowledgeOptions, type ExternalSource } from './store.ts';
+import { tracksKnowledgeUsage } from '../storage-ports.ts';
 import {
   externalRecognitionDue,
   googleRecognitionDue,
@@ -759,11 +760,15 @@ export function createGoogleKnowledge({
             throw new KnowledgeError('quota');
           const total = z.object({ bytes: z.coerce.number() }).parse(
             (
-              await tx.client.query(`SELECT
+              await tx.client.query(
+                tracksKnowledgeUsage(tx)
+                  ? `SELECT bytes FROM ${table(tx, 'usage')} WHERE id=1`
+                  : `SELECT
             (SELECT COALESCE(sum(original_bytes),0) FROM ${table(tx, 'revisions')})+
             (SELECT COALESCE(sum(octet_length(normalized_content)),0) FROM ${table(tx, 'google_originals')})+
             (SELECT COALESCE(sum(octet_length(markdown)),0) FROM ${table(tx, 'publications')})+
-            (SELECT COALESCE(sum(octet_length(passage)+octet_length(heading)),0) FROM ${table(tx, 'chunks')}) AS bytes`)
+            (SELECT COALESCE(sum(octet_length(passage)+octet_length(heading)),0) FROM ${table(tx, 'chunks')}) AS bytes`,
+              )
             ).rows[0],
           ).bytes;
           if (

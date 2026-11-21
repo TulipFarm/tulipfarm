@@ -71,8 +71,9 @@ function fixture({ afterChunkRead, afterChunkWrite, refreshExternalProof } = {})
       publications.set(id, { id, document_id, revision_id, markdown, pages, tokens, chunk_count, fingerprint });
       return result();
     },
-    insertChunk: ([publicationId, ordinal, heading, passage, , source_offset]) => {
-      chunks.set(`${publicationId}:${ordinal}`, { heading, passage, source_offset });
+    insertChunks: ([publicationId, rows]) => {
+      for (const { ordinal, heading, passage, offset } of rows)
+        chunks.set(`${publicationId}:${ordinal}`, { heading, passage, source_offset: offset });
       afterChunkWrite?.(() => {
         denyProof = true;
       });

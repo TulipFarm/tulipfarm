@@ -321,32 +321,24 @@ export function createDocumentStore<Context, Source extends { kind: string }>({
         input.chunks.length,
         fingerprint,
       ]);
-      for (const [ordinal, chunk] of input.chunks.entries()) {
-        const values: [
-          string,
-          number,
-          string,
-          string,
-          number,
-          z.infer<typeof lexicalInput>['chunks'][number]['offset'],
-          string,
-        ] = [
+      const chunks = input.chunks.map((chunk, ordinal) => ({
+        ordinal,
+        heading: chunk.heading,
+        passage: chunk.text,
+        tokens: chunk.tokens,
+        offset: chunk.offset,
+        hash: hash(`${chunk.heading}\n${chunk.text}`),
+      }));
+      if (local)
+        await repository(tx).insertSearchChunks([
           input.id,
-          ordinal,
-          chunk.heading,
-          chunk.text,
-          chunk.tokens,
-          chunk.offset,
-          hash(`${chunk.heading}\n${chunk.text}`),
-        ];
-        if (local)
-          await repository(tx).insertSearchChunk([
-            ...values,
-            revision.title,
-            exactIdentifiers(`${revision.title}\n${local.filename}\n${chunk.heading}\n${chunk.text}`),
-          ]);
-        else await repository(tx).insertChunk(values);
-      }
+          chunks.map(chunk => ({
+            ...chunk,
+            title: revision.title,
+            identifiers: exactIdentifiers(`${revision.title}\n${local.filename}\n${chunk.heading}\n${chunk.passage}`),
+          })),
+        ]);
+      else await repository(tx).insertChunks([input.id, chunks]);
     }
     await requireProof(tx, human, doc, origin);
     await repository(tx).publishDocument([doc.id, input.id]);
