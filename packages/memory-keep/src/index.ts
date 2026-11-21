@@ -95,6 +95,17 @@ export type KeepListedFile = {
   readonly revisionId: string;
   readonly version: string;
   readonly trashed: boolean;
+  readonly category?: string | null | undefined;
+  readonly displayName?: string | undefined;
+  readonly description?: string | undefined;
+  readonly sizeBytes?: number | undefined;
+  readonly updatedAt?: string | undefined;
+};
+
+export type KeepMetadataOutcome = KeepWriteOutcome & {
+  readonly path: string;
+  readonly displayName: string;
+  readonly description: string;
 };
 
 export type KeepList = { readonly files: readonly KeepListedFile[]; readonly nextAfter: string | null };
@@ -189,6 +200,11 @@ const writeSchema = z.object({
   replayed: z.boolean(),
   revisionId: z.string(),
 });
+const metadataSchema = writeSchema.extend({
+  path: z.string(),
+  displayName: z.string(),
+  description: z.string(),
+});
 const historySchema = z.object({
   memoryId: z.string(),
   revisions: z.array(
@@ -219,6 +235,11 @@ const listSchema = z.object({
       revisionId: z.string(),
       version: z.string(),
       trashed: z.boolean(),
+      category: z.string().nullish(),
+      displayName: z.string().optional(),
+      description: z.string().optional(),
+      sizeBytes: z.number().int().nonnegative().optional(),
+      updatedAt: z.string().optional(),
     }),
   ),
   nextAfter: z.string().nullable().optional(),
@@ -370,6 +391,23 @@ export function createKeepClient(options: KeepClientOptions) {
         ...(input.expectedRevisionId === undefined ? {} : { expected_revision_id: input.expectedRevisionId }),
         ...(input.description === undefined ? {} : { description: input.description }),
         ...(input.idempotencyKey === undefined ? {} : { idempotency_key: input.idempotencyKey }),
+      }),
+
+    /** `POST /v1/memory/update_metadata`: renames or redescribes a file under compare-and-swap, as a new revision. */
+    updateMetadata: (
+      input: {
+        readonly scope: KeepScope;
+        readonly expectedRevisionId: string;
+        readonly displayName?: string;
+        readonly description?: string;
+      } & KeepTarget,
+    ): Promise<KeepMemoryResult<KeepMetadataOutcome>> =>
+      memory('update_metadata', metadataSchema, {
+        scope: input.scope,
+        ...target(input),
+        expected_revision_id: input.expectedRevisionId,
+        ...(input.displayName === undefined ? {} : { display_name: input.displayName }),
+        ...(input.description === undefined ? {} : { description: input.description }),
       }),
 
     /** `POST /v1/memory/history`: retained revisions, including those of a trashed file. */

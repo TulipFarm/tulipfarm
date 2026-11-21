@@ -1,26 +1,100 @@
 import { z } from 'zod';
-import { personalMemorySchema } from '@tulipfarm/memory-core/personal-memory-contracts';
 export * from '@tulipfarm/memory-core/personal-memory-contracts';
 
-/** One edit that background learning suggests for the member's memory. Nothing changes until they confirm it. */
-export const memoryProposalSchema = z.strictObject({
-  id: z.uuid(),
-  kind: z.enum(['add', 'change', 'remove']),
-  /** The memory text the edit changes or removes; null for an addition. */
-  before: z.string().nullable(),
-  /** The new text; null for a removal. */
-  after: z.string().nullable(),
-  /** The member's own words the suggestion is based on. */
-  quote: z.string(),
-  conversationId: z.uuid(),
-  conversationTitle: z.string(),
-  createdAt: z.string(),
-  /** The memory changed since the suggestion was made, so it cannot be confirmed as it is. */
-  outdated: z.boolean(),
+export const memoryGroups = ['you', 'topics', 'areas', 'people'] as const;
+export type MemoryGroup = (typeof memoryGroups)[number];
+
+/** How the member wants Bud to respond. Earlier memory lived only here. */
+export const preferencesPath = '/profile.md';
+/** Who the member is and what they do. */
+export const profilePath = '/you/about.md';
+/** The You files: always present on the memory page, with fixed names, and always given to Bud in full. */
+export const youFiles = [
+  { path: preferencesPath, name: 'Preferences', description: 'How you want Bud to respond' },
+  { path: profilePath, name: 'Profile', description: 'Who you are and what you do' },
+] as const;
+
+/** Keep's limits for one file. */
+export const memoryFileMaximumBytes = 8192;
+export const memoryDescriptionMaximumBytes = 160;
+const slug = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const grouped = /^\/(topics|areas|people)\/([^/]+)\.md$/;
+const bytes = (value: string) => new TextEncoder().encode(value).length;
+
+/** The group a memory path belongs to, or undefined when TulipFarm does not keep memory there. */
+export function memoryGroup(path: string): MemoryGroup | undefined {
+  if (youFiles.some(file => file.path === path)) return 'you';
+  const match = grouped.exec(path);
+  if (!match || match[2]!.length > 80 || !slug.test(match[2]!)) return undefined;
+  return match[1] as MemoryGroup;
+}
+
+/** A readable name for a file that has none: its slug in sentence case. */
+export function defaultMemoryName(path: string) {
+  const fixed = youFiles.find(file => file.path === path);
+  if (fixed) return fixed.name;
+  const name = (path.split('/').at(-1) ?? path).replace(/\.md$/, '').replace(/-/g, ' ');
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+export const memoryPathSchema = z
+  .string()
+  .max(200)
+  .refine(path => memoryGroup(path) !== undefined, 'Use /profile.md, /you/about.md, or /topics|areas|people/<slug>.md');
+const fileText = z
+  .string()
+  .refine(
+    value =>
+      !value.includes('\0') && !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(value),
+    'Invalid text',
+  )
+  .refine(value => bytes(value) <= memoryFileMaximumBytes, 'A memory file holds at most 8 KiB');
+export const memoryFileNameSchema = z.string().trim().min(1).max(120);
+export const memoryFileDescriptionSchema = z
+  .string()
+  .trim()
+  .refine(value => bytes(value) <= memoryDescriptionMaximumBytes, 'A description holds at most 160 bytes');
+const revisionId = z.string().min(1).max(200);
+
+export const memoryFileSchema = z.strictObject({
+  path: z.string(),
+  name: z.string(),
+  description: z.string(),
+  group: z.enum(memoryGroups),
+  /** Null for a You file that has not been written yet. */
+  revisionId: z.string().nullable(),
+  updatedAt: z.string().nullable(),
+  size: z.number().int().nonnegative(),
 });
-export type MemoryProposal = z.infer<typeof memoryProposalSchema>;
-export const memoryProposalsSchema = z.strictObject({
-  memory: personalMemorySchema,
-  proposals: z.array(memoryProposalSchema),
+export type MemoryFile = z.infer<typeof memoryFileSchema>;
+export const memoryFilesSchema = z.strictObject({ files: z.array(memoryFileSchema) });
+export const memoryFileContentSchema = memoryFileSchema.extend({ content: z.string() });
+export type MemoryFileContent = z.infer<typeof memoryFileContentSchema>;
+export const memoryFilePathSchema = z.strictObject({ path: memoryPathSchema });
+
+export const saveMemoryFileSchema = z.strictObject({
+  path: memoryPathSchema,
+  content: fileText,
+  /** Null creates the file; otherwise the revision the change was made against. */
+  expectedRevisionId: revisionId.nullable(),
+  name: memoryFileNameSchema.optional(),
+  description: memoryFileDescriptionSchema.optional(),
 });
-export type MemoryProposals = z.infer<typeof memoryProposalsSchema>;
+export type SaveMemoryFile = z.infer<typeof saveMemoryFileSchema>;
+export const deleteMemoryFileSchema = z.strictObject({ path: memoryPathSchema, expectedRevisionId: revisionId });
+
+export const memoryInstructionSchema = z.strictObject({
+  requestId: z.uuid(),
+  instruction: z.string().trim().min(1).max(2000),
+});
+export const memoryFileChangeSchema = z.strictObject({
+  path: z.string(),
+  name: z.string(),
+  operation: z.enum(['created', 'updated', 'deleted']),
+});
+export type MemoryFileChange = z.infer<typeof memoryFileChangeSchema>;
+export const memoryInstructionResultSchema = z.strictObject({
+  changed: z.array(memoryFileChangeSchema),
+  files: z.array(memoryFileSchema),
+});
+export type MemoryInstructionResult = z.infer<typeof memoryInstructionResultSchema>;

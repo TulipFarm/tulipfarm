@@ -11,104 +11,87 @@ if (import.meta.env.DEV && /^\/memory-mock(?:\/|$)/.test(window.location.pathnam
   const scenario = new URLSearchParams(window.location.search).get('memoryScenario');
   // `passwordScenario=credential|link` turns on self-hosted password sign-in for this demo account.
   const passwordScenario = new URLSearchParams(window.location.search).get('passwordScenario');
-  // `memoryScenario=keep-unavailable` shows the memory service not answering.
-  let memory: { content: string; revision: number; history: { trashed: boolean; undo: boolean } } = {
-    history: { trashed: false, undo: true },
-    content:
-      scenario === 'empty'
-        ? ''
-        : 'Use short, friendly replies with emojis when they help.\n\nGreet me for my time of day. Explain unfamiliar terms in plain words.',
-    revision: 1,
+  // `memoryScenario=empty|denied|keep-unavailable|error|slow|conflict|instruct-error` picks the memory files demo.
+  type File = {
+    path: string;
+    name: string;
+    description: string;
+    group: 'you' | 'topics' | 'areas' | 'people';
+    revisionId: string | null;
+    updatedAt: string | null;
+    size: number;
+    content: string;
   };
-  // `proposalScenario=pending|outdated|empty|error` sets the suggested changes.
-  const proposalScenario = new URLSearchParams(window.location.search).get('proposalScenario') ?? 'empty';
-  const suggestion = (n: number, kind: 'add' | 'change' | 'remove', before: string | null, after: string | null) => ({
-    id: `7${n}7${n}7${n}7${n}-7${n}7${n}-4${n}7${n}-8${n}7${n}-7${n}7${n}7${n}7${n}7${n}7${n}`,
-    kind,
-    before,
-    after,
-    conversationId: id,
-    createdAt: '2026-10-14T10:00:00.000Z',
+  let revision = 1;
+  const at = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
+  const file = (path: string, name: string, description: string, content: string, days: number): File => ({
+    path,
+    name,
+    description,
+    group: path.startsWith('/topics/')
+      ? 'topics'
+      : path.startsWith('/areas/')
+        ? 'areas'
+        : path.startsWith('/people/')
+          ? 'people'
+          : 'you',
+    revisionId: content ? `r${revision++}` : null,
+    updatedAt: content ? at(days) : null,
+    size: new TextEncoder().encode(content).length,
+    content,
   });
-  let proposals =
-    proposalScenario === 'pending' || proposalScenario === 'outdated'
-      ? [
-          {
-            ...suggestion(1, 'add', null, 'Answer in British English.'),
-            quote: 'Please always use British spelling.',
-            conversationTitle: 'Launch plan',
-            outdated: false,
-          },
-          {
-            ...suggestion(
-              2,
-              'change',
-              'Use short, friendly replies with emojis when they help.',
-              'Use short replies without emojis.',
-            ),
-            quote: 'Stop using emojis, keep it short.',
-            conversationTitle: 'Weekly update',
-            outdated: proposalScenario === 'outdated',
-          },
-        ]
-      : [];
-  let proposalFailures = 0;
-  let previous = '';
+  const empty = scenario === 'empty';
+  let files: File[] = [
+    file(
+      '/profile.md',
+      'Preferences',
+      'How you want Bud to respond',
+      empty
+        ? ''
+        : 'Use short, friendly replies.\n\nGreet me for my time of day. Explain unfamiliar terms in plain words.',
+      2,
+    ),
+    file(
+      '/you/about.md',
+      'Profile',
+      'Who you are and what you do',
+      empty ? '' : 'Head of operations at Tulip demo. Based in London.',
+      9,
+    ),
+    ...(empty
+      ? []
+      : [
+          file('/topics/career.md', 'Career', 'Goals and growth plans', 'Working towards a COO role next year.', 30),
+          file(
+            '/areas/hiring.md',
+            'Hiring',
+            'Recruiting for the operations team',
+            'Hiring two analysts this quarter.',
+            1,
+          ),
+          file(
+            '/people/sam-lee.md',
+            'Sam Lee',
+            'Finance lead',
+            'Prefers numbers in tables. Reviews budgets on Fridays.',
+            5,
+          ),
+        ]),
+  ];
   let failed = false;
   let readFailures = 0;
+  const listed = () => files.map(({ content: _content, ...entry }) => entry);
   const original = window.fetch.bind(window);
   window.fetch = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input), window.location.origin);
     if (!url.pathname.startsWith('/v1/')) return original(input, init);
     const path = url.pathname,
       method = init?.method ?? (input instanceof Request ? input.method : 'GET');
-    if (/\/personal-memory\/(?:undo|forget)$/.test(path) && method === 'POST') {
-      const value = JSON.parse(String(init?.body)) as { expectedRevision: number };
-      if (value.expectedRevision !== memory.revision)
-        return Response.json({ error: 'personal_memory_conflict' }, { status: 409 });
-      memory = path.endsWith('/forget')
-        ? { content: '', revision: memory.revision + 2, history: { trashed: false, undo: false } }
-        : {
-            content: memory.history?.trashed ? previous : 'Use short, friendly replies.',
-            revision: memory.revision + 2,
-            history: { trashed: false, undo: true },
-          };
-      return Response.json(memory);
-    }
-    if (path.endsWith('/personal-memory/proposals') && method === 'GET') {
-      if (proposalScenario === 'error' && proposalFailures < 3) {
-        proposalFailures++;
-        return Response.json({ error: 'personal-memory-unavailable' }, { status: 503 });
-      }
-      return Response.json({ memory, proposals });
-    }
-    const decision = /\/personal-memory\/proposals\/([^/]+)\/(confirm|dismiss|refresh)$/.exec(path);
-    if (decision && method === 'POST') {
-      const proposal = proposals.find(item => item.id === decision[1]);
-      if (!proposal) return Response.json({ error: 'memory-proposal-not-found' }, { status: 404 });
-      if (decision[2] === 'refresh' || (decision[2] === 'confirm' && proposal.outdated))
-        return Response.json({ error: 'memory-proposal-outdated' }, { status: 409 });
-      proposals = proposals.filter(item => item !== proposal);
-      if (decision[2] === 'confirm')
-        memory = {
-          content: proposal.before
-            ? memory.content.replace(proposal.before, proposal.after ?? '').trim()
-            : `${memory.content}\n${proposal.after}`,
-          revision: memory.revision + 1,
-          history: { trashed: false, undo: true },
-        };
-      return Response.json({ memory, proposals });
-    }
-    if (path.endsWith('/personal-memory')) {
+    if (/\/personal-memory\/(?:files(?:\/read)?|instruct)$/.test(path)) {
       if (scenario === 'denied') return Response.json({ error: 'personal-memory-not-found' }, { status: 404 });
       if (scenario === 'keep-unavailable')
         return Response.json({ error: 'personal-memory-unavailable' }, { status: 503 });
-      if (method === 'DELETE') {
-        previous = memory.content;
-        memory = { content: '', revision: memory.revision + 1, history: { trashed: true, undo: true } };
-        return Response.json(memory);
-      }
-      if (method === 'GET') {
+      if (path.endsWith('/files') && method === 'GET') {
         // Reads resend a 503 once, so the first load fails only when both answers do.
         if (scenario === 'error' && readFailures < 2) {
           readFailures++;
@@ -118,32 +101,72 @@ if (import.meta.env.DEV && /^\/memory-mock(?:\/|$)/.test(window.location.pathnam
           failed = true;
           await new Promise(resolve => setTimeout(resolve, 1800));
         }
-        return Response.json(memory);
+        return Response.json({ files: listed() });
       }
-      if (method === 'PUT') {
-        const value = JSON.parse(String(init?.body)) as { content: string; expectedRevision: number };
-        if (scenario === 'conflict' && !failed) {
+      if (path.endsWith('/files/read')) {
+        const found = files.find(entry => entry.path === url.searchParams.get('path'));
+        return found ? Response.json(found) : Response.json({ error: 'memory-file-not-found' }, { status: 404 });
+      }
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, string | null>;
+      const found = files.find(entry => entry.path === body.path);
+      if (path.endsWith('/files') && method === 'PUT') {
+        if (scenario === 'conflict' && !failed && found) {
           failed = true;
-          memory = {
-            content: 'Use clear, short replies without emojis.',
-            revision: memory.revision + 1,
-            history: { trashed: false, undo: true },
-          };
+          found.revisionId = `r${revision++}`;
         }
-        if (value.expectedRevision !== memory.revision)
+        if ((found?.revisionId ?? null) !== body.expectedRevisionId)
           return Response.json({ error: 'personal_memory_conflict' }, { status: 409 });
-        if (Array.from(value.content).length > 10000)
+        const content = String(body.content ?? '');
+        if (new TextEncoder().encode(content).length > 8192)
           return Response.json({ error: 'invalid-request' }, { status: 400 });
-        memory = {
-          history: { trashed: false, undo: true },
-          content: value.content.trim() ? value.content : '',
-          revision: memory.revision + 1,
-        };
-        if (scenario === 'lost-save' && !failed) {
-          failed = true;
-          throw new TypeError('Local fixture lost the save response');
+        const next = file(
+          String(body.path),
+          found?.name ?? String(body.name),
+          found?.description ?? '',
+          content.trim() ? content : '',
+          0,
+        );
+        files = found ? files.map(entry => (entry === found ? next : entry)) : [...files, next];
+        return Response.json(next);
+      }
+      if (path.endsWith('/files') && method === 'DELETE') {
+        if (!found?.revisionId) return Response.json({ error: 'memory-file-not-found' }, { status: 404 });
+        if (found.revisionId !== body.expectedRevisionId)
+          return Response.json({ error: 'personal_memory_conflict' }, { status: 409 });
+        files =
+          found.group === 'you'
+            ? files.map(entry => (entry === found ? file(found.path, found.name, found.description, '', 0) : entry))
+            : files.filter(entry => entry !== found);
+        return Response.json({ files: listed() });
+      }
+      if (path.endsWith('/instruct') && method === 'POST') {
+        await new Promise(resolve => setTimeout(resolve, 900));
+        if (scenario === 'instruct-error') return Response.json({ error: 'credits-exhausted' }, { status: 402 });
+        const text = String(body.instruction ?? '');
+        const falcon = files.find(entry => entry.path === '/topics/project-falcon.md');
+        if (/forget/i.test(text) && falcon) {
+          files = files.filter(entry => entry !== falcon);
+          return Response.json({
+            changed: [{ path: falcon.path, name: falcon.name, operation: 'deleted' }],
+            files: listed(),
+          });
         }
-        return Response.json(memory);
+        if (/forget/i.test(text)) return Response.json({ changed: [], files: listed() });
+        const about = files.find(entry => entry.path === '/you/about.md')!;
+        const content = `${about.content}\n${text}`.trim();
+        files = [
+          ...files.map(entry =>
+            entry === about ? file(about.path, about.name, about.description, content, 0) : entry,
+          ),
+          file('/topics/project-falcon.md', 'Project Falcon', 'Launch planning', 'Launch planned for spring.', 0),
+        ];
+        return Response.json({
+          changed: [
+            { path: about.path, name: about.name, operation: 'updated' },
+            { path: '/topics/project-falcon.md', name: 'Project Falcon', operation: 'created' },
+          ],
+          files: listed(),
+        });
       }
     }
     if (passwordScenario) {

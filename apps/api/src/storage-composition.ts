@@ -117,7 +117,6 @@ export function registerStorageComposition(
   registerRecommendations(app, { runtime, auth: dependencies.auth });
   // Keep is reached lazily per workspace; an invalid endpoint still fails at startup.
   keepConfiguration();
-  registerPersonalMemory(app, { auth: dependencies.auth, service: createPersonalMemoryService(runtime) });
   registerBud(app, { auth: dependencies.auth, service: createBudAssistant(runtime) });
   registerSkills(app, { runtime, auth: dependencies.auth });
   const wakeTask = taskWake(app, temporal);
@@ -135,10 +134,14 @@ export function registerStorageComposition(
     githubSubscriptions,
     ...(chatObjects ? { fileBytes: chatObjects } : {}),
   });
-  registerAgentAuthoringAssistance(app, {
+  const authoring = registerAgentAuthoringAssistance(app, {
     runtime,
     auth: dependencies.auth,
     modelFamilyEligibility: modelFamilyEligibility ?? (() => false),
+  });
+  registerPersonalMemory(app, {
+    auth: dependencies.auth,
+    service: createPersonalMemoryService(runtime, { instruct: authoring.memory }),
   });
   registerWorkspaceSettings(app, { auth: dependencies.auth, pool: dependencies.pool, runtime });
   registerSoulExplorer(app, { auth: dependencies.auth, pool: dependencies.pool, runtime });

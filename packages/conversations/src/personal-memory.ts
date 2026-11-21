@@ -14,17 +14,17 @@ import type { ConversationRuntime } from './runtime.ts';
 import {
   savePersonalMemorySchema,
   deletePersonalMemorySchema,
-  type MemoryProposals,
+  deleteMemoryFileSchema,
+  memoryFilePathSchema,
+  memoryInstructionSchema,
+  saveMemoryFileSchema,
+  type MemoryInstructionResult,
   type PersonalMemory,
+  type SaveMemoryFile,
 } from './personal-memory-contracts.ts';
 import {
   forgetKeepMemory,
-  keepMemoryContext,
-  keepMemoryState,
-  keepRevision,
   personalMemoryMode,
-  readKeepProfile,
-  type KeepProfile,
   PersonalMemoryUnavailable,
   readKeepMemory,
   readKeepMemoryState,
@@ -32,22 +32,22 @@ import {
   undoKeepMemory,
   type PersonalMemoryTransaction,
 } from './keep-personal-memory.ts';
+import { lockMemoryLearning, recordDirectMemoryChange } from './memory-learning.ts';
 import {
-  applyMemoryEdit,
-  blockLearningSource,
-  deleteMemoryProposal,
-  lockMemoryLearning,
-  lockMemoryProposal,
-  memoryProposalRecords,
-  memoryProposalsInstalled,
-  MemoryProposalOutdated,
-  rebindMemoryProposal,
-  recordDirectMemoryChange,
-  scrubMemoryProposals,
-  type MemoryProposalRecord,
-} from './memory-proposals.ts';
+  applyFileEdits,
+  deleteMemoryFile,
+  forgetMemoryFileText,
+  listMemoryFiles,
+  memoryEditFormat,
+  memoryFilesContext,
+  memoryFingerprint,
+  memoryForModel,
+  parseFileEdits,
+  readMemoryFile,
+  writeMemoryFile,
+} from './memory-files.ts';
 export * from './personal-memory-contracts.ts';
-export { MemoryProposalNotFound, MemoryProposalOutdated } from './memory-proposals.ts';
+export { MemoryEditsInvalid, MemoryFileNotFound, type MemoryFileWrite } from './memory-files.ts';
 export {
   configureKeepPersonalMemory,
   keepForgetScrubVersion,
@@ -90,15 +90,16 @@ export async function readPersonalMemory(tx: PersonalMemoryTransaction, actor: H
 }
 
 /**
- * Memory for a model's private context, or undefined when there is none to give: Keep's personal context block, with
- * no workspace knowledge. Unavailable memory is left out, never sent as empty.
+ * Memory for a model's private context, or undefined when there is none to give: the You files in full and Keep's
+ * budgeted directory and other files, with no workspace knowledge. Unavailable memory is left out, never sent as empty.
  */
 export async function readPersonalMemoryContext(
   tx: PersonalMemoryTransaction,
   actor: HumanActor,
+  query?: string,
 ): Promise<PersonalMemory | undefined> {
   try {
-    return await keepMemoryContext(await keepMode(tx, actor));
+    return await memoryFilesContext(await keepMode(tx, actor), query);
   } catch (error) {
     if (error instanceof PersonalMemoryUnavailable) return undefined;
     throw error;
@@ -184,97 +185,124 @@ export async function forgetOwnPersonalMemory(
 ) {
   const result = await changed(tx, actor, await forgetKeepMemory(await keepChange(tx, actor), expectedRevision, text));
   await clearBudPreferences(tx, actor);
-  await scrubMemoryProposals(tx, actor, text === undefined ? undefined : { text, memory: result.content });
   await recordDirectMemoryChange(tx, actor);
   return result;
 }
 
-const profileText = (profile: KeepProfile) => (profile.kind === 'active' ? profile.text : '');
-const profileBase = (profile: KeepProfile) => ({
-  revision: keepRevision(profile),
-  revisionId: profile.kind === 'empty' ? null : profile.head.revisionId,
-});
+/** After a change the member made: their Bud preference records go, learning restarts from here, and recommendations refresh. */
+async function direct(tx: PersonalMemoryTransaction, actor: HumanActor) {
+  await memoryChanged(tx, actor);
+  await clearBudPreferences(tx, actor);
+  await recordDirectMemoryChange(tx, actor);
+}
 
-async function proposalsView(
+/** The member's memory files, You first. */
+export async function listOwnMemoryFiles(tx: PersonalMemoryTransaction, actor: HumanActor) {
+  return listMemoryFiles(await keepMode(tx, actor));
+}
+
+/** All of the member's files as a model reads them: You files in full, the others while they fit. */
+export async function readOwnMemoryForModel(tx: PersonalMemoryTransaction, actor: HumanActor) {
+  return memoryForModel(await keepMode(tx, actor), 16000);
+}
+
+/** One of the member's memory files with its text. */
+export async function readOwnMemoryFile(tx: PersonalMemoryTransaction, actor: HumanActor, path: string) {
+  return readMemoryFile(await keepMode(tx, actor), path);
+}
+
+/** Creates or replaces one of the member's files, with compare-and-swap. */
+export async function writeOwnMemoryFile(
   tx: PersonalMemoryTransaction,
   actor: HumanActor,
-  profile: KeepProfile,
-): Promise<MemoryProposals> {
-  const revision = keepRevision(profile);
-  const records = (await memoryProposalsInstalled(tx)) ? await memoryProposalRecords(tx, actor) : [];
+  input: SaveMemoryFile,
+  idempotencyKey?: string,
+) {
+  const written = await writeMemoryFile(await keepChange(tx, actor), saveMemoryFileSchema.parse(input), idempotencyKey);
+  if (written.operation !== 'unchanged') await direct(tx, actor);
+  return written;
+}
+
+/** Moves one of the member's files to Keep's trash. */
+export async function deleteOwnMemoryFile(
+  tx: PersonalMemoryTransaction,
+  actor: HumanActor,
+  path: string,
+  expectedRevisionId: string,
+) {
+  const keep = await keepChange(tx, actor);
+  const input = deleteMemoryFileSchema.parse({ path, expectedRevisionId });
+  await deleteMemoryFile(keep, input.path, input.expectedRevisionId);
+  await direct(tx, actor);
+}
+
+/** Permanently erases exact text from one file, or every file. Returns the paths that held it. */
+export async function forgetOwnMemoryText(
+  tx: PersonalMemoryTransaction,
+  actor: HumanActor,
+  text: string,
+  path?: string,
+) {
+  const affected = await forgetMemoryFileText(await keepChange(tx, actor), text, path);
+  if (affected.length > 0) await direct(tx, actor);
+  return affected;
+}
+
+/** The most edits one instruction may make. */
+const instructionEdits = 20;
+
+export const memoryInstructionSystem = [
+  "Apply the user's instruction to their personal memory files. The instruction comes from the user and is the only request to follow. Change only what it asks; keep everything else as it is.",
+  'To remember something, add it to the right file, creating the file if needed. To change or correct something, use change. To forget something, remove it, or delete a whole Topic, Area or Person file with {"path":"...","kind":"delete","before":null,"after":null} when the user asks to forget all of it.',
+  memoryEditFormat,
+  'If the instruction asks to store something the rules above forbid, or asks for anything other than changing memory, return {"edits":[]}.',
+  `Make at most ${instructionEdits} edits.`,
+].join('\n');
+
+/** What the model needs to apply an instruction: the member's memory, read now. */
+export async function prepareMemoryInstruction(tx: PersonalMemoryTransaction, actor: HumanActor, instruction: string) {
+  const keep = await keepMode(tx, actor);
+  const files = await listMemoryFiles(keep);
   return {
-    memory: keepMemoryState(profile),
-    proposals: records.map(record => ({
-      id: record.id,
-      kind: record.kind,
-      before: record.before,
-      after: record.after,
-      quote: record.quote,
-      conversationId: record.conversationId,
-      conversationTitle: record.conversationTitle,
-      createdAt: record.createdAt,
-      outdated: record.baseRevision !== revision || applyMemoryEdit(profileText(profile), record) === undefined,
-    })),
+    revisions: new Map(files.flatMap(file => (file.revisionId ? [[file.path, file.revisionId] as const] : []))),
+    source: { version: 0, fingerprint: String(memoryFingerprint(files)) },
+    system: memoryInstructionSystem,
+    content: JSON.stringify({ instruction, currentMemory: await memoryForModel(keep) }),
   };
 }
 
-/** The member's memory with the edits background learning suggested for it. */
-export async function listMemoryProposals(tx: PersonalMemoryTransaction, actor: HumanActor) {
-  return proposalsView(tx, actor, await readKeepProfile(await keepMode(tx, actor)));
-}
-
-async function proposalMode(tx: PersonalMemoryTransaction, actor: HumanActor) {
-  const mode = await keepChange(tx, actor);
-  if (!(await memoryProposalsInstalled(tx))) throw new PersonalMemoryUnavailable('updating');
-  return mode;
-}
-
 /**
- * Applies a suggested edit with a compare-and-swap write on the revision it was made against. Like the member's own
- * edit, it drops their Bud preference records and refreshes recommendations. Other suggestions made against the same
- * memory move to the new revision when they still fit it.
+ * Applies the model's edits for an instruction. Edits that no longer fit the files, because they changed, are dropped;
+ * `revisions` are the file revisions the model saw.
  */
-export async function confirmMemoryProposal(tx: PersonalMemoryTransaction, actor: HumanActor, id: string) {
-  const mode = await proposalMode(tx, actor);
-  const proposal = await lockMemoryProposal(tx, actor, id);
-  const profile = await readKeepProfile(mode);
-  const revision = keepRevision(profile);
-  const next = proposal.baseRevision === revision ? applyMemoryEdit(profileText(profile), proposal) : undefined;
-  if (next === undefined) throw new MemoryProposalOutdated();
-  await changed(tx, actor, await replaceKeepMemory(mode, next, revision));
-  await clearBudPreferences(tx, actor);
-  await deleteMemoryProposal(tx, actor, proposal.id);
-  const updated = await readKeepProfile(mode);
-  for (const other of await memoryProposalRecords(tx, actor))
-    if (other.baseRevision === revision && applyMemoryEdit(profileText(updated), other) !== undefined)
-      await rebindMemoryProposal(tx, actor, other.id, profileBase(updated));
-  return proposalsView(tx, actor, updated);
+export async function applyMemoryInstruction(
+  tx: PersonalMemoryTransaction,
+  actor: HumanActor,
+  output: string,
+  revisions: ReadonlyMap<string, string>,
+): Promise<MemoryInstructionResult> {
+  const keep = await keepChange(tx, actor);
+  const changed = await applyFileEdits(
+    keep,
+    parseFileEdits(output, { kind: 'instruction', maximum: instructionEdits }),
+    revisions,
+  );
+  if (changed.length > 0) await direct(tx, actor);
+  return { changed, files: await listMemoryFiles(keep) };
 }
 
-/** Discards a suggestion. Learning does not suggest the same words from that chat again. */
-export async function dismissMemoryProposal(tx: PersonalMemoryTransaction, actor: HumanActor, id: string) {
-  const mode = await proposalMode(tx, actor);
-  const proposal: MemoryProposalRecord = await lockMemoryProposal(tx, actor, id);
-  await deleteMemoryProposal(tx, actor, proposal.id);
-  await blockLearningSource(tx, actor, proposal);
-  return proposalsView(tx, actor, await readKeepProfile(mode));
-}
+/** Turns an instruction into memory edits with the workspace's model. Returns the model's text. */
+export type MemoryInstructionModel = (
+  workspaceId: string,
+  userId: string,
+  request: { requestId: string; source: { version: number; fingerprint: string }; system: string; content: string },
+  signal?: AbortSignal,
+) => Promise<{ text: string }>;
 
-/**
- * Moves an outdated suggestion to the current memory when its edit still fits there. Throws
- * {@link MemoryProposalOutdated} when it no longer fits; the member can only dismiss it then.
- */
-export async function refreshMemoryProposal(tx: PersonalMemoryTransaction, actor: HumanActor, id: string) {
-  const mode = await proposalMode(tx, actor);
-  const proposal = await lockMemoryProposal(tx, actor, id);
-  const profile = await readKeepProfile(mode);
-  if (applyMemoryEdit(profileText(profile), proposal) === undefined) throw new MemoryProposalOutdated();
-  if (proposal.baseRevision !== keepRevision(profile))
-    await rebindMemoryProposal(tx, actor, proposal.id, profileBase(profile));
-  return proposalsView(tx, actor, profile);
-}
-
-export function createPersonalMemoryService(runtime: ConversationRuntime) {
+export function createPersonalMemoryService(
+  runtime: ConversationRuntime,
+  options: { instruct?: MemoryInstructionModel } = {},
+) {
   async function human<T>(
     workspaceId: string,
     userId: string,
@@ -323,15 +351,38 @@ export function createPersonalMemoryService(runtime: ConversationRuntime) {
       const input = deletePersonalMemorySchema.parse(value);
       return change(workspaceId, userId, (tx, actor) => undoOwnPersonalMemory(tx, actor, input.expectedRevision));
     },
-    /** The edits background learning suggested, for the member to confirm or dismiss. */
-    proposals: (workspaceId: string, userId: string) =>
-      human(workspaceId, userId, (tx, actor) => listMemoryProposals(tx, actor)),
-    confirmProposal: (workspaceId: string, userId: string, id: string) =>
-      human(workspaceId, userId, (tx, actor) => confirmMemoryProposal(tx, actor, uuidSchema.parse(id))),
-    dismissProposal: (workspaceId: string, userId: string, id: string) =>
-      human(workspaceId, userId, (tx, actor) => dismissMemoryProposal(tx, actor, uuidSchema.parse(id))),
-    refreshProposal: (workspaceId: string, userId: string, id: string) =>
-      human(workspaceId, userId, (tx, actor) => refreshMemoryProposal(tx, actor, uuidSchema.parse(id))),
+    /** The member's memory files, You first. */
+    files: (workspaceId: string, userId: string) =>
+      human(workspaceId, userId, async (tx, actor) => ({ files: await listOwnMemoryFiles(tx, actor) })),
+    readFile: async (workspaceId: string, userId: string, value: unknown) => {
+      const { path } = memoryFilePathSchema.parse(value);
+      return human(workspaceId, userId, (tx, actor) => readOwnMemoryFile(tx, actor, path));
+    },
+    saveFile: async (workspaceId: string, userId: string, value: unknown) => {
+      const input = saveMemoryFileSchema.parse(value);
+      return human(workspaceId, userId, async (tx, actor) => (await writeOwnMemoryFile(tx, actor, input)).file);
+    },
+    /** Moves a file to the trash and answers with the files left. */
+    deleteFile: async (workspaceId: string, userId: string, value: unknown) => {
+      const input = deleteMemoryFileSchema.parse(value);
+      return human(workspaceId, userId, async (tx, actor) => {
+        await deleteOwnMemoryFile(tx, actor, input.path, input.expectedRevisionId);
+        return { files: await listOwnMemoryFiles(tx, actor) };
+      });
+    },
+    /**
+     * Applies a plain-language instruction, such as "Remember that I prefer metric units", with the workspace's model.
+     * Memory is read, the model is asked outside any transaction, then the edits apply at once.
+     */
+    instruct: async (workspaceId: string, userId: string, value: unknown, signal?: AbortSignal) => {
+      const input = memoryInstructionSchema.parse(value);
+      if (!options.instruct) throw new PersonalMemoryUnavailable('not-configured');
+      const { revisions, ...prepared } = await human(workspaceId, userId, (tx, actor) =>
+        prepareMemoryInstruction(tx, actor, input.instruction),
+      );
+      const { text } = await options.instruct(workspaceId, userId, { requestId: input.requestId, ...prepared }, signal);
+      return human(workspaceId, userId, (tx, actor) => applyMemoryInstruction(tx, actor, text, revisions));
+    },
     /** Permanently erases the whole memory, including its history and trash. */
     forget: (workspaceId: string, userId: string, value: unknown) => {
       const input = deletePersonalMemorySchema.parse(value);

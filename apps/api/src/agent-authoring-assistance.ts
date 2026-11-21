@@ -20,6 +20,38 @@ import { authenticateRoutes } from './authenticated-routes.ts';
 import { routeValidation } from './route-validation.ts';
 import { requestBoundaryError } from './security.ts';
 
+/** The HTTP status for a paid authoring request that failed. */
+export function agentAuthoringStatus(error: AgentAuthoringError) {
+  if (error.code === 'invalid-request') return 400;
+  if (error.code === 'input-too-large') return 413;
+  if (error.code === 'credits-exhausted') return 402;
+  if (error.code === 'workspace-disabled') return 403;
+  if (['authoring-busy', 'provider-rate-limit'].includes(error.code)) return 429;
+  if (error.code === 'timed-out') return 504;
+  if (
+    [
+      'idempotency-conflict',
+      'request-already-dispatched',
+      'stale-snapshot',
+      'cancelled',
+      'model-family-unavailable',
+    ].includes(error.code)
+  )
+    return 409;
+  if (
+    [
+      'provider-unavailable',
+      'provider-quota',
+      'provider-authentication',
+      'provider-permission',
+      'credits-settlement-unavailable',
+      'authoring-unavailable',
+    ].includes(error.code)
+  )
+    return 503;
+  return 502;
+}
+
 export function registerAgentAuthoringAssistance(
   app: FastifyInstance,
   dependencies: {
@@ -63,37 +95,7 @@ export function registerAgentAuthoringAssistance(
       if (error instanceof StorageUnavailableError)
         return reply.code(error.code === 'disabled' ? 404 : 503).send({ error: 'authoring-unavailable' });
       if (error instanceof AgentAuthoringError) {
-        const status =
-          error.code === 'invalid-request'
-            ? 400
-            : error.code === 'input-too-large'
-              ? 413
-              : error.code === 'credits-exhausted'
-                ? 402
-                : error.code === 'workspace-disabled'
-                  ? 403
-                  : ['authoring-busy', 'provider-rate-limit'].includes(error.code)
-                    ? 429
-                    : error.code === 'timed-out'
-                      ? 504
-                      : [
-                            'idempotency-conflict',
-                            'request-already-dispatched',
-                            'stale-snapshot',
-                            'cancelled',
-                            'model-family-unavailable',
-                          ].includes(error.code)
-                        ? 409
-                        : [
-                              'provider-unavailable',
-                              'provider-quota',
-                              'provider-authentication',
-                              'provider-permission',
-                              'credits-settlement-unavailable',
-                              'authoring-unavailable',
-                            ].includes(error.code)
-                          ? 503
-                          : 502;
+        const status = agentAuthoringStatus(error);
         return reply.code(status).send(agentAuthoringErrorSchema.parse({ error: error.code }));
       }
       if (error instanceof z.ZodError || (typeof error === 'object' && error !== null && 'validation' in error))
@@ -171,4 +173,5 @@ export function registerAgentAuthoringAssistance(
       (request, reply) => run(request, reply, service.preview),
     );
   });
+  return service;
 }

@@ -93,32 +93,61 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   };
 }
 
-test('chat reads memory and edits it at once, refusing a stale revision', async t => {
+test('chat reads memory files and edits one at once, refusing a stale revision', async t => {
   const { tool, memory, runtime, w } = await setup(t);
-  assert.deepEqual(await tool({ tool: 'memory.read' }), { content: '', revision: 0 });
-  const first = await memory.save(w.id, w.userId, { content: 'I prefer short replies.', expectedRevision: 0 });
-  assert.deepEqual(await tool({ tool: 'memory.read' }), {
-    content: 'I prefer short replies.',
-    revision: first.revision,
-  });
-
-  assert.equal(
-    (await tool({ tool: 'memory.edit', revision: first.revision, content: 'I prefer short replies.' })).error,
-    'no-change',
+  assert.deepEqual(
+    (await tool({ tool: 'memory.read' })).files.map(file => [file.path, file.name, file.revisionId]),
+    [
+      ['/profile.md', 'Preferences', null],
+      ['/you/about.md', 'Profile', null],
+    ],
   );
-  assert.equal((await tool({ tool: 'memory.edit', revision: 0, content: 'Other.' })).error, 'draft-stale');
-  assert.equal((await memory.read(w.id, w.userId)).content, 'I prefer short replies.');
-
-  const edit = await tool({
-    tool: 'memory.edit',
-    revision: first.revision,
-    content: 'I prefer short replies.\nI work in sales.',
+  const first = await memory.saveFile(w.id, w.userId, {
+    path: '/profile.md',
+    content: 'I prefer short replies.',
+    expectedRevisionId: null,
   });
-  const current = await memory.read(w.id, w.userId);
-  assert.equal(edit.status, 'applied');
-  assert.deepEqual(edit.change, { store: 'memory', operation: 'edit', title: 'Preferences' });
-  assert.equal(edit.revision, current.revision);
-  assert.equal(current.content, 'I prefer short replies.\nI work in sales.');
+  const listed = await tool({ tool: 'memory.read' });
+  assert.deepEqual(listed.files[0], {
+    path: '/profile.md',
+    name: 'Preferences',
+    description: 'How you want Bud to respond',
+    revisionId: first.revisionId,
+    text: 'I prefer short replies.',
+  });
+  assert.equal((await tool({ tool: 'memory.read', path: '/profile.md' })).content, 'I prefer short replies.');
+
+  const edit = call => tool({ tool: 'memory.edit', path: '/profile.md', ...call });
+  assert.equal((await edit({ revisionId: first.revisionId, content: 'I prefer short replies.' })).error, 'no-change');
+  assert.equal((await edit({ revisionId: 'stale', content: 'Other.' })).error, 'draft-stale');
+  assert.equal(
+    (await edit({ revisionId: null, content: 'Other.' })).error,
+    'draft-stale',
+    'creating needs a free path',
+  );
+
+  const saved = await edit({ revisionId: first.revisionId, content: 'I prefer short replies.\nUse metric units.' });
+  assert.equal(saved.status, 'applied');
+  assert.deepEqual(saved.change, { store: 'memory', operation: 'edit', title: 'Preferences' });
+  assert.equal(
+    (await memory.readFile(w.id, w.userId, { path: '/profile.md' })).content,
+    'I prefer short replies.\nUse metric units.',
+  );
+
+  const career = await tool({
+    tool: 'memory.edit',
+    path: '/topics/career.md',
+    revisionId: null,
+    content: '- Wants to move into product.',
+    name: 'Career',
+    description: 'Goals and growth plans',
+  });
+  assert.deepEqual(career.change, { store: 'memory', operation: 'edit', title: 'Career' });
+  const file = (await memory.files(w.id, w.userId)).files.find(value => value.path === '/topics/career.md');
+  assert.deepEqual(
+    [file.name, file.description, file.revisionId],
+    ['Career', 'Goals and growth plans', career.revisionId],
+  );
   const drafts = await runtime.transaction(w.id, commonCompatibility, tx =>
     tx.client.query(`SELECT count(*)::int AS n FROM "${tx.schema}".tf_chat_authoring_drafts`),
   );
@@ -164,7 +193,7 @@ test('memory tools refuse project chats', async t => {
   for (const call of [
     { tool: 'memory.read' },
     { tool: 'memory.forget', text: 'Private' },
-    { tool: 'memory.edit', revision: 2, content: 'x' },
+    { tool: 'memory.edit', path: '/profile.md', revisionId: null, content: 'x' },
   ])
     assert.equal((await tool(call, projectChat)).error, 'memory-unavailable');
   assert.equal((await memory.read(w.id, w.userId)).content, 'Private note.');
@@ -174,6 +203,13 @@ test('chat forget is permanent at once, keeps no copy, clears Bud preferences, a
   const { tool, memory, chats, runtime, w, keep } = await setup(t);
   const { calls } = keep;
   await memory.save(w.id, w.userId, { content: '- Lives in Berlin\n- Prefers tea', expectedRevision: 0 });
+  await memory.saveFile(w.id, w.userId, {
+    path: '/people/sam-lee.md',
+    content: '- Lives in Berlin\n- Leads design.',
+    expectedRevisionId: null,
+    name: 'Sam Lee',
+    description: 'Design lead',
+  });
   await runtime.transaction(w.id, commonCompatibility, tx =>
     tx.client.query(
       `INSERT INTO "${tx.schema}".tf_bud_preferences
@@ -196,8 +232,11 @@ test('chat forget is permanent at once, keeps no copy, clears Bud preferences, a
   const forgotten = await tool({ tool: 'memory.forget', text: 'Lives in Berlin' });
   const current = await memory.read(w.id, w.userId);
   assert.equal(forgotten.status, 'applied');
-  assert.deepEqual(forgotten.change, { store: 'memory', operation: 'forget', title: 'Preferences' });
-  assert.equal(forgotten.revision, current.revision);
+  assert.deepEqual(forgotten.change, { store: 'memory', operation: 'forget', title: 'Preferences, Sam Lee' });
+  const sam = (await memory.readFile(w.id, w.userId, { path: '/people/sam-lee.md' })).content;
+  assert.ok(!sam.includes('Lives in Berlin') && sam.includes('Leads design.'), 'every file holding the text loses it');
+  const lead = await tool({ tool: 'memory.forget', text: 'Leads design.', path: '/profile.md' });
+  assert.equal(lead.error, 'not-found', 'a path limits forgetting to that file');
   assert.equal(JSON.stringify(forgotten).includes('Lives in Berlin'), false, 'the result never repeats the text');
   assert.equal(current.content.includes('Lives in Berlin'), false);
   assert.match(current.content, /Prefers tea/);

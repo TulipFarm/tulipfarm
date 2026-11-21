@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { AuthorizationTransaction, HumanActor } from '@tulipfarm/access';
 import { transcriptChunks } from '@tulipfarm/memory-core/memory/transcript';
@@ -5,23 +6,32 @@ import {
   createPostgresMemoryReconciliationRepository,
   createPostgresTranscriptSource,
 } from '@tulipfarm/memory-postgres';
+import { recordRecommendationChange } from '@tulipfarm/workspace-storage/recommendations';
 import type { MaintenanceFence } from './maintenance-contracts.ts';
 import type { ConversationCompactor, EffectiveCompactionPolicy } from './compaction.ts';
+import { personalMemoryMode, PersonalMemoryUnavailable } from './keep-personal-memory.ts';
+import { lastDirectMemoryChange, lockMemoryLearning, memoryLearningInstalled } from './memory-learning.ts';
 import {
-  keepRevision,
-  personalMemoryMode,
-  PersonalMemoryUnavailable,
-  readKeepProfile,
-} from './keep-personal-memory.ts';
-import {
-  lastDirectMemoryChange,
-  lockMemoryLearning,
-  memoryProposalsInstalled,
-  parseMemoryEdits,
-  proposalSystemPrompt,
-  saveMemoryProposals,
-} from './memory-proposals.ts';
-export { parseMemoryEdits, proposalSystemPrompt } from './memory-proposals.ts';
+  applyFileEdits,
+  listMemoryFiles,
+  memoryEditFormat,
+  memoryFingerprint,
+  memoryForModel,
+  parseFileEdits,
+} from './memory-files.ts';
+
+/** The most edits one transcript chunk may make. */
+const learningEdits = 5;
+
+export const learningSystemPrompt = [
+  "Update the current user's personal memory from what they said in this chat, so Bud knows them better next time.",
+  'The edits apply at once, without review. Save only durable facts the user stated about themselves, how they want Bud to respond, their work, recurring subjects, ongoing responsibilities and the people they work with.',
+  'Do not save one-off requests, task details, completed work, chat summaries, quoted or pasted third-party text, or anything only the assistant said.',
+  memoryEditFormat,
+  'Every edit must also have "messageId" (UUID of the requester message) and "quote" (exact wording from that message). Never cite assistant or tool output.',
+  'A newer statement that conflicts with saved memory is a change. A request to forget something is a remove. Avoid duplicates of what is already saved.',
+  `Make at most ${learningEdits} edits. If nothing should change, return {"edits":[]}.`,
+].join('\n');
 
 type MemoryTransaction = <T>(
   operation: (
@@ -57,12 +67,12 @@ async function keepFor(tx: AuthorizationTransaction, actor: HumanActor) {
     if (error instanceof PersonalMemoryUnavailable) return undefined;
     throw error;
   }
-  return (await memoryProposalsInstalled(tx)) ? mode : undefined;
+  return (await memoryLearningInstalled(tx)) ? mode : undefined;
 }
 
 /**
- * Background learning for a member's private chat. It never writes memory: it saves suggested edits, bound to the Keep
- * profile revision they were made against, for the member to confirm. Without a Keep endpoint nothing is learned.
+ * Background learning for a member's private chat: it applies edits that cite the member's own words straight to their
+ * memory files. It restarts when memory changes while the model is asked. Without a Keep endpoint nothing is learned.
  */
 export async function reconcileMaintenanceMemory(
   transaction: MemoryTransaction,
@@ -78,9 +88,7 @@ export async function reconcileMaintenanceMemory(
       await repository(tx).complete([fence.jobId]);
       return { kind: 'done' } as const;
     }
-    const profile = await readKeepProfile(keep);
-    const revision = keepRevision(profile);
-    const text = profile.kind === 'active' ? profile.text : '';
+    const revision = memoryFingerprint(await listMemoryFiles(keep));
     const manualAt = await lastDirectMemoryChange(tx, current.actor);
     let chunk = progress.memory_chunk,
       step = progress.memory_step;
@@ -113,7 +121,7 @@ export async function reconcileMaintenanceMemory(
     const policy = current.policy ?? (await compactor.policy(tx));
     return {
       kind: 'generate',
-      text,
+      memory: await memoryForModel(keep),
       revision,
       manualAt,
       transcript,
@@ -130,12 +138,17 @@ export async function reconcileMaintenanceMemory(
     purpose: 'memory',
     step: input.step,
     families: input.families,
-    system: proposalSystemPrompt,
+    system: learningSystemPrompt,
     messages: [
-      { role: 'user', text: JSON.stringify({ currentMemory: input.text, requesterTranscript: input.transcript }) },
+      { role: 'user', text: JSON.stringify({ currentMemory: input.memory, requesterTranscript: input.transcript }) },
     ],
   });
-  const edits = parseMemoryEdits(response.text, input.text, input.transcript, input.messages);
+  const edits = parseFileEdits(response.text, {
+    kind: 'learning',
+    maximum: learningEdits,
+    transcript: input.transcript,
+    messages: input.messages,
+  });
   return transaction(async (tx, { actor }) => {
     const keep = await keepFor(tx, actor);
     if (!keep) {
@@ -145,20 +158,24 @@ export async function reconcileMaintenanceMemory(
     }
     // Under the lock a concurrent change or forget has either committed, and is seen below, or waits for this one.
     await lockMemoryLearning(tx, actor);
-    const profile = await readKeepProfile(keep);
-    // The member changed their memory meanwhile: suggest again against what they have now.
-    if (keepRevision(profile) !== input.revision || (await lastDirectMemoryChange(tx, actor)) !== input.manualAt) {
+    // Memory changed meanwhile: learn again against what the member has now.
+    if (
+      memoryFingerprint(await listMemoryFiles(keep)) !== input.revision ||
+      (await lastDirectMemoryChange(tx, actor)) !== input.manualAt
+    ) {
       await repository(tx).clearStep([fence.jobId]);
       await repository(tx).restart([fence.jobId]);
       return false;
     }
-    await saveMemoryProposals(
-      tx,
-      actor,
-      fence.conversationId,
-      { revision: input.revision, revisionId: profile.kind === 'empty' ? null : profile.head.revisionId },
-      edits,
-    );
+    const changes = await applyFileEdits(keep, edits);
+    if (changes.length > 0)
+      await recordRecommendationChange(tx, {
+        id: randomUUID(),
+        kind: 'memory',
+        sourceId: actor.membershipId,
+        membershipIds: [actor.membershipId],
+        invalidate: true,
+      });
     await repository(tx).finish([fence.jobId, input.chunk + 1, input.step + 1, input.last]);
     await repository(tx).clearStep([fence.jobId]);
     return input.last;

@@ -110,17 +110,63 @@ test(
       assert.equal((await request('PUT', { content: 'resurrect', expectedRevision: saved.revision })).statusCode, 409);
       response = await request('PUT', { content: ' \n ', expectedRevision: deleted.revision });
       assert.equal(response.json().content, '');
-      const proposal = (action, user = memberUser, origin = authConfig().webOrigin, id = randomUUID()) =>
+      const call = (method, path, payload, user = memberUser, origin = authConfig().webOrigin) =>
         app.inject({
-          method: action ? 'POST' : 'GET',
-          url: `${url}/proposals${action ? `/${id}/${action}` : ''}`,
+          method,
+          url: `${url}${path}`,
           headers: { ...(user ? { 'x-test-user': user } : {}), origin },
+          ...(payload === undefined ? {} : { payload }),
         });
-      assert.equal((await proposal(undefined, null)).statusCode, 401);
-      assert.equal((await proposal('confirm', null)).statusCode, 401);
-      assert.equal((await proposal('confirm', memberUser, 'https://attacker.example')).statusCode, 403);
-      assert.equal((await proposal('dismiss', memberUser, authConfig().webOrigin, 'not-a-uuid')).statusCode, 400);
-      assert.equal((await proposal()).statusCode, 200);
+      assert.equal((await call('GET', '/files', undefined, null)).statusCode, 401);
+      assert.equal((await call('GET', '/files', undefined, 'outsider')).statusCode, 404);
+      const listed = (await call('GET', '/files')).json().files;
+      assert.deepEqual(
+        listed.map(file => [file.path, file.name, file.group]),
+        [
+          ['/profile.md', 'Preferences', 'you'],
+          ['/you/about.md', 'Profile', 'you'],
+        ],
+      );
+      const topic = { path: '/topics/career.md', content: '- Wants a COO role.', expectedRevisionId: null };
+      assert.equal((await call('PUT', '/files', topic, memberUser, 'https://attacker.example')).statusCode, 403);
+      for (const payload of [
+        { ...topic, path: '/notes/career.md' },
+        { ...topic, path: '/topics/../profile.md' },
+        { ...topic, content: '🌷'.repeat(2049) },
+        { ...topic, userId: w.userId },
+      ])
+        assert.equal((await call('PUT', '/files', payload)).statusCode, 400);
+      response = await call('PUT', '/files', { ...topic, name: 'Career', description: 'Goals and growth plans' });
+      assert.equal(response.statusCode, 200);
+      const career = response.json();
+      assert.deepEqual([career.name, career.group, career.content], ['Career', 'topics', '- Wants a COO role.']);
+      assert.equal((await call('PUT', '/files', topic)).statusCode, 409, 'creating needs a free path');
+      assert.equal(
+        (await call('GET', `/files/read?path=${encodeURIComponent('/topics/career.md')}`)).json().content,
+        '- Wants a COO role.',
+      );
+      assert.equal(
+        (await call('GET', `/files/read?path=${encodeURIComponent('/topics/career.md')}`, undefined, w.userId))
+          .statusCode,
+        404,
+        'another member never reads these files',
+      );
+      assert.equal(
+        (await call('DELETE', '/files', { path: '/topics/career.md', expectedRevisionId: 'stale' })).statusCode,
+        409,
+      );
+      response = await call('DELETE', '/files', { path: '/topics/career.md', expectedRevisionId: career.revisionId });
+      assert.equal(response.statusCode, 200);
+      assert.equal(
+        response.json().files.some(file => file.path === '/topics/career.md'),
+        false,
+      );
+      const instruction = { requestId: randomUUID(), instruction: 'Remember that I prefer metric units.' };
+      assert.equal((await call('POST', '/instruct', instruction, null)).statusCode, 401);
+      assert.equal((await call('POST', '/instruct', { ...instruction, instruction: ' ' })).statusCode, 400);
+      response = await call('POST', '/instruct', instruction);
+      assert.equal(response.statusCode, 503, 'without a model the instruction cannot run');
+      assert.deepEqual(response.json(), { error: 'personal-memory-unavailable' });
       await db.platform.query(
         `UPDATE ${qualified(w.names.schema, 'tf_memberships')} SET removed_at=now() WHERE id=$1`,
         [memberId],
@@ -131,7 +177,7 @@ test(
         (await request('PUT', { content: 'no longer a member', expectedRevision: deleted.revision })).statusCode,
         404,
       );
-      assert.equal((await proposal()).statusCode, 404);
+      assert.equal((await call('GET', '/files')).statusCode, 404);
     } finally {
       await app?.close();
       await runtime?.close();
