@@ -51,6 +51,12 @@ export const agentTabs: readonly {
     description: 'Check that this agent still handles your important requests after you change it.',
     requires: 'invoke',
   },
+  {
+    value: 'lessons',
+    label: 'Lessons',
+    description: 'What this agent learned from earlier tasks, and changes it suggests.',
+    requires: 'edit',
+  },
   { value: 'settings', label: 'Settings', description: 'Technical details and deletion.', requires: null },
 ];
 

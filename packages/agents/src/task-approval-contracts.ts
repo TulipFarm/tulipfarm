@@ -9,10 +9,17 @@ export const proposeTaskSchema = z.strictObject({
   generation: z.number().int().nonnegative(),
   calls: z.array(taskMutationSchema).min(1).max(50),
 });
-export const taskDecisionSchema = z.strictObject({
-  digest: z.string().regex(/^[a-f0-9]{64}$/),
-  decision: z.enum(['approve', 'reject']),
-});
+export const taskDecisionSchema = z
+  .strictObject({
+    digest: z.string().regex(/^[a-f0-9]{64}$/),
+    decision: z.enum(['approve', 'reject']),
+    /** Why the owner rejected the proposal. The agent learns from it. */
+    reason: z.string().trim().min(1).max(500).optional(),
+  })
+  .refine(input => input.reason === undefined || input.decision === 'reject', {
+    message: 'Only a rejection has a reason',
+    path: ['reason'],
+  });
 export const taskActionSchema = z.object({
   id: uuidSchema,
   call: taskMutationSchema,

@@ -1487,6 +1487,7 @@ export const backgroundJobs = [
   'recommendation-spend-projection',
   'member-profile-dispatch',
   'member-profile-projection',
+  'agent-lessons',
   'social-publisher',
   'social-refresh',
   'app-reconcile',

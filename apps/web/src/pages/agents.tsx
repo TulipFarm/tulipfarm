@@ -26,6 +26,7 @@ import { AgentEditor } from '@/features/agents/editor';
 import { AgentPolicy } from '@/features/agents/policy';
 import { AgentTriggerWorkflows } from '@/features/agents/agent-workflows';
 import { AgentEvals } from '@/features/agents/evals';
+import { AgentLessons } from '@/features/agents/lessons';
 import { useFlag } from '@/lib/feature-flags';
 import { AssignmentLimitsSettings } from '@/features/tables/assignment-limits';
 import { useOwnMembership } from '@/features/governance/queries';
@@ -770,6 +771,16 @@ function AgentPage({
                           setSuggestedModel({ id: model, at: Date.now() });
                           open('instructions', 'agent-model-family');
                         }}
+                      />,
+                    )}
+                  {can('edit') &&
+                    panel(
+                      'lessons',
+                      <AgentLessons
+                        workspaceId={workspaceId}
+                        workspaceSlug={slug}
+                        agentId={id}
+                        enabled={ready && active === 'lessons'}
                       />,
                     )}
                   {panel(

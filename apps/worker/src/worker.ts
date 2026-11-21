@@ -74,6 +74,7 @@ import { slackActionsFromEnvironment } from '@tulipfarm/agents/slack-environment
 import { createRecommendationComposition } from './recommendation-activities.ts';
 import { createRowAssignmentComposition } from './row-assignment-composition.ts';
 import { createMemberProfileComposition } from './member-profile-composition.ts';
+import { createAgentLessonComposition } from './agent-lesson-composition.ts';
 import { createSocialPublisherComposition } from './social-publisher-composition.ts';
 import { createSecretsSweep } from './secrets-sweep.ts';
 import { createAppComposition, repeatFromStart } from './app-composition.ts';
@@ -155,6 +156,7 @@ async function run() {
   let knowledgeEmbeddings: Awaited<ReturnType<typeof createKnowledgeEmbeddingWorker>>;
   let recommendations: ReturnType<typeof createRecommendationComposition> | undefined;
   let memberProfiles: ReturnType<typeof createMemberProfileComposition> | undefined;
+  let agentLessons: ReturnType<typeof createAgentLessonComposition> | undefined;
   let rowAssignments: ReturnType<typeof createRowAssignmentComposition> | undefined;
   let socialPublisher: ReturnType<typeof createSocialPublisherComposition> | undefined;
   try {
@@ -170,6 +172,10 @@ async function run() {
       memberProfiles = createMemberProfileComposition({
         runtime: coreResources.runtime,
         source: coreResources.memberProfiles,
+        discover: coreResources.readyTaskWorkspaces,
+      });
+      agentLessons = createAgentLessonComposition({
+        runtime: coreResources.runtime,
         discover: coreResources.readyTaskWorkspaces,
       });
       socialPublisher = createSocialPublisherComposition({
@@ -577,6 +583,7 @@ async function run() {
   } finally {
     await rowAssignments?.close();
     await memberProfiles?.close();
+    await agentLessons?.close();
     await socialPublisher?.close();
     await recommendations?.close();
     await knowledgeEmbeddings?.close();

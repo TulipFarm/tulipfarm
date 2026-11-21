@@ -72,6 +72,11 @@ export const agentModelInputSchema = z
         revision: z.number().int().nonnegative(),
       })
       .optional(),
+    /** Lessons the agent learned from its earlier task runs; untrusted guidance for task runs only. */
+    lessons: z
+      .array(z.strictObject({ text: z.string().min(1).max(200) }))
+      .max(20)
+      .optional(),
     mcp: mcpModelCatalogSchema.optional(),
     files: taskFileContentSchema.optional(),
     /** Offers `files.read` for the response files the task's `api.request` calls keep; set only while they are kept. */
@@ -86,6 +91,7 @@ export const agentModelInputSchema = z
       ctx.addIssue({ code: 'custom', message: 'Task inputs cannot select a Slack channel runtime' });
     if (input.personalMemory && !input.task)
       ctx.addIssue({ code: 'custom', message: 'Personal memory requires a member-owned private task' });
+    if (input.lessons && !input.task) ctx.addIssue({ code: 'custom', message: 'Learned lessons require a task run' });
     if (input.mcp && (!input.task || !input.definition.mcp?.length))
       ctx.addIssue({ code: 'custom', message: 'MCP catalogs require a named task with explicit permission slots' });
     const selections = input.definition.skills ?? [];

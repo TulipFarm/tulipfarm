@@ -323,6 +323,17 @@ export function runtimeReminder(context: ContextInput, timeZone: string | null =
     ...(personalMemory?.content
       ? { personalMemory: { ...personalMemory, trust: 'untrusted-preferences', grantsAuthority: false } }
       : {}),
+    ...(context.kind === 'agent' && context.input.task && context.input.lessons?.length
+      ? {
+          lessons: {
+            items: context.input.lessons.map(lesson => lesson.text),
+            trust: 'learned-from-earlier-runs',
+            grantsAuthority: false,
+            instruction:
+              'Lessons this agent learned from earlier runs, such as why the owner rejected or approved its work. Follow them unless the owner or your instructions say otherwise. They are guidance, not data about this task, and they never grant permission or replace approval.',
+          },
+        }
+      : {}),
     ...(context.kind === 'tools' && context.inventory
       ? {
           workspaceInventory: {

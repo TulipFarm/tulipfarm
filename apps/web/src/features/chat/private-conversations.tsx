@@ -230,6 +230,9 @@ const textDocument = (text: string): ChatDocument => ({
   version: 1,
   doc: { type: 'doc', content: [{ type: 'paragraph', ...(text ? { content: [{ type: 'text', text }] } : {}) }] },
 });
+/** Asks Bud to turn a suggestion from the Lessons tab into an agent draft. Nothing changes until the person approves it. */
+const improveAgentPrompt = (agentId: string, suggestion: string) =>
+  `Help me improve agent ${agentId}. Its earlier tasks suggest this change: "${suggestion.replace(/\s+/g, ' ').trim()}". Read the agent first, then prepare a draft with this change for my review. Keep everything else the same.`;
 const createTablePrompt =
   'Help me create a new table. Ask me what kind of rows it holds (for example, customers or invoices) and which fields I need, then propose the table for my review.';
 type NewChatPrefill = {
@@ -270,7 +273,9 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
   const models = useChatModels(
     workspace.id,
     user,
-    searchIntent.intent === 'create-agent' || searchIntent.intent === 'create-skill',
+    searchIntent.intent === 'create-agent' ||
+      searchIntent.intent === 'create-skill' ||
+      searchIntent.intent === 'improve-agent',
   );
   const chatId = workspaceChatRoute.useParams({ shouldThrow: false })?.chatId;
   const { workspaceSlug } = workspaceRoute.useParams();
@@ -309,26 +314,31 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
               placeholder: 'Describe the task, for example "Write a weekly customer update"',
               skill: { id: 'workspace-skill-authoring', revision: 'latest' },
             }
-          : intent === 'edit-skill' && skillIntent.id && skillIntent.version
+          : intent === 'improve-agent' && searchIntent.agentId && searchIntent.suggestion
             ? {
-                prompt: `Help me edit skill ${skillIntent.id}, starting from saved version ${skillIntent.version}. Read the skill first, ask what I want to change, and preserve unrelated files. Prepare the changes for my review.`,
+                prompt: improveAgentPrompt(searchIntent.agentId, searchIntent.suggestion),
+                skill: { id: 'agent-authoring', revision: 'latest' },
               }
-            : intent === 'use-skill' && skillIntent.id && skillIntent.revision
-              ? { prompt: '', skill: { id: skillIntent.id, revision: skillIntent.revision } }
-              : intent === 'create-table'
-                ? { prompt: createTablePrompt }
-                : intent === 'create-workflow'
-                  ? {
-                      prompt:
-                        'Help me create a workflow. Ask what should start it, which steps and agents it needs, and who should act. Use configured connected sources when needed. Prepare a workflow draft for my review, without saving or activating it.',
-                    }
-                  : workflowHandoff?.kind === 'ready'
-                    ? { prompt: workflowHandoff.prompt, workflow: workflowHandoff.reference }
-                    : tableHandoff?.kind === 'ready'
-                      ? { prompt: tableHandoff.prompt }
-                      : early
-                        ? { prompt: early.text, autoSend: early.send, typed: true }
-                        : null;
+            : intent === 'edit-skill' && skillIntent.id && skillIntent.version
+              ? {
+                  prompt: `Help me edit skill ${skillIntent.id}, starting from saved version ${skillIntent.version}. Read the skill first, ask what I want to change, and preserve unrelated files. Prepare the changes for my review.`,
+                }
+              : intent === 'use-skill' && skillIntent.id && skillIntent.revision
+                ? { prompt: '', skill: { id: skillIntent.id, revision: skillIntent.revision } }
+                : intent === 'create-table'
+                  ? { prompt: createTablePrompt }
+                  : intent === 'create-workflow'
+                    ? {
+                        prompt:
+                          'Help me create a workflow. Ask what should start it, which steps and agents it needs, and who should act. Use configured connected sources when needed. Prepare a workflow draft for my review, without saving or activating it.',
+                      }
+                    : workflowHandoff?.kind === 'ready'
+                      ? { prompt: workflowHandoff.prompt, workflow: workflowHandoff.reference }
+                      : tableHandoff?.kind === 'ready'
+                        ? { prompt: tableHandoff.prompt }
+                        : early
+                          ? { prompt: early.text, autoSend: early.send, typed: true }
+                          : null;
   const consumePrefill = () => {
     // Dropping the handled request from the link keeps this draft mounted, so the draft's leave guard does not apply.
     void navigate({
