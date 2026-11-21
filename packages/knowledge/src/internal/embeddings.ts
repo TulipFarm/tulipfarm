@@ -37,6 +37,9 @@ import type { AtlassianKnowledge } from './atlassian.ts';
 import { externalAuthority } from './external-authority.ts';
 import type { KnowledgeSourceGate } from './rolling.ts';
 import type { SourceDependency } from '../authorization/contracts.ts';
+
+/** The common migration that records each workspace's active embedding profile. */
+const activeEmbeddingProfileVersion = 104;
 export type KnowledgeEmbeddingCapacity = (input: {
   workspaceId: string;
   purpose: 'query' | 'ingestion';
@@ -93,7 +96,11 @@ export function createKnowledgeEmbeddings({
     runtime: knowledgeTenantRuntime(runtime),
     store,
     repository: transactionRepository(tx =>
-      createPostgresEmbeddingRepository(tx.client, { schema: tx.schema, tablePrefix: 'tf_knowledge_' }),
+      createPostgresEmbeddingRepository(
+        tx.client,
+        { schema: tx.schema, tablePrefix: 'tf_knowledge_' },
+        { activeProfile: tx.commonVersion >= activeEmbeddingProfileVersion },
+      ),
     ),
     authorization: knowledgeAuthorization(),
     lock: lockKnowledgeAuthorization,

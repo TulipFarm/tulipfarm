@@ -1,5 +1,4 @@
 import type { AuthorizationTransaction } from '@tulipfarm/access';
-import { unembeddedDocumentIds } from '@tulipfarm/memory-postgres';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import type { KnowledgeEligibilitySelection } from './eligibility.ts';
 
@@ -27,7 +26,7 @@ export async function embeddingDiscoveryCandidate(
       JOIN ${qualified(tx.schema, 'tf_memberships')} m ON m.id=${tx.commonVersion >= 1 ? 'COALESCE(cm.requester_membership_id,s.owner_membership_id)' : 's.owner_membership_id'}
       WHERE d.tombstoned_at IS NULL AND s.state='active' AND (s.provider IN ('note','file')${tx.commonVersion >= 1 ? ` OR (s.provider='conversation' AND EXISTS (SELECT 1 FROM ${table(tx, 'conversation_readers')} e JOIN ${qualified(tx.schema, 'tf_conversations')} c ON c.id=e.conversation_id WHERE e.source_id=s.id AND e.conversation_id=cr.conversation_id AND d.native_id=c.id::text AND e.membership_id=m.id AND c.is_closed AND c.activity_generation=cr.generation))` : ''}${google ? ` OR (s.provider='google' AND EXISTS (SELECT 1 FROM ${table(tx, 'google_eligible')} e WHERE e.document_id=d.id AND e.membership_id=m.id))` : ''}${slack ? ` OR (s.provider='slack' AND EXISTS (SELECT 1 FROM ${table(tx, 'slack_eligible')} e WHERE e.document_id=d.id AND e.membership_id=m.id))` : ''}${github ? ` OR (s.provider='github' AND EXISTS (SELECT 1 FROM ${table(tx, 'github_eligible')} e WHERE e.document_id=d.id AND e.membership_id=m.id))` : ''}${atlassian ? ` OR (s.provider IN ('confluence','jira') AND EXISTS (SELECT 1 FROM ${table(tx, 'atlassian_eligible')} e WHERE e.document_id=d.id AND e.membership_id=m.id))` : ''}) AND m.removed_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'embedding_jobs')} j WHERE j.publication_id=p.id AND j.profile_id=$1)
-      AND ($2::uuid IS NULL OR d.id=$2) AND d.id IN (${unembeddedDocumentIds(name => table(tx, name), '$1')})
+      AND d.lexical_publication_id IS NOT NULL AND d.vector_publication_id IS NULL AND ($2::uuid IS NULL OR d.id=$2)
       ORDER BY p.created_at,p.id LIMIT 1`,
       [profileId, documentId ?? null],
     )

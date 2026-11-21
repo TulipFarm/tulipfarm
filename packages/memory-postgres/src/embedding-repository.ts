@@ -3,30 +3,51 @@ import type { MemoryQueryClient } from './query-client.ts';
 import { memoryTable, type PostgresMemoryNames } from './names.ts';
 
 /**
- * SQL selecting live documents whose current publication has no vector publication for `profile`. Embedding discovery
- * and the due-job sweep only look at these: a document with one already had a job for that publication. Documents
- * with no vector publication come from a partial index. A vector publication can only belong to another profile once
- * a second profile is installed or when it predates profiles, so that part is skipped otherwise.
+ * `activeProfile` is set once the workspace records which profile is active. Only that profile's vectors may then be
+ * published to documents, so a replica still running an earlier profile cannot point documents back at its vectors.
  */
-export function unembeddedDocumentIds(table: (name: string) => string, profile: string) {
-  return `SELECT id FROM ${table('documents')}
-    WHERE tombstoned_at IS NULL AND lexical_publication_id IS NOT NULL AND vector_publication_id IS NULL
-    UNION ALL
-    SELECT d.id FROM ${table('documents')} d JOIN ${table('vector_publications')} v ON v.id=d.vector_publication_id
-    WHERE d.tombstoned_at IS NULL AND v.profile_id IS DISTINCT FROM ${profile}
-      AND (EXISTS (SELECT 1 FROM ${table('embedding_profiles')} WHERE id<>${profile})
-        OR EXISTS (SELECT 1 FROM ${table('vector_publications')} WHERE profile_id IS NULL))`;
-}
-
 export function createPostgresEmbeddingRepository(
   client: MemoryQueryClient,
   names: PostgresMemoryNames,
+  { activeProfile = false }: { activeProfile?: boolean } = {},
 ): EmbeddingRepository {
   const table = (name: string) => memoryTable(names, name);
   return {
     installProfile(values: [id: string, profile: unknown]) {
       return client.query(
         `INSERT INTO ${table('embedding_profiles')} (id,profile) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+        values,
+      );
+    },
+    async activateProfile(values: [profileId: string]) {
+      if (!activeProfile) return { rows: [], rowCount: 0 };
+      return client.query(
+        `INSERT INTO ${table('embedding_active_profile')} AS a (id,profile_id,forgetting) VALUES (1,$1,true)
+        ON CONFLICT (id) DO UPDATE SET profile_id=excluded.profile_id,forgetting=true WHERE a.profile_id<>excluded.profile_id`,
+        values,
+      );
+    },
+    async forgettingOtherProfiles(values: [profileId: string]) {
+      if (!activeProfile) return { rows: [], rowCount: 0 };
+      return client.query(
+        `SELECT 1 FROM ${table('embedding_active_profile')} WHERE profile_id=$1 AND forgetting`,
+        values,
+      );
+    },
+    async forgetOtherProfileVectors(values: [profileId: string, limit: number]) {
+      if (!activeProfile) return { rows: [], rowCount: 0 };
+      return client.query(
+        `UPDATE ${table('documents')} SET vector_publication_id=NULL
+      WHERE id IN (SELECT d.id FROM ${table('documents')} d JOIN ${table('vector_publications')} v ON v.id=d.vector_publication_id
+        WHERE v.profile_id IS DISTINCT FROM $1 LIMIT $2)
+        AND EXISTS (SELECT 1 FROM ${table('embedding_active_profile')} WHERE profile_id=$1 AND forgetting)`,
+        values,
+      );
+    },
+    async finishForgetting(values: [profileId: string]) {
+      if (!activeProfile) return { rows: [], rowCount: 0 };
+      return client.query(
+        `UPDATE ${table('embedding_active_profile')} SET forgetting=false WHERE profile_id=$1 AND forgetting`,
         values,
       );
     },
@@ -153,7 +174,12 @@ export function createPostgresEmbeddingRepository(
     ) {
       return client.query(
         `UPDATE ${table('documents')} SET vector_publication_id=$4
-        WHERE id=$1 AND observed_revision_id=$2 AND lexical_publication_id=$3 AND tombstoned_at IS NULL`,
+        WHERE id=$1 AND observed_revision_id=$2 AND lexical_publication_id=$3 AND tombstoned_at IS NULL${
+          activeProfile
+            ? ` AND EXISTS (SELECT 1 FROM ${table('vector_publications')} v JOIN ${table('embedding_active_profile')} a
+              ON a.profile_id=v.profile_id WHERE v.id=$4)`
+            : ''
+        }`,
         values,
       );
     },
@@ -234,7 +260,7 @@ export function createPostgresEmbeddingRepository(
       return client.query(
         `SELECT 1 FROM ${table('documents')} d
       WHERE d.tombstoned_at IS NULL AND d.lexical_publication_id IS NOT NULL
-        AND ($2::uuid IS NULL OR d.id=$2) AND d.id IN (${unembeddedDocumentIds(table, '$1')})
+        AND d.vector_publication_id IS NULL AND ($2::uuid IS NULL OR d.id=$2)
         AND NOT EXISTS (SELECT 1 FROM ${table('embedding_jobs')} j WHERE j.publication_id=d.lexical_publication_id AND j.profile_id=$1)
       LIMIT 1`,
         values,
@@ -288,9 +314,9 @@ export function createPostgresEmbeddingRepository(
           UNION
           SELECT j.* FROM ${table('documents')} d JOIN ${table('sources')} s ON s.id=d.source_id
           JOIN ${table('embedding_jobs')} j ON j.publication_id=d.lexical_publication_id AND j.profile_id=$1
-          WHERE d.id IN (${unembeddedDocumentIds(table, '$1')})
+          WHERE d.tombstoned_at IS NULL AND d.lexical_publication_id IS NOT NULL AND d.vector_publication_id IS NULL
             AND j.purpose='ingestion' AND j.document_id=d.id AND j.revision_id=d.observed_revision_id
-            AND d.tombstoned_at IS NULL AND s.state='active' AND s.access_epoch=j.access_epoch
+            AND s.state='active' AND s.access_epoch=j.access_epoch
             AND (SELECT count(*) FROM ${table('embedding_items')} i JOIN ${table('embedding_vectors')} v USING (profile_id,input_hash)
               WHERE i.job_id=j.id)=j.total_chunks) j
         WHERE NOT (j.purpose='ingestion' AND EXISTS (SELECT 1 FROM ${table('documents')} d WHERE d.id=j.document_id AND d.source_id=ANY($2::uuid[])))
