@@ -238,7 +238,7 @@ for (const mobile of [false, true])
         await injectAxe(page, '/acme/help', launcher);
         if (mobile) await toggle.click();
         await accessible(page);
-        const workspaceMenu = page.getByRole('button', { name: 'Acme, workspace menu', exact: true });
+        const workspaceMenu = page.getByRole('link', { name: 'Acme', exact: true });
         const accountMenu = page.getByRole('button', { name: `${name}, account menu`, exact: true });
         await workspaceMenu.waitFor();
         await accountMenu.waitFor();

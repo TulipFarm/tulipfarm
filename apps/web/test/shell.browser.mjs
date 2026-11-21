@@ -149,15 +149,20 @@ try {
       JSON.stringify(focus),
     );
     if (!mobile) {
-      const identity = page.getByRole('button', { name: 'Acme, workspace menu' });
+      const identity = page.getByRole('link', { name: 'Acme', exact: true });
       const a = await identity.boundingBox();
       const b = await toggle.boundingBox();
       assert.ok(Math.abs(a.y + a.height / 2 - (b.y + b.height / 2)) <= 1, 'Header controls align');
       await toggle.click();
       await page.reload();
       await page.locator('[data-sprout-sidebar][data-state="collapsed"]').waitFor();
+      await toggle.click();
+      await page.locator('[data-sprout-sidebar][data-state="expanded"]').waitFor();
     } else await openNavigation();
-    await nav.getByRole('button', { name: 'Search', exact: true }).click();
+    await page
+      .getByRole('complementary', { name: 'Workspace sidebar' })
+      .getByRole('button', { name: 'Search', exact: true })
+      .click();
     const dialog = page.getByRole('dialog', { name: 'Jump to…', exact: true });
     await dialog.waitFor();
     assert.equal(await dialog.getByRole('group', { name: 'Filter by type' }).count(), 0);
@@ -229,7 +234,6 @@ try {
       await page.waitForURL('**/acme/agents');
       await nav.waitFor({ state: 'hidden' });
     } else {
-      await toggle.click();
       await page.reload();
       await page.locator('[data-sprout-sidebar][data-state="expanded"]').waitFor();
       if (process.env.SHELL_SCREENSHOT_DIR)

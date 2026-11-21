@@ -15,7 +15,8 @@ import { Toaster } from '@tulipfarm/sprout/toast';
 import { Add } from 'reicon-react/icons/Add';
 import { BranchDown } from 'reicon-react/icons/BranchDown';
 import { LockKeyhole } from 'reicon-react/icons/LockKeyhole';
-import { ChevronDown } from 'reicon-react/icons/ChevronDown';
+import { Check } from 'reicon-react/icons/Check';
+import { ChevronUp } from 'reicon-react/icons/ChevronUp';
 import { ChevronLeft } from 'reicon-react/icons/ChevronLeft';
 import { Files } from 'reicon-react/icons/Files';
 import { Cpu } from 'reicon-react/icons/Cpu';
@@ -375,46 +376,75 @@ function MenuAvatar({ seed, name, image, size = 'md', shape = 'circle' }: Compon
   );
 }
 
-function WorkspaceMenu() {
+function WorkspaceSwitchItems() {
   const { workspace, workspaces: choices } = workspaceRoute.useRouteContext();
   const { setOpenMobile } = useSidebar();
   const close = () => setOpenMobile(false);
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        aria-label={`${workspace.name}, workspace menu`}
-        render={
-          <SidebarMenuButton
-            tooltip={workspace.name}
-            icon={
-              <MenuAvatar seed={workspace.id} name={workspace.name} image={workspace.icon} size="sm" shape="square" />
-            }
-            badge={<ChevronDown size={12} aria-hidden="true" />}
-          />
-        }
-      >
-        {workspace.name}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent size="menu">
-        {choices
-          .filter(item => item.slug !== workspace.slug)
-          .map(item => (
-            <DropdownMenuItem
-              key={item.slug}
-              render={<Link to="/$workspaceSlug" params={{ workspaceSlug: item.slug }} />}
-              onClick={close}
-            >
-              <EntityAvatar seed={item.id} name={item.name} image={item.icon} size="sm" shape="square" />
-              <span className="min-w-0 flex-1 truncate">{item.name}</span>
-            </DropdownMenuItem>
-          ))}
-        {choices.length > 1 && <DropdownMenuSeparator />}
+    <>
+      <DropdownMenuGroup>
+        <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
+        {choices.map(item => (
+          <DropdownMenuItem
+            key={item.slug}
+            render={<Link to="/$workspaceSlug" params={{ workspaceSlug: item.slug }} />}
+            onClick={close}
+            aria-current={item.slug === workspace.slug ? 'true' : undefined}
+          >
+            <EntityAvatar seed={item.id} name={item.name} image={item.icon} size="sm" shape="square" />
+            <span className="min-w-0 flex-1 truncate">{item.name}</span>
+            {item.slug === workspace.slug && <Check size={14} aria-hidden="true" />}
+          </DropdownMenuItem>
+        ))}
         <DropdownMenuItem render={<Link to="/create-workspace" />} onClick={close}>
           <Add size={14} aria-hidden="true" />
           Create workspace
         </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </DropdownMenuGroup>
+      <DropdownMenuSeparator />
+    </>
+  );
+}
+
+function WorkspaceHeader({ onSearch }: { onSearch: () => void }) {
+  const { workspace } = workspaceRoute.useRouteContext();
+  const { setOpenMobile } = useSidebar();
+  return (
+    <div className="flex items-center gap-1">
+      <SidebarMenuButton
+        tooltip={workspace.name}
+        nativeButton={false}
+        render={<Link to="/$workspaceSlug" params={{ workspaceSlug: workspace.slug }} />}
+        icon={<MenuAvatar seed={workspace.id} name={workspace.name} image={workspace.icon} size="sm" shape="square" />}
+        onClick={() => setOpenMobile(false)}
+      >
+        {workspace.name}
+      </SidebarMenuButton>
+      <div className="flex items-center gap-1 [[data-sprout-sidebar][data-state=collapsed]_&]:hidden">
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Search"
+          aria-keyshortcuts="Meta+K Control+K"
+          onClick={() => {
+            setOpenMobile(false);
+            onSearch();
+          }}
+        >
+          <Search3 size={16} aria-hidden="true" />
+        </Button>
+        <Button
+          variant="secondary"
+          size="icon"
+          aria-label="New chat"
+          nativeButton={false}
+          render={<Link to="/$workspaceSlug" params={{ workspaceSlug: workspace.slug }} />}
+          onClick={() => setOpenMobile(false)}
+        >
+          <PenSquare size={16} aria-hidden="true" />
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -442,12 +472,14 @@ function ProfileMenu() {
           <SidebarMenuButton
             tooltip="Account"
             icon={<MenuAvatar seed={user.id} name={name} image={user.image} size="sm" />}
+            badge={<ChevronUp size={12} aria-hidden="true" />}
           />
         }
       >
         {name}
       </DropdownMenuTrigger>
       <DropdownMenuContent size="menu" side="top">
+        <WorkspaceSwitchItems />
         <DropdownMenuGroup>
           <DropdownMenuLabel>
             <span className="block truncate">{user.email}</span>
@@ -598,7 +630,6 @@ function saveNavigationOpen(open: boolean) {
 
 function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
   const { workspace } = workspaceRoute.useRouteContext();
-  const { setOpenMobile } = useSidebar();
   const settingsMode = useSettingsMode();
   const appsEnabled = useFlag('app-hosting');
   usePreloadSidebarCode(workspace.slug);
@@ -620,7 +651,7 @@ function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
             <SidebarHeader>
               <SidebarMenu>
                 <SidebarMenuItem>
-                  <WorkspaceMenu />
+                  <WorkspaceHeader onSearch={onSearch} />
                 </SidebarMenuItem>
               </SidebarMenu>
             </SidebarHeader>
@@ -628,20 +659,6 @@ function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
               <nav aria-label="Workspace navigation" data-record-links>
                 <SidebarGroup>
                   <SidebarMenu>
-                    <NavItem page={newChat} />
-                    <SidebarMenuItem>
-                      <SidebarMenuButton
-                        icon={<Search3 size={16} aria-hidden="true" />}
-                        tooltip="Search"
-                        aria-keyshortcuts="Meta+K Control+K"
-                        onClick={() => {
-                          setOpenMobile(false);
-                          onSearch();
-                        }}
-                      >
-                        Search
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
                     <StandardNavItem page={chats} />
                     {workspace.status === 'ready' && <InboxNavItem workspaceId={workspace.id} />}
                     <StandardNavItem page={agents} />
