@@ -28,6 +28,7 @@ test('chat titles default to the priced Claude Haiku route with a small output l
     apiKey: 'synthetic-key',
     timeoutMs: 120000,
     maxOutputTokens: 256,
+    capabilities: { imageInput: true, responseModelAliases: ['claude-haiku-4-5-20251001'] },
   });
 });
 

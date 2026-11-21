@@ -54,8 +54,9 @@ function previousModel(family) {
       ? { provider: 'anthropic', ...common, apiKey: keys.ANTHROPIC_API_KEY }
       : { provider: 'azure', ...common, auth: { kind: 'api-key', value: keys.AZURE_FOUNDRY_API_KEY } };
   const maxOutputTokens = Math.min(16384, model.maxOutputTokens);
+  const capabilities = catalogModels.find(item => item.id === family).capabilities;
   return {
-    route: { ...route, timeoutMs: 120000, maxOutputTokens },
+    route: { ...route, timeoutMs: 120000, maxOutputTokens, ...(capabilities ? { capabilities } : {}) },
     price: {
       familyId: family,
       modelId: model.id,
