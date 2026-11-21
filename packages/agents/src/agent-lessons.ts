@@ -43,9 +43,12 @@ export type AgentLessonBook = { lessons: AgentLesson[]; suggestions: AgentSugges
 const header = '# Lessons learned from earlier runs';
 const metaPattern = /^<!-- (lesson|suggestion) (\{.*\}) -->$/;
 
-/** Collapses whitespace so a lesson stays one line and renders as one Markdown paragraph. */
+/** Collapses whitespace so a lesson stays one line, and drops leading `#` so it never reads as a new section. */
 export function cleanLessonText(value: string) {
-  return value.replace(/\s+/g, ' ').trim();
+  return value
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^#+\s*/, '');
 }
 
 /** Renders the book as one Keep file: a Markdown section per entry with its metadata in an HTML comment. */
@@ -189,11 +192,14 @@ const commonNames = new Set(
   'i ok tulipfarm slack google gmail github jira confluence notion markdown json csv pdf api url mcp ai'.split(' '),
 );
 
-/** Names, numbers and other specific words in `text`: words with a digit, and capitalized words inside a sentence. */
+/**
+ * Names, numbers and other specific words in `text`: words with a digit, and capitalized words inside a sentence. Words
+ * are split the way `words` splits them, so a possessive or hyphenated name still matches its plain form.
+ */
 function distinctiveWords(text: string) {
   const found = new Set<string>();
   for (const sentence of text.split(/(?<=[.!?:;])\s+|\n+/)) {
-    const tokens = sentence.match(/[\p{L}\p{N}][\p{L}\p{N}'’_-]*/gu) ?? [];
+    const tokens = sentence.match(/[\p{L}\p{N}]+/gu) ?? [];
     tokens.forEach((token, index) => {
       if (/\d/.test(token) || (index > 0 && /^\p{Lu}/u.test(token))) found.add(token.toLowerCase());
     });
@@ -204,15 +210,20 @@ function distinctiveWords(text: string) {
 /**
  * Why a lesson may carry data from its run, or null when it is safe to share with everyone who runs the agent. A lesson
  * is general guidance, so it must not contain contact details, links, ids, long numbers or quotes, nor a name or value
- * that appears in the run's private evidence but not in the agent's own definition.
+ * from the run's private evidence that the agent's own definition does not mention. A word counts as such a name when
+ * the evidence or the lesson treats it as one, wherever it sits in the lesson and in whatever case.
  */
 export function lessonLeak(text: string, context: { evidence?: readonly string[]; definition?: string } = {}) {
   if (contactOrIdentifier.some(pattern => pattern.test(text))) return 'identifier';
   if (!context.evidence?.length) return null;
   const allowed = new Set(words(context.definition ?? ''));
-  const evidence = new Set(context.evidence.flatMap(item => words(item)));
-  for (const word of distinctiveWords(text))
-    if (!commonNames.has(word) && !allowed.has(word) && evidence.has(word)) return 'private-name';
+  const evidenceWords = new Set(context.evidence.flatMap(item => words(item)));
+  const evidenceNames = new Set(context.evidence.flatMap(item => [...distinctiveWords(item)]));
+  const lessonNames = distinctiveWords(text);
+  for (const word of new Set(words(text))) {
+    if (commonNames.has(word) || allowed.has(word)) continue;
+    if (evidenceNames.has(word) || (lessonNames.has(word) && evidenceWords.has(word))) return 'private-name';
+  }
   return null;
 }
 

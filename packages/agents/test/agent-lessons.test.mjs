@@ -18,6 +18,15 @@ import { taskDecisionSchema } from '../src/task-approval-contracts.ts';
 const runs = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
 const at = index => new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString();
 
+test('a lesson never reads as a new section of the file', () => {
+  const book = mergeLessonBook(
+    { lessons: [], suggestions: [] },
+    { lessons: [{ kind: 'correction', text: '## Check the table first.' }] },
+    { run: null, at: at(0) },
+  );
+  assert.equal(parseLessonBook(renderLessonBook(book)).lessons[0].text, 'Check the table first.');
+});
+
 test('the lesson book survives a Keep round trip and skips sections it cannot trust', () => {
   const book = mergeLessonBook(
     { lessons: [], suggestions: [] },
@@ -82,6 +91,15 @@ test('lessons that carry data from the run are dropped', () => {
   ])
     assert.equal(lessonLeak(leaked, { evidence, definition }), 'identifier', leaked);
   assert.equal(lessonLeak('Never contact Priya about deals.', { evidence, definition }), 'private-name');
+  const mention = ['Please send the summary to Priya at Globex instead.'];
+  for (const leaked of [
+    "Send summaries to Globex's finance lead first.",
+    'Priya wants summaries sent before noon.',
+    'Send summaries to Globex-wide channels.',
+    'send summaries to globex first.',
+  ])
+    assert.equal(lessonLeak(leaked, { evidence: mention, definition }), 'private-name', leaked);
+  assert.equal(lessonLeak('Please send summaries to the team instead.', { evidence: mention, definition }), null);
   assert.equal(lessonLeak('Ask before updating rows for Northwind.', { evidence, definition }), 'private-name');
   assert.equal(lessonLeak('Update the Leads table only after the Sales team agrees.', { evidence, definition }), null);
   assert.equal(lessonLeak('Ask before contacting someone who left their company.', { evidence, definition }), null);

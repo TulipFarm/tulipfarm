@@ -122,6 +122,15 @@ export function safeLessonOutput(
   };
 }
 
+/** The text values in evidence, each on its own, so sentence starts and names read as they did in the run. */
+function evidenceTexts(value: unknown): string[] {
+  if (typeof value === 'string') return [value];
+  if (typeof value === 'number') return [String(value)];
+  if (Array.isArray(value)) return value.flatMap(evidenceTexts);
+  if (value && typeof value === 'object') return Object.values(value).flatMap(evidenceTexts);
+  return [];
+}
+
 type Job = { task_id: string; agent_id: string; due_at: string; attempts: number; learned: string[] };
 
 /**
@@ -276,7 +285,7 @@ export function createAgentLessonLearning(options: { runtime: AgentStorage; mode
     const keys = [...job.learned, ...fresh.map(item => item.key)];
     if (!output) return keys;
     const safe = safeLessonOutput(output, {
-      evidence: fresh.map(item => JSON.stringify(item.detail)),
+      evidence: fresh.flatMap(item => evidenceTexts(item.detail)),
       definition: definitionVocabulary(definition),
     });
     if (safe.lessons.length || safe.suggestions.length)
