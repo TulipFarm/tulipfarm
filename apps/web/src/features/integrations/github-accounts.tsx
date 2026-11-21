@@ -102,6 +102,122 @@ export function GitHubAccounts({
   const turningPrimary = Object.keys(turning)
     .find(key => key.endsWith(':primaryForKnowledge'))
     ?.split(':')[0];
+  const usableAccounts = visibleAccounts.filter(account => account.identity && account.state !== 'disconnected');
+  // With one usable login there is nothing to choose, so the Knowledge cell shows a fixed label instead of a lone radio.
+  const onlyKnowledgeLogin =
+    usableAccounts.length === 1 && usableAccounts[0]?.primaryForKnowledge ? usableAccounts[0].id : undefined;
+  const accountList = ready && (
+    <ul aria-label="GitHub accounts" className="divide-y rounded-lg border">
+      {visibleAccounts.map(account => {
+        const login = account.identity ? `@${account.identity.login}` : null;
+        const usable = !!login && account.state !== 'disconnected';
+        return (
+          <li
+            key={account.id}
+            className={cn('flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3', accountColumns('github'))}
+          >
+            <div className="flex min-w-0 basis-full items-center gap-3 sm:basis-auto">
+              <BrandIcon brand="github" size="sm" />
+              <div className="min-w-0 flex-1 space-y-0.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="min-w-0 break-all text-sm font-medium text-foreground">
+                    {login ?? 'Unfinished integration'}
+                  </p>
+                  <Badge
+                    variant={
+                      accountConnectionState(account) === 'connected'
+                        ? 'success'
+                        : accountConnectionState(account) === 'attention'
+                          ? 'warning'
+                          : 'secondary'
+                    }
+                  >
+                    {account.state === 'active'
+                      ? 'Connected'
+                      : !account.identity
+                        ? 'Not connected'
+                        : account.state === 'disconnected'
+                          ? 'Disconnected'
+                          : 'Reconnect required'}
+                  </Badge>
+                </div>
+                {account.state !== 'active' && account.state !== 'disconnected' && (
+                  <p className="text-sm text-muted-foreground">
+                    {account.identity
+                      ? 'Reconnect with this same GitHub login to restore access.'
+                      : 'GitHub sign-in was not completed. Finish connecting or dismiss this attempt.'}
+                  </p>
+                )}
+              </div>
+            </div>
+            {usable ? (
+              <>
+                {(['chat', 'coding'] as const).map(use => {
+                  const pendingUse = turning[`${account.id}:${use}`];
+                  return (
+                    <UseSwitch
+                      key={use}
+                      use={use === 'chat' ? 'Chat' : 'Coding'}
+                      account={login}
+                      checked={pendingUse ?? (use === 'chat' ? account.useForChat : account.useForCoding)}
+                      disabled={locked || pendingUse !== undefined}
+                      busy={pendingUse !== undefined}
+                      onChange={on => void turn(account.id, { [use]: on })}
+                    />
+                  );
+                })}
+                {onlyKnowledgeLogin === account.id ? (
+                  <span className="flex items-center text-sm text-muted-foreground sm:justify-center">
+                    <span className="sr-only">{login} is used for Knowledge imports</span>
+                    <span aria-hidden="true" className="whitespace-nowrap sm:hidden">
+                      Used for Knowledge
+                    </span>
+                    <span aria-hidden="true" className="hidden whitespace-nowrap sm:inline">
+                      In use
+                    </span>
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2 sm:justify-center">
+                    <RadioGroupItem value={account.id} aria-label={`Use ${login} for Knowledge imports`} />
+                    <span aria-hidden="true" className="text-sm text-muted-foreground sm:hidden">
+                      Knowledge
+                    </span>
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="hidden sm:col-span-3 sm:block" />
+            )}
+            <div className="ml-auto flex flex-wrap justify-end gap-1">
+              {account.state !== 'disconnected' && (
+                <Button
+                  variant={account.state === 'active' ? 'ghost' : 'outline'}
+                  size="sm"
+                  disabled={locked || !ready.data.configured}
+                  aria-busy={busy === account.id}
+                  aria-label={login ? `Reconnect ${login}` : undefined}
+                  onClick={() => void run('reconnect', account.id)}
+                >
+                  {login ? 'Reconnect' : 'Finish connecting'}
+                </Button>
+              )}
+              {(account.identity ? account.state !== 'disconnected' : true) && (
+                <Button
+                  variant="ghost-destructive"
+                  size="sm"
+                  disabled={locked}
+                  aria-label={login ? `Disconnect ${login}` : undefined}
+                  onClick={() => void run('disconnect', account.id)}
+                >
+                  {login ? 'Disconnect' : 'Dismiss attempt'}
+                </Button>
+              )}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
   return (
     <section aria-labelledby="github-accounts-title" className="space-y-4">
       <div className="space-y-1">
@@ -126,8 +242,11 @@ export function GitHubAccounts({
           )}
         </div>
         <p className="max-w-prose text-sm text-muted-foreground">
-          Agents work with the access of these GitHub logins. Turn on Chat or Coding for each login, and pick one login
-          for Knowledge imports.
+          {onlyKnowledgeLogin
+            ? `Agents work with the access of your GitHub login. Turn on Chat or Coding, and Knowledge imports use this login.${
+                ready?.data.configured ? ' To use a different login for Knowledge, add another account.' : ''
+              }`
+            : 'Agents work with the access of these GitHub logins. Turn on Chat or Coding for each login, and pick one login for Knowledge imports.'}
         </p>
       </div>
       {state.kind === 'loading' && (
@@ -190,113 +309,20 @@ export function GitHubAccounts({
       {ready && visibleAccounts.length > 0 && (
         <div className="space-y-2">
           <AccountColumnHeads uses={['Chat', 'Coding', 'Knowledge']} layout="github" />
-          <RadioGroup
-            aria-label="Login for Knowledge imports"
-            value={turningPrimary ?? visibleAccounts.find(account => account.primaryForKnowledge)?.id ?? ''}
-            disabled={locked || turningPrimary !== undefined}
-            onValueChange={value => {
-              if (typeof value === 'string' && value) void turn(value, { primaryForKnowledge: true });
-            }}
-          >
-            <ul aria-label="GitHub accounts" className="divide-y rounded-lg border">
-              {visibleAccounts.map(account => {
-                const login = account.identity ? `@${account.identity.login}` : null;
-                const usable = !!login && account.state !== 'disconnected';
-                return (
-                  <li
-                    key={account.id}
-                    className={cn('flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3', accountColumns('github'))}
-                  >
-                    <div className="flex min-w-0 basis-full items-center gap-3 sm:basis-auto">
-                      <BrandIcon brand="github" size="sm" />
-                      <div className="min-w-0 flex-1 space-y-0.5">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="min-w-0 break-all text-sm font-medium text-foreground">
-                            {login ?? 'Unfinished integration'}
-                          </p>
-                          <Badge
-                            variant={
-                              accountConnectionState(account) === 'connected'
-                                ? 'success'
-                                : accountConnectionState(account) === 'attention'
-                                  ? 'warning'
-                                  : 'secondary'
-                            }
-                          >
-                            {account.state === 'active'
-                              ? 'Connected'
-                              : !account.identity
-                                ? 'Not connected'
-                                : account.state === 'disconnected'
-                                  ? 'Disconnected'
-                                  : 'Reconnect required'}
-                          </Badge>
-                        </div>
-                        {account.state !== 'active' && account.state !== 'disconnected' && (
-                          <p className="text-sm text-muted-foreground">
-                            {account.identity
-                              ? 'Reconnect with this same GitHub login to restore access.'
-                              : 'GitHub sign-in was not completed. Finish connecting or dismiss this attempt.'}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    {usable ? (
-                      <>
-                        {(['chat', 'coding'] as const).map(use => {
-                          const pendingUse = turning[`${account.id}:${use}`];
-                          return (
-                            <UseSwitch
-                              key={use}
-                              use={use === 'chat' ? 'Chat' : 'Coding'}
-                              account={login}
-                              checked={pendingUse ?? (use === 'chat' ? account.useForChat : account.useForCoding)}
-                              disabled={locked || pendingUse !== undefined}
-                              busy={pendingUse !== undefined}
-                              onChange={on => void turn(account.id, { [use]: on })}
-                            />
-                          );
-                        })}
-                        <span className="flex items-center gap-2 sm:justify-center">
-                          <RadioGroupItem value={account.id} aria-label={`Use ${login} for Knowledge imports`} />
-                          <span aria-hidden="true" className="text-sm text-muted-foreground sm:hidden">
-                            Knowledge
-                          </span>
-                        </span>
-                      </>
-                    ) : (
-                      <span className="hidden sm:col-span-3 sm:block" />
-                    )}
-                    <div className="ml-auto flex flex-wrap justify-end gap-1">
-                      {account.state !== 'disconnected' && (
-                        <Button
-                          variant={account.state === 'active' ? 'ghost' : 'outline'}
-                          size="sm"
-                          disabled={locked || !ready.data.configured}
-                          aria-busy={busy === account.id}
-                          aria-label={login ? `Reconnect ${login}` : undefined}
-                          onClick={() => void run('reconnect', account.id)}
-                        >
-                          {login ? 'Reconnect' : 'Finish connecting'}
-                        </Button>
-                      )}
-                      {(account.identity ? account.state !== 'disconnected' : true) && (
-                        <Button
-                          variant="ghost-destructive"
-                          size="sm"
-                          disabled={locked}
-                          aria-label={login ? `Disconnect ${login}` : undefined}
-                          onClick={() => void run('disconnect', account.id)}
-                        >
-                          {login ? 'Disconnect' : 'Dismiss attempt'}
-                        </Button>
-                      )}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          </RadioGroup>
+          {onlyKnowledgeLogin ? (
+            accountList
+          ) : (
+            <RadioGroup
+              aria-label="Login for Knowledge imports"
+              value={turningPrimary ?? visibleAccounts.find(account => account.primaryForKnowledge)?.id ?? ''}
+              disabled={locked || turningPrimary !== undefined}
+              onValueChange={value => {
+                if (typeof value === 'string' && value) void turn(value, { primaryForKnowledge: true });
+              }}
+            >
+              {accountList}
+            </RadioGroup>
+          )}
         </div>
       )}
       {ready && visibleAccounts.some(account => account.identity) && (

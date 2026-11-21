@@ -172,6 +172,9 @@ try {
   await page.getByRole('link', { name: 'Return to GitHub accounts' }).click();
   await page.getByText('@octocat', { exact: true }).waitFor();
   assert.equal(new URL(page.url()).pathname + new URL(page.url()).search, accountsPath);
+  // A single login is the Knowledge login without a choice to make.
+  await logins.getByText('@octocat is used for Knowledge imports').waitFor();
+  assert.equal(await page.getByRole('radiogroup', { name: 'Login for Knowledge imports' }).count(), 0);
   f.setProfile({ id: 456, login: 'second-person' });
   await page.getByRole('button', { name: 'Add another account', exact: true }).click();
   await page.getByRole('heading', { name: 'Connected @second-person' }).waitFor();
