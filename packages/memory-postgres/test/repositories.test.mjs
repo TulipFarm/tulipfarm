@@ -29,7 +29,11 @@ for (const factory of factories) {
         return response;
       },
     };
-    const repository = factory(client, { schema: 'tenant."one', tablePrefix: 'memory."_' }, () => 'eligible_scope');
+    const repository = factory(
+      client,
+      { schema: 'tenant."one', tablePrefix: 'memory."_' },
+      factory === createPostgresEmbeddingRepository ? { activeProfile: true } : () => 'eligible_scope',
+    );
     const values = ["bound-value-' OR TRUE --"];
     for (const [method, operation] of Object.entries(repository)) {
       const extra =

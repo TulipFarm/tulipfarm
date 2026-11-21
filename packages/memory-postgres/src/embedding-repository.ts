@@ -2,15 +2,28 @@ import type { EmbeddingRepository } from '@tulipfarm/memory-core/ports/embedding
 import type { MemoryQueryClient } from './query-client.ts';
 import { memoryTable, type PostgresMemoryNames } from './names.ts';
 
+/**
+ * `activeProfile` is set once the workspace records which profile is active. Only that profile's vectors may then be
+ * published to documents, so a replica still running an earlier profile cannot point documents back at its vectors.
+ */
 export function createPostgresEmbeddingRepository(
   client: MemoryQueryClient,
   names: PostgresMemoryNames,
+  { activeProfile = false }: { activeProfile?: boolean } = {},
 ): EmbeddingRepository {
   const table = (name: string) => memoryTable(names, name);
   return {
     installProfile(values: [id: string, profile: unknown]) {
       return client.query(
         `INSERT INTO ${table('embedding_profiles')} (id,profile) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+        values,
+      );
+    },
+    async activateProfile(values: [profileId: string]) {
+      if (!activeProfile) return { rows: [], rowCount: 0 };
+      return client.query(
+        `INSERT INTO ${table('embedding_active_profile')} AS a (id,profile_id) VALUES (1,$1)
+        ON CONFLICT (id) DO UPDATE SET profile_id=excluded.profile_id WHERE a.profile_id<>excluded.profile_id`,
         values,
       );
     },
@@ -144,7 +157,12 @@ export function createPostgresEmbeddingRepository(
     ) {
       return client.query(
         `UPDATE ${table('documents')} SET vector_publication_id=$4
-        WHERE id=$1 AND observed_revision_id=$2 AND lexical_publication_id=$3 AND tombstoned_at IS NULL`,
+        WHERE id=$1 AND observed_revision_id=$2 AND lexical_publication_id=$3 AND tombstoned_at IS NULL${
+          activeProfile
+            ? ` AND EXISTS (SELECT 1 FROM ${table('vector_publications')} v JOIN ${table('embedding_active_profile')} a
+              ON a.profile_id=v.profile_id WHERE v.id=$4)`
+            : ''
+        }`,
         values,
       );
     },

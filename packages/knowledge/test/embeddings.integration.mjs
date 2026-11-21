@@ -10,6 +10,7 @@ import { AccessDenied } from '@tulipfarm/access';
 import { createFiles } from '@tulipfarm/files';
 import { workspaceTableMigrations } from '../../workspaces/dist/table-migrations.js';
 import { createKnowledgeEmbeddings, createLocalKnowledge, KnowledgeError } from '../dist/index.js';
+import { createPostgresEmbeddingRepository } from '@tulipfarm/memory-postgres';
 import { registerExtension } from '@tulipfarm/extensions';
 import { creditAccountExtension } from '@tulipfarm/workspace-storage/credit-account';
 import { hostedCreditPricingExtension } from '../../workspace-storage/test/hosted-credit-pricing.mjs';
@@ -782,6 +783,81 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.equal(await published(second.documentId), null);
       assert.deepEqual(await api.due(w.ws.id), []);
       assert.ok(await published(second.documentId));
+      assert.equal(calls, 1);
+    });
+    await t.test('a profile rollback re-embeds documents and other profiles cannot publish to them', async () => {
+      const w = await workspace();
+      const local = createLocalKnowledge({
+        runtime: firstRuntime,
+        files: createFiles(firstRuntime, {
+          putIfAbsent: async () => {},
+          read: async () => {
+            throw new Error('unexpected object read');
+          },
+        }),
+      });
+      const saved = await local.save(w.ws.id, w.ws.userId, {
+        commandId: randomUUID(),
+        documentId: randomUUID(),
+        expectedRevisionId: null,
+        title: 'Rollback',
+        input: { kind: 'note', text: '# Lilies\nKeep the soil moist.' },
+      });
+      for (const work of await local.due(w.ws.id)) await local.process(work);
+      let calls = 0;
+      const api = w.make(async () => {
+        calls++;
+        return success();
+      });
+      for (const work of await api.due(w.ws.id)) assert.equal((await api.process(work)).disposition, 'ready');
+      const document = async () =>
+        (
+          await db.platform.query(
+            `SELECT d.observed_revision_id,d.lexical_publication_id,d.vector_publication_id,v.profile_id
+            FROM ${w.table('documents')} d LEFT JOIN ${w.table('vector_publications')} v ON v.id=d.vector_publication_id
+            WHERE d.id=$1`,
+            [saved.documentId],
+          )
+        ).rows[0];
+      const embedded = await document();
+      assert.equal(embedded.profile_id, knowledgeEmbeddingProfile.id);
+
+      // Another profile becomes active, as a deployment with a new profile would leave it, and publishes its vectors.
+      await db.platform.query(
+        `INSERT INTO ${w.table('embedding_profiles')} (id,profile) VALUES ('next-profile','{"next":true}')`,
+      );
+      await db.platform.query(`UPDATE ${w.table('embedding_active_profile')} SET profile_id='next-profile'`);
+      await db.platform.query(
+        `WITH v AS (
+          INSERT INTO ${w.table('vector_publications')} (id,document_id,revision_id,lexical_publication_id,profile,profile_id)
+          VALUES (gen_random_uuid(),$1,$2,$3,'{"next":true}','next-profile') RETURNING id)
+        UPDATE ${w.table('documents')} d SET vector_publication_id=v.id FROM v WHERE d.id=$1`,
+        [saved.documentId, embedded.observed_revision_id, embedded.lexical_publication_id],
+      );
+
+      // A replica still on the earlier profile cannot point the document back at its vectors.
+      const login = await connect(db.login(w.ws));
+      try {
+        const stale = createPostgresEmbeddingRepository(
+          login,
+          { schema: w.ws.names.schema, tablePrefix: 'tf_knowledge_' },
+          { activeProfile: true },
+        );
+        const result = await stale.publishVectors([
+          saved.documentId,
+          embedded.observed_revision_id,
+          embedded.lexical_publication_id,
+          embedded.vector_publication_id,
+        ]);
+        assert.equal(result.rowCount, 0);
+      } finally {
+        await login.end();
+      }
+      assert.equal((await document()).profile_id, 'next-profile');
+
+      // Rolling back makes the earlier profile active again; its finished vectors are published without new calls.
+      assert.deepEqual(await api.due(w.ws.id), []);
+      assert.equal((await document()).vector_publication_id, embedded.vector_publication_id);
       assert.equal(calls, 1);
     });
     await t.test('document retries cannot retarget a newer publication at the same generation', async () => {

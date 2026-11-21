@@ -188,14 +188,16 @@ export function createEmbeddingEngine<Context, Source extends { kind: string }>(
     }
   }
   async function installProfile(tx: Transaction) {
-    // Search and the sweep only use vectors of the current profile. When a profile is first installed, documents
-    // pointing at another profile's vectors become unembedded, so the sweep finds them without scanning the rest.
-    if ((await repository(tx).installProfile([profile.id, profile])).rowCount)
-      await repository(tx).forgetOtherProfileVectors([profile.id]);
+    await repository(tx).installProfile([profile.id, profile]);
     const stored = z
       .object({ matches: z.boolean() })
       .parse((await repository(tx).profileMatches([profile.id, profile])).rows[0]);
     if (!stored.matches) throw new KnowledgeError('conflict');
+    // Search and the sweep only use vectors of the active profile. Whenever that changes, including a rollback to an
+    // earlier one, documents pointing at another profile's vectors become unembedded, so the sweep finds them through
+    // the unembedded index.
+    if ((await repository(tx).activateProfile([profile.id])).rowCount)
+      await repository(tx).forgetOtherProfileVectors([profile.id]);
   }
   async function currentIncarnation(tx: Transaction, job: Job, actor?: HumanActor) {
     if (job.purpose !== 'ingestion' || !externalProviders().length) {

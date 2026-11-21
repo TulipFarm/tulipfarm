@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { fixture } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createWorkspaceRuntime, qualified } from '@tulipfarm/workspace-storage/runtime';
@@ -229,7 +228,7 @@ test('documents pointing at vectors of another profile are embedded again for th
     assert.equal((await db.platform.query(`SELECT 1 FROM ${table('embedding_profiles')}`)).rowCount, 0);
 
     // Each document points at vectors the current profile can't search: one from an earlier profile, one from
-    // before profiles were recorded, which only the migration can clear.
+    // before profiles were recorded. Activating the current profile clears both.
     await db.platform.query(
       `INSERT INTO ${table('embedding_profiles')} (id,profile) VALUES ('retired-profile','{"retired":true}')`,
     );
@@ -248,15 +247,6 @@ test('documents pointing at vectors of another profile are embedded again for th
         UPDATE ${table('documents')} d SET vector_publication_id=v.id FROM v WHERE d.id=v.document_id`,
         [document.documentId, profile],
       );
-    const migration = await readFile(
-      new URL('../../workspace-storage/common/0102_knowledge_profiled_vector_pointers.sql', import.meta.url),
-      'utf8',
-    );
-    await db.platform.query(
-      migration
-        .slice(migration.indexOf('UPDATE'), migration.indexOf('DROP INDEX'))
-        .replaceAll('{{schema}}', ws.names.schema),
-    );
     const pointers = async () =>
       Object.fromEntries(
         (await db.platform.query(`SELECT id,vector_publication_id FROM ${table('documents')}`)).rows.map(row => [
@@ -264,7 +254,7 @@ test('documents pointing at vectors of another profile are embedded again for th
           row.vector_publication_id !== null,
         ]),
       );
-    assert.deepEqual(await pointers(), { [retired.documentId]: true, [legacy.documentId]: false });
+    assert.deepEqual(await pointers(), { [retired.documentId]: true, [legacy.documentId]: true });
 
     const embeddings = createKnowledgeEmbeddings({
       runtime,
