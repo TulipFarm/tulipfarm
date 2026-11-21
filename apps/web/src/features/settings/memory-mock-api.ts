@@ -11,17 +11,16 @@ if (import.meta.env.DEV && /^\/memory-mock(?:\/|$)/.test(window.location.pathnam
   const scenario = new URLSearchParams(window.location.search).get('memoryScenario');
   // `passwordScenario=credential|link` turns on self-hosted password sign-in for this demo account.
   const passwordScenario = new URLSearchParams(window.location.search).get('passwordScenario');
-  // `memoryScenario=keep` adds history (undo, delete, forget); `hidden` and `keep-unavailable` show Keep's states.
-  const keep = scenario === 'keep';
-  let memory: { content: string; revision: number; history?: { trashed: boolean; undo: boolean } } = {
-    ...(keep ? { history: { trashed: false, undo: true } } : {}),
+  // `memoryScenario=keep-unavailable` shows the memory service not answering.
+  let memory: { content: string; revision: number; history: { trashed: boolean; undo: boolean } } = {
+    history: { trashed: false, undo: true },
     content:
       scenario === 'empty'
         ? ''
         : 'Use short, friendly replies with emojis when they help.\n\nGreet me for my time of day. Explain unfamiliar terms in plain words.',
     revision: 1,
   };
-  // With `keep`, `proposalScenario=pending|outdated|empty|error` sets the suggested changes.
+  // `proposalScenario=pending|outdated|empty|error` sets the suggested changes.
   const proposalScenario = new URLSearchParams(window.location.search).get('proposalScenario') ?? 'empty';
   const suggestion = (n: number, kind: 'add' | 'change' | 'remove', before: string | null, after: string | null) => ({
     id: `7${n}7${n}7${n}7${n}-7${n}7${n}-4${n}7${n}-8${n}7${n}-7${n}7${n}7${n}7${n}7${n}7${n}`,
@@ -63,7 +62,7 @@ if (import.meta.env.DEV && /^\/memory-mock(?:\/|$)/.test(window.location.pathnam
     if (!url.pathname.startsWith('/v1/')) return original(input, init);
     const path = url.pathname,
       method = init?.method ?? (input instanceof Request ? input.method : 'GET');
-    if (keep && /\/personal-memory\/(?:undo|forget)$/.test(path) && method === 'POST') {
+    if (/\/personal-memory\/(?:undo|forget)$/.test(path) && method === 'POST') {
       const value = JSON.parse(String(init?.body)) as { expectedRevision: number };
       if (value.expectedRevision !== memory.revision)
         return Response.json({ error: 'personal_memory_conflict' }, { status: 409 });
@@ -76,7 +75,7 @@ if (import.meta.env.DEV && /^\/memory-mock(?:\/|$)/.test(window.location.pathnam
           };
       return Response.json(memory);
     }
-    if (keep && path.endsWith('/personal-memory/proposals') && method === 'GET') {
+    if (path.endsWith('/personal-memory/proposals') && method === 'GET') {
       if (proposalScenario === 'error' && proposalFailures < 3) {
         proposalFailures++;
         return Response.json({ error: 'personal-memory-unavailable' }, { status: 503 });
@@ -84,7 +83,7 @@ if (import.meta.env.DEV && /^\/memory-mock(?:\/|$)/.test(window.location.pathnam
       return Response.json({ memory, proposals });
     }
     const decision = /\/personal-memory\/proposals\/([^/]+)\/(confirm|dismiss|refresh)$/.exec(path);
-    if (keep && decision && method === 'POST') {
+    if (decision && method === 'POST') {
       const proposal = proposals.find(item => item.id === decision[1]);
       if (!proposal) return Response.json({ error: 'memory-proposal-not-found' }, { status: 404 });
       if (decision[2] === 'refresh' || (decision[2] === 'confirm' && proposal.outdated))
@@ -102,10 +101,9 @@ if (import.meta.env.DEV && /^\/memory-mock(?:\/|$)/.test(window.location.pathnam
     }
     if (path.endsWith('/personal-memory')) {
       if (scenario === 'denied') return Response.json({ error: 'personal-memory-not-found' }, { status: 404 });
-      if (scenario === 'hidden') return Response.json({ error: 'personal-memory-hidden' }, { status: 409 });
       if (scenario === 'keep-unavailable')
         return Response.json({ error: 'personal-memory-unavailable' }, { status: 503 });
-      if (keep && method === 'DELETE') {
+      if (method === 'DELETE') {
         previous = memory.content;
         memory = { content: '', revision: memory.revision + 1, history: { trashed: true, undo: true } };
         return Response.json(memory);
@@ -126,14 +124,18 @@ if (import.meta.env.DEV && /^\/memory-mock(?:\/|$)/.test(window.location.pathnam
         const value = JSON.parse(String(init?.body)) as { content: string; expectedRevision: number };
         if (scenario === 'conflict' && !failed) {
           failed = true;
-          memory = { content: 'Use clear, short replies without emojis.', revision: memory.revision + 1 };
+          memory = {
+            content: 'Use clear, short replies without emojis.',
+            revision: memory.revision + 1,
+            history: { trashed: false, undo: true },
+          };
         }
         if (value.expectedRevision !== memory.revision)
           return Response.json({ error: 'personal_memory_conflict' }, { status: 409 });
         if (Array.from(value.content).length > 10000)
           return Response.json({ error: 'invalid-request' }, { status: 400 });
         memory = {
-          ...(keep ? { history: { trashed: false, undo: true } } : {}),
+          history: { trashed: false, undo: true },
           content: value.content.trim() ? value.content : '',
           revision: memory.revision + 1,
         };

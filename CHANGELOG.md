@@ -10,14 +10,27 @@ One version identifies all apps and images of a release.
 
 ### Changed
 
-- With the `keep-memory` flag on, background learning from private chats no
-  longer writes personal memory. It suggests edits instead, each quoting the
-  member's own words and naming the chat, and members confirm or dismiss them
-  under Settings → Account → Personal memory. A suggestion goes out of date
-  when memory changes and can't be confirmed until it is updated. Forgetting
-  text deletes suggestions that hold it, and that chat won't suggest it again.
-  Without the flag, learning works as before. Workspace migration 0098 adds
-  the suggestion tables.
+- Keep now always holds personal memory, answers Knowledge search and recalls
+  compacted chats, in every workspace; the `keep-memory` feature flag is
+  removed. Nothing moves from the earlier memory: members start with empty
+  memory in Keep. Without `KEEP_ENDPOINT`, personal memory reports that it
+  can't be reached, chats aren't learned from, and Knowledge search uses the
+  local search index. Documents Keep hasn't received yet, or refused, are
+  still found through the local search index alongside Keep's results.
+  Forgetting text from chat always asks first, and can't be undone. Undo and
+  restore cards created by the earlier memory no longer change memory.
+- The development and self-hosted Compose stacks run Keep as a `keep`
+  service in its own `keep` database on their Postgres. `pnpm dev:setup` and
+  `pnpm self-host:setup` set `KEEP_ENDPOINT` and `KEEP_TOKEN` for the API and
+  worker; self-host setup also creates the Keep database and login and writes
+  `keep.env`.
+- Background learning from private chats no longer writes personal memory.
+  It suggests edits instead, each quoting the member's own words and naming
+  the chat, and members confirm or dismiss them under Settings → Account →
+  Personal memory. A suggestion goes out of date when memory changes and
+  can't be confirmed until it is updated. Forgetting text deletes suggestions
+  that hold it, and that chat won't suggest it again. Workspace migration
+  0098 adds the suggestion tables.
 - Agents and Bud show one still image, the TulipFarm tulip in a circle,
   instead of Sprout's animated monster avatars: in the agent list and editor,
   the builder preview, chat, subagent fan-out, workflow diagrams and the
@@ -89,6 +102,12 @@ One version identifies all apps and images of a release.
   both services under `COMPOSE_PROFILES=public-web`.
 - Bundles, runs and receipts stored by earlier releases still verify, and an
   unchanged catalog keeps the earlier server bundle ids and price revision.
+
+### Removed
+
+- The earlier personal memory system: its workspace storage, its direct
+  learning into members' memory, and undoing a forget from chat. Workspace
+  migration 0100 drops its `tf_personal_memory` and `tf_keep_memory` tables.
 
 ### Fixed
 

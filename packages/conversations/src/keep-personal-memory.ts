@@ -11,23 +11,28 @@ import {
   type KeepRevision,
   type KeepScope,
 } from '@tulipfarm/memory-keep';
-import { isFeatureEnabled, log } from '@tulipfarm/observability';
-import { qualified, workspaceIdFromSchema } from '@tulipfarm/workspace-storage/runtime';
-import { PersonalMemoryConflict } from '@tulipfarm/memory-core/memory/personal-memory';
+import { log } from '@tulipfarm/observability';
+import { workspaceIdFromSchema } from '@tulipfarm/workspace-storage/runtime';
 import type { PersonalMemory } from '@tulipfarm/memory-core/personal-memory-contracts';
 
 export type PersonalMemoryTransaction = AuthorizationTransaction & { commonVersion?: number; workspaceId?: string };
 
 /** Why personal memory cannot be read or changed right now. None of these is an empty memory. */
 export type PersonalMemoryUnavailableReason =
-  /** Keep was turned off after the workspace used it: its memory is kept but hidden, and the old store is not used. */
-  | 'hidden'
   /** Keep did not answer, or refused the service's credentials. */
   | 'unavailable'
-  /** Keep is on for the workspace but this deployment has no Keep endpoint. */
+  /** This deployment has no Keep endpoint. */
   | 'not-configured'
-  /** The workspace's storage has not been migrated far enough to record Keep use. */
+  /** The workspace's storage has not been migrated far enough for this operation. */
   | 'updating';
+
+/** The memory changed since the revision the caller read. */
+export class PersonalMemoryConflict extends Error {
+  constructor() {
+    super('personal_memory_conflict');
+    this.name = 'PersonalMemoryConflict';
+  }
+}
 
 export class PersonalMemoryUnavailable extends Error {
   readonly reason: PersonalMemoryUnavailableReason;
@@ -48,16 +53,6 @@ export class PersonalMemoryRejected extends Error {
   }
 }
 
-/** The operation needs Keep's history, which the workspace's memory store does not have. */
-export class PersonalMemoryUnsupported extends Error {
-  constructor() {
-    super('personal-memory-unsupported');
-    this.name = 'PersonalMemoryUnsupported';
-  }
-}
-
-/** The common migration that adds tf_keep_memory. */
-export const keepMemoryVersion = 91;
 /** The common migration that lets a decided forget card drop the text it asked to forget. */
 export const keepForgetScrubVersion = 94;
 const writeTimeoutMs = 5000;
@@ -67,7 +62,6 @@ const contextMaximumCharacters = 16000;
 
 type Dependencies = {
   readonly client: () => KeepClient | undefined;
-  readonly enabled: (workspaceId: string) => Promise<boolean>;
 };
 
 function defaults(): Dependencies {
@@ -86,76 +80,34 @@ function defaults(): Dependencies {
           : undefined;
       return client;
     },
-    enabled: workspaceId => isFeatureEnabled('keep-memory', null, { id: workspaceId }),
   };
 }
 
 let dependencies = defaults();
 
-/**
- * Replaces how Keep is reached and whether the `keep-memory` flag is on, for tests and local tools. Returns a function
- * that restores the defaults.
- */
-export function configureKeepPersonalMemory(options: {
-  client?: KeepClient | undefined;
-  enabled?: (workspaceId: string) => Promise<boolean>;
-}) {
-  dependencies = {
-    client: 'client' in options ? () => options.client : dependencies.client,
-    enabled: options.enabled ?? dependencies.enabled,
-  };
+/** Replaces how Keep is reached, for tests and local tools. Returns a function that restores the default. */
+export function configureKeepPersonalMemory(options: { client?: KeepClient | undefined }) {
+  dependencies = { client: 'client' in options ? () => options.client : dependencies.client };
   return () => {
     dependencies = defaults();
   };
 }
 
-export type PersonalMemoryMode =
-  | { readonly kind: 'legacy' }
-  | { readonly kind: 'keep'; readonly client: KeepClient; readonly scope: KeepScope }
-  | { readonly kind: 'hidden' };
+/** Where a member's memory lives: their own scope in Keep. */
+export type PersonalMemoryMode = { readonly kind: 'keep'; readonly client: KeepClient; readonly scope: KeepScope };
 
-function workspaceIdOf(tx: PersonalMemoryTransaction) {
-  return tx.workspaceId ?? workspaceIdFromSchema(tx.schema);
-}
-
-/**
- * Which store holds the member's memory. With `keep-memory` on, Keep does, and the workspace's first use is recorded.
- * With it off, the old store is used only by a workspace that never used Keep; otherwise memory is hidden.
- */
-export async function personalMemoryMode(
-  tx: PersonalMemoryTransaction,
-  actor: HumanActor,
-): Promise<PersonalMemoryMode> {
-  const workspaceId = workspaceIdOf(tx);
-  const enabled = await dependencies.enabled(workspaceId).catch(() => false);
-  const installed =
-    tx.commonVersion === undefined
-      ? Boolean(
-          (
-            await tx.client.query<{ installed: boolean }>('SELECT to_regclass($1) IS NOT NULL AS installed', [
-              qualified(tx.schema, 'tf_keep_memory'),
-            ])
-          ).rows[0]?.installed,
-        )
-      : tx.commonVersion >= keepMemoryVersion;
-  if (!installed) {
-    if (enabled) throw new PersonalMemoryUnavailable('updating');
-    return { kind: 'legacy' };
-  }
-  const used = Boolean(
-    (await tx.client.query(`SELECT 1 FROM ${qualified(tx.schema, 'tf_keep_memory')} WHERE id=1`)).rowCount,
-  );
-  if (!enabled) return used ? { kind: 'hidden' } : { kind: 'legacy' };
+/** The member's memory in Keep. Throws {@link PersonalMemoryUnavailable} when this deployment has no Keep endpoint. */
+export function personalMemoryMode(tx: PersonalMemoryTransaction, actor: HumanActor): PersonalMemoryMode {
   const client = dependencies.client();
   if (!client) throw new PersonalMemoryUnavailable('not-configured');
-  if (!used)
-    await tx.client.query(
-      `INSERT INTO ${qualified(tx.schema, 'tf_keep_memory')} (id) VALUES (1) ON CONFLICT DO NOTHING`,
-    );
-  return { kind: 'keep', client, scope: keepMemberScope(workspaceId, actor.membershipId) };
+  return {
+    kind: 'keep',
+    client,
+    scope: keepMemberScope(tx.workspaceId ?? workspaceIdFromSchema(tx.schema), actor.membershipId),
+  };
 }
 
-type Keep = Extract<PersonalMemoryMode, { kind: 'keep' }>;
+type Keep = PersonalMemoryMode;
 
 /** The member's `/profile.md` in Keep: absent, current, or in the trash. */
 export type KeepProfile =

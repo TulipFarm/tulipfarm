@@ -18,12 +18,6 @@ export function createPostgresMemoryReconciliationRepository(
       client.query(`SELECT owner_membership_id,project_id FROM ${table('conversations')} WHERE id=$1`, values),
     complete: values =>
       client.query(`UPDATE ${table('conversation_maintenance')} SET memory_complete=true WHERE id=$1`, values),
-    timestamps: values =>
-      client.query(
-        `SELECT manual_updated_at::text,reconciled_through::text FROM ${table('personal_memory')}
-      WHERE membership_id=$1`,
-        values,
-      ),
     completeEmpty: values =>
       client.query(
         `UPDATE ${table('conversation_maintenance')} SET memory_complete=true,memory_base_revision=NULL WHERE id=$1`,
@@ -34,12 +28,6 @@ export function createPostgresMemoryReconciliationRepository(
         `UPDATE ${table('conversation_maintenance')} SET memory_chunk=$2,memory_step=$3,memory_base_revision=$4,memory_manual_at=$5,memory_reconciled_through=$6 WHERE id=$1`,
         values,
       ),
-    watermark: values =>
-      client.query(
-        `SELECT reconciled_through::text FROM ${table('personal_memory')}
-      WHERE membership_id=$1`,
-        values,
-      ),
     clearStep: values =>
       client.query(
         `DELETE FROM ${table('conversation_maintenance_steps')} WHERE job_id=$1 AND purpose='memory'`,
@@ -48,12 +36,6 @@ export function createPostgresMemoryReconciliationRepository(
     restart: values =>
       client.query(
         `UPDATE ${table('conversation_maintenance')} SET memory_step=memory_step+1,memory_base_revision=NULL WHERE id=$1`,
-        values,
-      ),
-    advanceWatermark: values =>
-      client.query(
-        `UPDATE ${table('personal_memory')} SET reconciled_through=GREATEST(reconciled_through,$2::timestamptz)
-      WHERE membership_id=$1`,
         values,
       ),
     finish: values =>

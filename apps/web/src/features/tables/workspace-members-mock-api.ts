@@ -588,7 +588,13 @@ export function createWorkspaceMembersMock(scenario?: string) {
     if (path === '/v1/workspaces/members-table-mock/last-used' && method === 'PUT')
       return new Response(null, { status: 204 });
     if (method === 'GET') {
-      if (path === `${root}/personal-memory`) return Response.json({ content: '', revision: 0 });
+      if (path === `${root}/personal-memory`)
+        return Response.json({ content: '', revision: 0, history: { trashed: false, undo: false } });
+      if (path === `${root}/personal-memory/proposals`)
+        return Response.json({
+          memory: { content: '', revision: 0, history: { trashed: false, undo: false } },
+          proposals: [],
+        });
       if (path === '/v1/google-workspace/availability') return Response.json({ configured: false });
       if (path === `${root}/google-workspace`) return Response.json({ status: 'disconnected' });
       if (path === `${root}/slack/status`)

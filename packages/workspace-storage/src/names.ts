@@ -37,8 +37,6 @@ export const commonTables = {
   migrations: 'tf_common_migrations',
   provisioning: 'tf_provisioning',
   memberships: 'tf_memberships',
-  personalMemory: 'tf_personal_memory',
-  keepMemory: 'tf_keep_memory',
   keepKnowledge: 'tf_keep_knowledge',
   conversationKeep: 'tf_conversation_keep',
   memoryProposals: 'tf_memory_proposals',

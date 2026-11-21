@@ -155,7 +155,20 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 36
           return;
         }
         if (path === `${base}/personal-memory`)
-          return send({ content: 'Use concise answers and include next steps.', revision: 1 });
+          return send({
+            content: 'Use concise answers and include next steps.',
+            revision: 1,
+            history: { trashed: false, undo: false },
+          });
+        if (path === `${base}/personal-memory/proposals`)
+          return send({
+            memory: {
+              content: 'Use concise answers and include next steps.',
+              revision: 1,
+              history: { trashed: false, undo: false },
+            },
+            proposals: [],
+          });
         if (path === `${base}/compaction-policy`)
           return send({
             automatic: true,

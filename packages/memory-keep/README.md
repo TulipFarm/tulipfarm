@@ -38,11 +38,9 @@ A chat's compacted messages are `keepConversationScope(workspaceId, conversation
 `{ user: 'ws-<workspaceId>-c-<conversationId>' }`, which never equals a member
 or Knowledge scope.
 
-The conversations package uses the client in workspaces where the
-`keep-memory` flag (off by default) is on: for personal memory (see
-`packages/conversations/src/keep-personal-memory.ts`) and for chat recall,
-which sends messages that compaction moves out of a chat's context to Keep and
-searches them for later replies (see
-`packages/conversations/src/keep-chat-recall.ts`). In the same
-workspaces the knowledge package sends published Knowledge to Keep and
-searches it there; see `packages/knowledge/src/internal/keep.ts`.
+The conversations package uses the client whenever `KEEP_ENDPOINT` is set: for
+personal memory (see `packages/conversations/src/keep-personal-memory.ts`) and
+for chat recall, which sends messages that compaction moves out of a chat's
+context to Keep and searches them for later replies (see
+`packages/conversations/src/keep-chat-recall.ts`). The knowledge package sends
+published Knowledge to Keep and searches it there; see `packages/knowledge/src/internal/keep.ts`.

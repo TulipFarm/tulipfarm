@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { keepWorkspaceKnowledgeScope } from '@tulipfarm/memory-keep';
-import { createKnowledgeKeepIndex, KnowledgeSearchUnavailable } from '../dist/index.js';
+import { createKnowledgeKeepIndex, KnowledgeSearchUnavailable, keepKnowledgeVersion } from '../dist/index.js';
 
 const ws = randomUUID();
 const hit = (documentId, ordinal, score, metadata = { documentId, publicationId: randomUUID() }) => ({
@@ -26,7 +26,6 @@ test('Keep index splits large allowlists, keeps only allowed mapped hits and mer
   const outsider = randomUUID();
   const calls = [];
   const index = createKnowledgeKeepIndex({
-    enabled: async () => true,
     client: () => ({
       searchKnowledge: async input => {
         calls.push(input);
@@ -65,10 +64,23 @@ test('Keep index splits large allowlists, keeps only allowed mapped hits and mer
 
 test('Keep index reports unavailability instead of an empty result', async () => {
   const unreachable = createKnowledgeKeepIndex({
-    enabled: async () => true,
     client: () => ({ searchKnowledge: async () => ({ status: 'unavailable', reason: 'unreachable' }) }),
   });
   await assert.rejects(unreachable.search(ws, 'query', [randomUUID()]), KnowledgeSearchUnavailable);
-  const unconfigured = createKnowledgeKeepIndex({ enabled: async () => true, client: () => undefined });
+  const unconfigured = createKnowledgeKeepIndex({ client: () => undefined });
   await assert.rejects(unconfigured.search(ws, 'query', [randomUUID()]), error => error.reason === 'not-configured');
+});
+
+test('Keep index holds nothing in a workspace whose storage predates its delivery table', async () => {
+  const index = createKnowledgeKeepIndex({ client: () => ({}) });
+  const tx = {
+    commonVersion: keepKnowledgeVersion - 1,
+    schema: 'ws',
+    client: {
+      query: async () => {
+        throw new Error('the delivery table does not exist yet');
+      },
+    },
+  };
+  assert.deepEqual(await index.held(tx, [{ documentId: randomUUID(), publicationId: randomUUID() }]), new Set());
 });

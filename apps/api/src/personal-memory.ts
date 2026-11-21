@@ -13,7 +13,6 @@ import {
   PersonalMemoryConflict,
   PersonalMemoryRejected,
   PersonalMemoryUnavailable,
-  PersonalMemoryUnsupported,
 } from '@tulipfarm/conversations/personal-memory';
 import { authConfig, type registerAuth } from './auth.ts';
 import { authenticateRoutes } from './authenticated-routes.ts';
@@ -75,14 +74,9 @@ export function registerPersonalMemory(
       if (error instanceof MemoryProposalNotFound) return reply.code(404).send({ error: error.message });
       if (error instanceof MemoryProposalOutdated) return reply.code(409).send({ error: error.message });
       if (error instanceof PersonalMemoryConflict) return reply.code(409).send({ error: error.message });
-      // Hidden memory is kept but not shown while Keep is off; it is not a temporary failure.
-      if (error instanceof PersonalMemoryUnavailable && error.reason === 'hidden')
-        return reply.code(409).send({ error: 'personal-memory-hidden' });
       if (error instanceof StorageUnavailableError || error instanceof PersonalMemoryUnavailable)
         return reply.code(503).send({ error: 'personal-memory-unavailable' });
       if (error instanceof PersonalMemoryRejected) return reply.code(422).send({ error: 'personal-memory-rejected' });
-      if (error instanceof PersonalMemoryUnsupported)
-        return reply.code(409).send({ error: 'personal-memory-unsupported' });
       if (error instanceof z.ZodError || (typeof error === 'object' && error !== null && 'validation' in error))
         return reply.code(400).send({ error: 'invalid-request' });
       return reply.code(500).send({ error: 'personal-memory-operation-failed' });
@@ -101,7 +95,7 @@ export function registerPersonalMemory(
       {
         schema: schema(
           'deletePersonalMemoryV1',
-          'Delete your personal memory. With history on, it can be restored for 7 days.',
+          'Delete your personal memory. It can be restored for 7 days.',
           deletePersonalMemorySchema,
         ),
       },
@@ -112,7 +106,7 @@ export function registerPersonalMemory(
       {
         schema: schema(
           'undoPersonalMemoryV1',
-          'Undo your last personal memory change, or restore deleted memory. Needs history.',
+          'Undo your last personal memory change, or restore deleted memory.',
           deletePersonalMemorySchema,
         ),
       },
@@ -123,7 +117,7 @@ export function registerPersonalMemory(
       {
         schema: schema(
           'forgetPersonalMemoryV1',
-          'Permanently erase your personal memory, including its history. This cannot be undone. Needs history.',
+          'Permanently erase your personal memory, including its history. This cannot be undone.',
           deletePersonalMemorySchema,
         ),
       },
@@ -133,14 +127,9 @@ export function registerPersonalMemory(
     routes.get(
       proposals,
       {
-        schema: schema(
-          'listMemoryProposalsV1',
-          'List edits suggested for your personal memory. Needs history.',
-          undefined,
-          {
-            response: memoryProposalsSchema,
-          },
-        ),
+        schema: schema('listMemoryProposalsV1', 'List edits suggested for your personal memory.', undefined, {
+          response: memoryProposalsSchema,
+        }),
       },
       request => dependencies.service.proposals(params.parse(request.params).workspaceId, user(request)),
     );

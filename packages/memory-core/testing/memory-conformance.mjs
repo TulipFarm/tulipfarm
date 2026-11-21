@@ -62,123 +62,7 @@ function register(test, label, create, cases) {
     });
 }
 
-/** Fixtures supply isolated storage, seed(), run(), and the three real port factories. */
-export function memoryRepositoryConformance(test, label, create) {
-  register(test, label, create, {
-    async 'missing documents have no row'(f) {
-      await f.run(async context =>
-        assertResult(await f.memory(context).read([f.ids.member]), { rows: [], rowCount: 0 }),
-      );
-    },
-    async 'first insert wins without overwriting its content'(f) {
-      await f.run(async context => {
-        const repository = f.memory(context);
-        assertResult(await repository.insert([f.ids.member, 'first', false, null]), {
-          rows: [{ content: 'first', revision: 1 }],
-          rowCount: 1,
-        });
-        assertResult(await repository.insert([f.ids.member, 'second', true, null]), { rows: [], rowCount: 0 });
-        assert.deepEqual((await repository.read([f.ids.member])).rows, [{ content: 'first', revision: 1 }]);
-      });
-    },
-    async 'compare-and-swap rejects stale and missing revisions'(f) {
-      await f.seed({ memories: [{ membershipId: f.ids.member, content: 'before', revision: 4 }] });
-      await f.run(async context => {
-        const repository = f.memory(context);
-        for (const [id, revision] of [
-          [f.ids.member, 3],
-          [f.ids.other, 4],
-        ]) {
-          assertResult(await repository.replace([id, 'stale', revision, false, null]), { rows: [], rowCount: 0 });
-        }
-        const writes = await Promise.all([
-          repository.replace([f.ids.member, 'winner', 4, false, null]),
-          repository.replace([f.ids.member, 'loser', 4, false, null]),
-        ]);
-        assert.equal(writes.filter(value => value.rowCount === 1).length, 1);
-        const winner = writes.find(value => value.rowCount === 1).rows[0];
-        assert.equal(winner.revision, 5);
-        assert.ok(['winner', 'loser'].includes(winner.content));
-        assert.deepEqual((await repository.read([f.ids.member])).rows, [winner]);
-      });
-    },
-    async 'identical text and empty replacements still advance the revision'(f) {
-      await f.seed({ memories: [{ membershipId: f.ids.member, content: 'same' }] });
-      await f.run(async context => {
-        const repository = f.memory(context);
-        assert.deepEqual((await repository.replace([f.ids.member, 'same', 1, false, null])).rows, [
-          { content: 'same', revision: 2 },
-        ]);
-        assert.deepEqual((await repository.replace([f.ids.member, '', 2, false, null])).rows, [
-          { content: '', revision: 3 },
-        ]);
-        assert.equal((await repository.replace([f.ids.member, 'resurrect', 1, false, null])).rowCount, 0);
-      });
-    },
-    async 'manual timestamps survive automatic writes and watermarks never move backward'(f) {
-      const earlier = '2020-01-01T00:00:00.000Z';
-      const later = '2020-02-01T00:00:00.000Z';
-      await f.run(async context => {
-        const repository = f.memory(context);
-        const reconciliation = f.reconciliation(context);
-        await repository.insert([f.ids.member, 'manual', false, later]);
-        const manual = (await reconciliation.timestamps([f.ids.member])).rows[0];
-        assert.ok(Number.isFinite(Date.parse(manual.manual_updated_at)));
-        await repository.replace([f.ids.member, 'automatic', 1, true, earlier]);
-        const automatic = (await reconciliation.timestamps([f.ids.member])).rows[0];
-        assert.equal(timestamp(automatic.manual_updated_at), timestamp(manual.manual_updated_at));
-        assert.equal(timestamp(automatic.reconciled_through), later);
-        await repository.replace([f.ids.member, 'no watermark', 2, true, null]);
-        assert.equal(timestamp((await reconciliation.watermark([f.ids.member])).rows[0].reconciled_through), later);
-      });
-    },
-    async 'automatic first writes do not invent a manual timestamp'(f) {
-      await f.run(async context => {
-        await f.memory(context).insert([f.ids.member, 'automatic', true, null]);
-        assert.deepEqual((await f.reconciliation(context).timestamps([f.ids.member])).rows, [
-          { manual_updated_at: null, reconciled_through: null },
-        ]);
-      });
-    },
-    async 'watermark comparisons retain differences smaller than one millisecond'(f) {
-      const early = '2020-01-01T00:00:00.000001Z';
-      const late = '2020-01-01T00:00:00.000002Z';
-      await f.run(async context => {
-        await f.memory(context).insert([f.ids.member, 'first', true, late]);
-        await f.reconciliation(context).advanceWatermark([f.ids.member, early]);
-        await f.memory(context).replace([f.ids.member, 'second', 1, true, early]);
-        assert.equal(
-          timestamp((await f.reconciliation(context).watermark([f.ids.member])).rows[0].reconciled_through),
-          late,
-        );
-      });
-    },
-    async 'manual cleanup targets only the requester memory steps'(f) {
-      await f.seed({
-        steps: [
-          { jobId: f.ids.job, purpose: 'memory' },
-          { jobId: f.ids.previousJob, purpose: 'memory' },
-          { jobId: f.ids.job, purpose: 'summary' },
-          { jobId: f.ids.otherJob, purpose: 'memory' },
-        ],
-      });
-      await f.run(async context => {
-        assert.equal((await f.memory(context).clearPending([f.ids.member])).rowCount, 2);
-        assert.equal((await f.memory(context).clearPending([f.ids.member])).rowCount, 0);
-        assert.equal((await f.reconciliation(context).clearStep([f.ids.otherJob])).rowCount, 1);
-      });
-    },
-    async 'returned rows cannot mutate stored documents'(f) {
-      await f.seed({ memories: [{ membershipId: f.ids.member, content: 'retained' }] });
-      await f.run(async context => {
-        const first = await f.memory(context).read([f.ids.member]);
-        first.rows[0].content = 'tampered';
-        assert.equal((await f.memory(context).read([f.ids.member])).rows[0].content, 'retained');
-      });
-    },
-  });
-}
-
+/** Fixtures supply isolated storage, seed(), run(), and the reconciliation and transcript port factories. */
 export function memoryReconciliationConformance(test, label, create) {
   register(test, label, create, {
     async 'owner and progress reads preserve absence and exact fields'(f) {
@@ -263,21 +147,6 @@ export function memoryReconciliationConformance(test, label, create) {
         await repository.finish([f.ids.job, 4, 9, true]);
         assert.equal((await repository.progress([f.ids.job])).rows[0].memory_complete, true);
         assert.equal((await repository.finish([f.ids.member, 4, 9, true])).rowCount, 0);
-      });
-    },
-    async 'watermark updates neither create documents nor replace newer timestamps'(f) {
-      const early = '2020-01-01T00:00:00.000Z';
-      const late = '2020-02-01T00:00:00.000Z';
-      await f.seed({ memories: [{ membershipId: f.ids.member, content: 'keep' }] });
-      await f.run(async context => {
-        const repository = f.reconciliation(context);
-        assert.equal((await repository.advanceWatermark([f.ids.other, late])).rowCount, 0);
-        assertResult(await repository.timestamps([f.ids.other]), { rows: [], rowCount: 0 });
-        assertResult(await repository.watermark([f.ids.other]), { rows: [], rowCount: 0 });
-        await repository.advanceWatermark([f.ids.member, late]);
-        await repository.advanceWatermark([f.ids.member, early]);
-        assert.equal(timestamp((await repository.watermark([f.ids.member])).rows[0].reconciled_through), late);
-        assert.deepEqual((await f.memory(context).read([f.ids.member])).rows, [{ content: 'keep', revision: 1 }]);
       });
     },
     async 'clearing a step affects only memory steps in its own job'(f) {

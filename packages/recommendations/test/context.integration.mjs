@@ -20,7 +20,8 @@ import {
 test(
   'real permissions bound member context, source revocation, no-op memory and saved-only reads',
   { timeout: 60000 },
-  async () => {
+  async t => {
+    t.after(configureKeepPersonalMemory({ client: fakeKeep().client }));
     const f = await conversationFixture();
     try {
       const w = f.workspace;
@@ -45,7 +46,7 @@ test(
       const memory = createPersonalMemoryService(f.runtime);
       const projectId = randomUUID(),
         fileId = randomUUID();
-      await memory.save(w.id, alice.userId, {
+      const remembered = await memory.save(w.id, alice.userId, {
         content: 'Alice prefers concise customer checklists.',
         expectedRevision: 0,
       });
@@ -190,7 +191,7 @@ test(
 
       await memory.save(w.id, alice.userId, {
         content: 'Alice prefers concise customer checklists.',
-        expectedRevision: 1,
+        expectedRevision: remembered.revision,
       });
       await f.db.platform.query(
         `UPDATE ${f.table('tf_google_integrations')} SET generation=generation+1 WHERE membership_id=$1`,
@@ -203,7 +204,8 @@ test(
         'identical memory saves and credential generation changes are not new model input',
       );
       assert.doesNotMatch(JSON.stringify(unchanged), /Excluded automatic chat attachment/);
-      assert.equal(unchanged.sources.find(source => source.kind === 'memory').revision, '2');
+      const current = await memory.read(w.id, alice.userId);
+      assert.equal(unchanged.sources.find(source => source.kind === 'memory').revision, String(current.revision));
       await files.share(w.id, alice.userId, fileId, { kind: 'individual', id: bob.membershipId }, null);
       const revoked = await collect(alice.userId);
       assert.equal(
@@ -231,7 +233,7 @@ test(
           'unreadable Knowledge originals and protected dependencies are absent',
         );
       }
-      await memory.delete(w.id, alice.userId, { expectedRevision: 2 });
+      await memory.delete(w.id, alice.userId, { expectedRevision: current.revision });
       assert.equal(
         (await collect(alice.userId)).context.entries.some(entry => entry.kind === 'memory'),
         false,
@@ -263,9 +265,7 @@ test(
           assert.equal((await readSavedRecommendations(readTx, actor.membershipId)).items.length, 5);
         assert.equal(queries.length, 10);
         assert.ok(
-          queries.every(
-            sql => sql.startsWith('SELECT') && !/tf_(?:projects|files|personal_memory|recommendation_events)/.test(sql),
-          ),
+          queries.every(sql => sql.startsWith('SELECT') && !/tf_(?:projects|files|recommendation_events)/.test(sql)),
         );
       });
       assert.equal(
@@ -282,7 +282,7 @@ test(
 test('memory that cannot be reached leaves personalization unknown, not missing', { timeout: 60000 }, async t => {
   const { client } = fakeKeep();
   client.available = false;
-  t.after(configureKeepPersonalMemory({ enabled: async () => true, client }));
+  t.after(configureKeepPersonalMemory({ client }));
   const f = await conversationFixture();
   t.after(() => f.close());
   const { signals, context } = await f.runtime.transaction(f.workspace.id, commonCompatibility, async tx =>

@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
-import { createPersonalMemoryService } from '@tulipfarm/conversations/personal-memory';
+import { configureKeepPersonalMemory, createPersonalMemoryService } from '@tulipfarm/conversations/personal-memory';
+import { fakeKeep } from '../../../packages/conversations/test/fake-keep.mjs';
 import { createConversationActivities } from '../src/conversation-activities.ts';
 import { conversationFixture } from '../../../packages/conversations/test/fixture.mjs';
 import { completionReply, isCompletionRequest, anthropicText, isTitleRequest } from './native-chat-fixture.mjs';
 import { useModelCatalog } from './model-catalog-fixture.mjs';
 
 test('default worker composition includes current personal memory across private chats and omits deleted memory', async t => {
+  t.after(configureKeepPersonalMemory({ client: fakeKeep().client }));
   const f = await conversationFixture();
   const previous = process.env.ANTHROPIC_API_KEY;
   process.env.ANTHROPIC_API_KEY = 'synthetic-test-key';
@@ -27,9 +29,9 @@ test('default worker composition includes current personal memory across private
     });
     const w = f.workspace;
     const memory = createPersonalMemoryService(f.runtime);
-    await memory.save(w.id, w.userId, { content: 'Prefer concise bullet points.', expectedRevision: 0 });
+    const saved = await memory.save(w.id, w.userId, { content: 'Prefer concise bullet points.', expectedRevision: 0 });
     for (let index = 0; index < 3; index++) {
-      if (index === 2) await memory.delete(w.id, w.userId, { expectedRevision: 1 });
+      if (index === 2) await memory.delete(w.id, w.userId, { expectedRevision: saved.revision });
       const chatId = randomUUID();
       await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
       const sent = await f.store.send(w.id, w.userId, chatId, {

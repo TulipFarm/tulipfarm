@@ -2,8 +2,8 @@
 
 The Postgres/pgvector/FTS implementation of the
 [memory-core ports](../memory-core/README.md). This package owns the extracted
-document, retrieval, search-session, lexical/vector, embedding, and
-personal-memory storage operations. Provider ACLs and host-only permission
+document, retrieval, search-session, lexical/vector and embedding storage
+operations, and the progress and transcript reads of background learning. Provider ACLs and host-only permission
 queries remain in Knowledge.
 
 Every factory receives an already-scoped query client and
@@ -11,15 +11,15 @@ Every factory receives an already-scoped query client and
 principal, create a pool, or start/commit a transaction. The host supplies
 these within its existing runtime and authorization locks.
 
-Knowledge tables use the host's `tf_knowledge_` prefix; personal memory and
-conversation storage use `tf_`. Identifiers are escaped and data uses bound
+Knowledge tables use the host's `tf_knowledge_` prefix; conversation storage
+uses `tf_`. Identifiers are escaped and data uses bound
 values. Escaping names is not a permission check: only trusted host
 composition chooses the schema, prefix, and eligibility SQL callback.
 
 ```ts
-import { createPostgresMemoryRepository } from '@tulipfarm/memory-postgres';
+import { createPostgresTranscriptSource } from '@tulipfarm/memory-postgres';
 
-const repository = createPostgresMemoryRepository(transactionClient, {
+const transcript = createPostgresTranscriptSource(transactionClient, {
   schema: workspaceSchema,
   tablePrefix: 'tf_',
 });
@@ -34,7 +34,7 @@ new generic query language.
 
 ## Verification
 
-Unit tests check adapter calls. The shared personal-memory conformance
+Unit tests check adapter calls. The shared memory conformance
 suite also runs against the real factories using disposable, uniquely named
 schemas and a nondefault prefix. It requires `TEST_ADMIN_DATABASE_URL`:
 

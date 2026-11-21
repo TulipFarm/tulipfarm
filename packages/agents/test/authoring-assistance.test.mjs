@@ -181,11 +181,7 @@ test('test chat selects the requested permitted model without tools, scripts, in
   assert.equal(body.max_completion_tokens, agentAuthoringLimits.previewTokens);
   assert.match(body.messages[0].content, /unsaved agent/);
   assert.doesNotMatch(JSON.stringify(body), /rows\.delete/);
-  assert.ok(
-    fixture.state.queries.every(
-      query => !/tf_agent_(?:runs|activations|commands|tasks)|tf_personal_memory/.test(query.sql),
-    ),
-  );
+  assert.ok(fixture.state.queries.every(query => !/tf_agent_(?:runs|activations|commands|tasks)/.test(query.sql)));
   assertSettled(fixture);
 });
 

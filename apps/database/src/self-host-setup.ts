@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -6,7 +6,7 @@ import { loadSecretFiles, SecretFileError } from '@tulipfarm/config/secret-files
 import { z } from 'zod';
 import { installExtensions } from './extensions.ts';
 import { loadDatabaseExtensions, migrate } from './migrations.ts';
-import { bootstrap, connect } from './postgres.ts';
+import { bootstrap, connect, ensureKeepDatabase } from './postgres.ts';
 import { createEmailLogin, inspectEmailLogin } from './product-release-access.ts';
 import { productEmailRole, ProductReleaseError } from './product-release.ts';
 import { DatabaseError } from './config.ts';
@@ -29,7 +29,7 @@ const help = `Usage: pnpm self-host:setup --out DIR
 Prepares an empty PostgreSQL server and S3-compatible bucket for a self-hosted
 TulipFarm, then writes generated service environment files to DIR:
 
-  api.env  worker.env  storage-worker.env  temporal.env  state.json
+  api.env  worker.env  storage-worker.env  temporal.env  keep.env  state.json
 
 Safe to rerun. state.json holds every generated key and password; later runs reuse
 it so encrypted data stays readable. Keep DIR private and back it up, or import the
@@ -57,9 +57,11 @@ const stateSchema = z
     roles: z.object({ owner: hex, application: hex, temporal: hex, email: hex }),
     releaseLogins: z.record(z.string(), hex),
     betterAuthSecret: hex,
+    // Added after the first release; setup generates it for older state files.
+    keep: z.object({ password: hex, token: hex }).strict().optional(),
   })
   .strict();
-type State = z.infer<typeof stateSchema>;
+type State = z.infer<typeof stateSchema> & { keep: { password: string; token: string } };
 
 const bucketName = z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/);
 const envSchema = z
@@ -89,7 +91,11 @@ class SetupError extends Error {}
 // Encrypted workspace credentials depend on these keys, so they are generated once and reused.
 async function loadState(path: string): Promise<State> {
   try {
-    return stateSchema.parse(JSON.parse(await readFile(path, 'utf8')));
+    const state = stateSchema.parse(JSON.parse(await readFile(path, 'utf8')));
+    if (state.keep) return { ...state, keep: state.keep };
+    const upgraded = { ...state, keep: { password: randomHex(), token: randomHex() } };
+    await writeFile(path, `${JSON.stringify(upgraded, null, 2)}\n`, { mode: 0o600 });
+    return upgraded;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
       throw new SetupError(`${path} is unreadable or invalid. Restore it from backup; do not delete it.`);
@@ -100,6 +106,7 @@ async function loadState(path: string): Promise<State> {
     releaseLogins: releaseLoginPasswords(),
     betterAuthSecret: randomHex(),
     roles: { owner: randomHex(), application: randomHex(), temporal: randomHex(), email: randomHex() },
+    keep: { password: randomHex(), token: randomHex() },
   };
   await writeFile(path, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
   return state;
@@ -184,6 +191,9 @@ async function main() {
   });
   await email.end();
 
+  step('Creating the Keep memory database');
+  await ensureKeepDatabase(adminUrl, state.keep.password);
+
   step('Creating the object storage buckets');
   await ensureBuckets(objectStorage);
 
@@ -197,10 +207,30 @@ async function main() {
     databaseUrl: databaseUrl(endpoint, 'tulipfarm', state.roles.application),
   });
   const generator = 'pnpm self-host:setup';
-  await writeEnvFile(join(out, 'api.env'), generator, { ...services.api, BETTER_AUTH_SECRET: state.betterAuthSecret });
-  await writeEnvFile(join(out, 'worker.env'), generator, { ...services.worker, EMAIL_DELIVERY_DATABASE_URL: emailUrl });
+  const keep = { KEEP_ENDPOINT: 'http://keep:7357', KEEP_TOKEN: state.keep.token };
+  await writeEnvFile(join(out, 'api.env'), generator, {
+    ...services.api,
+    ...keep,
+    BETTER_AUTH_SECRET: state.betterAuthSecret,
+  });
+  await writeEnvFile(join(out, 'worker.env'), generator, {
+    ...services.worker,
+    ...keep,
+    EMAIL_DELIVERY_DATABASE_URL: emailUrl,
+  });
   await writeEnvFile(join(out, 'storage-worker.env'), generator, services.storageWorker);
   await writeEnvFile(join(out, 'render-worker.env'), generator, services.renderWorker);
+  const keepEnv = join(out, 'keep.env');
+  await writeEnvFile(keepEnv, generator, {
+    KEEP_POSTGRES_URL: databaseUrl(
+      { ...endpoint, database: 'keep', search: admin.searchParams.has('sslmode') ? admin.search : '?sslmode=disable' },
+      'keep',
+      state.keep.password,
+    ),
+    KEEP_API_TOKEN: state.keep.token,
+  });
+  // Keep runs as its own non-root user, not the user that wrote this volume.
+  await chmod(keepEnv, 0o644);
   const [temporalHost, temporalPort = '5432'] = endpoint.host.split(':');
   const tls = ['require', 'verify-ca', 'verify-full'].includes(admin.searchParams.get('sslmode') ?? '');
   await writeEnvFile(join(out, 'temporal.env'), generator, {

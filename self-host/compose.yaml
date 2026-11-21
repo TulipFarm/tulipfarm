@@ -199,6 +199,32 @@ services:
     depends_on:
       temporal-namespace: { condition: service_completed_successfully }
 
+  # Personal memory, Knowledge search and chat recall, stored in the keep database that setup creates. It publishes no port.
+  keep:
+    image: ghcr.io/tulipfarm/keep:sha-864e666@sha256:e1d6c37287fc5c4b5911b6152e4c038d7b1379dce326ebf05d9919b0046552e1
+    restart: unless-stopped
+    # Loads the generated database login and API token, then serves the JSON API.
+    entrypoint: ['/bin/sh', '-c', 'set -a && . /run/tulipfarm/keep.env && set +a && exec keep serve']
+    environment:
+      KEEP_STORAGE: postgres-vector
+      KEEP_BIND: 0.0.0.0:7357
+      # Plain HTTP on the Compose network only.
+      KEEP_INSECURE_HTTP: 'true'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    volumes:
+      - generated:/run/tulipfarm:ro
+      - keep-data:/var/lib/keep
+    depends_on:
+      setup: { condition: service_completed_successfully }
+    healthcheck:
+      test: ['CMD', 'keep', 'healthcheck']
+      interval: 5s
+      timeout: 6s
+      retries: 24
+      start_period: 5s
+
   # Page reads for agents. Huntsman refuses private and metadata addresses itself; it publishes no port.
   huntsman:
     profiles: [public-web]
@@ -311,6 +337,7 @@ services:
 volumes:
   generated:
   huntsman-data:
+  keep-data:
   postgres-data:
   object-storage-data:
   caddy-data:

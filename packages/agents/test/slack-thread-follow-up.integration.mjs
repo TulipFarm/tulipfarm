@@ -8,10 +8,15 @@ import { createSlackDefault } from '../src/slack-default.ts';
 import { createChatTools } from '../src/tools.ts';
 import { createAuthoringDrafts } from '../src/drafts.ts';
 import { createWorkflows } from '@tulipfarm/workflows';
-import { createPersonalMemoryService } from '../../conversations/src/personal-memory.ts';
+import { configureKeepPersonalMemory, createPersonalMemoryService } from '../../conversations/src/personal-memory.ts';
+import { fakeKeep } from '../../conversations/test/fake-keep.mjs';
 import { createConversationExecutor } from '../../conversations/src/runtime.ts';
 import { createTableWithRows, tableDefinition, textField } from '../../tables/test/fixture.mjs';
 import { AccessDenied } from '@tulipfarm/access';
+
+const keep = fakeKeep();
+configureKeepPersonalMemory({ client: keep.client });
+(await import('@tulipfarm/conversations/personal-memory')).configureKeepPersonalMemory({ client: keep.client });
 
 // Slack does not hand back the text a bot posted. A blocks-backed post comes back from conversations.replies with its
 // newlines flattened, and plain text can come back with bare URLs auto-linked. The fake does both, like production.

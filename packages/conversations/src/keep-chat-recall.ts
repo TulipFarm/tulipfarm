@@ -7,7 +7,7 @@ import {
   type KeepKnowledgeEpisode,
   type KeepMemoryResult,
 } from '@tulipfarm/memory-keep';
-import { isFeatureEnabled, log } from '@tulipfarm/observability';
+import { log } from '@tulipfarm/observability';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import { z } from 'zod';
 import type { ChatMessage } from './compaction.ts';
@@ -15,8 +15,8 @@ import type { ChatMessage } from './compaction.ts';
 /**
  * Chat recall on Keep: messages that compaction moves out of a chat's live context are sent to Keep as one knowledge
  * source per chat, and later replies search them for passages relevant to the newest message. TulipFarm's working
- * summary stays; recall only adds excerpts next to it. Everything here is behind the workspace's `keep-memory` flag,
- * except forgetting, which runs for any chat Keep may hold.
+ * summary stays; recall only adds excerpts next to it. Nothing is sent or recalled when this deployment has no Keep
+ * endpoint.
  */
 
 /** The common migration that adds tf_conversation_keep. */
@@ -38,7 +38,6 @@ const leaseSeconds = 600;
 type Dependencies = {
   /** The Keep client for one purpose, or undefined when this deployment has no Keep endpoint. */
   readonly client: (purpose: 'recall' | 'delivery') => KeepClient | undefined;
-  readonly enabled: (workspaceId: string) => Promise<boolean>;
 };
 
 function defaults(): Dependencies {
@@ -58,33 +57,22 @@ function defaults(): Dependencies {
       clients.set(purpose, client);
       return client;
     },
-    enabled: workspaceId => isFeatureEnabled('keep-memory', null, { id: workspaceId }),
   };
 }
 
 let dependencies = defaults();
 
-/**
- * Replaces how Keep is reached and whether the `keep-memory` flag is on, for tests and local tools. Returns a function
- * that restores the defaults.
- */
-export function configureKeepChatRecall(options: {
-  client?: KeepClient | undefined;
-  enabled?: (workspaceId: string) => Promise<boolean>;
-}) {
-  dependencies = {
-    client: 'client' in options ? () => options.client : dependencies.client,
-    enabled: options.enabled ?? dependencies.enabled,
-  };
+/** Replaces how Keep is reached, for tests and local tools. Returns a function that restores the default. */
+export function configureKeepChatRecall(options: { client?: KeepClient | undefined }) {
+  dependencies = { client: 'client' in options ? () => options.client : dependencies.client };
   return () => {
     dependencies = defaults();
   };
 }
 
-/** Whether chat recall is on for the workspace: Keep is configured and the flag is on. Never throws. */
-export async function keepChatRecallOn(workspaceId: string) {
-  if (!dependencies.client('recall')) return false;
-  return dependencies.enabled(workspaceId).catch(() => false);
+/** Whether chat recall is on: this deployment has a Keep endpoint. */
+export function keepChatRecallOn() {
+  return dependencies.client('recall') !== undefined;
 }
 
 type Transaction = AuthorizationTransaction & { commonVersion?: number };
@@ -104,7 +92,7 @@ export async function queueCompactedMessages(tx: Transaction, conversationId: st
   );
 }
 
-/** Marks a deleted chat for Keep to forget, whatever the flag is now. Call in the deleting transaction. */
+/** Marks a deleted chat for Keep to forget. Call in the deleting transaction. */
 export async function forgetChatInKeep(tx: Transaction, conversationId: string) {
   if (!installed(tx)) return;
   await tx.client.query(
@@ -236,8 +224,7 @@ type Runtime = {
 
 /**
  * Sends queued chat messages to Keep and forgets deleted chats. Runs in the background: a failure is recorded on the
- * chat's row and retried with backoff, and never touches a reply. Sending stops while the flag is off; forgetting does
- * not. Every send repeats the same episode ids, so a retried or concurrent send leaves Keep unchanged.
+ * chat's row and retried with backoff, and never touches a reply. Every send repeats the same episode ids, so a retried or concurrent send leaves Keep unchanged.
  */
 export function createKeepChatRecallDelivery(runtime: Runtime, compatibility: { minimum: number; maximum: number }) {
   const transaction = <T>(workspaceId: string, operation: (tx: Transaction) => Promise<T>) =>
@@ -247,7 +234,7 @@ export function createKeepChatRecallDelivery(runtime: Runtime, compatibility: { 
    * Claims a batch of due chats by pushing their next attempt past a lease, so other replicas skip them until this one
    * finishes or the lease runs out. Deleting a chat makes its row due at once, so a forget can still overlap a send.
    */
-  async function due(workspaceId: string, deliver: boolean, limit: number) {
+  async function due(workspaceId: string, limit: number) {
     return transaction(workspaceId, async tx => {
       if (!installed(tx)) return [];
       const { rows } = await tx.client.query(
@@ -255,14 +242,14 @@ export function createKeepChatRecallDelivery(runtime: Runtime, compatibility: { 
           SELECT k.conversation_id, (k.forget OR c.id IS NULL OR c.deleted_at IS NOT NULL) AS forget
           FROM ${keepTable(tx)} k LEFT JOIN ${table(tx, 'tf_conversations')} c ON c.id = k.conversation_id
           WHERE k.next_attempt_at <= clock_timestamp()
-            AND (k.forget OR c.id IS NULL OR c.deleted_at IS NOT NULL OR ($1 AND k.covered_through > k.sent_through))
-          ORDER BY k.next_attempt_at, k.conversation_id LIMIT $2
+            AND (k.forget OR c.id IS NULL OR c.deleted_at IS NOT NULL OR k.covered_through > k.sent_through)
+          ORDER BY k.next_attempt_at, k.conversation_id LIMIT $1
           FOR UPDATE OF k SKIP LOCKED
         )
-        UPDATE ${keepTable(tx)} k SET next_attempt_at = clock_timestamp() + make_interval(secs => $3)
+        UPDATE ${keepTable(tx)} k SET next_attempt_at = clock_timestamp() + make_interval(secs => $2)
         FROM claimed WHERE k.conversation_id = claimed.conversation_id
         RETURNING k.conversation_id, k.covered_through, k.sent_through, k.held, k.hold_count, claimed.forget, k.attempts`,
-        [deliver, limit, leaseSeconds],
+        [limit, leaseSeconds],
       );
       return z
         .array(dueSchema)
@@ -407,8 +394,7 @@ export function createKeepChatRecallDelivery(runtime: Runtime, compatibility: { 
     const outcome = { sent: 0, forgotten: 0, failed: 0 };
     const keep = dependencies.client('delivery');
     if (!keep) return outcome;
-    const sending = await dependencies.enabled(workspaceId).catch(() => false);
-    for (const row of await due(workspaceId, sending, deliveryBatch)) {
+    for (const row of await due(workspaceId, deliveryBatch)) {
       if (stopped()) break;
       if (row.forget) {
         if (await forget(keep, workspaceId, row)) outcome.forgotten += 1;

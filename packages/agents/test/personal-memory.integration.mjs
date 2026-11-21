@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { createConversationExecutor } from '../../conversations/src/runtime.ts';
-import { createPersonalMemoryService } from '../../conversations/src/personal-memory.ts';
+import { configureKeepPersonalMemory, createPersonalMemoryService } from '../../conversations/src/personal-memory.ts';
+import { fakeKeep } from '../../conversations/test/fake-keep.mjs';
 import { createProjects } from '../../conversations/src/projects.ts';
 import { conversationFixture } from '../../conversations/test/fixture.mjs';
 import { createAgentTasks } from '../src/tasks.ts';
@@ -12,6 +13,11 @@ import { savedTaskAgent, seedExecution } from './task-fixture.mjs';
 import { syntheticContinuity } from './continuity-fixture.mjs';
 import { createTableWithRows, tableDefinition } from '../../tables/test/fixture.mjs';
 import { createAuthoringDrafts } from '../src/drafts.ts';
+
+// The runtime loads the built conversations package and the tests load its source; both use one fake Keep.
+const keep = fakeKeep();
+configureKeepPersonalMemory({ client: keep.client });
+(await import('@tulipfarm/conversations/personal-memory')).configureKeepPersonalMemory({ client: keep.client });
 
 test(
   'private runtime reads fresh member memory and preserves project and standalone boundaries',
@@ -126,7 +132,7 @@ test(
         assert.ok(summarizeCalls.includes('handoff'));
         await memory.delete(w.id, w.userId, { expectedRevision: saved.revision });
         await exchange([{ kind: 'text', text: 'Continue after deletion' }]);
-        assert.deepEqual(reads.at(-1), { content: '', revision: 2 });
+        assert.equal(reads.at(-1).content, '');
         for (const name of [
           'tf_conversation_turns',
           'tf_conversation_working_summaries',
@@ -167,7 +173,7 @@ test(
         ];
         const drafted = [];
         const draftExecutor = createConversationExecutor(f.runtime, async input => {
-          assert.deepEqual(await input.readPersonalMemory(), { content: '', revision: 2 });
+          assert.equal((await input.readPersonalMemory()).content, '');
           for (const proposal of proposals) {
             const output = await input.executeTool(
               `${proposal.kind === 'skill' ? 'skills' : 'workflows'}.draft`,
@@ -204,7 +210,10 @@ test(
       await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
       'completed',
     );
-    assert.deepEqual(seen, [first, { content: 'UPDATED_PREFERENCE_ONLY', revision: 2 }, { content: '', revision: 3 }]);
+    assert.match(seen[0].content, /PRIVATE_PREFERENCE_ONLY/);
+    assert.match(seen[1].content, /UPDATED_PREFERENCE_ONLY/);
+    assert.equal(seen[2].content, '');
+    assert.ok(seen[0].revision < seen[1].revision && seen[1].revision < seen[2].revision);
     const retained = JSON.stringify((await store.history(w.id, w.userId, chatId)).messages);
     assert.equal(retained.includes('PREFERENCE_ONLY'), false);
     assert.equal(retained.includes('OTHER_MEMBER_ONLY'), false);
@@ -244,13 +253,17 @@ test(
     const agent = await savedTaskAgent(f.db, w, f.runtime, w.userId, w.membershipId, [], []);
     await seedExecution(f.db, w, agent.agentId, [agent.teamId], []);
     const tasks = createAgentTasks(f.runtime);
-    const saved = await memory.save(w.id, w.userId, { content: 'TASK_PREFERENCE_ONLY', expectedRevision: 3 });
+    const saved = await memory.save(w.id, w.userId, {
+      content: 'TASK_PREFERENCE_ONLY',
+      expectedRevision: (await memory.read(w.id, w.userId)).revision,
+    });
     let step = 0;
     const engine = createTaskRuntime(
       f.runtime,
       syntheticContinuity(async input => {
         assert.equal(JSON.stringify(JSON.parse(input.prompt)).includes('TASK_PREFERENCE_ONLY'), false);
-        assert.deepEqual(input.personalMemory, step++ === 0 ? saved : { content: '', revision: 5 });
+        if (step++ === 0) assert.match(input.personalMemory.content, /TASK_PREFERENCE_ONLY/);
+        else assert.equal(input.personalMemory.content, '');
         return step === 1 ? { kind: 'clarify', text: 'Continue?' } : { kind: 'answer', text: 'Task finished.' };
       }),
     );

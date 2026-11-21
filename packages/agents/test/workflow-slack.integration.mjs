@@ -12,8 +12,13 @@ import { createAuthoringDrafts } from '../src/drafts.ts';
 import { createConversationExecutor } from '../../conversations/src/runtime.ts';
 import { createChatTools } from '../src/tools.ts';
 import { createSlackActions } from '../src/slack-actions.ts';
-import { createPersonalMemoryService } from '../../conversations/src/personal-memory.ts';
+import { configureKeepPersonalMemory, createPersonalMemoryService } from '../../conversations/src/personal-memory.ts';
+import { fakeKeep } from '../../conversations/test/fake-keep.mjs';
 import { outboundFixture } from './slack-actions.integration.mjs';
+
+const keep = fakeKeep();
+configureKeepPersonalMemory({ client: keep.client });
+(await import('@tulipfarm/conversations/personal-memory')).configureKeepPersonalMemory({ client: keep.client });
 
 test('native Slack workflow: Tickets chat draft, row event, direct send, restart and exact sent receipt', async t => {
   const f = await outboundFixture({ channelName: 'tech' });

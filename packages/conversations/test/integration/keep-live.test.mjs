@@ -16,28 +16,21 @@ import {
 const endpoint = process.env.TEST_KEEP_ENDPOINT;
 const token = process.env.TEST_KEEP_TOKEN;
 
-/** A workspace transaction that answers membership and first-use checks without a database. */
+/** A workspace transaction that answers membership checks without a database. */
 function storage() {
   const workspaceId = randomUUID();
   const actor = { kind: 'human', userId: 'member', membershipId: randomUUID() };
-  let used = false;
   const tx = {
     schema: `ws_${workspaceId.replaceAll('-', '')}`,
     workspaceId,
-    commonVersion: 91,
+    commonVersion: 99,
     client: {
       query: async sql => {
         if (sql.includes('tf_authorization_lock')) return { rowCount: 1, rows: [{ id: 1 }] };
         if (sql.includes('tf_memberships'))
           return { rowCount: 1, rows: [{ id: actor.membershipId, user_id: actor.userId, role: 'member' }] };
-        if (sql.includes('INSERT INTO') && sql.includes('tf_keep_memory')) {
-          used = true;
-          return { rowCount: 1, rows: [] };
-        }
-        if (sql.includes('tf_keep_memory')) return { rowCount: used ? 1 : 0, rows: used ? [{}] : [] };
         if (sql.includes('record_recommendation_change')) return { rowCount: 1, rows: [{ recorded: true }] };
         if (sql.includes('to_regclass')) return { rowCount: 1, rows: [{ installed: true }] };
-        if (sql.includes('tf_personal_memory')) throw new Error('The old store must not be used with Keep on.');
         return { rowCount: 0, rows: [] };
       },
     },
@@ -47,7 +40,7 @@ function storage() {
 
 test('a real Keep holds member memory end to end', { skip: !endpoint && 'TEST_KEEP_ENDPOINT is not set' }, async t => {
   const client = createKeepClient({ endpoint: new URL(endpoint), token });
-  t.after(configureKeepPersonalMemory({ enabled: async () => true, client }));
+  t.after(configureKeepPersonalMemory({ client }));
   const { tx, actor, workspaceId } = storage();
   const service = createPersonalMemoryService({ transaction: async (_id, _c, run) => run(tx) });
 

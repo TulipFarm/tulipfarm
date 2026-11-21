@@ -178,7 +178,6 @@
                   "claude-plan",
                   "copilot-plan",
                   "coding-runs",
-                  "keep-memory",
                   "agent-evals"
                 ]
               },
@@ -542,7 +541,6 @@
                   "claude-plan",
                   "copilot-plan",
                   "coding-runs",
-                  "keep-memory",
                   "agent-evals"
                 ]
               },

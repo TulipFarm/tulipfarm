@@ -31,7 +31,7 @@ function failureKind(error: unknown): KnowledgeKeepFailureKind {
 
 /**
  * Sends a workspace's published Knowledge to Keep and forgets what was removed, one document at a time in id order.
- * Turning `keep-memory` on makes every published document due, so the first run is the backfill. A document that fails
+ * Every published document Keep does not hold yet is due, so the first run is the backfill. A document that fails
  * is recorded and backs off while the run moves on to the next. When Keep itself is unreachable the run waits, with a
  * growing delay, and tries the same document again, so no later run starts and hammers Keep in the meantime.
  */

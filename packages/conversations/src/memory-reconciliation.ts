@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import type { AuthorizationTransaction, HumanActor } from '@tulipfarm/access';
-import { createMemoryReconciliation } from '@tulipfarm/memory-core/memory/reconciliation';
 import { transcriptChunks } from '@tulipfarm/memory-core/memory/transcript';
 import {
   createPostgresMemoryReconciliationRepository,
@@ -8,8 +7,12 @@ import {
 } from '@tulipfarm/memory-postgres';
 import type { MaintenanceFence } from './maintenance-contracts.ts';
 import type { ConversationCompactor, EffectiveCompactionPolicy } from './compaction.ts';
-import { legacyPersonalMemory, personalMemoryMode } from './personal-memory.ts';
-import { keepRevision, readKeepProfile } from './keep-personal-memory.ts';
+import {
+  keepRevision,
+  personalMemoryMode,
+  PersonalMemoryUnavailable,
+  readKeepProfile,
+} from './keep-personal-memory.ts';
 import {
   lastDirectMemoryChange,
   lockMemoryLearning,
@@ -18,7 +21,6 @@ import {
   proposalSystemPrompt,
   saveMemoryProposals,
 } from './memory-proposals.ts';
-export { preferenceSystemPrompt, parsePreferenceReconciliation } from '@tulipfarm/memory-core/memory/reconciliation';
 export { parseMemoryEdits, proposalSystemPrompt } from './memory-proposals.ts';
 
 type MemoryTransaction = <T>(
@@ -36,25 +38,6 @@ const repository = (tx: AuthorizationTransaction) =>
   createPostgresMemoryReconciliationRepository(tx.client, { schema: tx.schema, tablePrefix: 'tf_' });
 const transcriptSource = (tx: AuthorizationTransaction) =>
   createPostgresTranscriptSource(tx.client, { schema: tx.schema, tablePrefix: 'tf_' });
-const reconcile = createMemoryReconciliation<AuthorizationTransaction>({
-  memory: legacyPersonalMemory,
-  repository,
-  transcript: tx => transcriptSource(tx),
-});
-/**
- * Background learning for a member's private chat. With Keep, it never writes memory: it saves suggested edits, bound
- * to the profile revision they were made against, for the member to confirm. Hidden memory is not learned from at all.
- */
-export async function reconcileMaintenanceMemory(
-  transaction: MemoryTransaction,
-  fence: MaintenanceFence,
-  compactor: ConversationCompactor,
-): Promise<boolean> {
-  const mode = await transaction(async (tx, current) => (await personalMemoryMode(tx, current.actor)).kind);
-  if (mode === 'legacy') return reconcile<MaintenanceFence>(transaction, fence, compactor);
-  return proposeMaintenanceMemory(transaction, fence, compactor);
-}
-
 const progressSchema = z.object({
   memory_complete: z.boolean(),
   memory_chunk: z.number().int(),
@@ -67,11 +50,21 @@ const messagesSchema = z.array(
 );
 
 async function keepFor(tx: AuthorizationTransaction, actor: HumanActor) {
-  const mode = await personalMemoryMode(tx, actor);
-  return mode.kind === 'keep' && (await memoryProposalsInstalled(tx)) ? mode : undefined;
+  let mode;
+  try {
+    mode = personalMemoryMode(tx, actor);
+  } catch (error) {
+    if (error instanceof PersonalMemoryUnavailable) return undefined;
+    throw error;
+  }
+  return (await memoryProposalsInstalled(tx)) ? mode : undefined;
 }
 
-async function proposeMaintenanceMemory(
+/**
+ * Background learning for a member's private chat. It never writes memory: it saves suggested edits, bound to the Keep
+ * profile revision they were made against, for the member to confirm. Without a Keep endpoint nothing is learned.
+ */
+export async function reconcileMaintenanceMemory(
   transaction: MemoryTransaction,
   fence: MaintenanceFence,
   compactor: ConversationCompactor,

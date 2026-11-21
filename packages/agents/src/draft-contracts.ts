@@ -119,9 +119,9 @@ const knowledgeDraftInput = z.discriminatedUnion('operation', [
 const memoryContent = savePersonalMemorySchema.shape.content;
 const memoryRevision = savePersonalMemorySchema.shape.expectedRevision;
 /**
- * The requester's own personal memory. A restore card undoes a chat forget: `forgotten` is the text it removed. With
- * history (Keep), forget is permanent instead: a forget card asks first and erases `forgotten` only once confirmed. It
- * holds no copy of the memory, and `forgotten` is blanked once the card is confirmed or dismissed.
+ * The requester's own personal memory. A forget card asks first and erases `forgotten` only once confirmed. It holds
+ * no copy of the memory, and `forgotten` is blanked once the card is confirmed or dismissed. Restore cards undid a
+ * forget in the earlier memory store; new ones are no longer created, but saved cards still read.
  */
 const memoryDraftInput = z.discriminatedUnion('operation', [
   z.strictObject({

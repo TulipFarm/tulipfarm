@@ -86,8 +86,7 @@ test(
   async () => {
     const f = await conversationFixture();
     const keep = fakeKeep();
-    let enabled = true;
-    const restore = configureKeepChatRecall({ client: keep.client, enabled: async () => enabled });
+    const restore = configureKeepChatRecall({ client: keep.client });
     try {
       const w = f.workspace;
       const delivery = createKeepChatRecallDelivery(f.runtime, compatibility);
@@ -122,12 +121,6 @@ test(
       assert.doesNotMatch(seen.at(-1), new RegExp(recalledHeading), 'an unreachable Keep only skips recall');
       keep.client.available = true;
 
-      enabled = false;
-      const before = keep.calls.length;
-      await say([{ kind: 'text', text: 'Lisbon budget, one more time?' }]);
-      assert.doesNotMatch(seen.at(-1), new RegExp(recalledHeading), 'recall stops with the flag');
-      assert.equal(keep.calls.length, before, 'the flag off asks Keep nothing');
-
       await f.store.remove(w.id, w.userId, chatId, { commandId: randomUUID() });
       assert.equal((await row(f, chatId)).forget, true);
       assert.deepEqual(
@@ -148,7 +141,7 @@ test(
 test('automatic compaction queues the messages it leaves out of the context', { timeout: 60_000 }, async () => {
   const f = await conversationFixture();
   const keep = fakeKeep();
-  const restore = configureKeepChatRecall({ client: keep.client, enabled: async () => true });
+  const restore = configureKeepChatRecall({ client: keep.client });
   try {
     const w = f.workspace,
       chatId = randomUUID();
@@ -186,7 +179,7 @@ test('automatic compaction queues the messages it leaves out of the context', { 
 test('a failed send is retried later and never fails the reply', { timeout: 60_000 }, async () => {
   const f = await conversationFixture();
   const keep = fakeKeep();
-  const restore = configureKeepChatRecall({ client: keep.client, enabled: async () => true });
+  const restore = configureKeepChatRecall({ client: keep.client });
   try {
     const delivery = createKeepChatRecallDelivery(f.runtime, compatibility);
     const { chatId } = await compactedChat(f);
@@ -234,7 +227,7 @@ function pausedAfterClaim(runtime) {
 test('two replicas never claim the same due chat', { timeout: 60_000 }, async () => {
   const f = await conversationFixture();
   const keep = fakeKeep();
-  const restore = configureKeepChatRecall({ client: keep.client, enabled: async () => true });
+  const restore = configureKeepChatRecall({ client: keep.client });
   try {
     await compactedChat(f);
     const a = pausedAfterClaim(f.runtime);
@@ -260,7 +253,7 @@ test(
   async () => {
     const f = await conversationFixture();
     const keep = fakeKeep();
-    const restore = configureKeepChatRecall({ client: keep.client, enabled: async () => true });
+    const restore = configureKeepChatRecall({ client: keep.client });
     try {
       const w = f.workspace;
       const { chatId } = await compactedChat(f);
@@ -296,12 +289,11 @@ test(
 );
 
 test(
-  'with the keep-memory flag off, compaction, replies and deletion never call Keep',
+  'without a Keep endpoint, compaction, replies and deletion queue nothing for Keep',
   { timeout: 60_000 },
   async () => {
     const f = await conversationFixture();
-    const keep = fakeKeep();
-    const restore = configureKeepChatRecall({ client: keep.client, enabled: async () => false });
+    const restore = configureKeepChatRecall({ client: undefined });
     try {
       const delivery = createKeepChatRecallDelivery(f.runtime, compatibility);
       const { chatId, seen, say } = await compactedChat(f);
@@ -312,7 +304,7 @@ test(
       await delivery.sync(f.workspace.id);
       await f.store.remove(f.workspace.id, f.workspace.userId, chatId, { commandId: randomUUID() });
       await delivery.sync(f.workspace.id);
-      assert.deepEqual(keep.calls, []);
+      assert.equal(await row(f, chatId), undefined, 'deletion queues nothing either');
     } finally {
       restore();
       await f.close();
@@ -330,7 +322,7 @@ test(
       token: process.env.TEST_KEEP_TOKEN ?? '',
       timeoutMs: 10_000,
     });
-    const restore = configureKeepChatRecall({ client, enabled: async () => true });
+    const restore = configureKeepChatRecall({ client });
     try {
       const w = f.workspace;
       const delivery = createKeepChatRecallDelivery(f.runtime, compatibility);

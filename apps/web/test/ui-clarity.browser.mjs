@@ -164,7 +164,20 @@ try {
       else if (path.endsWith('/settings'))
         json = { workspaceId: workspace.id, name: workspace.name, slug: workspace.slug, revision: 1, canManage: true };
       else if (path.endsWith('/personal-memory'))
-        json = { content: 'Use concise answers and include next steps.', revision: 1 };
+        json = {
+          content: 'Use concise answers and include next steps.',
+          revision: 1,
+          history: { trashed: false, undo: false },
+        };
+      else if (path.endsWith('/personal-memory/proposals'))
+        json = {
+          memory: {
+            content: 'Use concise answers and include next steps.',
+            revision: 1,
+            history: { trashed: false, undo: false },
+          },
+          proposals: [],
+        };
       else if (path.endsWith('/model-catalog'))
         json = {
           families: [

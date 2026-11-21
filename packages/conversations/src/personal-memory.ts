@@ -10,8 +10,6 @@ import {
 } from '@tulipfarm/access';
 import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
 import { recordRecommendationChange } from '@tulipfarm/workspace-storage/recommendations';
-import { createPersonalMemory } from '@tulipfarm/memory-core/memory/personal-memory';
-import { createPostgresMemoryRepository } from '@tulipfarm/memory-postgres';
 import type { ConversationRuntime } from './runtime.ts';
 import {
   savePersonalMemorySchema,
@@ -28,7 +26,6 @@ import {
   readKeepProfile,
   type KeepProfile,
   PersonalMemoryUnavailable,
-  PersonalMemoryUnsupported,
   readKeepMemory,
   readKeepMemoryState,
   replaceKeepMemory,
@@ -51,37 +48,18 @@ import {
 } from './memory-proposals.ts';
 export * from './personal-memory-contracts.ts';
 export { MemoryProposalNotFound, MemoryProposalOutdated } from './memory-proposals.ts';
-export { PersonalMemoryConflict } from '@tulipfarm/memory-core/memory/personal-memory';
 export {
   configureKeepPersonalMemory,
   keepForgetScrubVersion,
   personalMemoryMode,
+  PersonalMemoryConflict,
   PersonalMemoryRejected,
   PersonalMemoryUnavailable,
-  PersonalMemoryUnsupported,
   type PersonalMemoryMode,
   type PersonalMemoryUnavailableReason,
 } from './keep-personal-memory.ts';
 
 const compatibility = { minimum: 1, maximum: commonCompatibility.maximum };
-/** The workspace's own memory store, used only while Keep is off and was never used. */
-export const legacyPersonalMemory = createPersonalMemory<AuthorizationTransaction & { commonVersion?: number }>({
-  repository: tx => createPostgresMemoryRepository(tx.client, { schema: tx.schema, tablePrefix: 'tf_' }),
-  authorization: {
-    async lock(tx) {
-      await lockAuthorization(tx, 'read');
-      return { kind: 'allowed', value: undefined };
-    },
-    async member(tx, actor) {
-      await currentMember(tx, actor);
-      return { kind: 'allowed', value: undefined };
-    },
-  },
-  available: tx => !(tx.commonVersion !== undefined && tx.commonVersion < 1),
-  egressPolicy: { deny: () => denyMcpEgress() },
-  onChanged: (tx, actor) => memoryChanged(tx, actor),
-});
-
 function memoryChanged(tx: AuthorizationTransaction, actor: HumanActor) {
   return recordRecommendationChange(tx, {
     id: randomUUID(),
@@ -100,38 +78,34 @@ async function member(tx: PersonalMemoryTransaction, actor: HumanActor) {
 
 async function keepMode(tx: PersonalMemoryTransaction, actor: HumanActor) {
   await member(tx, actor);
-  const mode = await personalMemoryMode(tx, actor);
-  if (mode.kind === 'hidden') throw new PersonalMemoryUnavailable('hidden');
-  return mode;
+  return personalMemoryMode(tx, actor);
 }
 
 /**
- * The member's own memory, from Keep when the workspace uses it. Throws {@link PersonalMemoryUnavailable} when Keep
- * cannot answer or its memory is hidden: that is never an empty memory.
+ * The member's own memory, from Keep. Throws {@link PersonalMemoryUnavailable} when Keep cannot answer or this
+ * deployment has no Keep endpoint: that is never an empty memory.
  */
 export async function readPersonalMemory(tx: PersonalMemoryTransaction, actor: HumanActor): Promise<PersonalMemory> {
-  const mode = await keepMode(tx, actor);
-  return mode.kind === 'keep' ? readKeepMemory(mode) : legacyPersonalMemory.read(tx, actor);
+  return readKeepMemory(await keepMode(tx, actor));
 }
 
 /**
- * Memory for a model's private context, or undefined when there is none to give: Keep's personal context block (no
- * workspace knowledge) or the stored document. Unavailable or hidden memory is left out, never sent as empty.
+ * Memory for a model's private context, or undefined when there is none to give: Keep's personal context block, with
+ * no workspace knowledge. Unavailable memory is left out, never sent as empty.
  */
 export async function readPersonalMemoryContext(
   tx: PersonalMemoryTransaction,
   actor: HumanActor,
 ): Promise<PersonalMemory | undefined> {
   try {
-    const mode = await keepMode(tx, actor);
-    return mode.kind === 'keep' ? await keepMemoryContext(mode) : await legacyPersonalMemory.read(tx, actor);
+    return await keepMemoryContext(await keepMode(tx, actor));
   } catch (error) {
     if (error instanceof PersonalMemoryUnavailable) return undefined;
     throw error;
   }
 }
 
-/** Compare-and-swap replacement. With Keep, blank text moves memory to the trash, recoverable for 7 days. */
+/** Compare-and-swap replacement. Blank text moves memory to Keep's trash, recoverable for 7 days. */
 export async function replacePersonalMemory(
   tx: PersonalMemoryTransaction,
   actor: HumanActor,
@@ -139,7 +113,6 @@ export async function replacePersonalMemory(
   expectedRevision: number,
 ): Promise<PersonalMemory> {
   const mode = await keepMode(tx, actor);
-  if (mode.kind === 'legacy') return legacyPersonalMemory.replace(tx, actor, nextContent, expectedRevision);
   savePersonalMemorySchema.parse({ content: nextContent, expectedRevision });
   await lockMemoryLearning(tx, actor);
   return changed(tx, actor, await replaceKeepMemory(mode, nextContent, expectedRevision));
@@ -175,29 +148,19 @@ export async function replaceOwnPersonalMemory(
 ) {
   const result = await replacePersonalMemory(tx, actor, nextContent, expectedRevision);
   await clearBudPreferences(tx, actor);
-  await directKeepChange(tx, actor);
+  // A change the member made themselves resets where background learning reads from.
+  await recordDirectMemoryChange(tx, actor);
   return result;
 }
 
-/** With Keep, a change the member made themselves resets where background learning reads from. */
-async function directKeepChange(tx: PersonalMemoryTransaction, actor: HumanActor) {
-  if ((await personalMemoryMode(tx, actor)).kind === 'keep') await recordDirectMemoryChange(tx, actor);
-}
-
-async function keepOnly(tx: PersonalMemoryTransaction, actor: HumanActor) {
-  const mode = await keepMode(tx, actor);
-  if (mode.kind !== 'keep') throw new PersonalMemoryUnsupported();
-  return mode;
-}
-
-/** Keep only, for a change: holds off background learning until the transaction ends. */
+/** For a change: holds off background learning until the transaction ends. */
 async function keepChange(tx: PersonalMemoryTransaction, actor: HumanActor) {
-  const mode = await keepOnly(tx, actor);
+  const mode = await keepMode(tx, actor);
   await lockMemoryLearning(tx, actor);
   return mode;
 }
 
-/** Undoes the member's last memory change in Keep: a deleted memory comes back, an edit is reverted as a new revision. */
+/** Undoes the member's last memory change: a deleted memory comes back, an edit is reverted as a new revision. */
 export async function undoOwnPersonalMemory(
   tx: PersonalMemoryTransaction,
   actor: HumanActor,
@@ -210,7 +173,7 @@ export async function undoOwnPersonalMemory(
 }
 
 /**
- * Permanently erases the exact `text` from the member's memory in Keep, or all of it, including history and trash.
+ * Permanently erases the exact `text` from the member's memory, or all of it, including history and trash.
  * Nothing can undo it.
  */
 export async function forgetOwnPersonalMemory(
@@ -255,9 +218,9 @@ async function proposalsView(
   };
 }
 
-/** Keep only: the member's memory with the edits background learning suggested for it. */
+/** The member's memory with the edits background learning suggested for it. */
 export async function listMemoryProposals(tx: PersonalMemoryTransaction, actor: HumanActor) {
-  return proposalsView(tx, actor, await readKeepProfile(await keepOnly(tx, actor)));
+  return proposalsView(tx, actor, await readKeepProfile(await keepMode(tx, actor)));
 }
 
 async function proposalMode(tx: PersonalMemoryTransaction, actor: HumanActor) {
@@ -332,9 +295,8 @@ export function createPersonalMemoryService(runtime: ConversationRuntime) {
     operation: (tx: AuthorizationTransaction, actor: HumanActor) => Promise<PersonalMemory>,
   ) {
     return human(workspaceId, userId, async (tx, actor): Promise<PersonalMemory> => {
-      const result = await operation(tx, actor);
-      const mode = await personalMemoryMode(tx, actor);
-      return mode.kind === 'keep' ? readKeepMemoryState(mode) : result;
+      await operation(tx, actor);
+      return readKeepMemoryState(personalMemoryMode(tx, actor));
     });
   }
   async function replace(workspaceId: string, userId: string, nextContent: string, expectedRevision: number) {
@@ -343,12 +305,11 @@ export function createPersonalMemoryService(runtime: ConversationRuntime) {
     );
   }
   return {
-    /** The member's memory and, with Keep, what its history can do: undo, or restore from the trash. */
+    /** The member's memory and what its history can do: undo, or restore from the trash. */
     read: (workspaceId: string, userId: string) =>
-      human(workspaceId, userId, async (tx, actor): Promise<PersonalMemory> => {
-        const mode = await keepMode(tx, actor);
-        return mode.kind === 'keep' ? readKeepMemoryState(mode) : legacyPersonalMemory.read(tx, actor);
-      }),
+      human(workspaceId, userId, async (tx, actor): Promise<PersonalMemory> =>
+        readKeepMemoryState(await keepMode(tx, actor)),
+      ),
     save: (workspaceId: string, userId: string, value: unknown) => {
       const input = savePersonalMemorySchema.parse(value);
       return replace(workspaceId, userId, input.content, input.expectedRevision);
@@ -357,12 +318,12 @@ export function createPersonalMemoryService(runtime: ConversationRuntime) {
       const input = deletePersonalMemorySchema.parse(value);
       return replace(workspaceId, userId, '', input.expectedRevision);
     },
-    /** Keep only: undoes the last change, restoring a deleted memory. */
+    /** Undoes the last change, restoring a deleted memory. */
     undo: (workspaceId: string, userId: string, value: unknown) => {
       const input = deletePersonalMemorySchema.parse(value);
       return change(workspaceId, userId, (tx, actor) => undoOwnPersonalMemory(tx, actor, input.expectedRevision));
     },
-    /** Keep only: the edits background learning suggested, for the member to confirm or dismiss. */
+    /** The edits background learning suggested, for the member to confirm or dismiss. */
     proposals: (workspaceId: string, userId: string) =>
       human(workspaceId, userId, (tx, actor) => listMemoryProposals(tx, actor)),
     confirmProposal: (workspaceId: string, userId: string, id: string) =>
@@ -371,7 +332,7 @@ export function createPersonalMemoryService(runtime: ConversationRuntime) {
       human(workspaceId, userId, (tx, actor) => dismissMemoryProposal(tx, actor, uuidSchema.parse(id))),
     refreshProposal: (workspaceId: string, userId: string, id: string) =>
       human(workspaceId, userId, (tx, actor) => refreshMemoryProposal(tx, actor, uuidSchema.parse(id))),
-    /** Keep only: permanently erases the whole memory, including its history and trash. */
+    /** Permanently erases the whole memory, including its history and trash. */
     forget: (workspaceId: string, userId: string, value: unknown) => {
       const input = deletePersonalMemorySchema.parse(value);
       return change(workspaceId, userId, (tx, actor) => forgetOwnPersonalMemory(tx, actor, input.expectedRevision));
