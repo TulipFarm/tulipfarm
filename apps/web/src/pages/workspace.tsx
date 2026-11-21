@@ -20,6 +20,7 @@ import { ChevronLeft } from 'reicon-react/icons/ChevronLeft';
 import { Files } from 'reicon-react/icons/Files';
 import { Cpu } from 'reicon-react/icons/Cpu';
 import { ChartBar } from 'reicon-react/icons/ChartBar';
+import { Code2 } from 'reicon-react/icons/Code2';
 import { Database } from 'reicon-react/icons/Database';
 import { HelpCircle } from 'reicon-react/icons/HelpCircle';
 import { People } from 'reicon-react/icons/People';
@@ -120,6 +121,7 @@ export type WorkspacePath =
   | '/$workspaceSlug/settings/secrets'
   | '/$workspaceSlug/settings/models'
   | '/$workspaceSlug/settings/usage'
+  | '/$workspaceSlug/settings/api'
   | '/$workspaceSlug/teams'
   | '/$workspaceSlug/grants'
   | '/$workspaceSlug/members'
@@ -200,6 +202,7 @@ function usePreloadSidebarCode(slug: string) {
 }
 const models: Page = { label: 'Models', to: '/$workspaceSlug/settings/models', icon: Cpu };
 const usage: Page = { label: 'Usage', to: '/$workspaceSlug/settings/usage', icon: ChartBar };
+const externalAccess: Page = { label: 'API and MCP', to: '/$workspaceSlug/settings/api', icon: Code2 };
 const soul: Page = { label: 'Soul repository', to: '/$workspaceSlug/settings/soul', icon: Files };
 const tableAccess: Page = { label: 'Table access', to: '/$workspaceSlug/grants', icon: ShieldUser };
 const administrationPages: Page[] = [members, teams, tableAccess];
@@ -209,6 +212,7 @@ const settingsPages: Page[] = [
   tableAccess,
   models,
   usage,
+  externalAccess,
   soul,
 ];
 // Pages without a sidebar entry still resolve as the current page, so New chat isn't marked current on them.

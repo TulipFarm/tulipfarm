@@ -132,6 +132,10 @@ const ModelsPage = lazyRouteComponent(routePage('models'), 'ModelsPage');
 const SettingsPage = lazyRouteComponent(routePage('settings'), 'SettingsPage');
 const AccountSettingsPage = lazyRouteComponent(routePage('accountSettings'), 'AccountSettingsPage');
 const SecretsSettingsPage = lazyRouteComponent(routePage('secretsSettings'), 'SecretsSettingsPage');
+const ExternalAccessSettingsPage = lazyRouteComponent(
+  routePage('externalAccessSettings'),
+  'ExternalAccessSettingsPage',
+);
 const UsagePage = lazyRouteComponent(routePage('usage'), 'UsagePage');
 
 function NotFoundPanel() {
@@ -951,6 +955,11 @@ const workspaceSecretsRoute = createRoute({
   path: 'settings/secrets',
   component: SecretsSettingsPage,
 });
+const workspaceExternalAccessRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'settings/api',
+  component: ExternalAccessSettingsPage,
+});
 const workspaceUsageRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'settings/usage',
@@ -1119,6 +1128,7 @@ export const router = createRouter({
       workspaceSoulRoute,
       workspaceAccountRoute,
       workspaceSecretsRoute,
+      workspaceExternalAccessRoute,
       workspaceModelsRoute,
       workspaceUsageRoute,
       workspaceMembersRoute,
