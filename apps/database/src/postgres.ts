@@ -277,3 +277,41 @@ export async function bootstrap(adminUrl: string, passwords: { owner: string; ap
     await app.end();
   }
 }
+
+/** Gives the Keep memory service its own login and database with pgvector. Safe to rerun. */
+export async function ensureKeepDatabase(adminUrl: string, password: string) {
+  if (!password) throw new Error('Missing role configuration');
+  const admin = await connect(adminUrl);
+  try {
+    await admin.query('SELECT pg_advisory_lock(734128, 3)');
+    const role = await admin.query<{ elevated: boolean }>(
+      'SELECT rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls AS elevated FROM pg_roles WHERE rolname = $1',
+      ['keep'],
+    );
+    if (role.rows[0]?.elevated)
+      throw new DatabaseError('Unexpected elevated role keep. Reconcile its privileges before setup.');
+    if (!role.rowCount) await admin.query('CREATE ROLE keep LOGIN');
+    await admin.query(`ALTER ROLE keep LOGIN PASSWORD ${escapeLiteral(password)}`);
+    const user = await admin.query<{ current_user: string }>('SELECT current_user');
+    await admin.query(`GRANT keep TO ${escapeIdentifier(user.rows[0]!.current_user)}`);
+    const database = await admin.query<{ owner: string }>(
+      "SELECT pg_get_userbyid(datdba) AS owner FROM pg_database WHERE datname = 'keep'",
+    );
+    if (!database.rowCount) await admin.query('CREATE DATABASE keep OWNER keep');
+    else if (database.rows[0]?.owner !== 'keep') throw new Error('Unexpected owner for keep');
+    await admin.query('REVOKE ALL ON DATABASE keep FROM PUBLIC');
+    await admin.query('GRANT CONNECT, TEMPORARY ON DATABASE keep TO keep');
+  } finally {
+    await admin.end();
+  }
+  const url = new URL(adminUrl);
+  url.pathname = '/keep';
+  const keep = await connect(url.href);
+  try {
+    // pgvector is not a trusted extension, so the administrator installs it for Keep.
+    await keep.query('CREATE EXTENSION IF NOT EXISTS vector');
+    await keep.query('GRANT USAGE, CREATE ON SCHEMA public TO keep');
+  } finally {
+    await keep.end();
+  }
+}

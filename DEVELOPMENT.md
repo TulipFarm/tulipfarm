@@ -24,9 +24,18 @@ pnpm lint
 | Temporal                       | 7233 |
 | Temporal UI                    | 8233 |
 | RustFS (S3-compatible storage) | 9000 |
+| Keep (memory and Knowledge)    | 7357 |
 
 [`infra/postgres/init.sql`](infra/postgres/init.sql) creates the `tulipfarm` and
 `temporal` databases on first start.
+[`infra/postgres/keep.sql`](infra/postgres/keep.sql) creates the `keep` login and
+database on every start, so an existing data volume gets them too.
+
+[Keep](https://github.com/TulipFarm/keep) holds personal memory, answers
+Knowledge search and recalls compacted chats. `pnpm dev:setup` points the API
+and worker at it with `KEEP_ENDPOINT` and `KEEP_TOKEN`. Without `KEEP_ENDPOINT`,
+personal memory reports that it can't be reached, chats aren't learned from,
+and Knowledge search uses the local search index.
 
 ```sh
 pnpm infra:up     # start and wait for health checks

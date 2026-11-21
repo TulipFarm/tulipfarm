@@ -14,6 +14,12 @@ import { createAuthoringDrafts } from '../src/drafts.ts';
 import { createChatTools } from '../src/tools.ts';
 
 async function setup(t) {
+  const keep = fakeKeep();
+  // The tools load the built conversations package; the test's service loads its source. Both must use the fake.
+  t.after(configureKeepPersonalMemory({ client: keep.client }));
+  t.after(
+    (await import('@tulipfarm/conversations/personal-memory')).configureKeepPersonalMemory({ client: keep.client }),
+  );
   const db = await fixture();
   let runtime;
   t.after(async () => {
@@ -60,68 +66,42 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     await drafts.decide(w.id, w.userId, chatId, draftId, { commandId: randomUUID(), digest: pending.digest, decision });
     return drafts.read(w.id, w.userId, chatId, draftId);
   }
-  return { w, runtime, chats, chatId, drafts, tool, decide, memory: createPersonalMemoryService(runtime) };
+  return { w, runtime, chats, chatId, drafts, tool, decide, keep, memory: createPersonalMemoryService(runtime) };
 }
 
 test('chat reads memory and edits it only through an approved card', async t => {
   const { tool, decide, memory, drafts, chatId, w } = await setup(t);
   assert.deepEqual(await tool({ tool: 'memory.read' }), { content: '', revision: 0 });
-  await memory.save(w.id, w.userId, { content: 'I prefer short replies.', expectedRevision: 0 });
-  assert.deepEqual(await tool({ tool: 'memory.read' }), { content: 'I prefer short replies.', revision: 1 });
+  const first = await memory.save(w.id, w.userId, { content: 'I prefer short replies.', expectedRevision: 0 });
+  assert.deepEqual(await tool({ tool: 'memory.read' }), {
+    content: 'I prefer short replies.',
+    revision: first.revision,
+  });
 
   assert.equal(
-    (await tool({ tool: 'memory.edit', revision: 1, content: 'I prefer short replies.' })).error,
+    (await tool({ tool: 'memory.edit', revision: first.revision, content: 'I prefer short replies.' })).error,
     'no-change',
   );
   assert.equal((await tool({ tool: 'memory.edit', revision: 0, content: 'Other.' })).error, 'draft-stale');
 
-  const edit = await tool({ tool: 'memory.edit', revision: 1, content: 'I prefer short replies.\nI work in sales.' });
+  const edit = await tool({
+    tool: 'memory.edit',
+    revision: first.revision,
+    content: 'I prefer short replies.\nI work in sales.',
+  });
   assert.equal(edit.status, 'review-required');
-  assert.equal((await memory.read(w.id, w.userId)).revision, 1);
+  assert.equal((await memory.read(w.id, w.userId)).revision, first.revision);
   const saved = await decide(edit.draftId);
   assert.equal(saved.status, 'saved');
-  assert.deepEqual(saved.outcome, { kind: 'memory', operation: 'edit', revision: 2 });
-  assert.equal((await memory.read(w.id, w.userId)).content, 'I prefer short replies.\nI work in sales.');
+  const current = await memory.read(w.id, w.userId);
+  assert.deepEqual(saved.outcome, { kind: 'memory', operation: 'edit', revision: current.revision });
+  assert.equal(current.content, 'I prefer short replies.\nI work in sales.');
 
-  const late = await tool({ tool: 'memory.edit', revision: 2, content: 'Replaced.' });
-  await memory.save(w.id, w.userId, { content: 'Changed in settings.', expectedRevision: 2 });
+  const late = await tool({ tool: 'memory.edit', revision: current.revision, content: 'Replaced.' });
+  await memory.save(w.id, w.userId, { content: 'Changed in settings.', expectedRevision: current.revision });
   assert.equal((await drafts.read(w.id, w.userId, chatId, late.draftId)).status, 'stale');
   await assert.rejects(decide(late.draftId), { code: 'draft-stale' });
   assert.equal((await memory.read(w.id, w.userId)).content, 'Changed in settings.');
-});
-
-test('chat forgets text at once, clears Bud preferences and offers an undo card', async t => {
-  const { tool, decide, memory, drafts, chatId, runtime, w } = await setup(t);
-  const original = '- Lives in Berlin\n- Prefers tea\n\nNotes: Lives in Berlin';
-  await memory.save(w.id, w.userId, { content: original, expectedRevision: 0 });
-  await runtime.transaction(w.id, commonCompatibility, tx =>
-    tx.client.query(
-      `INSERT INTO "${tx.schema}".tf_bud_preferences
-        (id, membership_id, conversation_id, turn_id, topic, question, value, status, expected_revision)
-       VALUES ($1,$2,$3,$4,'role','What do you do?','Sales','saved',0)`,
-      [randomUUID(), w.membershipId, randomUUID(), randomUUID()],
-    ),
-  );
-
-  assert.equal((await tool({ tool: 'memory.forget', text: 'Lives in Paris' })).error, 'not-found');
-  const forgotten = await tool({ tool: 'memory.forget', text: 'Lives in Berlin' });
-  assert.equal(forgotten.status, 'forgotten');
-  assert.deepEqual(await memory.read(w.id, w.userId), { content: '- Prefers tea\n\nNotes: ', revision: 2 });
-  const preferences = await runtime.transaction(w.id, commonCompatibility, tx =>
-    tx.client.query(`SELECT count(*)::int AS n FROM "${tx.schema}".tf_bud_preferences`),
-  );
-  assert.equal(preferences.rows[0].n, 0);
-
-  const undone = await decide(forgotten.draftId);
-  assert.equal(undone.status, 'saved');
-  assert.deepEqual(undone.outcome, { kind: 'memory', operation: 'restore', revision: 3 });
-  assert.equal((await memory.read(w.id, w.userId)).content, original);
-
-  const again = await tool({ tool: 'memory.forget', text: 'Prefers tea' });
-  await memory.save(w.id, w.userId, { content: 'Newer.', expectedRevision: 4 });
-  assert.equal((await drafts.read(w.id, w.userId, chatId, again.draftId)).status, 'stale');
-  await assert.rejects(decide(again.draftId), { code: 'draft-stale' });
-  assert.equal((await memory.read(w.id, w.userId)).content, 'Newer.');
 });
 
 test('memory tools refuse project chats', async t => {
@@ -134,20 +114,30 @@ test('memory tools refuse project chats', async t => {
   for (const call of [
     { tool: 'memory.read' },
     { tool: 'memory.forget', text: 'Private' },
-    { tool: 'memory.edit', revision: 1, content: 'x' },
+    { tool: 'memory.edit', revision: 2, content: 'x' },
   ])
     assert.equal((await tool(call, projectChat)).error, 'memory-unavailable');
   assert.equal((await memory.read(w.id, w.userId)).content, 'Private note.');
 });
 
-test('with Keep, chat forget asks first and is permanent, and project chats never reach Keep', async t => {
-  const { client, calls } = fakeKeep();
-  const options = { enabled: async () => true, client };
-  // The tools load the built conversations package; the test's service loads its source. Both must use the fake.
-  t.after(configureKeepPersonalMemory(options));
-  t.after((await import('@tulipfarm/conversations/personal-memory')).configureKeepPersonalMemory(options));
-  const { tool, decide, memory, chats, runtime, w } = await setup(t);
+test('chat forget asks first, is permanent, clears Bud preferences, and project chats never reach Keep', async t => {
+  const { tool, decide, memory, chats, runtime, w, keep } = await setup(t);
+  const { calls } = keep;
   const saved = await memory.save(w.id, w.userId, { content: '- Lives in Berlin\n- Prefers tea', expectedRevision: 0 });
+  await runtime.transaction(w.id, commonCompatibility, tx =>
+    tx.client.query(
+      `INSERT INTO "${tx.schema}".tf_bud_preferences
+        (id, membership_id, conversation_id, turn_id, topic, question, value, status, expected_revision)
+       VALUES ($1,$2,$3,$4,'role','What do you do?','Sales','saved',0)`,
+      [randomUUID(), w.membershipId, randomUUID(), randomUUID()],
+    ),
+  );
+  const preferences = async () =>
+    (
+      await runtime.transaction(w.id, commonCompatibility, tx =>
+        tx.client.query(`SELECT count(*)::int AS n FROM "${tx.schema}".tf_bud_preferences`),
+      )
+    ).rows[0].n;
 
   const stored = draftId =>
     runtime.transaction(w.id, commonCompatibility, async tx =>
@@ -160,8 +150,10 @@ test('with Keep, chat forget asks first and is permanent, and project chats neve
       ),
     );
 
+  assert.equal((await tool({ tool: 'memory.forget', text: 'Lives in Paris' })).error, 'not-found');
   const asked = await tool({ tool: 'memory.forget', text: 'Lives in Berlin' });
   assert.equal(asked.status, 'confirm');
+  assert.equal(await preferences(), 1, 'nothing changes before the member confirms');
   assert.equal((await memory.read(w.id, w.userId)).content, saved.content);
   const pending = await stored(asked.draftId);
   assert.ok(pending.includes('Lives in Berlin'));
@@ -172,6 +164,7 @@ test('with Keep, chat forget asks first and is permanent, and project chats neve
   assert.equal(forgotten.proposal.input.forgotten, '');
   assert.equal((await stored(asked.draftId)).includes('Lives in Berlin'), false);
   assert.equal((await memory.read(w.id, w.userId)).content.includes('Lives in Berlin'), false);
+  assert.equal(await preferences(), 0);
 
   const declined = await tool({ tool: 'memory.forget', text: 'Prefers tea' });
   assert.equal((await decide(declined.draftId, 'dismiss')).status, 'dismissed');
@@ -185,8 +178,4 @@ test('with Keep, chat forget asks first and is permanent, and project chats neve
   const before = calls.length;
   assert.equal((await tool({ tool: 'memory.read' }, projectChat)).error, 'memory-unavailable');
   assert.equal(calls.length, before);
-  const legacy = await runtime.transaction(w.id, commonCompatibility, tx =>
-    tx.client.query(`SELECT count(*)::int AS n FROM "${tx.schema}".tf_personal_memory`),
-  );
-  assert.equal(legacy.rows[0].n, 0);
 });

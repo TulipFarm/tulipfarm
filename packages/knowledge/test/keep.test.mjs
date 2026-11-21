@@ -26,7 +26,6 @@ test('Keep index splits large allowlists, keeps only allowed mapped hits and mer
   const outsider = randomUUID();
   const calls = [];
   const index = createKnowledgeKeepIndex({
-    enabled: async () => true,
     client: () => ({
       searchKnowledge: async input => {
         calls.push(input);
@@ -65,10 +64,9 @@ test('Keep index splits large allowlists, keeps only allowed mapped hits and mer
 
 test('Keep index reports unavailability instead of an empty result', async () => {
   const unreachable = createKnowledgeKeepIndex({
-    enabled: async () => true,
     client: () => ({ searchKnowledge: async () => ({ status: 'unavailable', reason: 'unreachable' }) }),
   });
   await assert.rejects(unreachable.search(ws, 'query', [randomUUID()]), KnowledgeSearchUnavailable);
-  const unconfigured = createKnowledgeKeepIndex({ enabled: async () => true, client: () => undefined });
+  const unconfigured = createKnowledgeKeepIndex({ client: () => undefined });
   await assert.rejects(unconfigured.search(ws, 'query', [randomUUID()]), error => error.reason === 'not-configured');
 });

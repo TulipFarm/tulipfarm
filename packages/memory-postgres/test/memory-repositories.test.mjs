@@ -1,16 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  createPostgresMemoryRepository,
-  createPostgresMemoryReconciliationRepository,
-  createPostgresTranscriptSource,
-} from '../dist/index.js';
+import { createPostgresMemoryReconciliationRepository, createPostgresTranscriptSource } from '../dist/index.js';
 
-for (const factory of [
-  createPostgresMemoryRepository,
-  createPostgresMemoryReconciliationRepository,
-  createPostgresTranscriptSource,
-]) {
+for (const factory of [createPostgresMemoryReconciliationRepository, createPostgresTranscriptSource]) {
   test(`${factory.name} binds values, returns results and errors, and quotes tenant identifiers`, async () => {
     const response = { rows: [], rowCount: 0 };
     const failure = new Error('storage failure');

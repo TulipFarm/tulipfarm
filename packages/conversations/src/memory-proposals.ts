@@ -5,7 +5,7 @@ import { savePersonalMemorySchema } from '@tulipfarm/memory-core/personal-memory
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import type { PersonalMemoryTransaction } from './keep-personal-memory.ts';
 
-/** The common migration that adds memory proposals. Before it, Keep-mode learning does nothing. */
+/** The common migration that adds memory proposals. Before it, background learning does nothing. */
 export const memoryProposalsVersion = 98;
 
 export class MemoryProposalNotFound extends Error {

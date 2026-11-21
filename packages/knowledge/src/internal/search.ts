@@ -46,7 +46,7 @@ export function createKnowledgeSearch({
   atlassian?: AtlassianKnowledge;
   clock?: Clock;
   callTimeoutMs?: number;
-  /** Where a workspace with `keep-memory` on searches. Defaults to Keep. */
+  /** Answers searches instead of the local keyword and vector index when configured. Defaults to Keep. */
   index?: KnowledgeIndexSearch;
 }) {
   const store = createKnowledgeStore({

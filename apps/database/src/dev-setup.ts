@@ -25,6 +25,9 @@ const objectStorage = {
   filesBucket: 'tulipfarm-files-local',
 };
 
+// Matches the keep service in compose.yaml. Local development only.
+const keep = { KEEP_ENDPOINT: 'http://127.0.0.1:7357', KEEP_TOKEN: 'local-keep-token' };
+
 type State = { keys: SetupKeys; passwords: Record<string, string> };
 
 // Encrypted workspace credentials depend on these keys, so they are generated once and reused.
@@ -89,13 +92,16 @@ async function main() {
       'HUNTSMAN_TOKEN',
       'SEARXNG_ENDPOINT',
       'SEARXNG_TOKEN',
+      'KEEP_ENDPOINT',
+      'KEEP_TOKEN',
     ]
       .filter(name => process.env[name] !== undefined)
       .map(name => [name, process.env[name]!]),
   );
-  await write('apps/api/.env.local', { ...env.api, ...connections });
+  await write('apps/api/.env.local', { ...env.api, ...keep, ...connections });
   await write('apps/worker/.env.local', {
     ...env.worker,
+    ...keep,
     ...connections,
   });
   await write('apps/render-worker/.env.local', {

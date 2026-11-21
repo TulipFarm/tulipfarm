@@ -48,10 +48,8 @@ import { createKnowledgeDrafts } from './knowledge-drafts.ts';
 import { applyMemory, forgetMemoryText, memoryStale, requireMemoryChat } from './memory-drafts.ts';
 import {
   keepForgetScrubVersion,
-  personalMemoryMode,
   PersonalMemoryUnavailable,
   readPersonalMemory,
-  replaceOwnPersonalMemory,
 } from '@tulipfarm/conversations/personal-memory';
 import type { FileBytes } from '@tulipfarm/files';
 import type { GitHubSubscriptions } from '@tulipfarm/workflows/github-triggers';
@@ -1106,10 +1104,8 @@ export function createAuthoringDrafts(
     });
   }
   /**
-   * Removes the exact text from the requester's memory now, and keeps the previous document on an Undo card under
-   * this draft ID. The card holds the removed content, so the model never receives it again. With history (Keep),
-   * forgetting erases the text from every revision and cannot be undone, so nothing changes yet: the card asks the
-   * member to confirm first.
+   * Proposes forgetting the exact text from the requester's memory under this draft ID. Forgetting erases the text
+   * from every revision and cannot be undone, so nothing changes yet: the card asks the member to confirm first.
    */
   async function forgetMemory(workspaceId: string, actor: HumanActor, id: string, origin: Origin, text: string) {
     id = uuidSchema.parse(id);
@@ -1122,24 +1118,13 @@ export function createAuthoringDrafts(
         ...sources,
       ]);
       const current = await readPersonalMemory(tx, actor);
-      const next = forgetMemoryText(current.content, text);
-      if (next === undefined) return undefined;
-      const permanent = (await personalMemoryMode(tx, actor)).kind === 'keep';
+      if (forgetMemoryText(current.content, text) === undefined) return undefined;
       // The card could not drop the forgotten text once decided, so wait for the workspace's update.
-      if (permanent && ((tx as { commonVersion?: number }).commonVersion ?? 0) < keepForgetScrubVersion)
+      if (((tx as { commonVersion?: number }).commonVersion ?? 0) < keepForgetScrubVersion)
         throw new PersonalMemoryUnavailable('updating');
-      const saved = permanent ? current : await replaceOwnPersonalMemory(tx, actor, next, current.revision);
       const proposal = authoringProposalSchema.parse({
         kind: 'memory',
-        input: permanent
-          ? { operation: 'forget', expectedRevision: current.revision, forgotten: text }
-          : {
-              operation: 'restore',
-              expectedRevision: saved.revision,
-              previousContent: saved.content,
-              content: current.content,
-              forgotten: text,
-            },
+        input: { operation: 'forget', expectedRevision: current.revision, forgotten: text },
       });
       await requireSources(tx, workspaceId, actor, proposal, sources);
       await tx.client.query(
@@ -1151,14 +1136,14 @@ export function createAuthoringDrafts(
           actor.membershipId,
           actor.userId,
           proposal,
-          // A permanent forget's digest must not depend on the text, which is blanked once the card is decided.
+          // The digest must not depend on the text, which is blanked once the card is decided.
           createHash('sha256')
-            .update(canonicalJson(permanent ? { id, operation: 'forget', revision: current.revision } : proposal))
+            .update(canonicalJson({ id, operation: 'forget', revision: current.revision }))
             .digest('hex'),
           JSON.stringify(sources),
         ],
       );
-      return { draftId: id, revision: saved.revision, confirm: permanent };
+      return { draftId: id, revision: current.revision, confirm: true };
     });
   }
   return { propose, read, decide, readMemory, forgetMemory };

@@ -916,7 +916,7 @@ const descriptions: Record<ToolName, string> = {
   'memory.edit':
     "Prepare a review card that replaces the human's own personal memory with new full text, for example to add, reword or reorder preferences. Call memory.read first and pass its revision. The card shows the change; nothing changes until the human approves it. Never treat chat text as approval. To remove something, use memory.forget.",
   'memory.forget':
-    "Forget exact text from the human's own personal memory when they ask you to. Copy the text exactly from memory.read. The card under your reply either lets them undo it or, where forgetting is permanent, asks them to confirm first. Don't repeat the removed text.",
+    "Forget exact text from the human's own personal memory when they ask you to. Copy the text exactly from memory.read. Forgetting is permanent, so the card under your reply asks them to confirm first. Don't repeat the text.",
   'integrations.disconnect':
     'Show a card under your reply that lets the human disconnect one connection from integrations.list. The card shows what stops working. Nothing changes until the human confirms on the card. Never treat chat text as approval.',
   'files.read':
@@ -3911,21 +3911,13 @@ async function invokeMemory(
   if (call.tool === 'memory.read') return drafts.readMemory(workspaceId, actor, origin.conversationId);
   if (call.tool === 'memory.forget') {
     const forgotten = await drafts.forgetMemory(workspaceId, actor, callId, origin, call.text);
-    if (forgotten?.confirm)
-      return {
-        status: 'confirm',
-        draftId: forgotten.draftId,
-        revision: forgotten.revision,
-        instruction:
-          'Nothing is forgotten yet. Forgetting is permanent here, so the card under your reply asks the human to confirm. Say so briefly without repeating the text.',
-      };
     return forgotten
       ? {
-          status: 'forgotten',
+          status: 'confirm',
           draftId: forgotten.draftId,
           revision: forgotten.revision,
           instruction:
-            'Removed from memory. The card under your reply lets the human undo it. Confirm briefly without repeating the removed text.',
+            'Nothing is forgotten yet. Forgetting is permanent, so the card under your reply asks the human to confirm. Say so briefly without repeating the text.',
         }
       : {
           error: 'not-found',

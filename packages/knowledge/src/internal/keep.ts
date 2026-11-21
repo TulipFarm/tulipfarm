@@ -10,7 +10,6 @@ import {
   type KeepKnowledgeEpisode,
   type KeepMemoryResult,
 } from '@tulipfarm/memory-keep';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import { z } from 'zod';
 import { knowledgeTenantRuntime, type KnowledgeRuntime, type KnowledgeTransaction } from '../storage-ports.ts';
@@ -30,8 +29,6 @@ const metadataValueBytes = 1024;
 export type KnowledgeKeepDependencies = {
   /** The Keep client, or undefined when this deployment has no Keep endpoint. */
   readonly client?: () => KeepClient | undefined;
-  /** Whether the workspace's `keep-memory` flag is on. */
-  readonly enabled?: (workspaceId: string) => Promise<boolean>;
 };
 
 function defaultClient(timeoutMs: number) {
@@ -46,8 +43,6 @@ function defaultClient(timeoutMs: number) {
     return client;
   };
 }
-const defaultEnabled = (workspaceId: string) =>
-  isFeatureEnabled('keep-memory', null, { id: workspaceId }).catch(() => false);
 
 function failure(result: Exclude<KeepMemoryResult<unknown>, { status: 'ok' }>) {
   return result.status === 'unavailable'
@@ -58,15 +53,14 @@ function failure(result: Exclude<KeepMemoryResult<unknown>, { status: 'ok' }>) {
 }
 
 /**
- * Searches a workspace's Knowledge in Keep. Keep sees only the document ids passed in, which the search engine takes
+ * Searches a workspace's Knowledge in Keep whenever this deployment has a Keep endpoint. Keep sees only the document ids passed in, which the search engine takes
  * from the actor's current authorization, and every hit is mapped back to the TulipFarm publication it came from.
  */
 export function createKnowledgeKeepIndex({
   client = defaultClient(searchTimeoutMs),
-  enabled = defaultEnabled,
 }: KnowledgeKeepDependencies = {}): KnowledgeIndexSearch {
   return {
-    enabled,
+    configured: () => client() !== undefined,
     async search(workspaceId, query, documentIds) {
       const keep = client();
       if (!keep) throw new KnowledgeSearchUnavailable('not-configured');
@@ -141,7 +135,7 @@ export type KnowledgeKeepOutcome =
   | { status: 'skipped' }
   /** Another sync of this document is still running; the document stays due. */
   | { status: 'busy' }
-  /** The workspace's flag is off, or the deployment has no Keep endpoint. */
+  /** The deployment has no Keep endpoint. */
   | { status: 'disabled' }
   /** Keep refused this publication itself. It is recorded and not sent again until the document changes. */
   | { status: 'rejected'; error: string };
@@ -173,7 +167,6 @@ export class KnowledgeKeepUnavailable extends Error {
 export function createKnowledgeKeepFeed({
   runtime,
   client = defaultClient(deliveryTimeoutMs),
-  enabled = defaultEnabled,
 }: { runtime: KnowledgeRuntime } & KnowledgeKeepDependencies) {
   const tenant = knowledgeTenantRuntime(runtime);
   const table = (tx: KnowledgeTransaction, name: string) => qualified(tx.schema, `tf_knowledge_${name}`);
@@ -186,13 +179,12 @@ export function createKnowledgeKeepFeed({
   const ready = `(k.next_attempt_at IS NULL OR k.next_attempt_at <= clock_timestamp())`;
 
   /**
-   * The next documents, in id order after `after`, that Keep must receive or forget. Documents are only sent while the
-   * workspace's flag is on, and turning it on makes every published document due, which is the backfill. Documents
-   * are forgotten whatever the flag. A document waiting out the backoff of an earlier failure is not due yet.
+   * The next documents, in id order after `after`, that Keep must receive or forget. Every published document Keep
+   * does not hold yet is due, so the first run is the backfill. A document waiting out the backoff of an earlier
+   * failure is not due yet.
    */
   async function due(workspaceId: string, after: string | null, limit: number): Promise<KnowledgeKeepWork[]> {
     if (!client()) return [];
-    const deliver = await enabled(workspaceId);
     return tenant.transaction(workspaceId, {}, async tx => {
       if (!installed(tx)) return [];
       const { rows } = await tx.client.query(
@@ -202,7 +194,7 @@ export function createKnowledgeKeepFeed({
           JOIN ${table(tx, 'publications')} p ON p.id=d.lexical_publication_id AND p.document_id=d.id
           JOIN ${table(tx, 'revisions')} r ON r.id=p.revision_id
           LEFT JOIN ${keepTable(tx)} k ON k.document_id=d.id
-          WHERE $3 AND ${deliverable} AND ($1::uuid IS NULL OR d.id > $1::uuid) AND ${ready}
+          WHERE ${deliverable} AND ($1::uuid IS NULL OR d.id > $1::uuid) AND ${ready}
             AND k.publication_id IS DISTINCT FROM p.id AND k.failed_publication_id IS DISTINCT FROM p.id
           ORDER BY d.id LIMIT $2)
         UNION ALL
@@ -216,7 +208,7 @@ export function createKnowledgeKeepFeed({
             AND ($1::uuid IS NULL OR k.document_id > $1::uuid)
           ORDER BY k.document_id LIMIT $2)
         ORDER BY document_id LIMIT $2`,
-        [after, limit, deliver],
+        [after, limit],
       );
       return z.array(dueSchema).parse(rows);
     });
@@ -322,7 +314,6 @@ export function createKnowledgeKeepFeed({
         return { status: 'forgotten' };
       });
     }
-    if (!(await enabled(workspaceId))) return { status: 'disabled' };
     const publicationId = z.uuid().parse(current.publication_id);
     if (current.delivered_publication_id === publicationId) return { status: 'current' };
     const chunks = await tenant.transaction(workspaceId, {}, async tx =>

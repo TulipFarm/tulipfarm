@@ -21,7 +21,6 @@ export async function createKnowledgeKeepWorker(
   const feed = createKnowledgeKeepFeed({
     runtime: dependencies.runtime,
     ...(dependencies.client ? { client: dependencies.client } : {}),
-    ...(dependencies.enabled ? { enabled: dependencies.enabled } : {}),
   });
   const createWorker = dependencies.createWorker ?? Worker.create.bind(Worker);
   const worker = await createWorker({

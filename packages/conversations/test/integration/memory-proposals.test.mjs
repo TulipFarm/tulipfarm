@@ -60,11 +60,10 @@ function model(edits = () => []) {
   };
 }
 
-async function setup(t, client) {
+async function setup(t, client, { keepless = false } = {}) {
   const f = await conversationFixture();
   const keep = fakeKeep();
-  const state = { enabled: true };
-  const reset = configureKeepPersonalMemory({ client: client ?? keep.client, enabled: async () => state.enabled });
+  const reset = configureKeepPersonalMemory({ client: keepless ? undefined : (client ?? keep.client) });
   t.after(async () => {
     reset();
     await f.close();
@@ -117,7 +116,7 @@ async function setup(t, client) {
   }
   const count = async (name, where = 'true') =>
     (await f.db.platform.query(`SELECT count(*)::int AS n FROM ${f.table(name)} WHERE ${where}`)).rows[0].n;
-  return { f, w, keep, state, memory, chat, exchange, close, learn, count };
+  return { f, w, keep, memory, chat, exchange, close, learn, count };
 }
 
 test(
@@ -400,59 +399,37 @@ test(
   },
 );
 
-test(
-  'hidden memory is not learned from, and project chats never feed personal learning',
-  { timeout: 60000 },
-  async t => {
-    const { f, w, state, memory, chat, exchange, close, count } = await setup(t);
-    await memory.read(w.id, w.userId);
-    const projectId = randomUUID();
-    await f.db.platform.query(
-      `INSERT INTO ${f.table('tf_projects')} (id,name,creator_membership_id) VALUES ($1,'Launch',$2)`,
-      [projectId, w.membershipId],
-    );
-    await f.db.platform.query(
-      `INSERT INTO ${f.table('tf_project_members')} (project_id,membership_id,role) VALUES ($1,$2,'manager')`,
-      [projectId, w.membershipId],
-    );
-    const project = await chat();
-    await f.db.platform.query(`UPDATE ${f.table('tf_conversations')} SET project_id=$2 WHERE id=$1`, [
-      project,
-      projectId,
-    ]);
-    await exchange(project, 'Please use emojis.');
-    const projectModel = model(() => [{ kind: 'add', before: null, after: '- Use emojis.', quote: 'use emojis' }]);
-    assert.equal(await close(project, projectModel), 'ready');
-    assert.equal(projectModel.calls.filter(call => call.purpose === 'memory').length, 0);
+test('project chats never feed personal learning', { timeout: 60000 }, async t => {
+  const { f, w, memory, chat, exchange, close, count } = await setup(t);
+  await memory.read(w.id, w.userId);
+  const projectId = randomUUID();
+  await f.db.platform.query(
+    `INSERT INTO ${f.table('tf_projects')} (id,name,creator_membership_id) VALUES ($1,'Launch',$2)`,
+    [projectId, w.membershipId],
+  );
+  await f.db.platform.query(
+    `INSERT INTO ${f.table('tf_project_members')} (project_id,membership_id,role) VALUES ($1,$2,'manager')`,
+    [projectId, w.membershipId],
+  );
+  const project = await chat();
+  await f.db.platform.query(`UPDATE ${f.table('tf_conversations')} SET project_id=$2 WHERE id=$1`, [
+    project,
+    projectId,
+  ]);
+  await exchange(project, 'Please use emojis.');
+  const projectModel = model(() => [{ kind: 'add', before: null, after: '- Use emojis.', quote: 'use emojis' }]);
+  assert.equal(await close(project, projectModel), 'ready');
+  assert.equal(projectModel.calls.filter(call => call.purpose === 'memory').length, 0);
+  assert.equal(await count('tf_memory_proposals'), 0);
+});
 
-    state.enabled = false;
-    const hidden = await chat();
-    await exchange(hidden, 'Please use emojis.');
-    const hiddenModel = model(() => [{ kind: 'add', before: null, after: '- Use emojis.', quote: 'use emojis' }]);
-    assert.equal(await close(hidden, hiddenModel), 'ready');
-    assert.equal(hiddenModel.calls.filter(call => call.purpose === 'memory').length, 0);
-    assert.equal(await count('tf_memory_proposals'), 0);
-    assert.equal(await count('tf_personal_memory'), 0, 'hidden memory never falls back to the old store');
-  },
-);
-
-test('without Keep, learning still writes the workspace store directly', { timeout: 60000 }, async t => {
-  const { w, state, memory, chat, exchange, close, count } = await setup(t);
-  state.enabled = false;
+test('without Keep, chats are not learned from', { timeout: 60000 }, async t => {
+  const { chat, exchange, close, count } = await setup(t, undefined, { keepless: true });
   const id = await chat();
   await exchange(id, 'Please use emojis in your replies.');
-  const legacy = model();
-  legacy.summarize = async input => {
-    if (input.purpose !== 'memory') return model().summarize(input);
-    const messageId = JSON.parse(input.messages[0].text).requesterTranscript.match(/id="([^"]+)"/)[1];
-    return {
-      text: JSON.stringify({ content: 'Use emojis in replies.', evidence: [{ messageId, quote: 'use emojis' }] }),
-      familyId: 'claude-haiku',
-      fallbackFrom: null,
-    };
-  };
-  assert.equal(await close(id, legacy), 'ready');
-  assert.deepEqual(await memory.read(w.id, w.userId), { content: 'Use emojis in replies.', revision: 1 });
+  const selected = model(() => [{ kind: 'add', before: null, after: '- Use emojis.', quote: 'use emojis' }]);
+  assert.equal(await close(id, selected), 'ready');
+  assert.equal(selected.calls.filter(call => call.purpose === 'memory').length, 0);
   assert.equal(await count('tf_memory_proposals'), 0);
 });
 

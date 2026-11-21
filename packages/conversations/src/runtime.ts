@@ -2127,13 +2127,12 @@ export function createConversationExecutor(
     );
     if (!source) return 'stale';
     // Only private chats keep a working summary, so only they are sent to Keep or recall from it.
-    const keepRecall = source.compaction ? keepChatRecallOn(fence.workspaceId) : Promise.resolve(false);
+    const keepRecallOn = Boolean(source.compaction) && keepChatRecallOn();
     if (source.compaction?.command && compactor && source.compactionPolicy) {
       const {
         compaction: { command },
         compactionPolicy,
       } = source;
-      const keepRecallOn = await keepRecall;
       return staged('compaction', () =>
         compactTurn(fence, { ...source, keepRecall: keepRecallOn }, command, compactionPolicy, compactor),
       );
@@ -3058,7 +3057,6 @@ export function createConversationExecutor(
         const tail = [...pendingGoogle, ...tableOutcomes, ...procedure, ...replay];
         return { describedHandles, sourceMessages, render, tail };
       });
-      const keepRecallOn = await keepRecall;
       const recalled =
         source.compaction?.summary && keepRecallOn
           ? await recallEarlier(fence, source.currentMessage.text, source.messages)

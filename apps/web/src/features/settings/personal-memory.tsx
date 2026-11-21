@@ -28,7 +28,6 @@ type State =
   | { kind: 'loading' }
   | { kind: 'load-error' }
   | { kind: 'unavailable' }
-  | { kind: 'hidden' }
   | { kind: 'service-unavailable' }
   | { kind: 'ready' }
   | { kind: 'saving' }
@@ -81,11 +80,9 @@ export function PersonalMemoryEditor({ workspaceId, workspaceName }: { workspace
       setState(
         denied
           ? { kind: 'unavailable' }
-          : code === 'personal-memory-hidden'
-            ? { kind: 'hidden' }
-            : !check && code === 'personal-memory-unavailable'
-              ? { kind: 'service-unavailable' }
-              : { kind: check ? 'uncertain' : 'load-error' },
+          : !check && code === 'personal-memory-unavailable'
+            ? { kind: 'service-unavailable' }
+            : { kind: check ? 'uncertain' : 'load-error' },
       );
     } finally {
       if (active.current === controller) active.current = null;
@@ -119,7 +116,7 @@ export function PersonalMemoryEditor({ workspaceId, workspaceName }: { workspace
         ),
       );
       if (controller.signal.aborted) return;
-      // Revisions only grow; with history they can grow by more than one.
+      // Revisions only grow, sometimes by more than one.
       if (result.revision <= saved.revision || result.content !== (draft.trim() ? draft : ''))
         throw new Error('Unconfirmed memory save');
       accept(result);
@@ -226,13 +223,6 @@ export function PersonalMemoryEditor({ workspaceId, workspaceName }: { workspace
             Retry loading memory
           </Button>
         </StatePanel>
-      ) : state.kind === 'hidden' ? (
-        <StatePanel
-          kind="unavailable"
-          heading="h3"
-          title="Memory is turned off"
-          description="Memory is turned off in this workspace. What you saved is kept but not used or shown."
-        />
       ) : state.kind === 'unavailable' ? (
         <StatePanel
           kind="unavailable"
@@ -258,10 +248,8 @@ export function PersonalMemoryEditor({ workspaceId, workspaceName }: { workspace
             <div className="grid gap-4">
               {saved?.content === '' && !history?.trashed && (
                 <p className="text-sm text-muted-foreground">
-                  No preferences saved yet. Add your own, or tell Bud how you like replies.{' '}
-                  {history
-                    ? 'Closed chats are checked in the background, and changes are suggested below for you to review.'
-                    : 'Closed chats are checked in the background.'}
+                  No preferences saved yet. Add your own, or tell Bud how you like replies. Closed chats are checked in
+                  the background, and changes are suggested below for you to review.
                 </p>
               )}
               <Field
@@ -379,11 +367,7 @@ export function PersonalMemoryEditor({ workspaceId, workspaceName }: { workspace
                         },
                       }
                 }
-                note={
-                  history
-                    ? 'Manual changes take priority over older chats. Memory keeps a history of changes, so you can undo them.'
-                    : 'Manual changes take priority over older chats. To clear memory, remove the text and save. New chats can add new preferences.'
-                }
+                note="Manual changes take priority over older chats. Memory keeps a history of changes, so you can undo them."
                 error={
                   state.kind === 'error' ? state.message : invalid ? 'Fix the memory text before saving.' : undefined
                 }
@@ -420,7 +404,7 @@ export function PersonalMemoryEditor({ workspaceId, workspaceName }: { workspace
               )}
             </div>
           </Form>
-          {history && saved && (
+          {saved && (
             <MemoryProposals
               path={path}
               revision={saved.revision}

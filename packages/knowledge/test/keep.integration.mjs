@@ -54,17 +54,15 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       const local = createLocalKnowledge({ runtime, files });
       const keep = fakeKnowledgeKeep();
       if (client) keep.client = client;
-      const flag = { on: true };
-      const enabled = async workspaceId => {
-        assert.equal(workspaceId, ws.id);
-        return flag.on;
-      };
-      const feed = createKnowledgeKeepFeed({ runtime, client: () => keep.client, enabled });
+      // Clearing `connected.on` stands for a deployment without a Keep endpoint.
+      const connected = { on: true };
+      const endpoint = () => (connected.on ? keep.client : undefined);
+      const feed = createKnowledgeKeepFeed({ runtime, client: endpoint });
       const embeddings = createKnowledgeEmbeddings({ runtime, config: { kind: 'disabled' } });
       const search = createKnowledgeSearch({
         runtime,
         embeddings,
-        index: customIndex?.(ws) ?? createKnowledgeKeepIndex({ client: () => keep.client, enabled }),
+        index: customIndex?.(ws) ?? createKnowledgeKeepIndex({ client: endpoint }),
       });
       searches.push(search);
       const tools = createKnowledgeAgentTools({ runtime, search });
@@ -127,7 +125,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         ws,
         local,
         keep,
-        flag,
+        connected,
         feed,
         search,
         tools,
@@ -144,9 +142,9 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     }
     const ask = (w, query, actor = w.actor) => w.tools.search(w.ws.id, actor, { query }, { commandId: randomUUID() });
 
-    await t.test('flag off: Keep is never called and keyword search is unchanged', async () => {
+    await t.test('without a Keep endpoint, Keep is never called and keyword search answers', async () => {
       const w = await setup();
-      w.flag.on = false;
+      w.connected.on = false;
       const doc = await w.note('supplier payment deadline', 'Supplier policy');
       assert.deepEqual(await w.feed.due(w.ws.id, null, 100), []);
       const found = await ask(w, 'supplier');
@@ -158,7 +156,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.deepEqual(w.keep.calls, []);
     });
 
-    await t.test('flag on: a publication reaches Keep with its scope, source id and metadata', async () => {
+    await t.test('a publication reaches Keep with its scope, source id and metadata', async () => {
       const w = await setup();
       const doc = await w.note('supplier payment deadline', 'Supplier policy');
       const publicationId = await w.publication(doc.documentId);
@@ -232,7 +230,6 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         documentId: doc.documentId,
         expectedRevisionId: doc.revisionId,
       });
-      w.flag.on = false;
       assert.deepEqual(await w.drain(), [{ document_id: doc.documentId, action: 'forget', status: 'forgotten' }]);
       assert.deepEqual(w.keep.calls.at(-1), {
         op: 'forget',
@@ -360,13 +357,13 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.equal((await w.row(doc.documentId)).lease_token, null, 'the lease is released');
     });
 
-    await t.test('turning the flag on backfills every published document, page by page', async () => {
+    await t.test('connecting Keep backfills every published document, page by page', async () => {
       const w = await setup();
-      w.flag.on = false;
+      w.connected.on = false;
       const ids = [];
       for (let index = 0; index < 5; index++) ids.push((await w.note(`supplier appendix ${index}`)).documentId);
       assert.deepEqual(await w.drain(), []);
-      w.flag.on = true;
+      w.connected.on = true;
       assert.equal(await w.feed.pending(w.ws.id), true);
       const outcomes = await w.drain();
       assert.deepEqual(
@@ -407,7 +404,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       let removeDuringSearch = null;
       const w = await setup({
         index: ws => ({
-          enabled: async () => true,
+          configured: () => true,
           search: async (workspaceId, query, documentIds) => {
             assert.equal(workspaceId, ws.id);
             const hits = documentIds.map((documentId, rank) => ({

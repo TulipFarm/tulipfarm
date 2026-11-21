@@ -8,7 +8,6 @@ import { createConversationMaintenance } from '../../src/maintenance.ts';
 import { createConversationExecutor } from '../../src/runtime.ts';
 import { conversationFixture } from '../fixture.mjs';
 import { requestFixture } from '../request-fixture.mjs';
-import { createPersonalMemoryService } from '../../src/personal-memory.ts';
 import { registerExtension } from '@tulipfarm/extensions';
 import { creditAccountExtension } from '@tulipfarm/workspace-storage/credit-account';
 
@@ -50,237 +49,6 @@ function compactor(onCall = async () => {}) {
   };
 }
 const published = () => ({ documentId: randomUUID(), revisionId: randomUUID(), embeddingStatus: 'disabled' });
-
-test(
-  'maintenance learns owner preferences once, backfills saved compactions, and preserves manual edits',
-  { timeout: 60000 },
-  async () => {
-    const f = await conversationFixture();
-    try {
-      const id = await chat(f),
-        w = f.workspace,
-        maintenance = createConversationMaintenance(f.runtime);
-      const memory = createPersonalMemoryService(f.runtime);
-      const knowledge = createConversationKnowledge({ runtime: f.runtime });
-      await exchange(f, id, 'Please use emojis in your replies.');
-      await due(f, id);
-      await maintenance.sweep(w.id);
-      const [job] = await work(f, maintenance);
-      assert.equal(await maintenance.process(job, compactor(), knowledge.publish), 'ready');
-      await f.db.platform.query(
-        `UPDATE ${f.table('tf_conversation_maintenance')}
-      SET memory_complete=false,memory_chunk=0,dispatched_at=NULL WHERE id=$1`,
-        [job.jobId],
-      );
-      assert.equal(
-        (await work(f, maintenance)).length,
-        1,
-        'completed historical jobs are discovered without re-compaction',
-      );
-      const calls = [];
-      const model = {
-        ...compactor(),
-        summarize: async input => {
-          calls.push(input);
-          assert.equal(input.purpose, 'memory');
-          const { requesterTranscript } = JSON.parse(input.messages[0].text);
-          assert.doesNotMatch(requesterTranscript, /Invitations remain open/);
-          const messageId = requesterTranscript.match(/id="([^"]+)"/)[1];
-          return {
-            text: JSON.stringify({ content: 'Use emojis in replies.', evidence: [{ messageId, quote: 'use emojis' }] }),
-            familyId: 'claude-haiku',
-            fallbackFrom: null,
-          };
-        },
-      };
-      assert.equal(await maintenance.process(job, model, knowledge.publish), 'ready');
-      assert.equal(calls.length, 1);
-      assert.deepEqual(await memory.read(w.id, w.userId), { content: 'Use emojis in replies.', revision: 1 });
-      assert.equal((await work(f, maintenance)).length, 0);
-      assert.equal(await maintenance.process(job, model, async () => published()), 'idle');
-      assert.equal(
-        (
-          await f.db.platform.query(
-            `SELECT count(*)::int AS n FROM ${f.table('tf_conversation_compactions')} WHERE conversation_id=$1`,
-            [id],
-          )
-        ).rows[0].n,
-        1,
-      );
-      assert.equal(
-        (await f.db.platform.query(`SELECT count(*)::int AS n FROM ${f.table('tf_knowledge_documents')}`)).rows[0].n,
-        1,
-        'backfill reuses the published recap',
-      );
-      assert.equal(
-        (
-          await f.db.platform.query(
-            `SELECT count(*)::int AS n FROM ${f.table('tf_conversation_maintenance_steps')} WHERE purpose='memory'`,
-          )
-        ).rows[0].n,
-        0,
-        'applied memory has no retained content history',
-      );
-
-      await memory.delete(w.id, w.userId, { expectedRevision: 1 });
-      await f.db.platform.query(
-        `UPDATE ${f.table('tf_conversation_maintenance')} SET memory_complete=false,memory_chunk=0,dispatched_at=NULL WHERE id=$1`,
-        [job.jobId],
-      );
-      assert.equal(await maintenance.process(job, model, async () => published()), 'ready');
-      assert.equal(calls.length, 1, 'cleared memory is not resurrected from older chat text');
-      assert.deepEqual(await memory.read(w.id, w.userId), { content: '', revision: 2 });
-
-      await exchange(f, id, 'Please use emojis again.');
-      await due(f, id);
-      await maintenance.sweep(w.id);
-      const [next] = await work(f, maintenance);
-      const base = compactor();
-      const reopened = {
-        ...base,
-        summarize: input => (input.purpose === 'memory' ? model.summarize(input) : base.summarize(input)),
-      };
-      assert.equal(await maintenance.process(next, reopened, knowledge.publish), 'ready');
-      assert.equal(calls.length, 2, 'new chats can learn after a manual clear');
-      assert.doesNotMatch(JSON.parse(calls[1].messages[0].text).requesterTranscript, /use emojis in your replies/);
-      assert.deepEqual(await memory.read(w.id, w.userId), { content: 'Use emojis in replies.', revision: 3 });
-    } finally {
-      await f.close();
-    }
-  },
-);
-
-test('newer no-change evidence protects memory from an older backfill', { timeout: 60000 }, async () => {
-  const f = await conversationFixture();
-  try {
-    const w = f.workspace,
-      maintenance = createConversationMaintenance(f.runtime),
-      memory = createPersonalMemoryService(f.runtime);
-    const seed = await chat(f),
-      old = await chat(f),
-      latest = await chat(f);
-    for (const [id, text, at] of [
-      [seed, 'No emojis.', '2026-01-01'],
-      [old, 'Use emojis.', '2026-01-02'],
-      [latest, 'Still no emojis.', '2026-01-03'],
-    ]) {
-      await exchange(f, id, text);
-      await f.db.platform.query(
-        `UPDATE ${f.table('tf_conversation_messages')} SET created_at=$2 WHERE conversation_id=$1`,
-        [id, at],
-      );
-      await due(f, id);
-    }
-    await maintenance.sweep(w.id);
-    const jobs = await work(f, maintenance),
-      base = compactor();
-    const model = (content, quote) => ({
-      ...base,
-      summarize: async input => {
-        if (input.purpose !== 'memory') return base.summarize(input);
-        const messageId = JSON.parse(input.messages[0].text).requesterTranscript.match(/id="([^"]+)"/)[1];
-        return {
-          text: JSON.stringify({ content, evidence: quote ? [{ messageId, quote }] : [] }),
-          familyId: 'claude-haiku',
-          fallbackFrom: null,
-        };
-      },
-    });
-    const process = (id, selected) =>
-      maintenance.process(
-        jobs.find(job => job.conversationId === id),
-        selected,
-        async () => published(),
-      );
-    assert.equal(await process(seed, model('Do not use emojis.', 'No emojis.')), 'ready');
-    assert.equal(await process(latest, model(null)), 'ready');
-    assert.equal(await process(old, model('Use emojis.', 'Use emojis.')), 'blocked');
-    assert.equal((await f.store.maintenance(w.id, w.userId, old)).maintenance.errorCode, 'memory-invalid-preferences');
-    assert.deepEqual(await memory.read(w.id, w.userId), { content: 'Do not use emojis.', revision: 1 });
-  } finally {
-    await f.close();
-  }
-});
-
-test('reopening a chat during preference inference fences the memory write', { timeout: 60000 }, async () => {
-  const f = await conversationFixture();
-  try {
-    const id = await chat(f),
-      w = f.workspace,
-      maintenance = createConversationMaintenance(f.runtime),
-      base = compactor();
-    await exchange(f, id, 'Use emojis.');
-    await due(f, id);
-    await maintenance.sweep(w.id);
-    const [job] = await work(f, maintenance);
-    const model = {
-      ...base,
-      summarize: async input => {
-        if (input.purpose !== 'memory') return base.summarize(input);
-        await f.store.send(w.id, w.userId, id, {
-          commandId: randomUUID(),
-          messageId: randomUUID(),
-          parts: [{ kind: 'text', text: 'Continue.' }],
-        });
-        const messageId = JSON.parse(input.messages[0].text).requesterTranscript.match(/id="([^"]+)"/)[1];
-        return {
-          text: JSON.stringify({ content: 'Use emojis.', evidence: [{ messageId, quote: 'Use emojis.' }] }),
-          familyId: 'claude-haiku',
-          fallbackFrom: null,
-        };
-      },
-    };
-    assert.equal(
-      await maintenance.process(job, model, async () => {
-        throw new Error('must not publish');
-      }),
-      'stale',
-    );
-    assert.deepEqual(await createPersonalMemoryService(f.runtime).read(w.id, w.userId), { content: '', revision: 0 });
-  } finally {
-    await f.close();
-  }
-});
-
-test('manual changes during inference win and leave a resumable memory checkpoint', { timeout: 60000 }, async () => {
-  const f = await conversationFixture();
-  try {
-    const id = await chat(f),
-      w = f.workspace,
-      maintenance = createConversationMaintenance(f.runtime);
-    const memory = createPersonalMemoryService(f.runtime);
-    await exchange(f, id, 'Use emojis.');
-    await due(f, id);
-    await maintenance.sweep(w.id);
-    const [job] = await work(f, maintenance);
-    const base = compactor();
-    let memoryCalls = 0;
-    const model = {
-      ...base,
-      summarize: async input => {
-        if (input.purpose !== 'memory') return base.summarize(input);
-        memoryCalls++;
-        await memory.save(w.id, w.userId, { content: 'No emojis.', expectedRevision: 0 });
-        const messageId = JSON.parse(input.messages[0].text).requesterTranscript.match(/id="([^"]+)"/)[1];
-        return {
-          text: JSON.stringify({ content: 'Use emojis.', evidence: [{ messageId, quote: 'Use emojis.' }] }),
-          familyId: 'claude-haiku',
-          fallbackFrom: null,
-        };
-      },
-    };
-    assert.equal(await maintenance.process(job, model, async () => published()), 'queued');
-    assert.deepEqual(await memory.read(w.id, w.userId), { content: 'No emojis.', revision: 1 });
-    await f.db.platform.query(
-      `UPDATE ${f.table('tf_conversation_maintenance')} SET next_attempt_at=clock_timestamp() WHERE id=$1`,
-      [job.jobId],
-    );
-    assert.equal(await maintenance.process(job, model, async () => published()), 'ready');
-    assert.equal(memoryCalls, 1);
-  } finally {
-    await f.close();
-  }
-});
 
 test('recap embedding status and resume select the current profile and publication', { timeout: 60000 }, async () => {
   const f = await conversationFixture();
@@ -474,7 +242,8 @@ test(
       );
       assert.deepEqual(
         model.calls.map(call => call.purpose),
-        ['summary', 'handoff', 'memory'],
+        ['summary', 'handoff'],
+        'without Keep, chats are not learned from',
       );
       const first = await f.store.maintenance(w.id, w.userId, id);
       assert.ok(first.maintenance.compactionId);
@@ -487,7 +256,7 @@ test(
         }),
         'ready',
       );
-      assert.equal(model.calls.length, 3, 'saved recap and reconciled memory retry without model generation');
+      assert.equal(model.calls.length, 2, 'the saved recap retries without model generation');
       assert.equal(publication.requester.userId, w.userId);
       assert.equal(publication.coveredThrough, 1);
       const after = await f.store.read(w.id, w.userId, id);

@@ -491,7 +491,7 @@ export function createConversationMaintenance(runtime: ConversationRuntime) {
             );
         });
         if (generated.nextChunk !== null) return 'queued';
-        const keepRecall = await keepChatRecallOn(work.workspaceId);
+        const keepRecall = keepChatRecallOn();
         const recap = await handoff(
           compactor,
           fence,

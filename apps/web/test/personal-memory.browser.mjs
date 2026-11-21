@@ -116,12 +116,12 @@ test('suggested memory changes can be confirmed, dismissed, or shown as out of d
     page.setDefaultTimeout(10000);
     const errors = [];
     page.on('pageerror', error => errors.push(String(error)));
-    const url = `http://127.0.0.1:${server.httpServer.address().port}/memory-mock/settings/account?memoryScenario=keep`;
+    const url = `http://127.0.0.1:${server.httpServer.address().port}/memory-mock/settings/account`;
     const editor = page.getByRole('textbox', { name: 'Your preferences', exact: true });
     const list = page.getByRole('list', { name: 'Suggested changes' });
     const card = name => list.getByRole('region', { name: `Suggested change: ${name}` });
 
-    await page.goto(`${url}&proposalScenario=pending`);
+    await page.goto(`${url}?proposalScenario=pending`);
     await card('Add to your memory').waitFor();
     await list.getByText('“Please always use British spelling.”').waitFor();
     await list.getByText('From the chat “Launch plan”').waitFor();
@@ -138,7 +138,7 @@ test('suggested memory changes can be confirmed, dismissed, or shown as out of d
     await page.getByText('No suggestions right now.', { exact: true }).waitFor();
     await shot(page, 'empty');
 
-    await page.goto(`${url}&proposalScenario=outdated`);
+    await page.goto(`${url}?proposalScenario=outdated`);
     const outdated = card('Change your memory');
     await outdated.getByText('Out of date', { exact: true }).waitFor();
     assert.equal(await outdated.getByRole('button', { name: 'Confirm', exact: true }).count(), 0);
@@ -149,16 +149,16 @@ test('suggested memory changes can be confirmed, dismissed, or shown as out of d
     await outdated.getByRole('button', { name: 'Dismiss', exact: true }).click();
     await page.getByText('Suggestion dismissed. Your memory didn’t change.', { exact: true }).waitFor();
 
-    await page.goto(`${url}&proposalScenario=error`);
+    await page.goto(`${url}?proposalScenario=error`);
     await page.getByRole('heading', { name: 'Suggestions could not load', exact: true }).waitFor();
     await shot(page, 'error');
     await page.getByRole('button', { name: 'Retry', exact: true }).click();
     await page.getByText('No suggestions right now.', { exact: true }).waitFor();
 
-    await page.goto(url.replace('memoryScenario=keep', 'memoryScenario=empty'));
+    await page.goto(`${url}?memoryScenario=empty`);
     await editor.waitFor();
-    assert.equal(await page.getByRole('heading', { name: 'Suggested changes' }).count(), 0);
-    await page.getByText(/Closed chats are checked in the background\.$/).waitFor();
+    await page.getByText(/changes are suggested below for you to review\.$/).waitFor();
+    await page.getByText('No suggestions right now.', { exact: true }).waitFor();
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();

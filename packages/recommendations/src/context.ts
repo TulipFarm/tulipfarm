@@ -311,7 +311,7 @@ export async function collectRecommendationContext(transaction: Transaction, act
     content: teammates ? 'A teammate or pending invitation exists.' : 'There are no teammates or pending invitations.',
   });
 
-  // Memory that is hidden or cannot be reached is left out rather than read as empty.
+  // Memory that is not configured or cannot be reached is left out rather than read as empty.
   const memory = await readPersonalMemory(tx, actor).catch((error: unknown) => {
     if (error instanceof PersonalMemoryUnavailable) return undefined;
     throw error;
@@ -795,7 +795,7 @@ export async function collectRecommendationContext(transaction: Transaction, act
     connected: entries.some(entry => entry.kind === 'integration'),
     gmail: capability('gmail.read'),
     googleCalendar: capability('calendar.read'),
-    // Unknown, not false, while memory is hidden or unreachable: Bud shouldn't ask the member to set it up again.
+    // Unknown, not false, while memory is unavailable: Bud shouldn't ask the member to set it up again.
     ...(memory ? { personalized: Boolean(memory.content.trim()) } : {}),
     indexedProviders,
     indexableProviders: [

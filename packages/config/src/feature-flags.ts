@@ -165,13 +165,6 @@ export const featureFlags = {
     scope: 'workspace',
     env: 'FEATURE_FLAG_CODING_RUNS',
   },
-  'keep-memory': {
-    description:
-      "Keeps members' personal memory in the Keep memory service (KEEP_ENDPOINT), with history, recoverable delete and permanent forget. Nothing is migrated: members start with empty memory. Turning it off after first use hides Keep memory; it never returns to the earlier memory. Also sends published Knowledge to Keep and answers Knowledge search from it, limited to the documents each reader may see; off searches Knowledge as before. Also sends the messages that compaction moves out of a chat's context to Keep and recalls relevant ones into later replies; turning it off stops both, and deleted chats are still forgotten in Keep.",
-    default: false,
-    scope: 'workspace',
-    env: 'FEATURE_FLAG_KEEP_MEMORY',
-  },
   'agent-evals': {
     description:
       "An Evals tab on saved agents: members write test cases, run them against the agent's model or up to three models, and see pass rates. Runs use workspace credits and never write to tables, tasks or chats.",

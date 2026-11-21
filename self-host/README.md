@@ -99,6 +99,23 @@ and that secret is no longer sent there. Responses from a private host, like
 responses from calls that use a secret, are visible only to the member who ran
 the agent.
 
+## Keep
+
+[Keep](https://github.com/TulipFarm/keep) stores each member's personal memory,
+answers Knowledge search and recalls compacted chats. The `keep` service runs
+the pinned Keep image on the stack's Postgres, in its own `keep` database and
+login, with embeddings computed locally. It publishes no port. Setup creates
+the database and writes `keep.env` with its URL and API token, and points the
+API and worker at `http://keep:7357` with `KEEP_ENDPOINT` and `KEEP_TOKEN`.
+Keep's local files live in the `keep-data` volume.
+
+To run Keep elsewhere, set `KEEP_ENDPOINT` and `KEEP_TOKEN` for the API and
+worker to its origin and API token. Use HTTPS outside a private network.
+Without `KEEP_ENDPOINT`, personal memory reports that it can't be reached, chats
+aren't learned from, and Knowledge search uses the local search index. Nothing
+from the memory of earlier releases moves to Keep: members start with empty
+memory.
+
 ## Separate knowledge worker
 
 By default one worker process runs every task queue. A large knowledge sync
@@ -152,7 +169,9 @@ plain or managed Postgres, including RDS. Set `TULIPFARM_DATABASE_ADMIN_URL`
 The admin needs authority to create roles and databases, grant role membership,
 and install pgvector (`vector` >= 0.8.0). The server must provide that extension.
 Setup creates roles, databases, extensions, migrations, restricted storage and
-email logins, and the bucket. Keep the generated state and env files private;
+email logins, the Keep database and login, and the bucket. Outside Compose, run
+Keep yourself with the `KEEP_POSTGRES_URL` and `KEEP_API_TOKEN` from the
+generated `keep.env`. Keep the generated state and env files private;
 reruns reuse the same keys and passwords. URL query parameters, including TLS,
 are preserved in scoped login URLs.
 

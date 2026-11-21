@@ -11,6 +11,8 @@ import {
   recommendationPolicy,
   validateGeneratedRecommendations,
 } from '../dist/index.js';
+import { configureKeepPersonalMemory } from '@tulipfarm/conversations/personal-memory';
+import { fakeKeep } from '../../conversations/test/fake-keep.mjs';
 
 const fresh = {
   slack: false,
@@ -261,23 +263,32 @@ test('saved row decoding rejects corrupt items, ordering, sources and unsafe Pos
   assert.equal((await readSavedRecommendations(readTx([saved({ refresh_generation: 7n })]), memberId)).version, 7);
 });
 
-test('bounded context keeps own memory, denies an unreadable table, and never reads provider feeds', async () => {
-  let revision = 1;
+test('bounded context keeps own memory, denies an unreadable table, and never reads provider feeds', async t => {
+  const keep = fakeKeep();
+  const text = 'Use short checklists.';
+  let scope;
+  const client = {
+    ...keep.client,
+    async history(input) {
+      if (!scope) {
+        scope = input.scope;
+        await keep.client.write({ scope, text });
+      }
+      return keep.client.history(input);
+    },
+  };
+  t.after(configureKeepPersonalMemory({ client }));
   const queries = [];
   const tx = {
     schema: 'ws_test',
     workspaceId: '10000000-0000-4000-8000-000000000004',
     commonVersion: 30,
     client: {
-      query: async (sql, values = []) => {
+      query: async sql => {
         queries.push(sql);
         if (sql.includes('tf_authorization_lock')) return { rows: [{ id: 1 }], rowCount: 1 };
         if (sql.includes('SELECT id, user_id, role FROM'))
           return { rows: [{ id: memberId, user_id: userId, role: 'member' }], rowCount: 1 };
-        if (sql.includes('SELECT content,revision')) {
-          assert.deepEqual(values, [memberId]);
-          return { rows: [{ content: 'Use short checklists.', revision }], rowCount: 1 };
-        }
         if (sql.includes('to_regclass')) return { rows: [{ installed: true }], rowCount: 1 };
         if (sql.includes('generation.table_id::text')) {
           return {
@@ -301,7 +312,7 @@ test('bounded context keeps own memory, denies an unreadable table, and never re
   };
   const actor = { kind: 'human', membershipId: memberId, userId };
   const first = await collectRecommendationContext(tx, actor);
-  revision++;
+  await keep.client.write({ scope, text, expectedRevisionId: (await keep.client.read({ scope })).value.revisionId });
   const second = await collectRecommendationContext(tx, actor);
   assert.equal(first.fingerprint, second.fingerprint);
   assert.notEqual(
@@ -310,7 +321,7 @@ test('bounded context keeps own memory, denies an unreadable table, and never re
   );
   assert.equal(first.signals.table, null);
   assert.equal(JSON.stringify(first).includes('Hidden payroll'), false);
-  assert.equal(first.context.entries.find(source => source.kind === 'memory').content, 'Use short checklists.');
+  assert.equal(first.context.entries.find(source => source.kind === 'memory').content, text);
   assert.equal(
     queries.some(sql => /FROM .*"hidden_payroll"/.test(sql)),
     false,

@@ -125,11 +125,11 @@ export function fuseKnowledgeCandidates(lexical: Candidate[], semantic: Candidat
 /** A ranked passage from an external Knowledge index, already mapped to TulipFarm ids. */
 export type KnowledgeIndexHit = { documentId: string; publicationId: string; ordinal: number; score: number };
 /**
- * An external Knowledge index that replaces keyword and vector matching for a workspace.
+ * An external Knowledge index that replaces keyword and vector matching whenever it is configured.
  * `search` receives only document ids the actor may read now and throws `KnowledgeSearchUnavailable` when it cannot answer.
  */
 export type KnowledgeIndexSearch = {
-  enabled(workspaceId: string): Promise<boolean>;
+  configured(): boolean;
   search(workspaceId: string, query: string, documentIds: string[]): Promise<KnowledgeIndexHit[]>;
 };
 
@@ -595,7 +595,7 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
         return page(workspaceId, userId, previous, 0, deadlineAt, false);
       }
     }
-    if (index && (await index.enabled(workspaceId))) {
+    if (index?.configured()) {
       const found = await indexed(index, workspaceId, userId, input.query, filters, deadlineAt - 400);
       const session: Session = {
         id: input.kind === 'submitted' ? input.commandId : randomUUID(),

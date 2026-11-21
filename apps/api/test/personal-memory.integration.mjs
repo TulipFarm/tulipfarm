@@ -4,14 +4,16 @@ import { test } from 'node:test';
 import Fastify from 'fastify';
 import { fixture } from '../../../packages/workspace-storage/test/integration/fixture.mjs';
 import { createWorkspaceRuntime, qualified } from '@tulipfarm/workspace-storage/runtime';
-import { createPersonalMemoryService } from '@tulipfarm/conversations/personal-memory';
+import { configureKeepPersonalMemory, createPersonalMemoryService } from '@tulipfarm/conversations/personal-memory';
+import { fakeKeep } from '../../../packages/conversations/test/fake-keep.mjs';
 import { registerPersonalMemory } from '../src/personal-memory.ts';
 import { authConfig } from '../src/auth.ts';
 
 test(
   'personal memory HTTP only uses the session member, rejects stale edits and enforces origin',
   { timeout: 60000 },
-  async () => {
+  async t => {
+    t.after(configureKeepPersonalMemory({ client: fakeKeep().client }));
     const db = await fixture();
     let runtime, app;
     try {
@@ -70,7 +72,11 @@ test(
         ).statusCode,
         401,
       );
-      assert.deepEqual((await request('GET')).json(), { content: '', revision: 0 });
+      assert.deepEqual((await request('GET')).json(), {
+        content: '',
+        revision: 0,
+        history: { trashed: false, undo: false },
+      });
       for (const payload of [
         { content: 'secret', expectedRevision: 0, membershipId: w.membershipId },
         { content: 'secret', expectedRevision: 0, userId: w.userId },
@@ -83,21 +89,27 @@ test(
         assert.equal((await request('PUT', payload)).statusCode, 400);
       let response = await request('PUT', { content: 'My explicit preferences', expectedRevision: 0 });
       assert.equal(response.statusCode, 200);
-      assert.deepEqual(response.json(), { content: 'My explicit preferences', revision: 1 });
+      const saved = response.json();
+      assert.equal(saved.content, 'My explicit preferences');
+      assert.ok(saved.revision > 0);
       assert.equal(response.headers['cache-control'], 'no-store');
-      assert.deepEqual((await request('GET', undefined, w.userId)).json(), { content: '', revision: 0 });
+      assert.equal((await request('GET', undefined, w.userId)).json().content, '');
       response = await request('PUT', { content: 'stale', expectedRevision: 0 });
       assert.equal(response.statusCode, 409);
       assert.deepEqual(response.json(), { error: 'personal_memory_conflict' });
       assert.equal((await request('DELETE', { expectedRevision: 0 })).statusCode, 409);
-      assert.equal((await request('DELETE', { expectedRevision: 1, membershipId: memberId })).statusCode, 400);
-      response = await request('DELETE', { expectedRevision: 1 });
+      assert.equal(
+        (await request('DELETE', { expectedRevision: saved.revision, membershipId: memberId })).statusCode,
+        400,
+      );
+      response = await request('DELETE', { expectedRevision: saved.revision });
       assert.equal(response.statusCode, 200);
-      assert.deepEqual(response.json(), { content: '', revision: 2 });
-      assert.deepEqual((await request('GET')).json(), { content: '', revision: 2 });
-      assert.equal((await request('PUT', { content: 'resurrect', expectedRevision: 1 })).statusCode, 409);
-      response = await request('PUT', { content: ' \n ', expectedRevision: 2 });
-      assert.deepEqual(response.json(), { content: '', revision: 3 });
+      const deleted = response.json();
+      assert.equal(deleted.content, '');
+      assert.equal((await request('GET')).json().content, '');
+      assert.equal((await request('PUT', { content: 'resurrect', expectedRevision: saved.revision })).statusCode, 409);
+      response = await request('PUT', { content: ' \n ', expectedRevision: deleted.revision });
+      assert.equal(response.json().content, '');
       const proposal = (action, user = memberUser, origin = authConfig().webOrigin, id = randomUUID()) =>
         app.inject({
           method: action ? 'POST' : 'GET',
@@ -108,16 +120,17 @@ test(
       assert.equal((await proposal('confirm', null)).statusCode, 401);
       assert.equal((await proposal('confirm', memberUser, 'https://attacker.example')).statusCode, 403);
       assert.equal((await proposal('dismiss', memberUser, authConfig().webOrigin, 'not-a-uuid')).statusCode, 400);
-      // Suggestions exist only with Keep; the workspace store keeps writing learned preferences directly.
-      for (const action of [undefined, 'confirm', 'dismiss', 'refresh'])
-        assert.equal((await proposal(action)).statusCode, 409);
+      assert.equal((await proposal()).statusCode, 200);
       await db.platform.query(
         `UPDATE ${qualified(w.names.schema, 'tf_memberships')} SET removed_at=now() WHERE id=$1`,
         [memberId],
       );
       assert.equal((await request('GET')).statusCode, 404);
-      assert.equal((await request('DELETE', { expectedRevision: 3 })).statusCode, 404);
-      assert.equal((await request('PUT', { content: 'no longer a member', expectedRevision: 3 })).statusCode, 404);
+      assert.equal((await request('DELETE', { expectedRevision: deleted.revision })).statusCode, 404);
+      assert.equal(
+        (await request('PUT', { content: 'no longer a member', expectedRevision: deleted.revision })).statusCode,
+        404,
+      );
       assert.equal((await proposal()).statusCode, 404);
     } finally {
       await app?.close();

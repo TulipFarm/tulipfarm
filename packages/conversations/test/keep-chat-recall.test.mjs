@@ -22,28 +22,17 @@ async function ingest(keep, messages, chat = conversationId) {
   });
 }
 
-test('chat recall is off without a Keep client or with the flag off, and never asks Keep', async () => {
+test('chat recall is off without a Keep client and never asks Keep', async () => {
   const keep = fakeKeep();
-  let restore = configureKeepChatRecall({ client: undefined, enabled: async () => true });
+  let restore = configureKeepChatRecall({ client: undefined });
   try {
-    assert.equal(await keepChatRecallOn(workspaceId), false);
+    assert.equal(keepChatRecallOn(), false);
   } finally {
     restore();
   }
-  restore = configureKeepChatRecall({ client: keep.client, enabled: async () => false });
+  restore = configureKeepChatRecall({ client: keep.client });
   try {
-    assert.equal(await keepChatRecallOn(workspaceId), false);
-  } finally {
-    restore();
-  }
-  restore = configureKeepChatRecall({
-    client: keep.client,
-    enabled: async () => {
-      throw new Error('flags down');
-    },
-  });
-  try {
-    assert.equal(await keepChatRecallOn(workspaceId), false);
+    assert.equal(keepChatRecallOn(), true);
   } finally {
     restore();
   }
@@ -52,7 +41,7 @@ test('chat recall is off without a Keep client or with the flag off, and never a
 
 test('recall searches only this chat and maps hits back to its message ids', async () => {
   const keep = fakeKeep();
-  const restore = configureKeepChatRecall({ client: keep.client, enabled: async () => true });
+  const restore = configureKeepChatRecall({ client: keep.client });
   try {
     const [budget, visible, other] = [randomUUID(), randomUUID(), randomUUID()];
     await ingest(keep, [
@@ -81,7 +70,7 @@ test('recall searches only this chat and maps hits back to its message ids', asy
 test('an unreachable Keep returns no excerpts instead of failing the reply', async () => {
   const keep = fakeKeep();
   keep.client.available = false;
-  const restore = configureKeepChatRecall({ client: keep.client, enabled: async () => true });
+  const restore = configureKeepChatRecall({ client: keep.client });
   try {
     assert.deepEqual(await searchEarlierMessages({ workspaceId, conversationId, query: 'budget' }), []);
     assert.deepEqual(keep.calls, ['search']);

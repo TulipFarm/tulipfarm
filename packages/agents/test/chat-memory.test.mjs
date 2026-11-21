@@ -33,7 +33,7 @@ for (const { label, format, route } of routes)
       const reply =
         operation === 'edit'
           ? 'Review the memory change in the card. Nothing changes until you save it.'
-          : 'Removed it from your memory. The card below lets you undo it.';
+          : 'Nothing is forgotten yet. Confirm on the card below.';
       t.mock.method(globalThis, 'fetch', async (_url, init) => {
         const body = JSON.parse(init.body);
         if (isCompletionRequest(body)) return Response.json(completionReply(format));
@@ -81,7 +81,7 @@ for (const { label, format, route } of routes)
           assert.equal(call.tool, `memory.${operation}`);
           return operation === 'edit'
             ? { status: 'review-required', draftId, digest: 'a'.repeat(64) }
-            : { status: 'forgotten', draftId, revision: 2 };
+            : { status: 'confirm', draftId, revision: 1 };
         },
         undefined,
         false,

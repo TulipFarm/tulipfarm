@@ -2,15 +2,10 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { Client, escapeIdentifier } from 'pg';
-import {
-  createPostgresMemoryRepository,
-  createPostgresMemoryReconciliationRepository,
-  createPostgresTranscriptSource,
-} from '../dist/index.js';
+import { createPostgresMemoryReconciliationRepository, createPostgresTranscriptSource } from '../dist/index.js';
 import {
   baseMemorySeed,
   memoryFixtureIds,
-  memoryRepositoryConformance,
   memoryReconciliationConformance,
   transcriptSourceConformance,
 } from '@tulipfarm/memory-core/testing/memory-conformance';
@@ -35,9 +30,6 @@ async function fixture(t) {
   });
   await client.query(`
     CREATE SCHEMA ${escapeIdentifier(schema)};
-    CREATE TABLE ${table('personal_memory')} (
-      membership_id uuid PRIMARY KEY, content text NOT NULL, revision integer NOT NULL,
-      manual_updated_at timestamptz, reconciled_through timestamptz);
     CREATE TABLE ${table('conversations')} (id uuid PRIMARY KEY, owner_membership_id uuid, project_id uuid);
     CREATE TABLE ${table('conversation_maintenance')} (
       id uuid PRIMARY KEY, conversation_id uuid NOT NULL, requester_membership_id uuid NOT NULL,
@@ -54,7 +46,6 @@ async function fixture(t) {
     CREATE TABLE ${table('internal_publications')} (message_id uuid);
   `);
   const ids = memoryFixtureIds();
-  const memory = () => createPostgresMemoryRepository(client, names);
   const reconciliation = () => createPostgresMemoryReconciliationRepository(client, names);
   const transcript = () => createPostgresTranscriptSource(client, names);
   async function run(operation) {
@@ -82,19 +73,6 @@ async function fixture(t) {
   }
   async function seed(input) {
     await run(async () => {
-      for (const row of input.memories ?? [])
-        await upsert(
-          'personal_memory',
-          ['membership_id', 'content', 'revision', 'manual_updated_at', 'reconciled_through'],
-          [
-            row.membershipId,
-            row.content ?? '',
-            row.revision ?? 1,
-            row.manual_updated_at ?? null,
-            row.reconciled_through ?? null,
-          ],
-          'membership_id',
-        );
       for (const row of input.conversations ?? [])
         await upsert(
           'conversations',
@@ -158,9 +136,8 @@ async function fixture(t) {
     });
   }
   await seed(baseMemorySeed(ids));
-  return { ids, seed, run, memory, reconciliation, transcript };
+  return { ids, seed, run, reconciliation, transcript };
 }
 
-memoryRepositoryConformance(test, 'Postgres MemoryRepository', fixture);
 memoryReconciliationConformance(test, 'Postgres MemoryReconciliationRepository', fixture);
 transcriptSourceConformance(test, 'Postgres TranscriptSource', fixture);

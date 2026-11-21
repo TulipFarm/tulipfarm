@@ -49,6 +49,43 @@ services:
     ports:
       - '127.0.0.1:8233:8080'
 
+  keep-database:
+    image: pgvector/pgvector:0.8.2-pg18
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: local-postgres
+    command: ['psql', '-h', 'postgres', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1', '-q', '-f', '/keep.sql']
+    volumes:
+      - ./infra/postgres/keep.sql:/keep.sql:ro
+    restart: 'no'
+
+  # Personal memory, Knowledge search and chat recall. Data lives in the keep database on postgres.
+  keep:
+    image: ghcr.io/tulipfarm/keep:sha-864e666@sha256:e1d6c37287fc5c4b5911b6152e4c038d7b1379dce326ebf05d9919b0046552e1
+    depends_on:
+      keep-database:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    environment:
+      KEEP_STORAGE: postgres-vector
+      KEEP_POSTGRES_URL: postgres://keep:local-keep@postgres:5432/keep?sslmode=disable
+      KEEP_BIND: 0.0.0.0:7357
+      KEEP_API_TOKEN: local-keep-token
+      # Plain HTTP inside the Compose network; the host port is loopback-only.
+      KEEP_INSECURE_HTTP: 'true'
+    ports:
+      - '127.0.0.1:7357:7357'
+    volumes:
+      - keep-data:/var/lib/keep
+    healthcheck:
+      test: ['CMD', 'keep', 'healthcheck']
+      interval: 5s
+      timeout: 6s
+      retries: 24
+      start_period: 5s
+
   object-storage:
     image: rustfs/rustfs:1.0.0
     environment:
@@ -67,3 +104,4 @@ services:
 volumes:
   postgres-data:
   object-storage-data:
+  keep-data:
