@@ -3267,7 +3267,7 @@ test('an app chat tells the model which app tools read and change the app', asyn
 });
 
 /** Runs one app chat turn against a scripted model; `script` answers each reply round, by round index. */
-async function appTurn(t, script, request = 'Now change it to Orders v3 and rebuild.', route = routes.azure) {
+async function appTurn(t, script, request = 'Now change it to Orders v3 and rebuild.', route = routes.azure, meter) {
   const rounds = [];
   const ran = [];
   const wire = await boundary(t, (_req, res) => {
@@ -3292,7 +3292,7 @@ async function appTurn(t, script, request = 'Now change it to Orders v3 and rebu
         ? { draft: { state: 'built' }, files: [{ path: 'index.html', bytes: 40 }] }
         : {};
     },
-    undefined,
+    meter,
     false,
     null,
     { earlierMessages: false, sources: () => [], apps: 'public' },
@@ -3318,6 +3318,46 @@ test('a forced app status round that runs to the output limit without its call r
   assert.deepEqual(turn.limits, [1284, 8192]);
   assert.deepEqual(turn.ran, ['apps.status']);
   assert.equal(turn.result.text, answer);
+});
+
+test('a forced app status round on a low-reasoning route is capped with room for its reasoning', async t => {
+  const claim = 'I changed the paragraph and rebuilt the app. ';
+  const answer = 'Your app is now live at release 3.';
+  const turn = await appTurn(
+    t,
+    round => (round === 0 ? { text: claim.repeat(40), finish: 'length' } : { text: answer }),
+    'is it live?',
+    { ...routes.azure, maxOutputTokens: 8192, capabilities: { reasoningEffort: 'low' } },
+  );
+  assert.deepEqual(turn.choices, ['apps_status', 'auto']);
+  assert.deepEqual(turn.limits, [3332, 8192]);
+  assert.deepEqual(turn.ran, ['apps.status']);
+});
+
+test('a round that forces a tool, or stops forcing one, is still metered against the previous round', async t => {
+  const attempts = [];
+  const meter = async attempt => {
+    attempts.push(attempt);
+    return async () => {};
+  };
+  const turn = await appTurn(
+    t,
+    round =>
+      [
+        { calls: [use('apps.status')] },
+        { text: "I updated the heading in index.html to 'Orders v3'." },
+        { calls: [use('apps.files.read', { path: 'index.html' })] },
+        { calls: [use('apps.files.write', { path: 'index.html', content: '<h1>Orders v3</h1>' })] },
+        { text: 'The heading now reads Orders v3.' },
+      ][round] ?? { text: 'The heading now reads Orders v3.' },
+    'Now change it to Orders v3.',
+    routes.azure,
+    meter,
+  );
+  assert.deepEqual(turn.choices.slice(0, 4), ['apps_status', 'auto', 'apps_files_read', 'auto']);
+  const rounds = attempts.filter(attempt => attempt.model === routes.azure.model);
+  assert.equal(rounds[0].previous, undefined);
+  for (const round of rounds.slice(1, 4)) assert.ok(round.previous, `round ${rounds.indexOf(round)} has no previous`);
 });
 
 test('any other forced app round that runs to the output limit without its call is sent again unforced', async t => {
