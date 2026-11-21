@@ -2360,6 +2360,11 @@ const nowClaim =
 /** A clause that says the app already holds something, which only reading its files in this reply could show. */
 const alreadyClaim =
   /\balready (?:has|have|contains?|includes?|serves?|returns?|responds?|exposes?|defines?|handles?|reads?|says?|shows?|uses?)\b/i;
+const editRequest =
+  /\b(?:add|change|rename|replace|remove|delete|edit|update|fix|insert|move|swap|restyle|recolou?r|resize|cent(?:er|re)|align|hide|translate|rewrite|make (?:it|the|them|this|that)|turn (?:it|the|them|this|that)|set (?:the|its|it))\b/i;
+/** A short reply that reports the work finished without naming it. */
+const doneClaim =
+  /^\s*(?:all )?(?:done|finished|complete|updated)\b|\b(?:is|are) (?:all )?(?:done|ready|live|updated|in place)\b/i;
 const toReader = /\b(?:below|for you|here(?:'|’)?s|here is|here are)\b/i;
 /** Verbs that ask for a change, in any inflection. */
 const changeVerb = String.raw`(?:add(?:s|ed|ing)?|chang(?:e|es|ed|ing)|creat(?:e|es|ed|ing)|writ(?:e|es|ing)|wrote|written|rewrit(?:e|es|ing)|rewrote|implement(?:s|ed|ing)?|turn(?:s|ed|ing)?|mak(?:e|es|ing)|made|(?:re)?build(?:s|ing)?|(?:re)?built|set(?:s|ting)?|renam(?:e|es|ed|ing)|replac(?:e|es|ed|ing)|remov(?:e|es|ed|ing)|delet(?:e|es|ed|ing)|fix(?:es|ed|ing)?|insert(?:s|ed|ing)?|mov(?:e|es|ed|ing)|swap(?:s|ped|ping)?|publish(?:es|ed|ing)?|deploy(?:s|ed|ing)?|updat(?:e|es|ed|ing)|edit(?:s|ed|ing)?|switch(?:es|ed|ing)?|(?:re)?styl(?:e|es|ed|ing)|redesign(?:s|ed|ing)?|refactor(?:s|ed|ing)?|convert(?:s|ed|ing)?|hook(?:s|ed|ing)?|wir(?:e|es|ed|ing)|drop(?:s|ped|ping)?|hid(?:e|es|ing)|hidden|enabl(?:e|es|ed|ing)|disabl(?:e|es|ed|ing)|translat(?:e|es|ed|ing)|resiz(?:e|es|ed|ing)|cent(?:er|re)(?:s|ed|ing)?|align(?:s|ed|ing)?|put(?:s|ting)?|includ(?:e|es|ed|ing)|giv(?:e|es|ing)|gave|given|get(?:s|ting)?|got|us(?:e|es|ed|ing)|show(?:s|ed|ing|n)?)`;
@@ -2439,8 +2444,8 @@ export function unbackedAppClaim(candidate: string, apps: AppKind | undefined, r
   const changed = ran.has('apps.files.write') || ran.has('apps.files.delete');
   const looked = changed || ran.has(buildTool) || ran.has('apps.status') || ran.has('apps.files.read');
   const asked = !appQuestionAsked(request);
-  // "Rebuild" alone asks for a build; any other change word asks for an edit that a build of unchanged files can't back.
-  const editAsked = asked && changeWord.test(request.replace(/\b(?:re)?buil(?:d|t)(?:s|ing)?\b/gi, ''));
+  // Only an edit verb asks for an edit that a build of unchanged files can't back; "rebuild and show it" asks for a build.
+  const editAsked = asked && editRequest.test(request.replace(notAsked, ''));
   const unconditional = sentences.filter(sentence => !conditional.test(sentence));
   const settled = unconditional.filter(sentence => !earlierOutcome.test(sentence));
   // 'edit' is an explicit edit claim, the only kind a forced write can back; 'change' says the app reads as asked.
@@ -2478,7 +2483,11 @@ export function unbackedAppClaim(candidate: string, apps: AppKind | undefined, r
   ];
   // An edit request answered after only checking status changed nothing, whatever the reply says.
   const untouched =
-    editAsked && !candidate.includes('?') && [...ran].every(tool => tool === 'apps.status')
+    editAsked &&
+    ran.size === 1 &&
+    ran.has('apps.status') &&
+    !candidate.includes('?') &&
+    (claimsActionOutcome(candidate) || doneClaim.test(candidate))
       ? { clause: candidate.trim(), missing: 'edit' as const }
       : undefined;
   const unbacked = claims.find(claim => claim.missing) ?? untouched;

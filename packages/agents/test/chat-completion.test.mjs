@@ -1550,7 +1550,19 @@ test('an app chat edit request answered after only a status check must make the 
   const builtClaim = 'The preview build succeeded.';
   for (const claim of [builtClaim, 'The draft build succeeded.', 'Done. Open it to see the background.'])
     assert.equal(unbackedAppClaim(claim, 'public', status, request)?.missing, 'edit', claim);
-  assert.equal(unbackedAppClaim(builtClaim, 'public', status, 'Rebuild the app.')?.missing, 'build');
+  for (const rebuild of [
+    'Rebuild the app.',
+    'Rebuild it and show it to me',
+    'Please rebuild it using the latest files',
+  ])
+    assert.equal(unbackedAppClaim(builtClaim, 'public', status, rebuild)?.missing, 'build', rebuild);
+  for (const [ask, reply] of [
+    ['Give me the address of the app', 'Your app is at https://x.tulipfarm.site.'],
+    ['Get me a summary of the app', 'Your app is a to-do list with three pages and a login form.'],
+    ['Add Stripe checkout', 'I can not add real payments to this static app; it has no server.'],
+    ['Make it better', 'Sure. Tell me which section you want to change first.'],
+  ])
+    assert.equal(unbackedAppClaim(reply, 'public', status, ask), undefined, ask);
   assert.equal(unbackedAppClaim('Which shade of yellow do you want?', 'public', status, request), undefined);
   // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
   const edited = new Set(['apps.status', 'apps.files.write', 'apps.preview.build']);

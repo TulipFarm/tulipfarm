@@ -51,8 +51,11 @@ export function fileListingQuery(request: string): string | undefined {
   return query?.slice(1).find(Boolean)?.slice(0, 255);
 }
 
+/** The Files library, as opposed to an app's own files such as index.html. */
+const filesLibrary = /\b(?:in|to|into|from)\s+(?:(?:my|your|the)\s+)?Files\b/i;
 /**
- * In an app's chat, file names and "created" describe the app's own files, so only a real Files save attempt is checked.
+ * In an app's chat, file names and "created" describe the app's own files, so only a save that names the Files library,
+ * or a real Files save attempt, is checked.
  */
 export function createFileJobGuard(
   request: string,
@@ -69,11 +72,13 @@ export function createFileJobGuard(
   const needsCheck = (text = '') =>
     !saved &&
     (attempted ||
-      (!appChat &&
-        (filePrefilter.test(request) ||
+      (appChat
+        ? filesLibrary.test(request) ||
+          (filesLibrary.test(text) && (fileSavedClaim.test(text) || readyFileClaim.test(text)))
+        : filePrefilter.test(request) ||
           wordApp.test(request) ||
           fileSavedClaim.test(text) ||
-          readyFileClaim.test(text))));
+          readyFileClaim.test(text)));
   const record = (call: { tool: string }, value: unknown) => {
     if (!call.tool.startsWith('files.')) return;
     calls++;

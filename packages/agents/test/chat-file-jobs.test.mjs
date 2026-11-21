@@ -1349,12 +1349,17 @@ test('three identical failed file operations stop instead of looping', async t =
   assert.equal(result.text, 'I stopped because the same file request kept failing. Ask me to try again.');
 });
 
-test("an app chat's own file names and save wording are not a Files save, but a real Files save attempt is", () => {
+test("an app chat's own file names are not a Files save, but a save naming Files or a real save attempt is", () => {
   const request = "Build a simple static web page: index.html with a heading 'Home'.";
   const app = createFileJobGuard(request, [], true);
   assert.equal(app.needsCheck('index.html is created and saved.'), false);
   assert.equal(app.holdPreview, false);
   assert.equal(createFileJobGuard(request).needsCheck(''), true);
+  assert.equal(
+    createFileJobGuard('Summarize this chat', [], true).needsCheck('Your summary PDF is ready in Files.'),
+    true,
+  );
+  assert.equal(createFileJobGuard('Save a summary as a PDF in my Files', [], true).needsCheck(''), true);
   const attempted = createFileJobGuard(request, [{ call: { tool: 'files.create' }, result: quota }], true);
   assert.equal(attempted.needsCheck(''), true);
   assert.equal(attempted.reply(), full);
