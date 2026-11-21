@@ -6,6 +6,7 @@ import { workspaceRoute } from '@/router';
 import { AgentBuilder } from '@/features/agents/builder';
 import { continueChatDraft, useBuilderInitial } from '@/features/agents/builder-initial';
 import { AgentRead } from '@/features/agents/feedback';
+import { DraftEvalCases } from '@/features/agents/draft-eval-cases';
 import { useAgentApi, useAgentPage } from '@/features/agents/queries';
 import type { AgentContext } from '@/features/agents/api';
 import { KeepsEditsContext, samePage } from '@/features/tables/feedback';
@@ -81,6 +82,9 @@ function AgentDraftBuilder({
   const initial = useBuilderInitial(api, workspaceId, id, resume, handoff);
   const changes = useConversationChanges();
   const refreshDraft = useCallback(() => changes.draft(chatId, draftId), [changes, chatId, draftId]);
+  const conversations = useMemo(() => conversationApi(workspaceId, () => {}), [workspaceId]);
+  const draftRead = useAuthoringDraft(conversations, chatId, draftId);
+  const draft = draftRead.state.kind === 'ready' ? draftRead.state.data : null;
   const [context, setContext] = useState<AgentContext | null>(null);
   if (read.state.kind === 'ready' && context !== read.state.data.context) setContext(read.state.data.context);
   return (
@@ -111,6 +115,15 @@ function AgentDraftBuilder({
             }}
             onSettled={refreshDraft}
             compact
+          />
+        )}
+        {draft?.proposal.kind === 'agent' && (
+          <DraftEvalCases
+            workspaceId={workspaceId}
+            workspaceSlug={workspace.slug}
+            agentId={id}
+            cases={draft.proposal.input.evalCases}
+            saved={draft.outcome?.kind === 'builder'}
           />
         )}
       </div>

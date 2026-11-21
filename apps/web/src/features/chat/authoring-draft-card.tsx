@@ -31,6 +31,7 @@ import { GitHubInstallNote } from '@/features/workflows/github-install-note';
 import { WorkflowSlackCheck } from '@/features/workflows/slack-step';
 import type { ConversationApi, ConversationCommand } from './conversation-api';
 import { AgentSetupDraftCard } from './agent-setup-draft-card';
+import { DraftEvalCases } from '@/features/agents/draft-eval-cases';
 import { DraftSkill } from '@/features/agents/setup-review';
 import { useConversationCommand } from './conversation-state';
 import { useAuthoringDraft, draftPending as pending } from './queries';
@@ -543,6 +544,15 @@ export function AuthoringDraftCard({
           owningTeamId={proposal.input.owningTeamId}
           definition={proposal.input.definition}
           brands={brands}
+        />
+      )}
+      {proposal.kind === 'agent' && (
+        <DraftEvalCases
+          workspaceId={workspace.id}
+          workspaceSlug={workspace.slug}
+          agentId={proposal.targetId}
+          cases={proposal.input.evalCases}
+          saved={draft.outcome?.kind === 'agent' && draft.outcome.receipt.status === 'accepted'}
         />
       )}
       {(!workflow || (draft.status === 'pending' && workflowNote(workflow))) && (

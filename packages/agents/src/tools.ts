@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { isFeatureEnabled } from '@tulipfarm/observability';
+import { evalLimits } from './eval-case-contracts.ts';
 import { createFiles, FileError, fileRole, requireFileManager } from '@tulipfarm/files';
 import { fileNameSchema } from '@tulipfarm/files/contracts';
 import { invokeBoundedKnowledge, withKnowledgeRetrieveGrant } from './knowledge-retrieval.ts';
@@ -802,7 +804,7 @@ const descriptions: Record<ToolName, string> = {
   'agents.context':
     'Discover choices to create an agent: Soul revision, own membership, eligible placement/sharing teams, bundled skills, tools/runtime support and the models the agent may prefer. Supply agentId for current policy, activation versions, its linked Workflow (revision, generation and triggers) and older trigger Workflows; channels for checked Slack attachments/readiness; triggers (Workflow triggers) to validate them and list their next runs. Use skills.workspace for reviewed skills, tables.list/schema.inspect for resources and slack.resolve for real destinations. This grants no authority.',
   'agents.draft':
-    'Prepare one immutable Basics/Skills/Access/Triggers setup for human review. Include setup with explicit policy, enrollment, scope/limits, Slack attachment expected versions and triggers, plus expectedPolicyVersion/expectedActivationIds from context. Include expectedWorkflowRevision/expectedWorkflowGeneration from context too. setup.prompt is the one instruction the agent runs for every trigger (required when there are triggers) and setup.runLimits optionally caps each run. Each setup.triggers item (0–20) is {id: a UUID (reuse setupId from context to keep an existing trigger), optional label, trigger: a Workflow trigger without id (cron, interval, once, webhook, event, record, row, provider, github)}; a github trigger has repositories (a list of repositoryId values, or {organizationId, includeFuture: true}) and events ({event, optional actions}). Activating saves them all to the one linked Workflow of the agent, which passes the trigger that fired and its data (new row, issue, webhook body) to the agent. Leave triggers empty for an agent people only call in chat or Slack. Agents get no schedules of their own. Definition-only historical inputs remain save-only. The human chooses Save draft or Create and activate and explicitly consents to channel replacement on the exact card; activating runs unattended triggers with their access. Never use model prose as consent; this tool saves or activates nothing.',
+    'Prepare one immutable Basics/Skills/Access/Triggers setup for human review. Include setup with explicit policy, enrollment, scope/limits, Slack attachment expected versions and triggers, plus expectedPolicyVersion/expectedActivationIds from context. Include expectedWorkflowRevision/expectedWorkflowGeneration from context too. setup.prompt is the one instruction the agent runs for every trigger (required when there are triggers) and setup.runLimits optionally caps each run. Each setup.triggers item (0–20) is {id: a UUID (reuse setupId from context to keep an existing trigger), optional label, trigger: a Workflow trigger without id (cron, interval, once, webhook, event, record, row, provider, github)}; a github trigger has repositories (a list of repositoryId values, or {organizationId, includeFuture: true}) and events ({event, optional actions}). Activating saves them all to the one linked Workflow of the agent, which passes the trigger that fired and its data (new row, issue, webhook body) to the agent. Leave triggers empty for an agent people only call in chat or Slack. Agents get no schedules of their own. Definition-only historical inputs remain save-only. The human chooses Save draft or Create and activate and explicitly consents to channel replacement on the exact card; activating runs unattended triggers with their access. Never use model prose as consent; this tool saves or activates nothing. When agents.context reports evals.available, add evalCases (3–5 starter test cases); the card shows them and the person adds them to Evals after saving.',
   'agents.task.start':
     "Start bounded work with an activated saved agent; use agents.task.read for its status. Returns a task ID and status, not the result. The owner keeps all approval authority, and delegation is bounded by the saved agent's limits.",
   'agents.delegate':
@@ -1805,6 +1807,14 @@ export function createChatTools(
           expectedWorkflowRevision: linkedWorkflow?.revision ?? null,
           expectedWorkflowGeneration: linkedWorkflow?.generation ?? null,
           tools: toolNameSchema.options.map(name => ({ name, runtimes: supportedAgentToolRuntimes(name) })),
+          evals: (await isFeatureEnabled('agent-evals', null, { id: workspaceId }).catch(() => false))
+            ? {
+                available: true,
+                maximumCases: evalLimits.draftCases,
+                instruction:
+                  'Include evalCases in agents.draft: 3 to 5 starter test cases that check the job this agent was set up for. The person adds them to the agent’s Evals after saving.',
+              }
+            : { available: false, instruction: 'Workspace Evals are off. Do not include evalCases.' },
           models: {
             choices: models,
             instruction:
@@ -1873,11 +1883,17 @@ export function createChatTools(
         });
       case 'agents.draft': {
         if (!context.origin) throw new AccessDenied();
+        const { evalCases, ...rest } = call.input;
+        // Starter test cases only reach the card where workspace Evals are on.
+        const input =
+          evalCases?.length && (await isFeatureEnabled('agent-evals', null, { id: workspaceId }).catch(() => false))
+            ? { ...rest, evalCases }
+            : rest;
         return createAuthoringDrafts(runtime).propose(workspaceId, actor, callId, context.origin, {
           kind: 'agent',
           ...(call.agent === 'new'
-            ? { targetId: randomUUID(), input: { ...call.input, expectedSavedRevision: null } }
-            : { targetId: call.agent.id, input: { ...call.input, expectedSavedRevision: call.agent.savedRevision } }),
+            ? { targetId: randomUUID(), input: { ...input, expectedSavedRevision: null } }
+            : { targetId: call.agent.id, input: { ...input, expectedSavedRevision: call.agent.savedRevision } }),
         });
       }
       case 'skills.draft':

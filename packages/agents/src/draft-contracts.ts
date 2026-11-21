@@ -13,6 +13,7 @@ import { agentRecordValueSchema } from './record-contracts.ts';
 import { fileNameSchema, moveFingerprintSchema, shareFingerprintSchema } from '@tulipfarm/files/contracts';
 import { authoredDefinitionSchema, definitionSchema } from '@tulipfarm/workflows/contracts';
 import { agentSetupConsentSchema, agentSetupDetailsSchema, agentSetupReceiptSchema } from './setup-contracts.ts';
+import { draftEvalCaseSchema, evalLimits } from './eval-case-contracts.ts';
 
 export const agentDraftInputSchema = saveAgentSchema.omit({ requestId: true }).extend({
   setup: agentSetupDetailsSchema.optional(),
@@ -31,6 +32,14 @@ export const agentDraftInputSchema = saveAgentSchema.omit({ requestId: true }).e
     .optional()
     .describe(
       'Required with setup. Copy expectedWorkflowGeneration from agents.context for this agent, including null.',
+    ),
+  /** Starter test cases shown on the card; an editor adds them to the agent's Evals after saving. */
+  evalCases: z
+    .array(draftEvalCaseSchema)
+    .max(evalLimits.draftCases)
+    .optional()
+    .describe(
+      "Optional starter test cases for the agent's Evals: realistic messages the agent should handle, each with checks that grade its reply.",
     ),
 });
 const workflowLifecycleInput = z.strictObject({
