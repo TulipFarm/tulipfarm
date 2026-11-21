@@ -1,4 +1,4 @@
-import { ChatRound } from 'reicon-react/icons/ChatRound';
+import { ChatIcon } from '@tulipfarm/icons';
 import { Link } from '@tanstack/react-router';
 import { z } from 'zod';
 import { tableDetailRoute, tableEditRoute, tablesRoute, tasksRoute, workspaceRoute } from '@/router';
@@ -138,7 +138,7 @@ function SchemaInChat({ tableId }: { tableId?: string }) {
       />
       <StatePanel
         kind="empty"
-        icon={ChatRound}
+        icon={ChatIcon}
         title="Build tables in chat"
         description="Describe the fields and changes you need to the built-in assistant. Review the exact schema and row effects in your chat before approving execution."
         sample={<CreateInChatSample />}
@@ -153,7 +153,7 @@ function SchemaInChat({ tableId }: { tableId?: string }) {
             />
           }
         >
-          <ChatRound size={16} aria-hidden="true" />
+          <ChatIcon size="md" aria-hidden="true" />
           {tableId ? 'Change fields in chat' : 'Create table in chat'}
         </Button>
       </StatePanel>

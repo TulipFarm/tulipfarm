@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChatRound } from 'reicon-react/icons/ChatRound';
+import { ChatIcon } from '@tulipfarm/icons';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Board, type BoardColumn } from '@tulipfarm/sprout/board';
 import { Button } from '@tulipfarm/sprout/button';
@@ -340,7 +340,7 @@ function TaskCardBody({
           {card.state === 'failed' && <Badge variant="destructive">Failed</Badge>}
           {card.comments > 0 && (
             <span className="flex items-center gap-1" aria-label={`${card.comments} comments`}>
-              <ChatRound size={12} aria-hidden="true" />
+              <ChatIcon size="xs" aria-hidden="true" />
               {card.comments}
             </span>
           )}

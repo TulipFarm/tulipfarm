@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { Plug } from 'reicon-react/icons/Plug';
+import { PlugIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@tulipfarm/sprout/collapsible';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
@@ -71,7 +71,7 @@ export function McpCallReviewCard({
       className="space-y-3 rounded-xl border border-border bg-card px-3 py-3 text-card-foreground"
     >
       <h4 id={`${id}-title`} className="flex items-center gap-2 text-sm font-medium">
-        <Plug size={16} aria-hidden="true" />
+        <PlugIcon size="md" aria-hidden="true" />
         <span className="min-w-0 break-words">
           {action.integrationName} · {tool}
         </span>

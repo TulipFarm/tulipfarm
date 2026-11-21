@@ -1,5 +1,5 @@
 import { useId } from 'react';
-import { X } from 'reicon-react/icons/X';
+import { CloseIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import {
   Combobox,
@@ -149,7 +149,7 @@ export function GrantsEditor({
               disabled={disabled}
               onClick={() => onChange(value.filter((_, position) => position !== index))}
             >
-              <X size={16} aria-hidden="true" />
+              <CloseIcon size="md" aria-hidden="true" />
             </Button>
           </li>
         ))}

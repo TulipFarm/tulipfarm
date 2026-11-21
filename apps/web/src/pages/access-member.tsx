@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { MoreH } from 'reicon-react/icons/MoreH';
-import { Users } from 'reicon-react/icons/Users';
+import { MoreIcon, UsersIcon } from '@tulipfarm/icons';
 import type { MemberAccess } from '@tulipfarm/workspaces/governance-contracts';
 import { Alert, AlertDescription, AlertTitle } from '@tulipfarm/sprout/alert';
 import { Badge } from '@tulipfarm/sprout/badge';
@@ -213,7 +212,7 @@ function Detail({ page, access, stale }: { page: AccessPage; access: MemberAcces
                 <StatePanel
                   kind="empty"
                   heading="h3"
-                  icon={Users}
+                  icon={UsersIcon}
                   title={access.self ? 'You’re not on any teams yet' : `${name} isn’t on any teams yet`}
                   description="Teams give their members access to tables."
                 />
@@ -285,7 +284,7 @@ function Detail({ page, access, stale }: { page: AccessPage; access: MemberAcces
                         <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${name} in ${team.name}`} />
                       }
                     >
-                      <MoreH size={16} aria-hidden="true" />
+                      <MoreIcon size="md" aria-hidden="true" />
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" size="menu">
                       <DropdownMenuItem

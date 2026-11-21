@@ -1,5 +1,5 @@
 import { useState, type ReactElement, type ReactNode } from 'react';
-import { Pin } from 'lucide-react';
+import { PinIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import {
   SidebarMenuSkeleton,
@@ -101,7 +101,7 @@ export function SidebarRecentItem({
             >
               <span className="flex min-w-0 items-center gap-2">
                 <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-                {entry.pinned && <Pin size={12} role="img" aria-label="Pinned" className="shrink-0" />}
+                {entry.pinned && <PinIcon size="xs" role="img" aria-label="Pinned" className="shrink-0" />}
               </span>
             </SidebarMenuSubButton>
           </SidebarMenuSubItem>

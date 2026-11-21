@@ -1,5 +1,5 @@
 import { useState, type ComponentType } from 'react';
-import { X } from 'reicon-react/icons/X';
+import { CloseIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import { ButtonGroup } from '@tulipfarm/sprout/button-group';
 
@@ -46,7 +46,7 @@ export function ActionNudge({
         <span className="@max-md:sr-only">{label}</span>
       </Button>
       <Button variant="outline" size="icon-sm" aria-label={`Dismiss ${label.toLowerCase()}`} onClick={onDismiss}>
-        <X size={14} aria-hidden="true" />
+        <CloseIcon size="sm" aria-hidden="true" />
       </Button>
     </ButtonGroup>
   );

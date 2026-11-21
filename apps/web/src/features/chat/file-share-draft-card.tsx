@@ -1,5 +1,5 @@
 import type { ReactNode, RefObject } from 'react';
-import { Share } from 'reicon-react/icons/Share';
+import { ShareIcon } from '@tulipfarm/icons';
 import { ReviewCard, ReviewRow, ReviewRows } from '@tulipfarm/sprout/review-card';
 import { Button } from '@tulipfarm/sprout/button';
 import { Disclosure } from '@/components/disclosure';
@@ -56,7 +56,7 @@ export function FileShareDraftCard({
   return (
     <ReviewCard
       label="Review file sharing"
-      icon={<Share size={16} />}
+      icon={<ShareIcon size="md" />}
       title={`Share “${file.name}”`}
       badge={badge[draft.status]}
       settled={draft.status === 'saved' || draft.status === 'dismissed' || draft.status === 'failed'}

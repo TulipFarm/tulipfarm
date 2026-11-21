@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
+import { ChevronDownIcon, ChevronRightIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 
 export type ToolRowView = {

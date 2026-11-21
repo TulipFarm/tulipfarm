@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ArrowRight } from 'reicon-react/icons/ArrowRight';
+import { ArrowRightIcon } from '@tulipfarm/icons';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { EntityAvatar } from '@tulipfarm/sprout/avatar';
 import { Button } from '@tulipfarm/sprout/button';
@@ -108,7 +108,7 @@ export function WorkspaceSignupPage() {
                 <Button type="submit" size="lg" disabled={pending} aria-busy={pending}>
                   {pending && <Spinner aria-hidden="true" />}
                   Continue
-                  <ArrowRight aria-hidden="true" />
+                  <ArrowRightIcon aria-hidden="true" />
                 </Button>
               </div>
             </div>

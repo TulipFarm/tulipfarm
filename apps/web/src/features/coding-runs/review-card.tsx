@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { Code } from 'reicon-react/icons/Code';
+import { CodeIcon } from '@tulipfarm/icons';
 import { codingAgentLabels } from '@tulipfarm/agents/coding-run-contracts';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
@@ -42,7 +42,7 @@ function statusText(run: CodingRunView) {
 function Heading({ id, run }: { id: string; run: CodingRunView }) {
   return (
     <h4 id={id} className="flex min-w-0 items-center gap-2 text-sm font-medium">
-      <Code size={16} aria-hidden="true" />
+      <CodeIcon size="md" aria-hidden="true" />
       <span className="min-w-0 break-all">
         {codingAgentLabels[run.agent]} on {run.repository}
         {run.branch && <span className="text-muted-foreground"> · {run.branch}</span>}

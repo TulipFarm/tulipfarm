@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ModelCatalogFamily, ModelCatalogImageModel } from '@tulipfarm/config/model-catalog';
 import { workspaceModelsRoute, workspaceRoute } from '@/router';
 import { useNavigate } from '@tanstack/react-router';
-import { Cpu } from 'reicon-react/icons/Cpu';
+import { CpuIcon } from '@tulipfarm/icons';
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { ModelsSample, StatePanel } from '@tulipfarm/sprout/state-panel';
@@ -114,7 +114,7 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
             {!families.length && (
               <StatePanel
                 kind="empty"
-                icon={Cpu}
+                icon={CpuIcon}
                 title="No models configured yet"
                 description="Once your operator configures model providers, each model family appears here. Admins then choose which teams can use it and pick a fallback if it becomes unavailable."
                 sample={<ModelsSample />}

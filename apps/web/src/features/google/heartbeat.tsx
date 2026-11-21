@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Refresh } from 'reicon-react/icons/Refresh';
+import { RefreshIcon } from '@tulipfarm/icons';
 import { heartbeatSettingsSchema, type HeartbeatSettings } from '@tulipfarm/google-workspace/public-contracts';
 import { Button } from '@tulipfarm/sprout/button';
 import { Input } from '@tulipfarm/sprout/input';
@@ -400,7 +400,7 @@ function HeartbeatResults({
           onClick={() => void read.refresh()}
         >
           <span aria-hidden="true" className={read.busy ? 'animate-spin motion-reduce:animate-none' : undefined}>
-            <Refresh size={16} />
+            <RefreshIcon size="md" />
           </span>
           Refresh heartbeat results
         </Button>

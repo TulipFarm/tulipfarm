@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
 import { z } from 'zod';
-import { EnvelopeCheck } from 'reicon-react/icons/EnvelopeCheck';
+import { MailCheckIcon } from '@tulipfarm/icons';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { Field, FieldSeparator } from '@tulipfarm/sprout/field';
@@ -403,7 +403,7 @@ export function AuthForm({
     return (
       <div className="space-y-4">
         <div role="status" className="flex items-center gap-2 font-medium">
-          <EnvelopeCheck size={16} />
+          <MailCheckIcon size="md" />
           Check your email
         </div>
         <p className="text-muted-foreground">

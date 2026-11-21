@@ -9,9 +9,7 @@ import {
   type RefObject,
   type SyntheticEvent,
 } from 'react';
-import { BookOpen } from 'reicon-react/icons/BookOpen';
-import { Compress } from 'reicon-react/icons/Compress';
-import { X } from 'reicon-react/icons/X';
+import { BookOpenIcon, CloseIcon, MinimizeIcon } from '@tulipfarm/icons';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
 import { Separator, SeparatorContent, SeparatorIcon } from '@tulipfarm/sprout/separator';
@@ -190,7 +188,7 @@ export function useSkillPicker(
             id={optionId(index)}
             active={index === current}
             onSelect={() => select(option)}
-            media={<BookOpen size={16} aria-hidden="true" />}
+            media={<BookOpenIcon size="md" aria-hidden="true" />}
             title={option.skill.name}
             description={option.description}
           />
@@ -239,7 +237,7 @@ export function useRichSkillPicker(
                     id: 'command:compact',
                     title: '/compact',
                     description: 'Summarize earlier messages to free context. Add instructions for a handoff.',
-                    media: <Compress size={16} aria-hidden="true" />,
+                    media: <MinimizeIcon size="md" aria-hidden="true" />,
                     apply: (target, range) => {
                       target.chain().focus().deleteRange(range).insertContent(`/${compactCommandName} `).run();
                     },
@@ -253,7 +251,7 @@ export function useRichSkillPicker(
               id: `${option.skill.skillId}:${option.skill.revision}`,
               title: option.skill.name,
               description: option.description,
-              media: <BookOpen size={16} aria-hidden="true" />,
+              media: <BookOpenIcon size="md" aria-hidden="true" />,
               apply: (editor, range) => {
                 setStaged(option.skill);
                 editor.chain().focus().deleteRange(range).run();
@@ -305,12 +303,12 @@ export function StagedSkill({
     <div className="space-y-1">
       <div className="flex min-w-0 items-center gap-1">
         <Badge variant="secondary" size="chip" title={skill.name}>
-          <BookOpen aria-hidden="true" />
+          <BookOpenIcon aria-hidden="true" />
           {label(skill)}
         </Badge>
         {!disabled && (
           <Button variant="ghost" size="icon-xs" aria-label={`Remove skill ${skill.name}`} onClick={onRemove}>
-            <X size={14} aria-hidden="true" />
+            <CloseIcon size="sm" aria-hidden="true" />
           </Button>
         )}
       </div>
@@ -328,7 +326,7 @@ export function SentSkill({ skill }: { skill: SkillReference }) {
       role="img"
       aria-label={`Skill ${skill.name}, version ${skill.revision.slice(0, 8)}`}
     >
-      <BookOpen aria-hidden="true" />
+      <BookOpenIcon aria-hidden="true" />
       {label(skill)}
     </Badge>
   );
@@ -338,7 +336,7 @@ export function SkillUse({ skill }: { skill: SkillReference }) {
   return (
     <Separator variant="marker">
       <SeparatorIcon>
-        <BookOpen size={16} />
+        <BookOpenIcon size="md" />
       </SeparatorIcon>
       <SeparatorContent>Used skill {label(skill)}</SeparatorContent>
     </Separator>

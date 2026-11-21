@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlarmClock } from 'reicon-react/icons/AlarmClock';
+import { AlarmClockIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import { ResultCard, type ResultCardProps } from '@tulipfarm/sprout/result-card';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
@@ -85,7 +85,7 @@ export function FollowUpCard({ api, chatId, id }: { api: ConversationApi; chatId
           <ResultCard
             title="Follow-up"
             kind="Activity"
-            icon={<AlarmClock aria-hidden />}
+            icon={<AlarmClockIcon aria-hidden />}
             apps={[]}
             status={
               cancelling

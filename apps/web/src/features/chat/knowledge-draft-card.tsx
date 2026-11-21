@@ -1,7 +1,5 @@
 import type { ReactNode, RefObject } from 'react';
-import { Add } from 'reicon-react/icons/Add';
-import { Edit } from 'reicon-react/icons/Edit';
-import { Trash } from 'reicon-react/icons/Trash';
+import { AddIcon, DeleteIcon, EditIcon } from '@tulipfarm/icons';
 import { ReviewCard, ReviewRow, ReviewRows } from '@tulipfarm/sprout/review-card';
 import { Button } from '@tulipfarm/sprout/button';
 import { Disclosure } from '@/components/disclosure';
@@ -10,14 +8,14 @@ import type { DraftView, KnowledgeProposal } from '@tulipfarm/agents/draft-contr
 import { TechnicalDetail } from './row-draft-card';
 
 const operations = {
-  add: { verb: 'Add', title: 'Add to Knowledge', done: 'added', doing: 'Adding…', icon: <Add size={16} /> },
-  update: { verb: 'Update', title: 'Update', done: 'updated', doing: 'Updating…', icon: <Edit size={16} /> },
+  add: { verb: 'Add', title: 'Add to Knowledge', done: 'added', doing: 'Adding…', icon: <AddIcon size="md" /> },
+  update: { verb: 'Update', title: 'Update', done: 'updated', doing: 'Updating…', icon: <EditIcon size="md" /> },
   remove: {
     verb: 'Remove',
     title: 'Remove from Knowledge',
     done: 'removed',
     doing: 'Removing…',
-    icon: <Trash size={16} />,
+    icon: <DeleteIcon size="md" />,
   },
 } as const;
 

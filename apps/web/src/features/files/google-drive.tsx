@@ -1,10 +1,6 @@
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ChatRound } from 'reicon-react/icons/ChatRound';
-import { Copy } from 'reicon-react/icons/Copy';
-import { Files } from 'reicon-react/icons/Files';
-import { Folder } from 'reicon-react/icons/Folder';
-import { MoreH } from 'reicon-react/icons/MoreH';
+import { ChatIcon, CopyIcon, FilesIcon, FolderIcon, MoreIcon } from '@tulipfarm/icons';
 import { filesRoute, workspaceRoute } from '@/router';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { FileTypeIcon } from '@tulipfarm/sprout/attachment';
@@ -342,7 +338,7 @@ function Browser({
               return (
                 <StatePanel
                   kind="unavailable"
-                  icon={Folder}
+                  icon={FolderIcon}
                   title="This Google folder isn’t available"
                   description="It may have been deleted, moved to trash, or unshared in Google."
                 >
@@ -353,7 +349,7 @@ function Browser({
               return folder ? (
                 <StatePanel
                   kind="unavailable"
-                  icon={Folder}
+                  icon={FolderIcon}
                   title="Google denied access to this folder"
                   description="Ask its owner in Google for access. Its contents stay hidden."
                 >
@@ -363,7 +359,7 @@ function Browser({
               ) : (
                 <StatePanel
                   kind="unavailable"
-                  icon={Files}
+                  icon={FilesIcon}
                   title={`Google denied access to ${name ? 'this search' : shared ? 'files shared with you' : 'My Drive'}`}
                   description="Google refused to list these files for your account. Check your Drive access in Google, then try again."
                 >
@@ -418,7 +414,7 @@ function Browser({
                   return (
                     <StatePanel
                       kind="empty"
-                      icon={Files}
+                      icon={FilesIcon}
                       title={`No Google Drive files match “${name}”`}
                       description="Search checks file and folder names across My Drive and files shared with you."
                     >
@@ -431,7 +427,7 @@ function Browser({
                   return (
                     <StatePanel
                       kind="empty"
-                      icon={Files}
+                      icon={FilesIcon}
                       title="No files on this page"
                       description={
                         page.value.nextPageToken
@@ -444,7 +440,7 @@ function Browser({
                   return (
                     <StatePanel
                       kind="empty"
-                      icon={Folder}
+                      icon={FolderIcon}
                       title="This Google folder is empty"
                       description="Add files to it in Google Drive. They appear here the next time you refresh."
                     />
@@ -453,7 +449,7 @@ function Browser({
                   return (
                     <StatePanel
                       kind="empty"
-                      icon={Files}
+                      icon={FilesIcon}
                       title="Nothing shared with you in Google Drive"
                       description="Files that other people share with your Google account appear here."
                     />
@@ -461,7 +457,7 @@ function Browser({
                 return (
                   <StatePanel
                     kind="empty"
-                    icon={Files}
+                    icon={FilesIcon}
                     title="Your Google Drive is empty"
                     description="Files you add to My Drive in Google appear here. They stay in Google."
                   />
@@ -540,7 +536,7 @@ function Crumb({ name, link }: { name: string; link?: ReactElement | undefined }
 
 export function GoogleFileIcon({ file }: { file: Pick<GoogleFileMetadata, 'name' | 'mimeType'> }) {
   const type = googleType(file);
-  if (type.view === 'folder') return <Folder size={20} />;
+  if (type.view === 'folder') return <FolderIcon size="xl" />;
   return type.brand ? (
     <BrandIcon brand={type.brand} size="glyph" />
   ) : (
@@ -571,18 +567,18 @@ function RowMenu({
           ref={trigger}
           render={<Button variant="ghost" size="icon-sm" aria-label={`More actions for ${file.name}`} />}
         >
-          <MoreH size={16} aria-hidden="true" />
+          <MoreIcon size="md" aria-hidden="true" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" size="menu">
           {googleReadable(file) && scope.kind === 'workspace' && (
             <DropdownMenuItem onClick={() => setOpen('chat')}>
-              <ChatRound size={14} aria-hidden="true" />
+              <ChatIcon size="sm" aria-hidden="true" />
               Use in chat
             </DropdownMenuItem>
           )}
           {canCopy(file) && (
             <DropdownMenuItem onClick={() => setOpen('copy')}>
-              <Copy size={14} aria-hidden="true" />
+              <CopyIcon size="sm" aria-hidden="true" />
               Save a copy to TulipFarm
             </DropdownMenuItem>
           )}

@@ -1,4 +1,4 @@
-import { CheckIcon } from 'lucide-react';
+import { CheckIcon } from '@tulipfarm/icons';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { googleAppScopes } from '@tulipfarm/google-workspace/public-contracts';

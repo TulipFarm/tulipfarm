@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Filter } from 'reicon-react/icons/Filter';
+import { FilterIcon } from '@tulipfarm/icons';
 import type { FilePerson, FileType } from '@tulipfarm/files/contracts';
 import { Button } from '@tulipfarm/sprout/button';
 import { Input } from '@tulipfarm/sprout/input';
@@ -243,7 +243,7 @@ export function FilterBar({
               />
             }
           >
-            <Filter size={14} aria-hidden="true" />
+            <FilterIcon size="sm" aria-hidden="true" />
             {!compact && (count ? `Filters (${count})` : sort ? 'Filter and sort' : 'Filters')}
           </SheetTrigger>
           <SheetContent side="bottom">

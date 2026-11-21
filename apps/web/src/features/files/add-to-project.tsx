@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Briefcase } from 'reicon-react/icons/Briefcase';
-import { Check } from 'reicon-react/icons/Check';
+import { BriefcaseIcon, CheckIcon } from '@tulipfarm/icons';
 import { FileTypeIcon } from '@tulipfarm/sprout/attachment';
 import { Button } from '@tulipfarm/sprout/button';
 import {
@@ -213,7 +212,7 @@ export function AddToProjectDialog({
         <PromotionSummary
           destination={
             <>
-              <Briefcase size={14} aria-hidden="true" />
+              <BriefcaseIcon size="sm" aria-hidden="true" />
               <span className="min-w-0 wrap-anywhere">{project.name} · Project files</span>
             </>
           }
@@ -295,7 +294,7 @@ export function AddToProjectDialog({
                 )}
                 {result.kind === 'added' && (
                   <p className="flex items-center gap-1.5 text-sm text-foreground">
-                    <Check size={14} aria-hidden="true" />
+                    <CheckIcon size="sm" aria-hidden="true" />
                     Added
                   </p>
                 )}
@@ -416,7 +415,7 @@ function Destinations({
       <StatePanel
         kind="empty"
         heading="h3"
-        icon={Briefcase}
+        icon={BriefcaseIcon}
         title="No projects you can add files to"
         description="Only project managers can add files. Create a project, or ask a manager of an existing project to add this file."
       >
@@ -443,7 +442,7 @@ function Destinations({
         {editable.map(project => (
           <li key={project.id} className="grid">
             <Button variant="ghost" size="md" onClick={() => choose(project)}>
-              <Briefcase size={16} aria-hidden="true" />
+              <BriefcaseIcon size="md" aria-hidden="true" />
               <span className="min-w-0 flex-1 truncate text-start" title={project.name}>
                 {project.name}
               </span>

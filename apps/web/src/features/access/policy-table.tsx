@@ -1,7 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
-import { MoreH } from 'reicon-react/icons/MoreH';
-import { ShieldUser } from 'reicon-react/icons/ShieldUser';
+import { MoreIcon, ShieldUserIcon } from '@tulipfarm/icons';
 import type { GovernanceSnapshot, PolicyScope } from '@tulipfarm/workspaces/governance-contracts';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Badge } from '@tulipfarm/sprout/badge';
@@ -505,7 +504,7 @@ export function PolicyTable({
                   />
                 }
               >
-                <MoreH size={16} aria-hidden="true" />
+                <MoreIcon size="md" aria-hidden="true" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" size="menu">
                 <DropdownMenuItem
@@ -590,7 +589,7 @@ function CheckingStatus({ message }: { message: string }) {
 
 export function NoPolicies({ title, description, action }: { title: string; description: string; action?: ReactNode }) {
   return (
-    <StatePanel kind="empty" heading="h3" icon={ShieldUser} title={title} description={description}>
+    <StatePanel kind="empty" heading="h3" icon={ShieldUserIcon} title={title} description={description}>
       {action}
     </StatePanel>
   );

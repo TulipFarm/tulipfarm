@@ -1,6 +1,6 @@
 import type { ReactElement, ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Folder } from 'reicon-react/icons/Folder';
+import { FolderIcon } from '@tulipfarm/icons';
 import type { FilePerson, LibraryItem, LibraryPage, LibraryQuery } from '@tulipfarm/files/contracts';
 import { workspaceRoute } from '@/router';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
@@ -200,7 +200,7 @@ function FilesSource({
     name: item.name,
     icon:
       item.kind === 'folder' ? (
-        <Folder size={20} />
+        <FolderIcon size="xl" />
       ) : (
         <FileTypeIcon name={item.name} mediaType={item.mediaType ?? 'application/octet-stream'} />
       ),

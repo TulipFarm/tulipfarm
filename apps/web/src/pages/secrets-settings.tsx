@@ -1,11 +1,6 @@
 import { useId, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Add } from 'reicon-react/icons/Add';
-import { ChevronDown } from 'reicon-react/icons/ChevronDown';
-import { Check } from 'reicon-react/icons/Check';
-import { ChevronUp } from 'reicon-react/icons/ChevronUp';
-import { Copy } from 'reicon-react/icons/Copy';
-import { MoreH } from 'reicon-react/icons/MoreH';
+import { AddIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, MoreIcon } from '@tulipfarm/icons';
 import { workspaceRoute } from '@/router';
 import { editListed, useFeatureScope, useOptimisticUpdate } from '@/lib/query';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
@@ -196,7 +191,7 @@ function Secrets({ workspaceId }: { workspaceId: string }) {
             <p className="text-sm text-muted-foreground">Yours and those shared with you.</p>
           </div>
           <Button onClick={() => setAction({ kind: 'add' })}>
-            <Add size={16} aria-hidden="true" />
+            <AddIcon size="md" aria-hidden="true" />
             Add secret
           </Button>
         </div>
@@ -261,7 +256,7 @@ function SecretActions({ secret, you, open }: { secret: SecretSummary; you: stri
   return (
     <DropdownMenu>
       <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${secret.name}`} />}>
-        <MoreH size={16} aria-hidden="true" />
+        <MoreIcon size="md" aria-hidden="true" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuGroup>
@@ -645,7 +640,11 @@ function AddSecretDialog({ workspaceId, people, close }: { workspaceId: string; 
               onClick={() => setAdvanced(!advanced)}
             >
               Advanced
-              {advanced ? <ChevronUp size={16} aria-hidden="true" /> : <ChevronDown size={16} aria-hidden="true" />}
+              {advanced ? (
+                <ChevronUpIcon size="md" aria-hidden="true" />
+              ) : (
+                <ChevronDownIcon size="md" aria-hidden="true" />
+              )}
             </Button>
           </div>
           {advanced && (
@@ -1179,7 +1178,7 @@ function CopyableName({ value }: { value: string }) {
           )
         }
       >
-        {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
+        {copied ? <CheckIcon size="sm" aria-hidden="true" /> : <CopyIcon size="sm" aria-hidden="true" />}
       </Button>
     </span>
   );

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Button } from '@tulipfarm/sprout/button';
 import { Field } from '@tulipfarm/sprout/field';
 import { Input } from '@tulipfarm/sprout/input';
-import { ArrowUpRight } from 'reicon-react/icons/ArrowUpRight';
+import { ArrowUpRightIcon } from '@tulipfarm/icons';
 import { McpRequestError, type McpApi } from './api';
 import { endMcpPasteSignIn, markMcpConnected } from './sign-in';
 
@@ -80,7 +80,7 @@ export function McpPasteSignIn({
           render={<a href={authorizationUrl} target="_blank" rel="noopener noreferrer" />}
         >
           Sign in to {name}
-          <ArrowUpRight aria-hidden="true" />
+          <ArrowUpRightIcon aria-hidden="true" />
         </Button>
       )}
       <form

@@ -1,10 +1,6 @@
 import { useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check } from 'reicon-react/icons/Check';
-import { Database } from 'reicon-react/icons/Database';
-import { ArrowRight } from 'reicon-react/icons/ArrowRight';
-import { Danger } from 'reicon-react/icons/Danger';
-import { X } from 'reicon-react/icons/X';
+import { ArrowRightIcon, CheckIcon, CloseIcon, DangerIcon, DatabaseIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Spinner } from '@tulipfarm/sprout/spinner';
@@ -214,7 +210,7 @@ export default function ApprovalPreview() {
                   </p>
                   <div className="flex items-center gap-3 py-2">
                     <span className="text-muted-foreground">
-                      <Database size={18} aria-hidden="true" />
+                      <DatabaseIcon size="lg" aria-hidden="true" />
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-foreground">
@@ -242,7 +238,7 @@ export default function ApprovalPreview() {
                 {done && (
                   <div className="flex items-start gap-2 text-sm">
                     <span className="text-success">
-                      <Check size={18} aria-hidden="true" />
+                      <CheckIcon size="lg" aria-hidden="true" />
                     </span>
                     <p>
                       {total === 1 ? 'Customers is ready.' : 'Customers, Contacts, and Companies are ready.'} Your new{' '}
@@ -274,13 +270,13 @@ export default function ApprovalPreview() {
                       {busy ? (
                         <Spinner aria-hidden="true" />
                       ) : done ? (
-                        <Check size={20} aria-hidden="true" />
+                        <CheckIcon size="xl" aria-hidden="true" />
                       ) : phase === 'error' ? (
-                        <Danger size={20} aria-hidden="true" />
+                        <DangerIcon size="xl" aria-hidden="true" />
                       ) : phase === 'rejected' ? (
-                        <X size={20} aria-hidden="true" />
+                        <CloseIcon size="xl" aria-hidden="true" />
                       ) : (
-                        <Database size={20} aria-hidden="true" />
+                        <DatabaseIcon size="xl" aria-hidden="true" />
                       )}
                     </span>
                     <div className="min-w-0 flex-1">
@@ -339,7 +335,7 @@ export default function ApprovalPreview() {
                           <span className="size-3 rounded-full bg-info" />
                         ) : (
                           <span className="text-success">
-                            <Check size={14} aria-hidden="true" />
+                            <CheckIcon size="sm" aria-hidden="true" />
                           </span>
                         )}
                         Approval
@@ -398,7 +394,7 @@ export default function ApprovalPreview() {
                               : phase === 'error'
                                 ? 'Retry creation'
                                 : 'Review again'}
-                      {done && <ArrowRight size={16} aria-hidden="true" />}
+                      {done && <ArrowRightIcon size="md" aria-hidden="true" />}
                     </Button>
                   </div>
                 </section>
@@ -432,7 +428,7 @@ export default function ApprovalPreview() {
         }
         canvas={
           <CanvasPanel
-            tabs={[{ id: 'approval', title: showRows ? 'Created tables' : 'Proposed changes', icon: Database }]}
+            tabs={[{ id: 'approval', title: showRows ? 'Created tables' : 'Proposed changes', icon: DatabaseIcon }]}
             activeId="approval"
             onSelect={() => {}}
             onCloseTab={() => setOpen(false)}
@@ -473,7 +469,7 @@ export default function ApprovalPreview() {
                     className="overflow-hidden rounded-xl border"
                   >
                     <header className="flex items-center gap-2 border-b bg-muted px-4 py-3">
-                      <Database size={18} aria-hidden="true" />
+                      <DatabaseIcon size="lg" aria-hidden="true" />
                       <h3 className="flex-1 text-base font-medium text-foreground">{table.name}</h3>
                       <span className="text-xs text-muted-foreground">{table.fields.length} fields</span>
                     </header>

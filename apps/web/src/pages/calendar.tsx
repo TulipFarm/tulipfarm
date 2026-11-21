@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import {
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  Clock3,
-  Command,
-  ExternalLink,
-  Inbox,
-  MoreHorizontal,
-  Plus,
-  RefreshCw,
-  Search,
-  SlidersHorizontal,
-} from 'lucide-react';
+  AddIcon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ClockIcon,
+  CommandIcon,
+  ExternalLinkIcon,
+  InboxIcon,
+  MoreIcon,
+  RefreshIcon,
+  SearchIcon,
+  SlidersIcon,
+} from '@tulipfarm/icons';
 import { format } from 'date-fns';
 import { workspaceCalendarRoute, workspaceRoute } from '@/router';
 import { Button } from '@tulipfarm/sprout/button';
@@ -364,7 +364,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                     {taskStatusLabels[task.status]}
                   </Badge>
                   <Button variant="outline" size="md" onClick={() => openCreate(day, '09:00', task.title)}>
-                    <Clock3 size={14} />
+                    <ClockIcon size="sm" />
                     Reserve time
                   </Button>
                 </div>
@@ -414,7 +414,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                     }
                   >
                     Review
-                    <ChevronRight size={14} />
+                    <ChevronRightIcon size="sm" />
                   </Button>
                 </div>
               </CardFooter>
@@ -485,7 +485,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
           />
         ))}
         <Button variant="ghost" size="sm" aria-label="Choose workflow follows" onClick={() => setPanel('follow')}>
-          <Plus size={14} />
+          <AddIcon size="sm" />
           Follow workflows
         </Button>
       </section>
@@ -593,12 +593,12 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                 title="Search events and commands (/)"
                 onClick={() => setCommandsOpen(true)}
               >
-                <Search size={14} />
+                <SearchIcon size="sm" />
                 Search
               </Button>
             </span>
             <Button size="md" onClick={() => openCreate()}>
-              <Plus size={14} />
+              <AddIcon size="sm" />
               Create
             </Button>
           </>
@@ -617,14 +617,14 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                 aria-label="Previous range"
                 onClick={() => show({ date: moveDate(day, view, -1, zone) })}
               >
-                <ChevronLeft size={16} />
+                <ChevronLeftIcon size="md" />
               </Button>
               <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
                 <h2 className="min-w-0" aria-label={title}>
                   <PopoverTrigger render={<Button variant="ghost" size="md" aria-label="Choose date" />}>
                     <span className="calendar-title-full">{title}</span>
                     <span className="calendar-title-short">{format(localDate(day, '12:00', zone), 'MMM yyyy')}</span>
-                    <ChevronDown size={14} />
+                    <ChevronDownIcon size="sm" />
                   </PopoverTrigger>
                 </h2>
                 <PopoverContent align="start" aria-label="Choose a calendar date">
@@ -648,7 +648,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                 aria-label="Next range"
                 onClick={() => show({ date: moveDate(day, view, 1, zone) })}
               >
-                <ChevronRight size={16} />
+                <ChevronRightIcon size="md" />
               </Button>
             </div>
             <div className="calendar-view-control">
@@ -677,12 +677,12 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                 <PopoverTrigger
                   render={<Button variant="outline" size="md" aria-label="Pending work" title={pendingDescription} />}
                 >
-                  <Inbox size={14} />
+                  <InboxIcon size="sm" />
                   <span className="calendar-pending-label">Pending work</span>
                   <Badge variant={pendingFailed ? 'destructive' : pendingCount === 0 ? 'secondary' : 'warning'}>
                     {pendingLabel}
                   </Badge>
-                  <ChevronDown size={14} />
+                  <ChevronDownIcon size="sm" />
                 </PopoverTrigger>
                 <PopoverContent size="work-list" align="start" aria-label="Pending work">
                   <div className="shrink-0 border-b p-3">
@@ -712,7 +712,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                       }}
                     >
                       View all
-                      <ChevronRight size={14} />
+                      <ChevronRightIcon size="sm" />
                     </Button>
                   </footer>
                 </PopoverContent>
@@ -721,7 +721,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                 Today
               </Button>
               <Button variant="outline" size="md" aria-label="Calendar filters" onClick={() => setPanel('filters')}>
-                <SlidersHorizontal size={14} />
+                <SlidersIcon size="sm" />
                 Filters{filterCount > 0 && <Badge variant="secondary">{filterCount}</Badge>}
               </Button>
               <div className="calendar-desktop-tools">
@@ -734,7 +734,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                     void sources.google.refresh();
                   }}
                 >
-                  <Clock3 size={14} />
+                  <ClockIcon size="sm" />
                   Find time
                 </Button>
                 <Button
@@ -743,7 +743,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                   aria-label="Refresh calendar"
                   onClick={() => void sources.refresh()}
                 >
-                  <RefreshCw size={14} />
+                  <RefreshIcon size="sm" />
                 </Button>
               </div>
               <div className="calendar-more-controls">
@@ -751,11 +751,11 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                   <DropdownMenuTrigger
                     render={<Button variant="ghost" size="icon" aria-label="More calendar actions" />}
                   >
-                    <MoreHorizontal size={16} />
+                    <MoreIcon size="md" />
                   </DropdownMenuTrigger>
                   <DropdownMenuContent size="menu" align="end">
                     <DropdownMenuItem onClick={() => setCommandsOpen(true)}>
-                      <Search size={14} />
+                      <SearchIcon size="sm" />
                       Search calendar
                     </DropdownMenuItem>
                     <DropdownMenuItem
@@ -764,11 +764,11 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                         void sources.google.refresh();
                       }}
                     >
-                      <Clock3 size={14} />
+                      <ClockIcon size="sm" />
                       Find time
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => void sources.refresh()}>
-                      <RefreshCw size={14} />
+                      <RefreshIcon size="sm" />
                       Refresh calendar
                     </DropdownMenuItem>
                   </DropdownMenuContent>
@@ -1068,7 +1068,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                     render={<a href={item.joinUrl} target="_blank" rel="noopener noreferrer" />}
                   >
                     Join meeting
-                    <ExternalLink size={14} />
+                    <ExternalLinkIcon size="sm" />
                   </Button>
                 )}
                 {item.href && (
@@ -1083,7 +1083,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                     }
                   >
                     Open {item.kind === 'workflow' ? 'workflow' : 'original'}
-                    <ExternalLink size={14} />
+                    <ExternalLinkIcon size="sm" />
                   </Button>
                 )}
               </div>
@@ -1157,7 +1157,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                 key={option.id}
                 value={option.id}
                 title={option.title}
-                media={<Command size={16} />}
+                media={<CommandIcon size="md" />}
                 trailing={option.key}
                 onSelect={() => {
                   setCommandsOpen(false);
@@ -1182,7 +1182,11 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
             ))}
           </SearchGroup>
           {!commandOptions.length && !matchingItems.length && (
-            <SearchEmpty media={<Search />} title="No matches" description="Try another title or calendar command." />
+            <SearchEmpty
+              media={<SearchIcon />}
+              title="No matches"
+              description="Try another title or calendar command."
+            />
           )}
         </SearchList>
         <SearchFooter>

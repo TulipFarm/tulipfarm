@@ -4,8 +4,7 @@ import { BrandIcon } from '@tulipfarm/sprout/brand-icon';
 import { Button } from '@tulipfarm/sprout/button';
 import { Field } from '@tulipfarm/sprout/field';
 import { Input } from '@tulipfarm/sprout/input';
-import { ArrowUpRight } from 'reicon-react/icons/ArrowUpRight';
-import { Check } from 'reicon-react/icons/Check';
+import { ArrowUpRightIcon, CheckIcon } from '@tulipfarm/icons';
 import { useFeatureChanges } from '@/lib/query';
 import { githubApi, githubConsent, githubError } from '@/lib/github';
 import { startGitHub } from '@/features/integrations/connect';
@@ -69,7 +68,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
         )
       }
     >
-      {copied ? <Check size={14} aria-hidden="true" /> : null}
+      {copied ? <CheckIcon size="sm" aria-hidden="true" /> : null}
       {copied ? 'Copied' : label}
     </Button>
   );
@@ -84,7 +83,7 @@ function ExternalLink({ href, children }: { href: string; children: ReactNode })
       rel="noopener noreferrer"
     >
       {children}
-      <ArrowUpRight size={12} aria-hidden="true" />
+      <ArrowUpRightIcon size="xs" aria-hidden="true" />
     </a>
   );
 }
@@ -457,7 +456,7 @@ export function useTokenPlan(workspaceId: string, provider: TokenPlanProvider): 
           render={<a href={device.verificationUri} target="_blank" rel="noopener noreferrer" />}
         >
           Open {device.verificationUri.replace(/^https:\/\//, '')}
-          <ArrowUpRight size={14} aria-hidden="true" />
+          <ArrowUpRightIcon size="sm" aria-hidden="true" />
         </Button>
       </div>
       <div className="flex flex-wrap items-center gap-3">

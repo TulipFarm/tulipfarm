@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useRouterState, useSearch } from '@tanstack/react-router';
-import { ArrowRight as ArrowRightIcon } from 'reicon-react/icons/ArrowRight';
+import { ArrowRightIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import { Input } from '@tulipfarm/sprout/input';
 import { Label } from '@tulipfarm/sprout/label';

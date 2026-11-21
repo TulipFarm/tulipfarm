@@ -10,20 +10,22 @@ import { SearchField } from '@tulipfarm/sprout/search-field';
 import { Skeleton, SkeletonGroup } from '@tulipfarm/sprout/skeleton';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { ToggleGroup, ToggleGroupItem } from '@tulipfarm/sprout/toggle-group';
-import { ArrowRight } from 'reicon-react/icons/ArrowRight';
-import { Box } from 'reicon-react/icons/Box';
-import { Building2 } from 'reicon-react/icons/Building2';
-import { Bullhorn } from 'reicon-react/icons/Bullhorn';
-import { ChartLine } from 'reicon-react/icons/ChartLine';
-import { Code } from 'reicon-react/icons/Code';
-import { Gear } from 'reicon-react/icons/Gear';
-import { Grid } from 'reicon-react/icons/Grid';
-import { Handshake } from 'reicon-react/icons/Handshake';
-import { Headphones } from 'reicon-react/icons/Headphones';
-import { Scale } from 'reicon-react/icons/Scale';
-import { ShieldCheck } from 'reicon-react/icons/ShieldCheck';
-import { Users } from 'reicon-react/icons/Users';
-import { Wallet } from 'reicon-react/icons/Wallet';
+import {
+  ArrowRightIcon,
+  BoxIcon,
+  BuildingIcon,
+  ChartLineIcon,
+  CodeIcon,
+  GridIcon,
+  HandshakeIcon,
+  HeadphonesIcon,
+  MegaphoneIcon,
+  ScaleIcon,
+  SettingsIcon,
+  ShieldCheckIcon,
+  UsersIcon,
+  WalletIcon,
+} from '@tulipfarm/icons';
 import { ReadFeedback, ReadError } from '@/components/read-feedback';
 import type { ReadState } from '@/features/tables/request-state';
 import { useFeatureRead } from '@/lib/query';
@@ -121,49 +123,55 @@ function PackageCatalogSkeleton() {
   );
 }
 
-type CategoryStyle = { icon: typeof Box; tile: string };
+type CategoryStyle = { icon: typeof BoxIcon; tile: string };
 
 const categoryStyles: Record<string, CategoryStyle> = {
   'Agency & client services': {
-    icon: Handshake,
+    icon: HandshakeIcon,
     tile: 'bg-[color-mix(in_oklab,var(--sprout-purple)_14%,transparent)] text-(--sprout-purple)',
   },
-  Finance: { icon: Wallet, tile: 'bg-[color-mix(in_oklab,var(--sprout-green)_14%,transparent)] text-(--sprout-green)' },
+  Finance: {
+    icon: WalletIcon,
+    tile: 'bg-[color-mix(in_oklab,var(--sprout-green)_14%,transparent)] text-(--sprout-green)',
+  },
   'IT & security': {
-    icon: ShieldCheck,
+    icon: ShieldCheckIcon,
     tile: 'bg-[color-mix(in_oklab,var(--sprout-blue)_14%,transparent)] text-(--sprout-blue)',
   },
   Industry: {
-    icon: Building2,
+    icon: BuildingIcon,
     tile: 'bg-[color-mix(in_oklab,var(--sprout-orange)_14%,transparent)] text-(--sprout-orange)',
   },
   'Legal & compliance': {
-    icon: Scale,
+    icon: ScaleIcon,
     tile: 'bg-[color-mix(in_oklab,var(--sprout-teal)_14%,transparent)] text-(--sprout-teal)',
   },
-  Marketing: { icon: Bullhorn, tile: 'bg-[color-mix(in_oklab,var(--sprout-red)_14%,transparent)] text-(--sprout-red)' },
+  Marketing: {
+    icon: MegaphoneIcon,
+    tile: 'bg-[color-mix(in_oklab,var(--sprout-red)_14%,transparent)] text-(--sprout-red)',
+  },
   Operations: {
-    icon: Gear,
+    icon: SettingsIcon,
     tile: 'bg-[color-mix(in_oklab,var(--sprout-yellow)_18%,transparent)] text-(--sprout-yellow)',
   },
   'People & HR': {
-    icon: Users,
+    icon: UsersIcon,
     tile: 'bg-[color-mix(in_oklab,var(--sprout-primary)_14%,transparent)] text-(--sprout-primary)',
   },
   'Product & engineering': {
-    icon: Code,
+    icon: CodeIcon,
     tile: 'bg-[color-mix(in_oklab,var(--sprout-blue)_14%,transparent)] text-(--sprout-blue)',
   },
   Sales: {
-    icon: ChartLine,
+    icon: ChartLineIcon,
     tile: 'bg-[color-mix(in_oklab,var(--sprout-green)_14%,transparent)] text-(--sprout-green)',
   },
   'Support & success': {
-    icon: Headphones,
+    icon: HeadphonesIcon,
     tile: 'bg-[color-mix(in_oklab,var(--sprout-teal)_14%,transparent)] text-(--sprout-teal)',
   },
 };
-const fallbackStyle: CategoryStyle = { icon: Box, tile: 'bg-muted text-muted-foreground' };
+const fallbackStyle: CategoryStyle = { icon: BoxIcon, tile: 'bg-muted text-muted-foreground' };
 const categoryStyle = (category: string) => categoryStyles[category] ?? fallbackStyle;
 
 const popularPackages = [
@@ -199,7 +207,7 @@ function PublicPackageBrowser({ packages }: { packages: PublicPackage[] }) {
   };
   const categoryItems = (layout: 'rail' | 'chips') => [
     <ToggleGroupItem key="all" value="all">
-      <CategoryLabel layout={layout} icon={Grid} label="All packages" count={packages.length} />
+      <CategoryLabel layout={layout} icon={GridIcon} label="All packages" count={packages.length} />
     </ToggleGroupItem>,
     ...categories.map(value => (
       <ToggleGroupItem key={value} value={value}>
@@ -271,7 +279,7 @@ function PublicPackageBrowser({ packages }: { packages: PublicPackage[] }) {
           ) : (
             <StatePanel
               kind="empty"
-              icon={Box}
+              icon={BoxIcon}
               title="No packages match your filters"
               description="Try another search or browse every category."
             >
@@ -302,7 +310,7 @@ function PublicPackageBrowser({ packages }: { packages: PublicPackage[] }) {
                     entries.length > sectionSize && (
                       <Button variant="ghost" size="sm" onClick={() => setCategory(value)}>
                         See all {entries.length}
-                        <ArrowRight data-icon="inline-end" aria-hidden="true" />
+                        <ArrowRightIcon data-icon="inline-end" aria-hidden="true" />
                       </Button>
                     )
                   }
@@ -313,7 +321,7 @@ function PublicPackageBrowser({ packages }: { packages: PublicPackage[] }) {
         ) : (
           <StatePanel
             kind="empty"
-            icon={Box}
+            icon={BoxIcon}
             title="No public packages yet"
             description="Check back for new systems from the public catalog."
           />
@@ -330,7 +338,7 @@ function CategoryLabel({
   count,
 }: {
   layout: 'rail' | 'chips';
-  icon: typeof Box;
+  icon: typeof BoxIcon;
   label: string;
   count: number;
 }) {

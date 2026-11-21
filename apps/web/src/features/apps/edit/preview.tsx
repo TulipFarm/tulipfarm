@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, AlertDescription, AlertTitle } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
-import { Window } from 'reicon-react/icons/Window';
+import { WindowIcon } from '@tulipfarm/icons';
 import { failureMessage, type AppApi } from '../api';
 
 /* oxlint-disable tulipfarm/product-copy -- Message types the preview host posts to this page, shared with the server. */
@@ -109,7 +109,7 @@ export function DraftPreview({
       <StatePanel
         kind="empty"
         heading="h2"
-        icon={Window}
+        icon={WindowIcon}
         title="Nothing built yet"
         description="The draft appears here after its first build."
       />

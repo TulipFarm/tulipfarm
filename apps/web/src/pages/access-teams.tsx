@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { MoreH } from 'reicon-react/icons/MoreH';
-import { People } from 'reicon-react/icons/People';
+import { MoreIcon, UsersIcon } from '@tulipfarm/icons';
 import type { PolicyPermission, Team } from '@tulipfarm/workspaces/governance-contracts';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Badge } from '@tulipfarm/sprout/badge';
@@ -190,7 +189,7 @@ export function TeamsList({ page }: { page: AccessPage }) {
         <StatePanel
           kind="empty"
           heading="h3"
-          icon={People}
+          icon={UsersIcon}
           title="No teams yet"
           description="Teams group people so you can give them access to tables together."
         >
@@ -219,7 +218,7 @@ export function TeamsList({ page }: { page: AccessPage }) {
               <StatePanel
                 kind="empty"
                 heading="h3"
-                icon={People}
+                icon={UsersIcon}
                 title="No teams match that search"
                 description="Try another name."
               />
@@ -256,7 +255,7 @@ export function TeamsList({ page }: { page: AccessPage }) {
                 <DropdownMenuTrigger
                   render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${team.name}`} />}
                 >
-                  <MoreH size={16} aria-hidden="true" />
+                  <MoreIcon size="md" aria-hidden="true" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" size="menu">
                   <DropdownMenuItem
@@ -433,7 +432,7 @@ function Detail({ page, team }: { page: AccessPage; team: Team }) {
                 <StatePanel
                   kind="empty"
                   heading="h3"
-                  icon={People}
+                  icon={UsersIcon}
                   title="No one is on this team yet"
                   description="Add members to give them the access this team has."
                 />
@@ -519,7 +518,7 @@ function Detail({ page, team }: { page: AccessPage; team: Team }) {
                         <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${row.name} in ${team.name}`} />
                       }
                     >
-                      <MoreH size={16} aria-hidden="true" />
+                      <MoreIcon size="md" aria-hidden="true" />
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" size="menu">
                       <DropdownMenuItem

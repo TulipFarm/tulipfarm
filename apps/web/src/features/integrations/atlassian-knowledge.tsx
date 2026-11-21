@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { EllipsisIcon } from 'lucide-react';
+import { MoreIcon } from '@tulipfarm/icons';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { BrandIcon } from '@tulipfarm/sprout/brand-icon';
@@ -391,7 +391,7 @@ function SourceRow({
                 />
               }
             >
-              <EllipsisIcon aria-hidden="true" />
+              <MoreIcon aria-hidden="true" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuGroup>

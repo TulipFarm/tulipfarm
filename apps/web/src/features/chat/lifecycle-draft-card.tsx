@@ -1,6 +1,5 @@
 import type { ReactNode, RefObject } from 'react';
-import { Archive } from 'reicon-react/icons/Archive';
-import { ArchiveUp } from 'reicon-react/icons/ArchiveUp';
+import { ArchiveIcon, ArchiveUpIcon } from '@tulipfarm/icons';
 import { ReviewCard, ReviewRow, ReviewRows } from '@tulipfarm/sprout/review-card';
 import { Button } from '@tulipfarm/sprout/button';
 import { Disclosure } from '@/components/disclosure';
@@ -130,7 +129,7 @@ export function LifecycleDraftCard({
   return (
     <ReviewCard
       label={text.label}
-      icon={archiving ? <Archive size={16} /> : <ArchiveUp size={16} />}
+      icon={archiving ? <ArchiveIcon size="md" /> : <ArchiveUpIcon size="md" />}
       title={items.length === 1 ? `${text.verb} “${items[0]!.name}”` : `${text.verb} ${count}`}
       badge={badge[draft.status]}
       settled={draft.status === 'saved' || draft.status === 'dismissed' || draft.status === 'failed'}

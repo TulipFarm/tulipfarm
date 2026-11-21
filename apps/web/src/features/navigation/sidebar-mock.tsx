@@ -54,7 +54,7 @@ export function SidebarMockNavItem({ page }: { page: Page }) {
   }, [location.scenario]);
   const { setOpenMobile } = useSidebar();
   const Icon = page.icon;
-  const icon = Icon && <Icon size={16} aria-hidden="true" />;
+  const icon = Icon && <Icon size="lg" aria-hidden="true" />;
   const active = location.pathname === base || (page.label !== 'New chat' && location.pathname.startsWith(`${base}/`));
   const link = <Link to={page.to} params={{ workspaceSlug: 'sidebar-mock' }} preload={false} />;
   if (!names)

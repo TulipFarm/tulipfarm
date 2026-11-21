@@ -13,8 +13,7 @@ import {
 import { ChoiceGroup, Field, FieldsDisabled } from '@tulipfarm/sprout/field';
 import { Input } from '@tulipfarm/sprout/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
-import { Plus } from 'reicon-react/icons/Plus';
-import { Trash } from 'reicon-react/icons/Trash';
+import { AddIcon, DeleteIcon } from '@tulipfarm/icons';
 import type { TableDefinition } from '@/features/tables/api';
 import { TableRequestError } from '@/features/tables/request-state';
 import { utcTimestamp } from '@/features/tables/row-query';
@@ -293,7 +292,7 @@ function FormBody({
                       setNextKey(nextKey + 1);
                     }}
                   >
-                    <Plus aria-hidden />
+                    <AddIcon aria-hidden />
                     Add rule
                   </Button>
                   {form.rules.length >= maxRules && (
@@ -442,7 +441,7 @@ function RuleEditor({
       )}
       <div className="flex justify-end">
         <Button type="button" variant="ghost-destructive" size="sm" aria-label={`Remove rule ${n}`} onClick={remove}>
-          <Trash aria-hidden />
+          <DeleteIcon aria-hidden />
           Remove
         </Button>
       </div>

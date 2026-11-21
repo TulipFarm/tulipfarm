@@ -1,8 +1,6 @@
 import { useRef, useState } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { MoreH } from 'reicon-react/icons/MoreH';
-import { User } from 'reicon-react/icons/User';
-import { CheckIcon } from 'lucide-react';
+import { CheckIcon, MoreIcon, UserIcon } from '@tulipfarm/icons';
 import { createdInvitationSchema, invitationLinkSchema } from '@tulipfarm/workspaces/governance-contracts';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
@@ -342,7 +340,7 @@ export function MembersList({ page }: { page: AccessPage }) {
           <StatePanel
             kind="empty"
             heading="h3"
-            icon={User}
+            icon={UserIcon}
             title={needle ? 'No one matches that search' : 'No members yet'}
             description={needle ? 'Try another name or email.' : 'Invite people to work in this workspace.'}
           />
@@ -437,7 +435,7 @@ export function MembersList({ page }: { page: AccessPage }) {
           return (
             <DropdownMenu>
               <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${who}`} />}>
-                <MoreH size={16} aria-hidden="true" />
+                <MoreIcon size="md" aria-hidden="true" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" size="menu">
                 {items}

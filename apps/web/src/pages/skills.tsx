@@ -8,8 +8,7 @@ import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SearchField } from '@tulipfarm/sprout/search-field';
 import { SkillsSample, StatePanel } from '@tulipfarm/sprout/state-panel';
 import { DataList, DataListCell, DataListLink, DataListRow, DataListSecondary } from '@/components/data-list';
-import { Add } from 'reicon-react/icons/Add';
-import { BookOpen } from 'reicon-react/icons/BookOpen';
+import { AddIcon, BookOpenIcon } from '@tulipfarm/icons';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { Disclosure } from '@/components/disclosure';
 import { ReadFeedback, ReadError } from '@/components/read-feedback';
@@ -146,7 +145,7 @@ export function SkillsPage() {
               />
             }
           >
-            <Add size={16} aria-hidden="true" />
+            <AddIcon size="md" aria-hidden="true" />
             New skill
           </Button>
         </div>
@@ -217,7 +216,7 @@ export function SkillsPage() {
                 <StatePanel
                   kind="empty"
                   heading="h3"
-                  icon={BookOpen}
+                  icon={BookOpenIcon}
                   title={archived ? 'No matching archived skills' : 'No matching workspace skills'}
                   description="Try another name or clear your search."
                 >
@@ -229,7 +228,7 @@ export function SkillsPage() {
                 <StatePanel
                   kind="empty"
                   heading="h3"
-                  icon={BookOpen}
+                  icon={BookOpenIcon}
                   title="No archived skills"
                   description="Skills you archive appear here. Open one to restore or delete it."
                 >
@@ -247,7 +246,7 @@ export function SkillsPage() {
                 <StatePanel
                   kind="empty"
                   heading="h3"
-                  icon={BookOpen}
+                  icon={BookOpenIcon}
                   title="No workspace skills yet"
                   description="Import a skill, or ask chat to make one for a task you repeat. Review it once to save and enable it privately."
                   sample={<SkillsSample />}

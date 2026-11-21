@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { CirclePauseIcon, TriangleAlertIcon } from 'lucide-react';
+import { PauseCircleIcon, WarningIcon } from '@tulipfarm/icons';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
@@ -493,7 +493,7 @@ function IntentRow({
               setConfirm(true);
             }}
           >
-            <CirclePauseIcon aria-hidden="true" />
+            <PauseCircleIcon aria-hidden="true" />
             Stop automatic Knowledge
           </Button>
         )}
@@ -551,7 +551,7 @@ function IntentRow({
       )}
       {issue && intent.state === 'active' && (
         <Alert role="status" variant={issue.badge === 'Sync failed' ? 'destructive' : 'default'}>
-          <TriangleAlertIcon aria-hidden="true" />
+          <WarningIcon aria-hidden="true" />
           <AlertDescription>
             {issue.message}
             {issue.recovery === 'reconnect' &&
@@ -561,7 +561,7 @@ function IntentRow({
       )}
       {!issue && incomplete && intent.state === 'active' && (
         <Alert role="note">
-          <TriangleAlertIcon aria-hidden="true" />
+          <WarningIcon aria-hidden="true" />
           <AlertDescription>
             Some content is not searchable:{' '}
             {[

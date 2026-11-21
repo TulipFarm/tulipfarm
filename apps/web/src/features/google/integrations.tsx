@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { RefreshCwIcon } from 'lucide-react';
+import { RefreshIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import {
@@ -72,7 +72,7 @@ export function GoogleAccount({ workspaceId }: { workspaceId: string }) {
             if (!read.busy) void check();
           }}
         >
-          <RefreshCwIcon aria-hidden="true" />
+          <RefreshIcon aria-hidden="true" />
         </Button>
         <Button
           variant="outline"

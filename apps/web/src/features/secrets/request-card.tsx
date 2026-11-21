@@ -1,6 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { LockKeyhole } from 'reicon-react/icons/LockKeyhole';
-import { LockKeyholeOpen } from 'reicon-react/icons/LockKeyholeOpen';
+import { LockIcon, LockOpenIcon } from '@tulipfarm/icons';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { CheckboxField, Field } from '@tulipfarm/sprout/field';
@@ -143,7 +142,7 @@ function StatusLine({ id, title, children }: { id: string; title: string; childr
       className="flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-xl border border-border bg-card px-3 py-2 text-sm text-card-foreground"
     >
       <span className="text-muted-foreground">
-        <LockKeyhole size={14} aria-hidden="true" />
+        <LockIcon size="sm" aria-hidden="true" />
       </span>
       <h4 id={`${id}-title`} className="font-medium">
         {title}
@@ -340,7 +339,7 @@ function SecretRequestForm({
       <UnsavedChanges dirty={dirty || !!reason} />
       <div className="space-y-0.5">
         <h4 id={`${id}-title`} className="flex items-center gap-2 text-sm font-medium">
-          <LockKeyhole size={16} aria-hidden="true" />
+          <LockIcon size="md" aria-hidden="true" />
           <span className="min-w-0 break-words">
             {single ? `The agent needs your ${view.fields[0]?.label}` : `The agent needs ${view.fields.length} secrets`}
           </span>
@@ -349,7 +348,7 @@ function SecretRequestForm({
         {!single && <p className="text-xs text-muted-foreground">Sent only to {hosts}</p>}
         {view.destinations.some(destination => destination.plainHttp) && (
           <p className="flex items-center gap-1 text-xs text-muted-foreground">
-            <LockKeyholeOpen size={14} aria-hidden="true" />
+            <LockOpenIcon size="sm" aria-hidden="true" />
             Sent without encryption
           </p>
         )}
@@ -456,7 +455,7 @@ function SecretRequestForm({
           {errorAlert}
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <LockKeyhole size={12} aria-hidden="true" />
+              <LockIcon size="xs" aria-hidden="true" />
               Only you can see this. The agent never sees the value.
             </p>
             <div className="flex flex-wrap gap-2">

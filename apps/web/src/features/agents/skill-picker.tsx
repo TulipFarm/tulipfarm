@@ -9,7 +9,7 @@ import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { SearchField } from '@tulipfarm/sprout/search-field';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@tulipfarm/sprout/collapsible';
-import { MoreH } from 'reicon-react/icons/MoreH';
+import { MoreIcon } from '@tulipfarm/icons';
 import { Disclosure } from '@/components/disclosure';
 import { useReviewedSkills, useSkillDetail } from '@/features/skills/queries';
 import { skillApi, type SkillDetail } from '@/features/skills/api';
@@ -87,7 +87,7 @@ export function AgentSkillPicker({
       <Collapsible open={adding} onOpenChange={setAdding}>
         <div>
           <CollapsibleTrigger render={<Button variant="outline" />}>
-            <MoreH size={16} aria-hidden="true" />
+            <MoreIcon size="md" aria-hidden="true" />
             {adding ? 'Hide more skills' : 'More skills'}
           </CollapsibleTrigger>
         </div>

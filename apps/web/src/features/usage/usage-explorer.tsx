@@ -1,18 +1,20 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { ArrowUpRight } from 'reicon-react/icons/ArrowUpRight';
-import { Calendar as CalendarIcon } from 'reicon-react/icons/Calendar';
-import { ChevronDown } from 'reicon-react/icons/ChevronDown';
-import { ChevronRight } from 'reicon-react/icons/ChevronRight';
-import { Download } from 'reicon-react/icons/Download';
-import { Filter } from 'reicon-react/icons/Filter';
-import { Key } from 'reicon-react/icons/Key';
-import { Lock } from 'reicon-react/icons/Lock';
-import { Plus } from 'reicon-react/icons/Plus';
-import { Sliders } from 'reicon-react/icons/Sliders';
-import { User } from 'reicon-react/icons/User';
-import { Wallet } from 'reicon-react/icons/Wallet';
-import { X } from 'reicon-react/icons/X';
+import {
+  AddIcon,
+  ArrowUpRightIcon,
+  CalendarIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CloseIcon,
+  DownloadIcon,
+  FilterIcon,
+  KeyIcon,
+  LockIcon,
+  SlidersIcon,
+  UserIcon,
+  WalletIcon,
+} from '@tulipfarm/icons';
 import type {
   UsageConnection,
   UsageDimension,
@@ -191,7 +193,7 @@ function Explorer({
           <div className="flex flex-wrap items-center gap-2">
             <RangePicker context={context} />
             <Button variant="outline" size="sm" disabled={!rows.length} onClick={() => downloadCsv(rows, context)}>
-              <Download size={14} aria-hidden />
+              <DownloadIcon size="sm" aria-hidden />
               Export CSV
             </Button>
           </div>
@@ -202,7 +204,7 @@ function Explorer({
         </div>
         <div className="flex flex-wrap items-center gap-2 md:hidden">
           <Button variant="outline" size="sm" onClick={() => setControlsOpen(true)}>
-            <Sliders size={14} aria-hidden />
+            <SlidersIcon size="sm" aria-hidden />
             Group and filter{filterCount ? ` (${filterCount})` : ''}
           </Button>
           <span className="text-sm text-muted-foreground">
@@ -267,7 +269,7 @@ function Explorer({
         </p>
         <p className="flex items-start gap-2">
           <span className="mt-0.5 shrink-0">
-            <Lock size={14} aria-hidden />
+            <LockIcon size="sm" aria-hidden />
           </span>
           {report.viewer.admin
             ? 'As a workspace admin, you see each member’s plan usage. Members see only their own plans, plus the workspace’s credits and API keys.'
@@ -304,7 +306,7 @@ function SourceSummary({ context }: { context: Context }) {
   return (
     <section aria-label="Payment sources" className="grid gap-3 sm:grid-cols-3">
       <SourceCard
-        icon={<Wallet size={14} aria-hidden />}
+        icon={<WalletIcon size="sm" aria-hidden />}
         title="TulipFarm credits"
         value={balance.available === null ? 'Unlimited' : formatNumber(balance.available)}
         caption={`${balance.available !== null && balance.granted !== null ? `left of ${formatNumber(balance.granted)} · ` : ''}${measureInfo.credits.format(credits.credits).replace('—', '0')} used in ${days} days`}
@@ -312,7 +314,7 @@ function SourceSummary({ context }: { context: Context }) {
         openLabel="See credit usage"
       />
       <SourceCard
-        icon={<User size={14} aria-hidden />}
+        icon={<UserIcon size="sm" aria-hidden />}
         title="Member plans"
         value={measureInfo.requests.format(plans.requests)}
         caption={
@@ -337,7 +339,7 @@ function SourceSummary({ context }: { context: Context }) {
         )}
       </SourceCard>
       <SourceCard
-        icon={<Key size={14} aria-hidden />}
+        icon={<KeyIcon size="sm" aria-hidden />}
         title="API keys"
         value={formatUsd(keys.billedUsd)}
         caption={
@@ -424,7 +426,7 @@ function RangePicker({ context }: { context: Context }) {
         }}
       >
         <PopoverTrigger render={<Button variant={state.range === 'custom' ? 'secondary' : 'outline'} size="sm" />}>
-          <CalendarIcon size={14} aria-hidden />
+          <CalendarIcon size="sm" aria-hidden />
           {state.range === 'custom' ? `${short(state.from)} – ${short(state.to)}` : 'Custom'}
         </PopoverTrigger>
         <PopoverContent align="end" size="picker" aria-label="Choose a date range">
@@ -585,7 +587,7 @@ function AddFilter({ context }: { context: Context }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>
-        <Plus size={14} aria-hidden />
+        <AddIcon size="sm" aria-hidden />
         Add filter
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
@@ -639,7 +641,7 @@ function FilterChips({ context }: { context: Context }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-muted-foreground">
-        <Filter size={14} aria-hidden />
+        <FilterIcon size="sm" aria-hidden />
       </span>
       {active.map(([dimension, values]) => {
         const info = context.dims[dimension];
@@ -662,7 +664,7 @@ function FilterChips({ context }: { context: Context }) {
               aria-label={`Remove ${info.label} filter`}
               onClick={() => setFilter(context, dimension, [])}
             >
-              <X size={12} aria-hidden />
+              <CloseIcon size="xs" aria-hidden />
             </Button>
           </ButtonGroup>
         );
@@ -846,7 +848,7 @@ function ConnectionStatus({ value, context }: { value: string; context: Context 
         render={<a href={planUsageUrls[connection.provider]} target="_blank" rel="noopener noreferrer" />}
       >
         Manage usage
-        <ArrowUpRight size={12} aria-hidden />
+        <ArrowUpRightIcon size="xs" aria-hidden />
         <span className="sr-only"> on {planLabels[connection.provider]} (opens in a new tab)</span>
       </Button>
     </span>
@@ -1020,7 +1022,7 @@ function MobileRows({ rows, context }: { rows: PivotRow[]; context: Context }) {
                     })
                   }
                 >
-                  {expanded ? <ChevronDown size={14} aria-hidden /> : <ChevronRight size={14} aria-hidden />}
+                  {expanded ? <ChevronDownIcon size="sm" aria-hidden /> : <ChevronRightIcon size="sm" aria-hidden />}
                   {context.dims[row.subRows[0]!.dimension].label} ({row.subRows.length})
                 </Button>
                 {expanded && (

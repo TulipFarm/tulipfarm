@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Refresh } from 'reicon-react/icons/Refresh';
+import { RefreshIcon } from '@tulipfarm/icons';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { CanvasSection } from '@tulipfarm/sprout/canvas';
@@ -158,7 +158,7 @@ function Opened({
             aria-busy={refreshing}
             onClick={retry}
           >
-            <Refresh size={16} />
+            <RefreshIcon size="md" />
           </Button>
         </div>
         <div className="flex flex-wrap gap-2">

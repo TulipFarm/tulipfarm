@@ -1,4 +1,4 @@
-import { HashIcon, LockIcon } from 'lucide-react';
+import { HashIcon, LockIcon } from '@tulipfarm/icons';
 
 /** Slack titles arrive as `#name`; the leading icon carries the `#`, so the text drops it. */
 export function slackChannelLabel(title: string) {

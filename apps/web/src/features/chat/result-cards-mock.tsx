@@ -1,6 +1,6 @@
 import { useContext, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { File } from 'reicon-react/icons/File';
+import { FileIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import { CanvasPanel, CanvasToggle, ChatSplit } from '@tulipfarm/sprout/canvas';
 import { ResultAppActions, ResultCard, type ResultApp, type ResultCardProps } from '@tulipfarm/sprout/result-card';
@@ -231,7 +231,7 @@ export default function ResultCardsMock() {
         canvas={
           selected && (
             <CanvasPanel
-              tabs={[{ id: selected.id, title: selected.title, icon: File }]}
+              tabs={[{ id: selected.id, title: selected.title, icon: FileIcon }]}
               activeId={selected.id}
               onSelect={() => {}}
               onCloseTab={() => setSelected(null)}

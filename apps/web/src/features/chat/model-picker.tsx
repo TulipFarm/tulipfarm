@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
-import { ChevronDown } from 'reicon-react/icons/ChevronDown';
-import { Coins } from 'reicon-react/icons/Coins';
+import { ChevronDownIcon, CoinsIcon } from '@tulipfarm/icons';
 import { BrandIcon, type Brand } from '@tulipfarm/sprout/brand-icon';
 import {
   DropdownMenu,
@@ -72,7 +71,7 @@ function UnavailableTag({ model }: { model: ComposerModel }) {
 
 function SourceMark({ source }: { source: ModelSource }) {
   const brand = sources[source].brand;
-  return brand ? <BrandIcon brand={brand} size="inline" /> : <Coins size={16} aria-hidden="true" />;
+  return brand ? <BrandIcon brand={brand} size="inline" /> : <CoinsIcon size="md" aria-hidden="true" />;
 }
 
 /** A model's logo; a warning dot marks a plan at its usage limit, though the model stays selectable. */
@@ -267,7 +266,7 @@ export function ModelPicker({ model, models, disabled, onModelChange, account }:
           {(accountName ?? shownSource) && (
             <span className="hidden max-w-40 truncate text-xs text-muted-foreground sm:inline">{`· ${accountName ?? shownSource}`}</span>
           )}
-          <ChevronDown size={14} aria-hidden="true" />
+          <ChevronDownIcon size="sm" aria-hidden="true" />
         </TooltipTrigger>
         <TooltipContent>AI model that writes replies, and where it runs</TooltipContent>
       </Tooltip>

@@ -1,10 +1,5 @@
 import type { ComponentType, ReactNode } from 'react';
-import { Cpu } from 'reicon-react/icons/Cpu';
-import { Key } from 'reicon-react/icons/Key';
-import { Repeat } from 'reicon-react/icons/Repeat';
-import { User } from 'reicon-react/icons/User';
-import { Users } from 'reicon-react/icons/Users';
-import { Wallet } from 'reicon-react/icons/Wallet';
+import { CpuIcon, KeyIcon, RepeatIcon, UserIcon, UsersIcon, WalletIcon } from '@tulipfarm/icons';
 import type { ModelFallbackReason } from '@tulipfarm/config/model-fallback';
 import type { UsageDimension, UsageReport } from '@tulipfarm/workspace-storage/model-usage-contracts';
 import { AgentAvatar } from '@tulipfarm/sprout/agent-avatar';
@@ -83,8 +78,8 @@ export function usageDimensions(report: UsageReport, members: ReadonlyMap<string
   };
   const memberIcon = (id: string) => {
     const member = members.get(id);
-    if (id === 'others') return glyph(Users);
-    if (!member) return glyph(User);
+    if (id === 'others') return glyph(UsersIcon);
+    if (!member) return glyph(UserIcon);
     return <EntityAvatar seed={member.id} name={member.name} image={member.image} size="sm" />;
   };
   const agentName = (id: string) => (id === 'none' ? 'No agent' : (report.labels.agents[id] ?? 'Agent'));
@@ -102,14 +97,14 @@ export function usageDimensions(report: UsageReport, members: ReadonlyMap<string
   const connectionIcon = (id: string) => {
     const connection = report.labels.connections[id];
     if (connection) return <BrandIcon brand={planBrands[connection.provider]} size="inline" />;
-    if (id === 'key') return glyph(Key);
-    if (id === 'credits') return glyph(Wallet);
-    return glyph(User);
+    if (id === 'key') return glyph(KeyIcon);
+    if (id === 'credits') return glyph(WalletIcon);
+    return glyph(UserIcon);
   };
   const modelIcon = (id: string) => {
     const label = report.labels.models[id];
     const brand = modelBrand(label?.vendor ?? planModelVendor(id.split('/').at(-1) ?? id));
-    return brand ? <BrandIcon brand={brand} size="inline" /> : glyph(Cpu);
+    return brand ? <BrandIcon brand={brand} size="inline" /> : glyph(CpuIcon);
   };
   const dimensions: Record<UsageDimension, DimensionInfo> = {
     model: {
@@ -122,13 +117,13 @@ export function usageDimensions(report: UsageReport, members: ReadonlyMap<string
       name: value => providers[value]?.name ?? value,
       icon: value => {
         const brand = providers[value]?.brand;
-        return brand ? <BrandIcon brand={brand} size="inline" /> : glyph(Cpu);
+        return brand ? <BrandIcon brand={brand} size="inline" /> : glyph(CpuIcon);
       },
     },
     paidBy: {
       label: 'Paid by',
       name: value => paidByLabels[value] ?? value,
-      icon: value => (value === 'credits' ? glyph(Wallet) : value === 'key' ? glyph(Key) : glyph(User)),
+      icon: value => (value === 'credits' ? glyph(WalletIcon) : value === 'key' ? glyph(KeyIcon) : glyph(UserIcon)),
     },
     connection: { label: 'Plan or key', name: connectionName, icon: connectionIcon },
     usedBy: {
@@ -157,7 +152,7 @@ export function usageDimensions(report: UsageReport, members: ReadonlyMap<string
         const why = fallbackReasons[reason as ModelFallbackReason] ?? fallbackReasons.unknown;
         return from ? `${connectionName(from)}: ${why}` : `Fell back: ${why}`;
       },
-      icon: value => (value === 'none' ? null : glyph(Repeat, 'text-warning')),
+      icon: value => (value === 'none' ? null : glyph(RepeatIcon, 'text-warning')),
     },
     week: { label: 'Week', name: value => `Week of ${shortDate(value)}` },
     day: { label: 'Day', name: shortDate },

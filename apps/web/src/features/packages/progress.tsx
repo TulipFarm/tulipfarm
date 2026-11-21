@@ -10,26 +10,28 @@ import {
   type PlanOutlineTask,
 } from '@tulipfarm/sprout/plan-outline';
 import type { ReactNode } from 'react';
-import { Database } from 'reicon-react/icons/Database';
-import { BookOpen } from 'reicon-react/icons/BookOpen';
-import { Users } from 'reicon-react/icons/Users';
-import { BranchDown } from 'reicon-react/icons/BranchDown';
-import { AddCircle } from 'reicon-react/icons/AddCircle';
-import { Files } from 'reicon-react/icons/Files';
-import { Plug } from 'reicon-react/icons/Plug';
+import {
+  AddCircleIcon,
+  BookOpenIcon,
+  BranchIcon,
+  DatabaseIcon,
+  FilesIcon,
+  PlugIcon,
+  UsersIcon,
+} from '@tulipfarm/icons';
 
 const verificationCriteria = [
   'The server reads back every installed resource and verifies its requested configuration.',
 ];
 type Resource = SystemPackage['resources'][number];
 export const resourceTypes = {
-  table: { icon: <Database />, label: 'Table' },
-  'seed-row': { icon: <AddCircle />, label: 'Starter record' },
-  skill: { icon: <BookOpen />, label: 'Skill' },
-  agent: { icon: <Users />, label: 'Agent' },
-  workflow: { icon: <BranchDown />, label: 'Workflow' },
-  integration: { icon: <Plug />, label: 'Integration' },
-  file: { icon: <Files />, label: 'File' },
+  table: { icon: <DatabaseIcon />, label: 'Table' },
+  'seed-row': { icon: <AddCircleIcon />, label: 'Starter record' },
+  skill: { icon: <BookOpenIcon />, label: 'Skill' },
+  agent: { icon: <UsersIcon />, label: 'Agent' },
+  workflow: { icon: <BranchIcon />, label: 'Workflow' },
+  integration: { icon: <PlugIcon />, label: 'Integration' },
+  file: { icon: <FilesIcon />, label: 'File' },
 } satisfies Record<Resource['kind'], NonNullable<PlanOutlineTask['typeIcon']>>;
 
 export function resourceTitle(resource: Resource, resources: Resource[], assets: SystemPackage['assets']): string {

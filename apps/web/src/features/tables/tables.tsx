@@ -1,10 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { z } from 'zod';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { Add } from 'reicon-react/icons/Add';
-import { Database } from 'reicon-react/icons/Database';
-import { MoreH } from 'reicon-react/icons/MoreH';
-import { Edit } from 'reicon-react/icons/Edit';
+import { AddIcon, DatabaseIcon, EditIcon, MoreIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import { Checkbox } from '@tulipfarm/sprout/checkbox';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
@@ -182,7 +179,7 @@ export function TableList({
           nativeButton={false}
           render={<Link to="/$workspaceSlug" params={{ workspaceSlug }} search={{ intent: 'create-table' }} />}
         >
-          <Add size={16} aria-hidden="true" />
+          <AddIcon size="md" aria-hidden="true" />
           New table
         </Button>
       </div>
@@ -193,7 +190,7 @@ export function TableList({
               pages.after ? (
                 <StatePanel
                   kind="empty"
-                  icon={Database}
+                  icon={DatabaseIcon}
                   title={`No readable ${shelf} tables on this page`}
                   description="Return to the previous page to see your tables."
                 >
@@ -204,7 +201,7 @@ export function TableList({
               ) : query ? (
                 <StatePanel
                   kind="empty"
-                  icon={Database}
+                  icon={DatabaseIcon}
                   title={`No ${archived ? 'archived ' : ''}tables match “${query}”`}
                   description="Search checks table names across this workspace. Try another name or clear the search."
                 >
@@ -215,7 +212,7 @@ export function TableList({
               ) : archived ? (
                 <StatePanel
                   kind="empty"
-                  icon={Database}
+                  icon={DatabaseIcon}
                   title="No archived tables"
                   description="Tables you archive appear here. Their fields and records are kept."
                 >
@@ -226,7 +223,7 @@ export function TableList({
               ) : (
                 <StatePanel
                   kind="empty"
-                  icon={Database}
+                  icon={DatabaseIcon}
                   title="No tables yet"
                   description="A table holds one kind of business row, such as customers or invoices. Describe the fields in chat, and the table appears here after it is created. Ask an administrator if you need read access."
                   sample={<TablesSample />}
@@ -237,7 +234,7 @@ export function TableList({
                       <Link to="/$workspaceSlug" params={{ workspaceSlug }} search={{ intent: 'create-table' }} />
                     }
                   >
-                    <Add size={16} aria-hidden="true" />
+                    <AddIcon size="md" aria-hidden="true" />
                     New table
                   </Button>
                 </StatePanel>
@@ -648,7 +645,7 @@ export function Records({
       disabled={locked || editing}
       onClick={event => select({ kind: 'create' }, event.currentTarget)}
     >
-      <Add size={size === 'sm' ? 14 : 16} aria-hidden="true" />
+      <AddIcon size={size === 'sm' ? 14 : 16} aria-hidden="true" />
       {systemKind === 'workspace-members' ? 'Add member' : 'Add row'}
     </Button>
   );
@@ -777,7 +774,7 @@ export function Records({
           data-row-id={record.id}
           onClick={event => select({ kind: 'edit', record }, event.currentTarget)}
         >
-          <Edit size={16} aria-hidden="true" />
+          <EditIcon size="md" aria-hidden="true" />
         </Button>
       )}
       <RowActions
@@ -922,7 +919,7 @@ export function Records({
         <StatePanel
           kind="empty"
           heading="h3"
-          icon={Database}
+          icon={DatabaseIcon}
           title={filtered ? 'No rows match' : 'Nothing to summarize'}
           description={
             filtered
@@ -942,7 +939,7 @@ export function Records({
         <StatePanel
           kind="empty"
           heading="h3"
-          icon={Database}
+          icon={DatabaseIcon}
           title="No rows on this page"
           description="Return to the previous page to see existing rows."
         >
@@ -954,7 +951,7 @@ export function Records({
         <StatePanel
           kind="empty"
           heading="h3"
-          icon={Database}
+          icon={DatabaseIcon}
           title="No rows match"
           description={`No rows in ${table.definition.label} match the current search and filters.`}
         >
@@ -966,7 +963,7 @@ export function Records({
         <StatePanel
           kind="empty"
           heading="h3"
-          icon={Database}
+          icon={DatabaseIcon}
           title="No rows"
           description={`${table.definition.label} has no rows.`}
         />
@@ -974,7 +971,7 @@ export function Records({
         <StatePanel
           kind="empty"
           heading="h3"
-          icon={Database}
+          icon={DatabaseIcon}
           title="No rows yet"
           description={
             permissions.create
@@ -997,7 +994,7 @@ export function Records({
               />
             }
           >
-            {!permissions.create && <Add size={16} aria-hidden="true" />}Add rows in chat
+            {!permissions.create && <AddIcon size="md" aria-hidden="true" />}Add rows in chat
           </Button>
         </StatePanel>
       )
@@ -1411,7 +1408,7 @@ function RowActions({
           />
         }
       >
-        <MoreH size={16} aria-hidden="true" />
+        <MoreIcon size="md" aria-hidden="true" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <RowActionItems
@@ -1488,7 +1485,7 @@ function AddressedRecord({
             <div className="flex flex-wrap gap-2">
               {permissions.update && (
                 <Button disabled={locked || selection !== null} onClick={() => setSelection({ kind: 'edit', record })}>
-                  <Edit size={16} aria-hidden="true" />
+                  <EditIcon size="md" aria-hidden="true" />
                   Edit row
                 </Button>
               )}

@@ -1,5 +1,5 @@
 import { useState, type CSSProperties } from 'react';
-import { Plug } from 'reicon-react/icons/Plug';
+import { PlugIcon } from '@tulipfarm/icons';
 import { BrandIcon, BrandTile, type Brand } from '@tulipfarm/sprout/brand-icon';
 
 type Size = 'md' | 'lg' | 'xl';
@@ -50,7 +50,7 @@ export function AppIcon({
     );
   return (
     <BrandTile size={size} aria-hidden="true">
-      <Plug size={plugSize[size]} />
+      <PlugIcon size={plugSize[size]} />
     </BrandTile>
   );
 }

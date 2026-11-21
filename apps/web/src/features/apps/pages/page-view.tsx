@@ -13,7 +13,7 @@ import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
-import { Window } from 'reicon-react/icons/Window';
+import { WindowIcon } from '@tulipfarm/icons';
 import { workspaceRoute } from '@/router';
 import { chosenLabels, optionLabels } from '@/features/chat/layout-labels';
 import { TableRequestError } from '@/features/tables/request-state';
@@ -184,7 +184,7 @@ export function AppPageView({
       <StatePanel
         kind="unavailable"
         heading="h2"
-        icon={Window}
+        icon={WindowIcon}
         title="This app is no longer available to you"
         description="Your access may have ended, or the app changed. Ask an editor of this app if you still need it."
       >
@@ -203,7 +203,7 @@ export function AppPageView({
       <StatePanel
         kind="unavailable"
         heading="h2"
-        icon={Window}
+        icon={WindowIcon}
         title="Page not found"
         description="This app has no page at this address."
       >

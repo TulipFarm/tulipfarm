@@ -16,17 +16,19 @@ import {
   type NodeProps,
 } from '@xyflow/react';
 import '@xyflow/react/dist/base.css';
-import { BranchDown } from 'reicon-react/icons/BranchDown';
-import { Clock } from 'reicon-react/icons/Clock';
-import { Code } from 'reicon-react/icons/Code';
-import { Database } from 'reicon-react/icons/Database';
-import { Globe } from 'reicon-react/icons/Globe';
-import { MessageEdit } from 'reicon-react/icons/MessageEdit';
-import { Play } from 'reicon-react/icons/Play';
-import { Plug } from 'reicon-react/icons/Plug';
-import { Sparkle } from 'reicon-react/icons/Sparkle';
-import { TerminalSquare } from 'reicon-react/icons/TerminalSquare';
-import { Users } from 'reicon-react/icons/Users';
+import {
+  BranchIcon,
+  ClockIcon,
+  CodeIcon,
+  DatabaseIcon,
+  GlobeIcon,
+  MessageEditIcon,
+  PlayIcon,
+  PlugIcon,
+  SparkleIcon,
+  TerminalIcon,
+  UsersIcon,
+} from '@tulipfarm/icons';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { BrandIcon, type Brand } from '@tulipfarm/sprout/brand-icon';
 import { AgentMark } from '@/components/agent-mark';
@@ -107,20 +109,20 @@ const badges = {
   withheld: 'outline',
 } as const;
 const icons: Record<WorkflowNodeKind, ComponentType<{ size?: number }>> = {
-  trigger: Plug,
-  condition: BranchDown,
-  transform: Code,
-  delay: Clock,
-  'wait-until': Clock,
-  human: Users,
-  code: Code,
-  agent: Sparkle,
-  coding: TerminalSquare,
-  http: Globe,
-  'slack-message': MessageEdit,
-  'find-rows': Database,
-  'create-row': Database,
-  'update-row': Database,
+  trigger: PlugIcon,
+  condition: BranchIcon,
+  transform: CodeIcon,
+  delay: ClockIcon,
+  'wait-until': ClockIcon,
+  human: UsersIcon,
+  code: CodeIcon,
+  agent: SparkleIcon,
+  coding: TerminalIcon,
+  http: GlobeIcon,
+  'slack-message': MessageEditIcon,
+  'find-rows': DatabaseIcon,
+  'create-row': DatabaseIcon,
+  'update-row': DatabaseIcon,
 };
 export const workflowKindLabels: Record<WorkflowNodeKind, string> = {
   trigger: 'Trigger',
@@ -190,7 +192,7 @@ export function WorkflowStepList({
       {nodes.map(step => (
         <li key={step.id} data-inspected={step.id === selected}>
           <span className="workflow-step-number" aria-hidden="true">
-            {step.ordinal || <Play size={12} />}
+            {step.ordinal || <PlayIcon size="xs" />}
           </span>
           <button
             type="button"

@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ArrowUpRight } from 'reicon-react/icons/ArrowUpRight';
-import { ChatRound } from 'reicon-react/icons/ChatRound';
-import { ChevronLeft } from 'reicon-react/icons/ChevronLeft';
-import { Copy } from 'reicon-react/icons/Copy';
-import { Download } from 'reicon-react/icons/Download';
-import { MoreH } from 'reicon-react/icons/MoreH';
-import { Refresh } from 'reicon-react/icons/Refresh';
+import {
+  ArrowUpRightIcon,
+  ChatIcon,
+  ChevronLeftIcon,
+  CopyIcon,
+  DownloadIcon,
+  MoreIcon,
+  RefreshIcon,
+} from '@tulipfarm/icons';
 import { googleFileRoute, workspaceRoute } from '@/router';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
@@ -83,7 +85,7 @@ function Viewer({
   const back = <Link to="/$workspaceSlug/files" params={{ workspaceSlug }} search={{ ...search, section: 'google' }} />;
   const backLink = (
     <Button variant="ghost" size="sm" nativeButton={false} role="link" render={back}>
-      <ChevronLeft size={16} aria-hidden="true" />
+      <ChevronLeftIcon size="md" aria-hidden="true" />
       Google Drive
     </Button>
   );
@@ -355,7 +357,7 @@ function Opened({
         role="link"
         render={<a href={web} target="_blank" rel="noopener noreferrer" />}
       >
-        <ArrowUpRight size={16} aria-hidden="true" />
+        <ArrowUpRightIcon size="md" aria-hidden="true" />
         Open in Google
       </Button>
     );
@@ -375,35 +377,35 @@ function Opened({
   const actions = narrow ? (
     <DropdownMenu>
       <DropdownMenuTrigger render={<Button ref={menuButton} variant="outline" size="icon" aria-label="File actions" />}>
-        <MoreH size={16} aria-hidden="true" />
+        <MoreIcon size="md" aria-hidden="true" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" size="menu">
         {googleReadable(file) && (
           <DropdownMenuItem onClick={() => setChatting(true)}>
-            <ChatRound size={14} aria-hidden="true" />
+            <ChatIcon size="sm" aria-hidden="true" />
             Use in chat
           </DropdownMenuItem>
         )}
         {binary && (
           <DropdownMenuItem disabled={sending} onClick={() => void save()}>
-            <Download size={14} aria-hidden="true" />
+            <DownloadIcon size="sm" aria-hidden="true" />
             {labels.download}
           </DropdownMenuItem>
         )}
         {canCopy(file) && (
           <DropdownMenuItem onClick={() => setCopying(true)}>
-            <Copy size={14} aria-hidden="true" />
+            <CopyIcon size="sm" aria-hidden="true" />
             Save a copy
           </DropdownMenuItem>
         )}
         {view.kind !== 'details' && web && (
           <DropdownMenuItem render={<a href={web} target="_blank" rel="noopener noreferrer" />}>
-            <ArrowUpRight size={14} aria-hidden="true" />
+            <ArrowUpRightIcon size="sm" aria-hidden="true" />
             Open in Google
           </DropdownMenuItem>
         )}
         <DropdownMenuItem disabled={refreshing} onClick={() => void refresh()}>
-          <Refresh size={14} aria-hidden="true" />
+          <RefreshIcon size="sm" aria-hidden="true" />
           {labels.refresh}
         </DropdownMenuItem>
       </DropdownMenuContent>
@@ -415,19 +417,19 @@ function Opened({
       </Button>
       {binary && (
         <Button variant="outline" disabled={sending} aria-busy={sending} onClick={() => void save()}>
-          <Download size={16} aria-hidden="true" />
+          <DownloadIcon size="md" aria-hidden="true" />
           {labels.download}
         </Button>
       )}
       {googleReadable(file) && (
         <Button ref={chatButton} onClick={() => setChatting(true)}>
-          <ChatRound size={16} aria-hidden="true" />
+          <ChatIcon size="md" aria-hidden="true" />
           Use in chat
         </Button>
       )}
       {canCopy(file) && (
         <Button ref={copyButton} variant="outline" onClick={() => setCopying(true)}>
-          <Copy size={16} aria-hidden="true" />
+          <CopyIcon size="md" aria-hidden="true" />
           Save a copy
         </Button>
       )}

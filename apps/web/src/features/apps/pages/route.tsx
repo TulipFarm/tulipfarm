@@ -3,7 +3,7 @@ import { Link, useParams, useSearch } from '@tanstack/react-router';
 import { Button } from '@tulipfarm/sprout/button';
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
-import { Window } from 'reicon-react/icons/Window';
+import { WindowIcon } from '@tulipfarm/icons';
 import { useFlag } from '@/lib/feature-flags';
 import { workspaceRoute } from '@/router';
 import type { AppDetail } from '../api';
@@ -21,7 +21,7 @@ export function LivePage({ app, slug, missing }: { app: AppDetail; slug: string 
       <StatePanel
         kind="unavailable"
         heading="h2"
-        icon={Window}
+        icon={WindowIcon}
         title="Page not found"
         description="This app has no page at this address."
       >

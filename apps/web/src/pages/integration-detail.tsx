@@ -1,7 +1,6 @@
 import { useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { ArrowRightIcon, MessageSquareIcon, ShieldCheckIcon, UsersIcon } from 'lucide-react';
-import { Plug } from 'reicon-react/icons/Plug';
+import { ArrowRightIcon, MessageIcon, PlugIcon, ShieldCheckIcon, UsersIcon } from '@tulipfarm/icons';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { BrandIcon } from '@tulipfarm/sprout/brand-icon';
@@ -98,7 +97,7 @@ function Missing({ slug }: { slug: string }) {
       />
       <StatePanel
         kind="empty"
-        icon={Plug}
+        icon={PlugIcon}
         title="This integration doesn’t exist"
         description="It may have been renamed or removed. Pick it again from the list."
       >
@@ -467,7 +466,7 @@ function Overview({
             <ul className="grid gap-2 sm:grid-cols-2">
               {app.prompts.map(prompt => (
                 <li key={prompt} className="flex items-start gap-3 rounded-xl border border-border bg-card p-4">
-                  <MessageSquareIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                  <MessageIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                   <span>{prompt}</span>
                 </li>
               ))}
@@ -631,7 +630,7 @@ function Accounts({
     <StatePanel
       kind="empty"
       heading="h2"
-      icon={Plug}
+      icon={PlugIcon}
       title={`No ${app.name} account linked`}
       description={
         status.kind === 'unavailable' ? status.detail : `Connect ${app.name} to let agents work there with your access.`

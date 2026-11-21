@@ -1,8 +1,5 @@
 import type { ReactNode, RefObject } from 'react';
-import { Edit } from 'reicon-react/icons/Edit';
-import { Folder } from 'reicon-react/icons/Folder';
-import { Reply } from 'reicon-react/icons/Reply';
-import { Trash } from 'reicon-react/icons/Trash';
+import { DeleteIcon, EditIcon, FolderIcon, ReplyIcon } from '@tulipfarm/icons';
 import { ReviewCard, ReviewRow, ReviewRows } from '@tulipfarm/sprout/review-card';
 import { Button } from '@tulipfarm/sprout/button';
 import { Disclosure } from '@/components/disclosure';
@@ -11,10 +8,10 @@ import type { DraftView, FilesProposal } from '@tulipfarm/agents/draft-contracts
 import { TechnicalDetail } from './row-draft-card';
 
 const changes = {
-  rename: { verb: 'Rename', done: 'renamed', doing: 'Renaming…', icon: <Edit size={16} /> },
-  move: { verb: 'Move', done: 'moved', doing: 'Moving…', icon: <Folder size={16} /> },
-  trash: { verb: 'Move to Trash', done: 'moved to Trash', doing: 'Moving to Trash…', icon: <Trash size={16} /> },
-  restore: { verb: 'Restore', done: 'restored', doing: 'Restoring…', icon: <Reply size={16} /> },
+  rename: { verb: 'Rename', done: 'renamed', doing: 'Renaming…', icon: <EditIcon size="md" /> },
+  move: { verb: 'Move', done: 'moved', doing: 'Moving…', icon: <FolderIcon size="md" /> },
+  trash: { verb: 'Move to Trash', done: 'moved to Trash', doing: 'Moving to Trash…', icon: <DeleteIcon size="md" /> },
+  restore: { verb: 'Restore', done: 'restored', doing: 'Restoring…', icon: <ReplyIcon size="md" /> },
 } as const;
 
 const place = (name: string | null, parentId: string | null) =>

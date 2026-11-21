@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { Link } from '@tanstack/react-router';
-import { BranchDown } from 'reicon-react/icons/BranchDown';
+import { BranchIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import { ResultCard } from '@tulipfarm/sprout/result-card';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
@@ -213,7 +213,7 @@ export function WorkflowCanvasButton({
   if (compact)
     return (
       <Button size="sm" variant="outline" onClick={() => show(item)}>
-        <BranchDown size={16} aria-hidden="true" />
+        <BranchIcon size="md" aria-hidden="true" />
         {name}
       </Button>
     );
@@ -223,7 +223,7 @@ export function WorkflowCanvasButton({
         title={name}
         kind="Workflow"
         apps={[]}
-        icon={<BranchDown size={18} />}
+        icon={<BranchIcon size="lg" />}
         status={
           status ??
           (reference.kind === 'definition'

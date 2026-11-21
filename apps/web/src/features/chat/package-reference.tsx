@@ -6,7 +6,7 @@ import { Link } from '@tanstack/react-router';
 import { marketplacePackage } from '@tulipfarm/config/package-links';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@tulipfarm/sprout/tooltip';
-import { ArrowUpRight } from 'reicon-react/icons/ArrowUpRight';
+import { ArrowUpRightIcon } from '@tulipfarm/icons';
 import { useFeatureRead } from '@/lib/query';
 import { workspaceRoute } from '@/router';
 import { loadPublicPackages } from '@/features/packages/public-catalog';
@@ -82,7 +82,7 @@ export function PackagePill({ url }: { url: string }) {
           <TooltipTrigger render={pill} />
           <TooltipContent>
             <span className="flex items-center gap-1">
-              Open package in new tab <ArrowUpRight size={14} aria-hidden="true" />
+              Open package in new tab <ArrowUpRightIcon size="sm" aria-hidden="true" />
             </span>
           </TooltipContent>
         </Tooltip>

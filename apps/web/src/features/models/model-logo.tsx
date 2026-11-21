@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react';
 import { BrandIcon, BrandTile } from '@tulipfarm/sprout/brand-icon';
-import { Cpu } from 'reicon-react/icons/Cpu';
+import { CpuIcon } from '@tulipfarm/icons';
 import { modelBrand, type ModelBrand } from './model-brand';
 
 type LogoSize = 'inline' | 'sm';
@@ -8,7 +8,7 @@ export type ModelLogoComponent = ComponentType<{ size?: number; 'aria-hidden'?: 
 
 function BrandLogo({ brand, size }: { brand: ModelBrand | null; size: LogoSize }) {
   if (brand) return <BrandIcon brand={brand} size={size} />;
-  const glyph = <Cpu size={16} aria-hidden="true" />;
+  const glyph = <CpuIcon size="md" aria-hidden="true" />;
   return size === 'inline' ? (
     <span
       data-slot="brand-icon"

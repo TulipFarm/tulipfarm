@@ -1,5 +1,5 @@
 import { useSyncExternalStore, type ReactNode } from 'react';
-import { Check, CircleAlert, Eye } from 'lucide-react';
+import { AlertCircleIcon, CheckIcon, EyeIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import { Form } from '@tulipfarm/sprout/form';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
@@ -71,9 +71,9 @@ export function AgentBuilderLayout({
                 <TabsTrigger key={item.id} value={item.id}>
                   <span aria-hidden="true" className="grid size-5 shrink-0 place-items-center text-xs">
                     {errors.has(item.id) ? (
-                      <CircleAlert className="size-4 text-destructive" />
+                      <AlertCircleIcon className="size-4 text-destructive" />
                     ) : completed.has(item.id) ? (
-                      <Check className="size-4" />
+                      <CheckIcon className="size-4" />
                     ) : (
                       index + 1
                     )}
@@ -104,7 +104,7 @@ export function AgentBuilderLayout({
             <Sheet open={previewOpen} onOpenChange={onPreviewOpenChange}>
               <div className="mb-3">
                 <SheetTrigger render={<Button variant="outline" />}>
-                  <Eye aria-hidden="true" />
+                  <EyeIcon aria-hidden="true" />
                   View agent
                 </SheetTrigger>
               </div>

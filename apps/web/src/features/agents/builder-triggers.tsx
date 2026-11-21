@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router';
-import { Trash2, Workflow } from 'lucide-react';
+import { DeleteIcon, WorkflowIcon } from '@tulipfarm/icons';
 import { unattendedTrigger, type AgentSetup } from '@tulipfarm/agents/setup-contracts';
 import { Button } from '@tulipfarm/sprout/button';
 import { FormSection } from '@tulipfarm/sprout/form';
@@ -33,7 +33,7 @@ export function BuilderTriggers({
     >
       {!value.length && (
         <div className="flex items-start gap-3 text-sm">
-          <Workflow aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
+          <WorkflowIcon aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
           <p className="text-muted-foreground">No triggers. People can still use this agent in chat and Slack.</p>
         </div>
       )}
@@ -58,7 +58,7 @@ export function BuilderTriggers({
             disabled={disabled}
             onClick={() => onChange(value.filter(other => other.id !== item.id))}
           >
-            <Trash2 aria-hidden="true" />
+            <DeleteIcon aria-hidden="true" />
           </Button>
         </section>
       ))}

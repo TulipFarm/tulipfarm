@@ -1,5 +1,5 @@
 import { Button } from '@tulipfarm/sprout/button';
-import { ArrowUpRight } from 'reicon-react/icons/ArrowUpRight';
+import { ArrowUpRightIcon } from '@tulipfarm/icons';
 
 /** Operator guide for configuring model providers and the catalog. */
 const docsUrl = import.meta.env.VITE_DOCS_URL || 'https://tulipfarm.ai/docs/';
@@ -16,7 +16,7 @@ export function ModelSetupLink({ size = 'sm' }: { size?: 'sm' | 'md' }) {
       render={<a href={modelSetupDocsUrl} target="_blank" rel="noopener noreferrer" />}
     >
       Model setup guide
-      <ArrowUpRight size={14} aria-hidden="true" />
+      <ArrowUpRightIcon size="sm" aria-hidden="true" />
     </Button>
   );
 }

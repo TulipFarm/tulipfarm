@@ -3,7 +3,7 @@ import { Link, useParams } from '@tanstack/react-router';
 import { Button } from '@tulipfarm/sprout/button';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
-import { Window } from 'reicon-react/icons/Window';
+import { WindowIcon } from '@tulipfarm/icons';
 import { workspaceRoute } from '@/router';
 import { useOwnMembership } from '@/features/governance/queries';
 import type { AppDetail } from './api';
@@ -23,7 +23,7 @@ export function AppsUnavailable() {
     <StatePanel
       kind="unavailable"
       heading="h2"
-      icon={Window}
+      icon={WindowIcon}
       title="Apps aren’t available in this workspace"
       description="They haven’t been turned on for this workspace yet."
     />
@@ -63,7 +63,7 @@ export function AppGate({ children }: { children: (app: AppDetail) => ReactNode 
       <StatePanel
         kind="unavailable"
         heading="h2"
-        icon={Window}
+        icon={WindowIcon}
         title="App not found"
         description="It may have moved to a new address, or you may not have access to it."
       >
@@ -81,7 +81,7 @@ export function AppGate({ children }: { children: (app: AppDetail) => ReactNode 
       <StatePanel
         kind="unavailable"
         heading="h2"
-        icon={Window}
+        icon={WindowIcon}
         title="You no longer have access to this app"
         description="Ask an editor of this app to share it with you."
       />

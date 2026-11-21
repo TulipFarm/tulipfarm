@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { z } from 'zod';
 import { Link } from '@tanstack/react-router';
-import { Pause } from 'reicon-react/icons/Pause';
-import { Play } from 'reicon-react/icons/Play';
-import { Tasks } from 'reicon-react/icons/Tasks';
+import { PauseIcon, PlayIcon, TasksIcon } from '@tulipfarm/icons';
 import { planListItemSchema, planReceiptSchema, planViewSchema, type PlanView } from '@tulipfarm/agents/plan-contracts';
 import { maximumTaskLimits } from '@tulipfarm/agents/contracts';
 import { formatDateTime } from '@tulipfarm/plan-documents/stamp';
@@ -485,7 +483,7 @@ export function PlanCanvas({
       <StatePanel
         kind="unavailable"
         heading="h3"
-        icon={Tasks}
+        icon={TasksIcon}
         title="Plan unavailable"
         description="This plan was removed or your access to its chat changed. Nothing from it is shown here."
       />
@@ -749,7 +747,7 @@ function PlanReference({
       title={current.title}
       kind="Plan"
       apps={apps}
-      icon={<Tasks size={18} />}
+      icon={<TasksIcon size="lg" />}
       status={status}
       state={tone === 'done' ? 'success' : tone === 'failed' ? 'error' : tone === 'active' ? 'running' : 'default'}
       action={{ label: 'Open plan', onClick: () => canvas.show(planCanvasItem(workspaceId, chatId, current)) }}
@@ -884,7 +882,7 @@ function PlanControls({
         {(approval && view.lifecycle === 'draft') || awaiting ? (
           <>
             <Button size="sm" disabled={!!busy || !revision} aria-busy={busy === 'approve'} onClick={approve}>
-              <Play size={14} aria-hidden="true" />
+              <PlayIcon size="sm" aria-hidden="true" />
               {busy === 'approve'
                 ? 'Approving…'
                 : view.lifecycle === 'draft'
@@ -902,7 +900,7 @@ function PlanControls({
             aria-busy={busy === 'start'}
             onClick={() => void run({ action: 'start' })}
           >
-            <Play size={14} aria-hidden="true" />
+            <PlayIcon size="sm" aria-hidden="true" />
             {busy === 'start' ? 'Starting…' : 'Start plan'}
           </Button>
         ) : paused ? (
@@ -912,7 +910,7 @@ function PlanControls({
             aria-busy={busy === 'resume'}
             onClick={() => void run(budget ? { action: 'resume', budget } : { action: 'resume' })}
           >
-            <Play size={14} aria-hidden="true" />
+            <PlayIcon size="sm" aria-hidden="true" />
             {busy === 'resume' ? 'Resuming…' : budget ? 'Add budget and resume' : 'Resume plan'}
           </Button>
         ) : (
@@ -923,7 +921,7 @@ function PlanControls({
             aria-busy={busy === 'pause'}
             onClick={() => void run({ action: 'pause' })}
           >
-            <Pause size={14} aria-hidden="true" />
+            <PauseIcon size="sm" aria-hidden="true" />
             {busy === 'pause' ? 'Pausing…' : 'Pause plan'}
           </Button>
         )}

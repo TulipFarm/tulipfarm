@@ -1,9 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { ChatPlus } from 'reicon-react/icons/ChatPlus';
-import { Chat as ChatIcon } from 'reicon-react/icons/Chat';
-import { Check } from 'reicon-react/icons/Check';
-import { Checklist } from 'reicon-react/icons/Checklist';
+import { ChatAddIcon, ChatIcon, CheckIcon, TasksIcon } from '@tulipfarm/icons';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { FileTypeIcon } from '@tulipfarm/sprout/attachment';
 import { Button } from '@tulipfarm/sprout/button';
@@ -369,7 +366,7 @@ export function FileStatus({
   if (!audience || audience.status === 'ready')
     return (
       <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
-        <Check size={14} aria-hidden="true" />
+        <CheckIcon size="sm" aria-hidden="true" />
         Everyone in {place} can open it
       </p>
     );
@@ -462,7 +459,7 @@ function Destinations({
         {(privateOnly ? read.state.data.filter(chat => !chat.projectId) : read.state.data).map(chat => (
           <li key={chat.id} className="grid">
             <Button variant="ghost" size="md" onClick={() => choose(chat)}>
-              <ChatIcon size={16} aria-hidden="true" />
+              <ChatIcon size="md" aria-hidden="true" />
               <span className="min-w-0 flex-1 truncate text-start" title={chat.title}>
                 {chat.title}
               </span>
@@ -481,7 +478,7 @@ function Destinations({
   return (
     <>
       <Button variant="outline" onClick={newChat}>
-        <ChatPlus size={16} aria-hidden="true" />
+        <ChatAddIcon size="md" aria-hidden="true" />
         New personal chat
       </Button>
       <section aria-labelledby="use-in-chat-existing" className="space-y-2">
@@ -562,7 +559,7 @@ function TaskDestinations({
         {read.state.data.map(task => (
           <li key={task.id} className="grid">
             <Button variant="ghost" size="md" onClick={() => choose(task)}>
-              <Checklist size={16} aria-hidden="true" />
+              <TasksIcon size="md" aria-hidden="true" />
               <span className="min-w-0 flex-1 truncate text-start" title={task.title}>
                 {task.title}
               </span>

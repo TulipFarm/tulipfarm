@@ -1,9 +1,4 @@
-import { BookOpen } from 'reicon-react/icons/BookOpen';
-import { Database } from 'reicon-react/icons/Database';
-import { Globe } from 'reicon-react/icons/Globe';
-import { Plug } from 'reicon-react/icons/Plug';
-import { Sparkle } from 'reicon-react/icons/Sparkle';
-import { Users } from 'reicon-react/icons/Users';
+import { BookOpenIcon, DatabaseIcon, GlobeIcon, PlugIcon, SparkleIcon, UsersIcon } from '@tulipfarm/icons';
 import { BrandIcon, type Brand } from '@tulipfarm/sprout/brand-icon';
 import type { ToolActivityItem } from '@tulipfarm/sprout/tool-activity';
 import type { ConversationMessage } from './conversation-api';
@@ -34,14 +29,14 @@ function brandOf(tool: string, label: string): Brand | null {
 
 export function toolVisual(tool: string, brand?: Brand | null) {
   if (brand) return <BrandIcon brand={brand} size="inline" />;
-  if (/^(tables|rows|schema)\./.test(tool)) return <Database size={14} />;
-  if (tool.startsWith('skills.')) return <BookOpen size={14} />;
-  if (tool.startsWith('knowledge.')) return <BookOpen size={14} />;
-  if (tool.startsWith('agents.')) return <Users size={14} />;
-  if (tool === 'web.fetch' || tool === 'files.read') return <BookOpen size={14} />;
-  if (tool.startsWith('web.') || tool === 'api.request') return <Globe size={14} />;
-  if (tool.startsWith('mcp.')) return <Plug size={14} />;
-  return <Sparkle size={14} />;
+  if (/^(tables|rows|schema)\./.test(tool)) return <DatabaseIcon size="sm" />;
+  if (tool.startsWith('skills.')) return <BookOpenIcon size="sm" />;
+  if (tool.startsWith('knowledge.')) return <BookOpenIcon size="sm" />;
+  if (tool.startsWith('agents.')) return <UsersIcon size="sm" />;
+  if (tool === 'web.fetch' || tool === 'files.read') return <BookOpenIcon size="sm" />;
+  if (tool.startsWith('web.') || tool === 'api.request') return <GlobeIcon size="sm" />;
+  if (tool.startsWith('mcp.')) return <PlugIcon size="sm" />;
+  return <SparkleIcon size="sm" />;
 }
 
 export function toolLabel(tool: Tool) {

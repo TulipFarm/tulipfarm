@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Command } from 'reicon-react/icons/Command';
+import { CommandIcon } from '@tulipfarm/icons';
 import { ResultCard, ResultAppActions } from '@tulipfarm/sprout/result-card';
 import { CanvasSection } from '@tulipfarm/sprout/canvas';
 import { ToolActivity } from '@tulipfarm/sprout/tool-activity';
@@ -40,7 +40,7 @@ export function ActivityResultCard({
         kind="Activity"
         title={title}
         apps={resultActivityApps(items)}
-        icon={<Command size={18} />}
+        icon={<CommandIcon size="lg" />}
         status={status}
         state={unknown || failed ? 'error' : running ? 'running' : 'default'}
         action={{

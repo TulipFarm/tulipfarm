@@ -1,13 +1,11 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
-import { BranchDown } from 'reicon-react/icons/BranchDown';
-import { RefreshCwIcon } from 'lucide-react';
+import { AddIcon, BranchIcon, RefreshIcon } from '@tulipfarm/icons';
 import { z } from 'zod';
 import { statusSchema, webhookKeyIssuedSchema, workflowSchema } from '@tulipfarm/workflows/contracts';
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SearchField } from '@tulipfarm/sprout/search-field';
-import { Add } from 'reicon-react/icons/Add';
 import { Button, jumpTo } from '@tulipfarm/sprout/button';
 import { Textarea } from '@tulipfarm/sprout/textarea';
 import { Label } from '@tulipfarm/sprout/label';
@@ -332,7 +330,7 @@ function WorkflowPage({
       title="Refresh workflows"
       onClick={() => void (shelf === 'archived' ? archivedRead.refresh() : refresh())}
     >
-      <RefreshCwIcon aria-hidden="true" />
+      <RefreshIcon aria-hidden="true" />
     </Button>
   );
   const create = () =>
@@ -489,7 +487,7 @@ function WorkflowPage({
                 <div className="flex shrink-0 gap-2 sm:ml-auto">
                   {refreshList}
                   <Button disabled={blocked} onClick={create}>
-                    <Add size={16} aria-hidden="true" />
+                    <AddIcon size="md" aria-hidden="true" />
                     New workflow
                   </Button>
                 </div>
@@ -536,7 +534,7 @@ function WorkflowPage({
               {shelfWorkflows?.length === 0 && (
                 <StatePanel
                   kind="empty"
-                  icon={BranchDown}
+                  icon={BranchIcon}
                   title={shelf === 'archived' ? 'No archived workflows' : 'No workflows yet'}
                   description={
                     shelf === 'archived'
@@ -929,7 +927,7 @@ function WorkflowPage({
                           </Select>
                         )}
                         <Button variant="outline" size="sm" onClick={() => void historyRead.refresh()}>
-                          <RefreshCwIcon data-icon="inline-start" aria-hidden="true" />
+                          <RefreshIcon data-icon="inline-start" aria-hidden="true" />
                           Check run history
                         </Button>
                       </div>

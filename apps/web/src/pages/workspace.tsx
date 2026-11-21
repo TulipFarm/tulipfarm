@@ -9,36 +9,41 @@ import {
   type ComponentProps,
   type CSSProperties,
 } from 'react';
-import { ChevronRight } from 'lucide-react';
+import {
+  AddIcon,
+  AgentIcon,
+  AppsIcon,
+  ChartBarIcon,
+  ChatIcon,
+  CheckIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ChevronUpIcon,
+  ComposeIcon,
+  CpuIcon,
+  DatabaseIcon,
+  FilesIcon,
+  FolderIcon,
+  HelpCircleIcon,
+  InboxIcon,
+  LockIcon,
+  LogoutIcon,
+  MonitorIcon,
+  MoonIcon,
+  PlugIcon,
+  SearchIcon,
+  SettingsIcon,
+  ShieldUserIcon,
+  SidebarLeftIcon,
+  SunIcon,
+  TasksIcon,
+  UserCircleIcon,
+  UserIcon,
+  UsersIcon,
+  WorkflowIcon,
+} from '@tulipfarm/icons';
 import { Link, Outlet, useLocation, useNavigate, useRouter } from '@tanstack/react-router';
 import { Toaster } from '@tulipfarm/sprout/toast';
-import { Add } from 'reicon-react/icons/Add';
-import { BranchDown } from 'reicon-react/icons/BranchDown';
-import { LockKeyhole } from 'reicon-react/icons/LockKeyhole';
-import { Check } from 'reicon-react/icons/Check';
-import { ChevronUp } from 'reicon-react/icons/ChevronUp';
-import { ChevronLeft } from 'reicon-react/icons/ChevronLeft';
-import { Files } from 'reicon-react/icons/Files';
-import { Cpu } from 'reicon-react/icons/Cpu';
-import { ChartBar } from 'reicon-react/icons/ChartBar';
-import { Database } from 'reicon-react/icons/Database';
-import { HelpCircle } from 'reicon-react/icons/HelpCircle';
-import { People } from 'reicon-react/icons/People';
-import { Setting2 } from 'reicon-react/icons/Setting2';
-import { ShieldUser } from 'reicon-react/icons/ShieldUser';
-import { User } from 'reicon-react/icons/User';
-import { UserCircle } from 'reicon-react/icons/UserCircle';
-import { Inbox } from 'reicon-react/icons/Inbox';
-import { Checklist } from 'reicon-react/icons/Checklist';
-import { Plug } from 'reicon-react/icons/Plug';
-import { Logout } from 'reicon-react/icons/Logout';
-import { Monitor } from 'reicon-react/icons/Monitor';
-import { Moon } from 'reicon-react/icons/Moon';
-import { PenSquare } from 'reicon-react/icons/PenSquare';
-import { ChatRound } from 'reicon-react/icons/ChatRound';
-import { Search3 } from 'reicon-react/icons/Search3';
-import { Sun } from 'reicon-react/icons/Sun';
-import { Users } from 'reicon-react/icons/Users';
 import { preloadRouteCode, workspaceRoute } from '@/router';
 import { whenCodeQuiet } from '@/lib/code-quiet';
 import { WorkspaceSetup } from './workspace-setup';
@@ -80,9 +85,7 @@ import {
   SidebarTrigger,
   useSidebar,
 } from '@tulipfarm/sprout/sidebar';
-import { SidebarLeft } from 'reicon-react/icons/SidebarLeft';
 import { SidebarRecents } from '@/features/navigation/sidebar-recents';
-import { Window } from 'reicon-react/icons/Window';
 import { TooltipProvider } from '@tulipfarm/sprout/tooltip';
 import { authClient } from '@/lib/auth';
 import { SearchPalette, useSearchShortcut } from '@/features/search/search-palette';
@@ -129,7 +132,7 @@ export type WorkspacePath =
   | '/$workspaceSlug/tables'
   | '/$workspaceSlug/integrations'
   | '/$workspaceSlug/help';
-export type Page = { label: string; to: WorkspacePath; icon?: typeof Add; recent?: RecentSection };
+export type Page = { label: string; to: WorkspacePath; icon?: typeof AddIcon; recent?: RecentSection };
 const SidebarCredits = overrides.get('credits');
 const creditsShown = overrides.overriddenBy('credits') !== undefined;
 const SidebarNavItem = lazy(() =>
@@ -142,18 +145,18 @@ const SidebarMockPage = import.meta.env.DEV
   ? lazy(() => import('@/features/navigation/sidebar-mock').then(module => ({ default: module.SidebarMockPage })))
   : null;
 
-const newChat: Page = { label: 'New chat', to: '/$workspaceSlug', icon: PenSquare };
-const chats: Page = { label: 'Chats', to: '/$workspaceSlug/chat', icon: ChatRound, recent: 'chat' };
-const inbox: Page = { label: 'Inbox', to: '/$workspaceSlug/inbox', icon: Inbox };
-const tasks: Page = { label: 'Tasks', to: '/$workspaceSlug/tasks', icon: Checklist };
-const settings: Page = { label: 'Settings', to: '/$workspaceSlug/settings', icon: Setting2 };
-const account: Page = { label: 'Account', to: '/$workspaceSlug/settings/account', icon: UserCircle };
-const secrets: Page = { label: 'Secrets', to: '/$workspaceSlug/settings/secrets', icon: LockKeyhole };
-const members: Page = { label: 'Members', to: '/$workspaceSlug/members', icon: User };
-const membersAndTeams: Page = { label: 'Members & teams', to: members.to, icon: People };
-const teams: Page = { label: 'Teams', to: '/$workspaceSlug/teams', icon: People };
-const agents: Page = { label: 'Agents', to: '/$workspaceSlug/agents', icon: Users, recent: 'agents' };
-const apps: Page = { label: 'Apps', to: '/$workspaceSlug/apps', icon: Window };
+const newChat: Page = { label: 'New chat', to: '/$workspaceSlug', icon: ComposeIcon };
+const chats: Page = { label: 'Chats', to: '/$workspaceSlug/chat', icon: ChatIcon, recent: 'chat' };
+const inbox: Page = { label: 'Inbox', to: '/$workspaceSlug/inbox', icon: InboxIcon };
+const tasks: Page = { label: 'Tasks', to: '/$workspaceSlug/tasks', icon: TasksIcon };
+const settings: Page = { label: 'Settings', to: '/$workspaceSlug/settings', icon: SettingsIcon };
+const account: Page = { label: 'Account', to: '/$workspaceSlug/settings/account', icon: UserCircleIcon };
+const secrets: Page = { label: 'Secrets', to: '/$workspaceSlug/settings/secrets', icon: LockIcon };
+const members: Page = { label: 'Members', to: '/$workspaceSlug/members', icon: UserIcon };
+const membersAndTeams: Page = { label: 'Members & teams', to: members.to, icon: UsersIcon };
+const teams: Page = { label: 'Teams', to: '/$workspaceSlug/teams', icon: UsersIcon };
+const agents: Page = { label: 'Agents', to: '/$workspaceSlug/agents', icon: AgentIcon, recent: 'agents' };
+const apps: Page = { label: 'Apps', to: '/$workspaceSlug/apps', icon: AppsIcon };
 const workspaceGroups: { label: string; pages: Page[] }[] = [
   {
     label: 'Daily work',
@@ -163,16 +166,16 @@ const workspaceGroups: { label: string; pages: Page[] }[] = [
     label: 'Agents & workflows',
     pages: [
       agents,
-      { label: 'Workflows', to: '/$workspaceSlug/workflows', icon: BranchDown, recent: 'workflows' },
+      { label: 'Workflows', to: '/$workspaceSlug/workflows', icon: WorkflowIcon, recent: 'workflows' },
       apps,
     ],
   },
   {
     label: 'Data & integrations',
     pages: [
-      { label: 'Tables', to: '/$workspaceSlug/tables', icon: Database, recent: 'tables' },
-      { label: 'Files', to: '/$workspaceSlug/files', icon: Files, recent: 'files' },
-      { label: 'Integrations', to: '/$workspaceSlug/integrations', icon: Plug },
+      { label: 'Tables', to: '/$workspaceSlug/tables', icon: DatabaseIcon, recent: 'tables' },
+      { label: 'Files', to: '/$workspaceSlug/files', icon: FolderIcon, recent: 'files' },
+      { label: 'Integrations', to: '/$workspaceSlug/integrations', icon: PlugIcon },
     ],
   },
 ];
@@ -202,13 +205,13 @@ function usePreloadSidebarCode(slug: string) {
     };
   }, [slug]);
 }
-const models: Page = { label: 'Models', to: '/$workspaceSlug/settings/models', icon: Cpu };
-const usage: Page = { label: 'Usage', to: '/$workspaceSlug/settings/usage', icon: ChartBar };
-const soul: Page = { label: 'Soul repository', to: '/$workspaceSlug/settings/soul', icon: Files };
-const tableAccess: Page = { label: 'Table access', to: '/$workspaceSlug/grants', icon: ShieldUser };
+const models: Page = { label: 'Models', to: '/$workspaceSlug/settings/models', icon: CpuIcon };
+const usage: Page = { label: 'Usage', to: '/$workspaceSlug/settings/usage', icon: ChartBarIcon };
+const soul: Page = { label: 'Soul repository', to: '/$workspaceSlug/settings/soul', icon: FilesIcon };
+const tableAccess: Page = { label: 'Table access', to: '/$workspaceSlug/grants', icon: ShieldUserIcon };
 const administrationPages: Page[] = [members, teams, tableAccess];
 const settingsPages: Page[] = [
-  { label: 'General', to: settings.to, icon: Setting2 },
+  { label: 'General', to: settings.to, icon: SettingsIcon },
   membersAndTeams,
   tableAccess,
   models,
@@ -321,7 +324,7 @@ function StandardNavItem({ page }: { page: Page }) {
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
-        icon={Icon && <Icon size={16} aria-hidden="true" />}
+        icon={Icon && <Icon size="lg" aria-hidden="true" />}
         tooltip={page.label}
         isActive={active}
         aria-current={active ? 'page' : undefined}
@@ -353,7 +356,7 @@ function InboxNavItem({ workspaceId }: { workspaceId: string }) {
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
-        icon={<Inbox size={16} aria-hidden="true" />}
+        icon={<InboxIcon size="lg" aria-hidden="true" />}
         tooltip={inbox.label}
         isActive={active}
         aria-current={active ? 'page' : undefined}
@@ -403,11 +406,11 @@ function WorkspaceSwitchItems() {
           >
             <EntityAvatar seed={item.id} name={item.name} image={item.icon} size="sm" shape="square" />
             <span className="min-w-0 flex-1 truncate">{item.name}</span>
-            {item.slug === workspace.slug && <Check size={14} aria-hidden="true" />}
+            {item.slug === workspace.slug && <CheckIcon size="sm" aria-hidden="true" />}
           </DropdownMenuItem>
         ))}
         <DropdownMenuItem render={<Link to="/create-workspace" />} onClick={close}>
-          <Add size={14} aria-hidden="true" />
+          <AddIcon size="sm" aria-hidden="true" />
           Create workspace
         </DropdownMenuItem>
       </DropdownMenuGroup>
@@ -441,7 +444,7 @@ function WorkspaceHeader({ onSearch }: { onSearch: () => void }) {
             onSearch();
           }}
         >
-          <Search3 size={16} aria-hidden="true" />
+          <SearchIcon size="lg" aria-hidden="true" />
         </Button>
         <Button
           variant="secondary"
@@ -451,17 +454,17 @@ function WorkspaceHeader({ onSearch }: { onSearch: () => void }) {
           render={<Link to="/$workspaceSlug" params={{ workspaceSlug: workspace.slug }} />}
           onClick={() => setOpenMobile(false)}
         >
-          <PenSquare size={16} aria-hidden="true" />
+          <ComposeIcon size="lg" aria-hidden="true" />
         </Button>
       </div>
     </div>
   );
 }
 
-const themeOptions: { value: Theme; label: string; icon: typeof Add }[] = [
-  { value: 'system', label: 'System', icon: Monitor },
-  { value: 'light', label: 'Light', icon: Sun },
-  { value: 'dark', label: 'Dark', icon: Moon },
+const themeOptions: { value: Theme; label: string; icon: typeof AddIcon }[] = [
+  { value: 'system', label: 'System', icon: MonitorIcon },
+  { value: 'light', label: 'Light', icon: SunIcon },
+  { value: 'dark', label: 'Dark', icon: MoonIcon },
 ];
 
 function ProfileMenu() {
@@ -482,7 +485,7 @@ function ProfileMenu() {
           <SidebarMenuButton
             tooltip="Account"
             icon={<MenuAvatar seed={user.id} name={name} image={user.image} size="sm" />}
-            badge={<ChevronUp size={12} aria-hidden="true" />}
+            badge={<ChevronUpIcon size="xs" aria-hidden="true" />}
           />
         }
       >
@@ -498,7 +501,7 @@ function ProfileMenu() {
             render={<Link to={account.to} params={{ workspaceSlug: workspace.slug }} />}
             onClick={() => setOpenMobile(false)}
           >
-            <UserCircle size={14} aria-hidden="true" />
+            <UserCircleIcon size="sm" aria-hidden="true" />
             Account settings
           </DropdownMenuItem>
         </DropdownMenuGroup>
@@ -507,12 +510,12 @@ function ProfileMenu() {
           render={<Link to="/$workspaceSlug/help" params={{ workspaceSlug: workspace.slug }} />}
           onClick={() => setOpenMobile(false)}
         >
-          <HelpCircle size={14} aria-hidden="true" />
+          <HelpCircleIcon size="sm" aria-hidden="true" />
           Help and support
         </DropdownMenuItem>
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
-            <Monitor size={14} aria-hidden="true" />
+            <MonitorIcon size="sm" aria-hidden="true" />
             Theme
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent>
@@ -539,7 +542,7 @@ function ProfileMenu() {
           render={<Link to="/logout" search={{ redirect: destination }} />}
           onClick={() => setOpenMobile(false)}
         >
-          <Logout size={14} aria-hidden="true" />
+          <LogoutIcon size="sm" aria-hidden="true" />
           Log out
         </DropdownMenuItem>
       </DropdownMenuContent>
@@ -576,7 +579,7 @@ function SettingsNavigation() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
-              icon={<ChevronLeft size={16} aria-hidden="true" />}
+              icon={<ChevronLeftIcon size="md" aria-hidden="true" />}
               tooltip="Back to app"
               nativeButton={false}
               render={<Link to="/$workspaceSlug" params={{ workspaceSlug: workspace.slug }} />}
@@ -675,7 +678,7 @@ function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
                     <StandardNavItem page={agents} />
                     <SidebarMenuItem>
                       <SidebarMenuButton
-                        icon={<ChevronRight size={12} aria-hidden="true" className={moreOpen ? 'rotate-90' : ''} />}
+                        icon={<ChevronRightIcon size="xs" aria-hidden="true" className={moreOpen ? 'rotate-90' : ''} />}
                         aria-expanded={moreOpen}
                         onClick={() => setMore(!moreOpen)}
                       >
@@ -857,7 +860,7 @@ function WorkspaceShellContent() {
               className={`group/header @container flex h-(--sprout-bar-height) shrink-0 items-center gap-2 border-b px-3 ${onCalendar ? 'pointer-coarse:h-14' : ''}`}
             >
               <SidebarTrigger>
-                <SidebarLeft size={16} aria-hidden="true" />
+                <SidebarLeftIcon size="md" aria-hidden="true" />
               </SidebarTrigger>
               <div ref={setHeaderElement} className="flex min-w-0 flex-1 items-center gap-2" />
               <div ref={setActionsElement} className="flex shrink-0 items-center gap-2" />
