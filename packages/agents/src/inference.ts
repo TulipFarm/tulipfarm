@@ -1289,8 +1289,8 @@ function measureRequest(route: CapableRoute, serialized: string, turns: Iterable
   };
 }
 /**
- * A reply round's request as two parts: everything sent but the loop items (route, system blocks, reminder, tools and
- * forced tool), and the loop items, which later rounds only append to. `items` counts them and `prefix` digests them.
+ * A reply round's request as two parts: everything sent but the loop items and the forced tool (route, system blocks,
+ * reminder and tools), and the loop items, which later rounds only append to. `items` counts them and `prefix` digests them.
  */
 type RoundShape = { fixed: string; items: number; prefix: string };
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('base64url');
@@ -1821,6 +1821,10 @@ function nativeStep(route: CapableRoute, body: unknown): NativeStep {
   }
 }
 
+/** The reasoning tokens a forced round may use before its call, by reasoning effort. Higher efforts are not capped. */
+const forcedReasoningTokens: Partial<Record<ReasoningEffort, number>> = { none: 0, minimal: 2048, low: 2048 };
+type ReasoningEffort = NonNullable<ReturnType<typeof routeCapabilities>['reasoningEffort']>;
+
 /**
  * `blocks[0]` is the stable platform prompt; later blocks vary per project. Anthropic caches the first block on its own.
  * `required` names an offered tool the model must call in this response; without it the model chooses.
@@ -1834,12 +1838,16 @@ function nativeRequest(
 ) {
   const forced = required !== undefined && tools.some(tool => tool.name === required) ? required : undefined;
   const capabilities = routeCapabilities(config);
-  // Reasoning tokens count toward the limit, so only a route with reasoning off can be given a small one.
-  const reasoningOff =
-    (capabilities.reasoningEffort ?? (capabilities.reasoningOffForTools ? 'none' : undefined)) === 'none';
-  const bound = forced && reasoningOff && argumentTokenBound(tools.find(tool => tool.name === forced)!.parameters);
+  // Reasoning tokens count toward the limit, so a route only gets a small one when its reasoning is off or kept low.
+  const effort = capabilities.reasoningEffort ?? (capabilities.reasoningOffForTools ? 'none' : undefined);
+  const reasoning = effort && forcedReasoningTokens[effort];
+  const bound =
+    forced && reasoning !== undefined ? argumentTokenBound(tools.find(tool => tool.name === forced)!.parameters) : 0;
   // A forced round only needs room for its call, so text a route writes before the call cannot run to the full limit.
-  const capped = bound ? { ...config, maxOutputTokens: Math.min(config.maxOutputTokens, bound + 1024) } : config;
+  const capped =
+    bound && reasoning !== undefined
+      ? { ...config, maxOutputTokens: Math.min(config.maxOutputTokens, bound + 1024 + reasoning) }
+      : config;
   return { ...nativeWire(capped, blocks, items, tools, forced), turns: loopTurns(items) };
 }
 
@@ -5549,7 +5557,9 @@ export async function inferWithTools(
           served = target;
           const blocks = roundBlocks();
           const forced = required && routeCapabilities(target).toolChoice !== 'auto' ? required : undefined;
-          const shape = roundShape(target, [blocks, currentReminder, offered, forced ?? null], items);
+          // The forced tool changes only the request's tool choice, whose few bytes the next round's bound counts, so
+          // a round that forces a tool, or stops forcing one, still extends the previous round.
+          const shape = roundShape(target, [blocks, currentReminder, offered], items);
           const previous =
             baseline && extendsRound(baseline.shape, shape, items)
               ? {

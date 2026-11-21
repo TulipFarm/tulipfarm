@@ -698,9 +698,10 @@ export async function beginReplySession(input: {
 }
 
 /**
- * Prices a call that already answered, so pricing never fails the reply. Usage above the hold's bound, such as a plan
- * session's summed internal calls, or a day without a price is charged the call's held worst case, which is nothing on
- * a member's own plan, and logged.
+ * Prices a call that already answered, so pricing never fails the reply. Usage above the route's limits is priced as
+ * reported, capped at the call's held worst case. Usage that cannot be priced that way, such as a plan session's summed
+ * internal calls, or a day without a price is charged the held worst case, which is nothing on a member's own plan, and
+ * logged.
  */
 export function pricedUsage(
   input: Omit<Parameters<typeof calculateUsageCost>[0], 'usage'> & {
@@ -713,9 +714,23 @@ export function pricedUsage(
     return calculateUsageCost(input);
   } catch (error) {
     const { tokens } = input.usage;
+    // A route can report more tokens than its limits, such as reasoning tokens on top of a call cut off at the output
+    // limit. Those tokens are still priced as reported, never above the call's worst case.
+    const reported = (() => {
+      try {
+        const cost = calculateUsageCost({
+          ...input,
+          maxInputTokens: Number.MAX_SAFE_INTEGER,
+          maxOutputTokens: Number.MAX_SAFE_INTEGER,
+        });
+        return cost.kind === 'known' && BigInt(cost.providerPicoUsd) <= worstCase ? cost : undefined;
+      } catch {
+        return undefined;
+      }
+    })();
     log('warn', 'activity', 'call_failed', {
       operation: 'chat.usage-cost',
-      outcome: 'estimated',
+      outcome: reported ? 'over_limit' : 'estimated',
       'gen_ai.provider.name': attempt.provider,
       'gen_ai.request.model': attempt.model,
       'billing.source': billingSource(attempt.provider),
@@ -723,6 +738,7 @@ export function pricedUsage(
       'gen_ai.usage.output_tokens': tokens.output,
       ...(errorSite(error) ? { 'error.site': errorSite(error) } : {}),
     });
+    if (reported) return reported;
     return {
       kind: 'known',
       providerPicoUsd: worstCase.toString(),
