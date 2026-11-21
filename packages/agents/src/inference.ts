@@ -2360,8 +2360,11 @@ const nowClaim =
 /** A clause that says the app already holds something, which only reading its files in this reply could show. */
 const alreadyClaim =
   /\balready (?:has|have|contains?|includes?|serves?|returns?|responds?|exposes?|defines?|handles?|reads?|says?|shows?|uses?)\b/i;
-const editRequest =
-  /\b(?:add|change|rename|replace|remove|delete|edit|update|fix|insert|move|swap|restyle|recolou?r|resize|cent(?:er|re)|align|hide|translate|rewrite|make (?:it|the|them|this|that)|turn (?:it|the|them|this|that)|set (?:the|its|it))\b/i;
+// After "the" or "latest", "update" or "edit" names a thing; "build it" asks for a build, not new code.
+const editRequest = new RegExp(
+  String.raw`(?<!\b(?:the|a|an|last|latest|newest|new|this|that|my|your|our|its) )\b(?:add|change|create|write|rewrite|implement|put|include|insert|make|turn|set|rename|replace|remove|delete|fix|move|swap|update|edit|switch|restyle|style|redesign|refactor|convert|hook|wire|drop|hide|enable|disable|translate|resize|cent(?:er|re)|align|bold|capitali[sz]e|recolou?r|build(?! (?:it|this|that|again|the (?:app|site|preview|draft|page)\b)))\b`,
+  'i',
+);
 /** A short reply that reports the work finished without naming it. */
 const doneClaim =
   /^\s*(?:all )?(?:done|finished|complete|updated)\b|\b(?:is|are) (?:all )?(?:done|ready|live|updated|in place)\b/i;

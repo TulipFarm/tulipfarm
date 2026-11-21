@@ -52,7 +52,8 @@ export function fileListingQuery(request: string): string | undefined {
 }
 
 /** The Files library, as opposed to an app's own files such as index.html. */
-const filesLibrary = /\b(?:in|to|into|from)\s+(?:(?:my|your|the)\s+)?Files\b/i;
+const filesLibrary =
+  /\b(?:[Ii]n|[Tt]o|[Ii]nto|[Ff]rom)\s+(?:(?:my|your|the)\s+)?Files\b(?!\s+(?:page|folder|directory|section|tab|list|route|view|link)\b)/;
 /**
  * In an app's chat, file names and "created" describe the app's own files, so only a save that names the Files library,
  * or a real Files save attempt, is checked.
