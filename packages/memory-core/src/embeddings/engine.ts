@@ -188,7 +188,10 @@ export function createEmbeddingEngine<Context, Source extends { kind: string }>(
     }
   }
   async function installProfile(tx: Transaction) {
-    await repository(tx).installProfile([profile.id, profile]);
+    // Search and the sweep only use vectors of the current profile. When a profile is first installed, documents
+    // pointing at another profile's vectors become unembedded, so the sweep finds them without scanning the rest.
+    if ((await repository(tx).installProfile([profile.id, profile])).rowCount)
+      await repository(tx).forgetOtherProfileVectors([profile.id]);
     const stored = z
       .object({ matches: z.boolean() })
       .parse((await repository(tx).profileMatches([profile.id, profile])).rows[0]);
