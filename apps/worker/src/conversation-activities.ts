@@ -78,6 +78,7 @@ import { chatSkills } from '@tulipfarm/agents/chat-skills';
 import { createReplyTextPublisher } from '@tulipfarm/conversations/event-publisher';
 import { isFeatureEnabled } from '@tulipfarm/observability';
 import { beginReplySession } from './reply-session.ts';
+import { heartbeating } from './app-activities.ts';
 import {
   memberPlans,
   planCredentialsFromEnvironment,
@@ -759,9 +760,10 @@ export function createConversationActivities(
     });
   return {
     processConversationReply: (work: Parameters<ReturnType<typeof createConversationExecutor>['process']>[0]) =>
-      run(work, (executor, parsed) => executor.process(parsed)),
+      heartbeating(() => run(work, (executor, parsed) => executor.process(parsed))),
     /** Delivers the reply and reports, without waiting on it, whether the chat still needs its first generated title. */
-    deliverConversationReply: (work: ReplyWork) => run(work, (executor, parsed) => executor.processReply(parsed)),
+    deliverConversationReply: (work: ReplyWork) =>
+      heartbeating(() => run(work, (executor, parsed) => executor.processReply(parsed))),
     generateConversationTitle: ({
       attempt,
       final,
