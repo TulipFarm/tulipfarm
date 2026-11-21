@@ -588,12 +588,28 @@ export function createWorkspaceMembersMock(scenario?: string) {
     if (path === '/v1/workspaces/members-table-mock/last-used' && method === 'PUT')
       return new Response(null, { status: 204 });
     if (method === 'GET') {
-      if (path === `${root}/personal-memory`)
-        return Response.json({ content: '', revision: 0, history: { trashed: false, undo: false } });
-      if (path === `${root}/personal-memory/proposals`)
+      if (path === `${root}/personal-memory/files`)
         return Response.json({
-          memory: { content: '', revision: 0, history: { trashed: false, undo: false } },
-          proposals: [],
+          files: [
+            {
+              path: '/profile.md',
+              name: 'Preferences',
+              description: 'How you want Bud to respond',
+              group: 'you',
+              revisionId: null,
+              updatedAt: null,
+              size: 0,
+            },
+            {
+              path: '/you/about.md',
+              name: 'Profile',
+              description: 'Who you are and what you do',
+              group: 'you',
+              revisionId: null,
+              updatedAt: null,
+              size: 0,
+            },
+          ],
         });
       if (path === '/v1/google-workspace/availability') return Response.json({ configured: false });
       if (path === `${root}/google-workspace`) return Response.json({ status: 'disconnected' });

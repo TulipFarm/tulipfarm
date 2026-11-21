@@ -7,20 +7,27 @@ import {
   personalMemorySchema,
   savePersonalMemorySchema,
   deletePersonalMemorySchema,
-  memoryProposalsSchema,
-  MemoryProposalNotFound,
-  MemoryProposalOutdated,
+  deleteMemoryFileSchema,
+  memoryFileContentSchema,
+  memoryFilePathSchema,
+  memoryFilesSchema,
+  memoryInstructionResultSchema,
+  memoryInstructionSchema,
+  MemoryEditsInvalid,
+  MemoryFileNotFound,
+  saveMemoryFileSchema,
   PersonalMemoryConflict,
   PersonalMemoryRejected,
   PersonalMemoryUnavailable,
 } from '@tulipfarm/conversations/personal-memory';
+import { AgentAuthoringError, agentAuthoringErrorSchema } from '@tulipfarm/agents/authoring-assistance-contracts';
+import { agentAuthoringStatus } from './agent-authoring-assistance.ts';
 import { authConfig, type registerAuth } from './auth.ts';
 import { authenticateRoutes } from './authenticated-routes.ts';
 import { routeValidation } from './route-validation.ts';
 import { requestBoundaryError } from './security.ts';
 
 const params = z.strictObject({ workspaceId: z.uuid() });
-const proposalParams = z.strictObject({ workspaceId: z.uuid(), proposalId: z.uuid() });
 const validation = routeValidation({
   missing: 'Missing personal memory request validator',
   invalid: () => new Error('invalid-request'),
@@ -35,25 +42,30 @@ function schema(
   operationId: string,
   summary: string,
   body?: z.ZodType,
-  options: { params?: z.ZodType; response?: z.ZodType } = {},
+  options: { querystring?: z.ZodType; response?: z.ZodType } = {},
 ) {
   return {
     operationId,
     summary,
     tags: ['Personal memory'],
-    params: validation.json(options.params ?? params),
+    params: validation.json(params),
+    ...(options.querystring ? { querystring: validation.json(options.querystring) } : {}),
     ...(body ? { body: validation.json(body) } : {}),
     response: {
       200: validation.json(options.response ?? personalMemorySchema),
       400: failure,
       401: failure,
+      402: failure,
       403: failure,
       404: failure,
       409: failure,
       413: failure,
       422: failure,
+      429: failure,
       500: failure,
+      502: failure,
       503: failure,
+      504: failure,
     },
   };
 }
@@ -71,8 +83,11 @@ export function registerPersonalMemory(
     routes.setErrorHandler((error, _request, reply) => {
       if (requestBoundaryError(error, reply)) return;
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'personal-memory-not-found' });
-      if (error instanceof MemoryProposalNotFound) return reply.code(404).send({ error: error.message });
-      if (error instanceof MemoryProposalOutdated) return reply.code(409).send({ error: error.message });
+      if (error instanceof MemoryFileNotFound) return reply.code(404).send({ error: 'memory-file-not-found' });
+      if (error instanceof AgentAuthoringError)
+        return reply.code(agentAuthoringStatus(error)).send(agentAuthoringErrorSchema.parse({ error: error.code }));
+      if (error instanceof MemoryEditsInvalid)
+        return reply.code(502).send({ error: 'personal-memory-instruction-failed' });
       if (error instanceof PersonalMemoryConflict) return reply.code(409).send({ error: error.message });
       if (error instanceof StorageUnavailableError || error instanceof PersonalMemoryUnavailable)
         return reply.code(503).send({ error: 'personal-memory-unavailable' });
@@ -123,39 +138,79 @@ export function registerPersonalMemory(
       },
       request => dependencies.service.forget(params.parse(request.params).workspaceId, user(request), request.body),
     );
-    const proposals = `${base}/proposals`;
+    const files = `${base}/files`;
     routes.get(
-      proposals,
+      files,
       {
-        schema: schema('listMemoryProposalsV1', 'List edits suggested for your personal memory.', undefined, {
-          response: memoryProposalsSchema,
+        schema: schema('listMemoryFilesV1', 'List your personal memory files, You first.', undefined, {
+          response: memoryFilesSchema,
         }),
       },
-      request => dependencies.service.proposals(params.parse(request.params).workspaceId, user(request)),
+      request => dependencies.service.files(params.parse(request.params).workspaceId, user(request)),
     );
-    for (const [action, operationId, summary] of [
-      ['confirm', 'confirmMemoryProposalV1', 'Apply a suggested edit to your personal memory'],
-      ['dismiss', 'dismissMemoryProposalV1', 'Discard a suggested edit'],
-      [
-        'refresh',
-        'refreshMemoryProposalV1',
-        'Update an outdated suggested edit to your current memory, if it still fits',
-      ],
-    ] as const)
-      routes.post(
-        `${proposals}/:proposalId/${action}`,
-        {
-          schema: schema(operationId, summary, undefined, { params: proposalParams, response: memoryProposalsSchema }),
-        },
-        request => {
-          const { workspaceId, proposalId } = proposalParams.parse(request.params);
-          const service = dependencies.service;
-          return action === 'confirm'
-            ? service.confirmProposal(workspaceId, user(request), proposalId)
-            : action === 'dismiss'
-              ? service.dismissProposal(workspaceId, user(request), proposalId)
-              : service.refreshProposal(workspaceId, user(request), proposalId);
-        },
-      );
+    routes.get(
+      `${files}/read`,
+      {
+        schema: schema('readMemoryFileV1', 'Read one of your personal memory files.', undefined, {
+          querystring: memoryFilePathSchema,
+          response: memoryFileContentSchema,
+        }),
+      },
+      request => dependencies.service.readFile(params.parse(request.params).workspaceId, user(request), request.query),
+    );
+    routes.put(
+      files,
+      {
+        schema: schema(
+          'saveMemoryFileV1',
+          'Create or replace one of your personal memory files. Saving applies at once.',
+          saveMemoryFileSchema,
+          { response: memoryFileContentSchema },
+        ),
+      },
+      request => dependencies.service.saveFile(params.parse(request.params).workspaceId, user(request), request.body),
+    );
+    routes.delete(
+      files,
+      {
+        schema: schema(
+          'deleteMemoryFileV1',
+          'Delete one of your personal memory files. It can be restored for 7 days.',
+          deleteMemoryFileSchema,
+          { response: memoryFilesSchema },
+        ),
+      },
+      request => dependencies.service.deleteFile(params.parse(request.params).workspaceId, user(request), request.body),
+    );
+    routes.post(
+      `${base}/instruct`,
+      {
+        schema: schema(
+          'instructPersonalMemoryV1',
+          'Tell Bud what to remember or forget. Bud applies the changes to your files at once.',
+          memoryInstructionSchema,
+          { response: memoryInstructionResultSchema },
+        ),
+      },
+      async (request, reply) => {
+        const controller = new AbortController();
+        const abort = () => {
+          if (!reply.raw.writableEnded) controller.abort();
+        };
+        request.raw.on('aborted', abort);
+        reply.raw.on('close', abort);
+        try {
+          return await dependencies.service.instruct(
+            params.parse(request.params).workspaceId,
+            user(request),
+            request.body,
+            controller.signal,
+          );
+        } finally {
+          request.raw.off('aborted', abort);
+          reply.raw.off('close', abort);
+        }
+      },
+    );
   });
 }

@@ -47,8 +47,16 @@ import { createProjectDrafts } from './project-drafts.ts';
 import { createFileDrafts } from './file-drafts.ts';
 import { createFileShareDrafts } from './file-share-drafts.ts';
 import { createKnowledgeDrafts } from './knowledge-drafts.ts';
-import { applyMemory, forgetMemoryText, memoryError, memoryStale, requireMemoryChat } from './memory-drafts.ts';
-import { keepForgetScrubVersion, readPersonalMemory } from '@tulipfarm/conversations/personal-memory';
+import { applyMemory, memoryError, memoryStale, requireMemoryChat } from './memory-drafts.ts';
+import {
+  forgetOwnMemoryText,
+  keepForgetScrubVersion,
+  listOwnMemoryFiles,
+  readOwnMemoryFile,
+  readOwnMemoryForModel,
+  writeOwnMemoryFile,
+  type SaveMemoryFile,
+} from '@tulipfarm/conversations/personal-memory';
 import type { FileBytes } from '@tulipfarm/files';
 import type { GitHubSubscriptions } from '@tulipfarm/workflows/github-triggers';
 import type { Work } from '@tulipfarm/workflows/contracts';
@@ -509,7 +517,7 @@ export function createAuthoringDrafts(
     tx: AgentTransaction,
     workspaceId: string,
     actor: HumanActor,
-    proposal: AuthoringProposal,
+    proposal: Pick<AuthoringProposal, 'kind'>,
     sources: z.infer<typeof sourcesSchema>,
   ) {
     const audience = proposal.kind === 'row' ? slackTurnAudience : undefined;
@@ -1093,12 +1101,62 @@ export function createAuthoringDrafts(
     if (wake) await Promise.all(woken.map(wake));
     return decided;
   }
-  /** The requester's own memory, read only in a chat it joins. */
-  async function readMemory(workspaceId: string, actor: HumanActor, chatId: string) {
+  /** The requester's own memory files, or one file, read only in a chat it joins. */
+  async function readMemory(workspaceId: string, actor: HumanActor, chatId: string, path?: string) {
     return transaction(workspaceId, actor, false, async tx => {
       await owned(tx, actor, chatId);
       await requireMemoryChat(tx, actor, chatId);
-      return readPersonalMemory(tx, actor);
+      try {
+        return path === undefined ? await readOwnMemoryForModel(tx, actor) : await readOwnMemoryFile(tx, actor, path);
+      } catch (error) {
+        throw memoryError(error);
+      }
+    });
+  }
+  /** The checks every change to memory from chat passes: the requester's own private chat, with no outside content. */
+  async function memoryChat(tx: AgentTransaction, workspaceId: string, actor: HumanActor, origin: Origin) {
+    const sources = sourcesSchema.parse(origin.sources);
+    await owned(tx, actor, origin.conversationId);
+    await requireMemoryChat(tx, actor, origin.conversationId);
+    await requireNoMcpDerived(tx, [
+      { kind: 'private-conversation', conversationId: origin.conversationId },
+      ...sources,
+    ]);
+    await requireSources(tx, workspaceId, actor, { kind: 'memory' }, sources);
+  }
+  /** Creates or replaces one of the requester's memory files at once. `id` makes a replay write once. */
+  async function writeMemory(
+    workspaceId: string,
+    actor: HumanActor,
+    id: string,
+    origin: Origin,
+    input: SaveMemoryFile,
+  ) {
+    id = uuidSchema.parse(id);
+    return transaction(workspaceId, actor, true, async tx => {
+      await memoryChat(tx, workspaceId, actor, origin);
+      try {
+        return await writeOwnMemoryFile(tx, actor, input, id);
+      } catch (error) {
+        throw memoryError(error);
+      }
+    });
+  }
+  /**
+   * Permanently forgets exact text from one memory file, or every file, at once. Answers with the names of the files
+   * that held it; none when memory does not contain it.
+   */
+  async function forgetMemory(workspaceId: string, actor: HumanActor, origin: Origin, text: string, path?: string) {
+    return transaction(workspaceId, actor, true, async tx => {
+      await memoryChat(tx, workspaceId, actor, origin);
+      try {
+        const affected = await forgetOwnMemoryText(tx, actor, text, path);
+        if (affected.length === 0) return [];
+        const files = await listOwnMemoryFiles(tx, actor);
+        return affected.map(at => files.find(file => file.path === at)?.name ?? at);
+      } catch (error) {
+        throw memoryError(error);
+      }
     });
   }
   /**
@@ -1132,35 +1190,10 @@ export function createAuthoringDrafts(
   async function change(workspaceId: string, actor: HumanActor, id: string, origin: Origin, value: unknown) {
     id = uuidSchema.parse(id);
     const proposal = authoringProposalSchema.parse(value);
-    if (
-      (proposal.kind !== 'memory' && proposal.kind !== 'knowledge') ||
-      (proposal.kind === 'memory' && proposal.input.operation !== 'edit')
-    )
-      throw new AgentError('invalid-request', 400);
+    if (proposal.kind !== 'knowledge') throw new AgentError('invalid-request', 400);
     return transaction(workspaceId, actor, true, (tx, _actor, bound) =>
       applyChange(tx, actor, bound, workspaceId, id, origin, proposal),
     );
   }
-  /**
-   * Forgets every occurrence of the exact text in the requester's memory at once. Undefined, changing nothing, when
-   * memory does not contain it.
-   */
-  async function forgetMemory(workspaceId: string, actor: HumanActor, id: string, origin: Origin, text: string) {
-    id = uuidSchema.parse(id);
-    return transaction(workspaceId, actor, true, async (tx, _actor, bound) => {
-      await owned(tx, actor, origin.conversationId);
-      await requireMemoryChat(tx, actor, origin.conversationId);
-      const current = await readPersonalMemory(tx, actor).catch(error => {
-        throw memoryError(error);
-      });
-      if (forgetMemoryText(current.content, text) === undefined) return undefined;
-      const proposal = authoringProposalSchema.parse({
-        kind: 'memory',
-        input: { operation: 'forget', expectedRevision: current.revision, forgotten: text },
-      });
-      if (proposal.kind !== 'memory') throw new AgentError('invalid-request', 400);
-      return applyChange(tx, actor, bound, workspaceId, id, origin, proposal);
-    });
-  }
-  return { propose, read, decide, readMemory, change, forgetMemory };
+  return { propose, read, decide, readMemory, writeMemory, change, forgetMemory };
 }

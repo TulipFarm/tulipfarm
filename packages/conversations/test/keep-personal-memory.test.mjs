@@ -12,6 +12,7 @@ import {
   readPersonalMemoryContext,
   replaceOwnPersonalMemory,
   undoOwnPersonalMemory,
+  writeOwnMemoryFile,
 } from '../src/personal-memory.ts';
 import { fakeKeep } from './fake-keep.mjs';
 
@@ -134,15 +135,30 @@ test('an unconfigured Keep is unavailable', async t => {
   );
 });
 
-test('model context comes from Keep with personal memory only', async t => {
+test('model context always holds the You files and adds other files through Keep, personal only', async t => {
   const { client, calls } = fakeKeep();
   t.after(keep(client));
   const { tx, actor } = storage();
-  assert.deepEqual(await readPersonalMemoryContext(tx, actor), { content: '', revision: 0 });
-  assert.equal(calls.includes('context'), false);
-  const saved = await replaceOwnPersonalMemory(tx, actor, 'Reply in French.', 0);
-  assert.deepEqual(await readPersonalMemoryContext(tx, actor), {
-    content: '## Personal\nReply in French.',
-    revision: saved.revision,
+  assert.equal(await readPersonalMemoryContext(tx, actor), undefined);
+  await replaceOwnPersonalMemory(tx, actor, 'Reply in French.', 0);
+  const you = await readPersonalMemoryContext(tx, actor, 'hello');
+  assert.match(you.content, /^BEGIN MEMORY CONTEXT\n/);
+  assert.match(
+    you.content,
+    /UNTRUSTED MEMORY PROFILE\n\{"path":"\/profile.md","name":"Preferences","text":"Reply in French."\}/,
+  );
+  assert.match(you.content, /\nEND MEMORY CONTEXT$/);
+  assert.equal(calls.includes('context'), false, 'You files alone need no context search');
+  await writeOwnMemoryFile(tx, actor, {
+    path: '/topics/career.md',
+    content: '- Wants a COO role.',
+    expectedRevisionId: null,
+    name: 'Career',
+    description: 'Goals and growth plans',
   });
+  const both = await readPersonalMemoryContext(tx, actor, 'career plans');
+  assert.ok(calls.includes('context'));
+  assert.match(both.content, /UNTRUSTED MEMORY FILE\n\{"path":"\/topics\/career.md"/);
+  assert.equal(both.content.match(/UNTRUSTED MEMORY PROFILE/g).length, 1, 'You files appear once');
+  assert.notEqual(both.revision, you.revision);
 });

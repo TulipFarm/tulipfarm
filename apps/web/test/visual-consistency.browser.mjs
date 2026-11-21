@@ -73,20 +73,28 @@ try {
         json = { available: 1000, granted: 1000, used: 0, held: 0, days: [], breakdown: [], series: [] };
       else if (path.endsWith('/settings'))
         json = { workspaceId: workspace.id, name: workspace.name, slug: workspace.slug, revision: 1, canManage: true };
-      else if (path.endsWith('/personal-memory'))
+      else if (path.endsWith('/personal-memory/files'))
         json = {
-          content: 'Use concise answers and include next steps.',
-          revision: 1,
-          history: { trashed: false, undo: false },
-        };
-      else if (path.endsWith('/personal-memory/proposals'))
-        json = {
-          memory: {
-            content: 'Use concise answers and include next steps.',
-            revision: 1,
-            history: { trashed: false, undo: false },
-          },
-          proposals: [],
+          files: [
+            {
+              path: '/profile.md',
+              name: 'Preferences',
+              description: 'How you want Bud to respond',
+              group: 'you',
+              revisionId: 'r1',
+              updatedAt: '2026-10-14T10:00:00.000Z',
+              size: 44,
+            },
+            {
+              path: '/you/about.md',
+              name: 'Profile',
+              description: 'Who you are and what you do',
+              group: 'you',
+              revisionId: null,
+              updatedAt: null,
+              size: 0,
+            },
+          ],
         };
       else if (path.endsWith('/governance/me'))
         json = {

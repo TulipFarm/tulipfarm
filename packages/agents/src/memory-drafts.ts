@@ -1,37 +1,17 @@
 import type { HumanActor } from '@tulipfarm/access';
 import {
   forgetOwnPersonalMemory,
+  MemoryFileNotFound,
   PersonalMemoryConflict,
   PersonalMemoryRejected,
   PersonalMemoryUnavailable,
   readPersonalMemory,
   replaceOwnPersonalMemory,
 } from '@tulipfarm/conversations/personal-memory';
+import { ZodError } from 'zod';
 import { AgentError } from './saved-contracts.ts';
 import type { DraftOutcome, MemoryProposal } from './draft-contracts.ts';
 import { relation, type AgentTransaction } from './store.ts';
-
-/** A line holding nothing, or only a list or quote marker. */
-const emptyLine = /^\s*(?:[-*+>]|\d+[.)])?\s*$/;
-
-/**
- * Removes every exact occurrence of `text`. A line the removal leaves empty or holding only a list marker goes too;
- * blank lines that were already there stay. Undefined when the text does not occur.
- */
-export function forgetMemoryText(content: string, text: string) {
-  if (!text || !content.includes(text)) return undefined;
-  let next = content;
-  for (let at = next.indexOf(text); at !== -1; at = next.indexOf(text, at)) {
-    const start = next.lastIndexOf('\n', at - 1) + 1;
-    const newline = next.indexOf('\n', at + text.length);
-    const end = newline === -1 ? next.length : newline;
-    if (emptyLine.test(next.slice(start, at) + next.slice(at + text.length, end))) {
-      next = newline === -1 ? next.slice(0, Math.max(0, start - 1)) : next.slice(0, start) + next.slice(end + 1);
-      at = Math.max(0, start - 1);
-    } else next = next.slice(0, at) + next.slice(at + text.length);
-  }
-  return next;
-}
 
 /**
  * Personal memory joins only the requester's own private chats outside projects and Slack. Callers check the chat is
@@ -85,5 +65,7 @@ export function memoryError(error: unknown) {
   if (error instanceof PersonalMemoryConflict) return new AgentError('draft-stale');
   if (error instanceof PersonalMemoryUnavailable) return new AgentError('memory-service-unavailable', 503);
   if (error instanceof PersonalMemoryRejected) return new AgentError('memory-rejected');
+  if (error instanceof MemoryFileNotFound) return new AgentError('memory-file-not-found', 404);
+  if (error instanceof ZodError) return new AgentError('memory-invalid', 400);
   return error;
 }

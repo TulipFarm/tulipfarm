@@ -2090,7 +2090,7 @@ export function createConversationExecutor(
             chat.project_id || chat.slack || chat.context || compaction?.command
               ? undefined
               : await requireGitHubSources(tx, chat.requester, inherited).then(() =>
-                  readPersonalMemoryContext(tx, chat.requester),
+                  readPersonalMemoryContext(tx, chat.requester, currentMessage.text),
                 );
           return {
             personalMemory,
@@ -2317,7 +2317,7 @@ export function createConversationExecutor(
             await requireGoogleFileSources(tx, chat.requester, inheritedSources);
             await requireFileSources(tx, chat.requester, fileSources);
             await requireReplyMcpSources(tx, chat.requester, fence.conversationId, inheritedSources);
-            const memory = await readPersonalMemoryContext(tx, chat.requester);
+            const memory = await readPersonalMemoryContext(tx, chat.requester, source.currentMessage.text);
             if (memory?.content)
               inheritedSources.push({ kind: 'personal-memory', membershipId: chat.requester.membershipId });
             return memory;

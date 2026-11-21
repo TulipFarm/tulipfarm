@@ -120,10 +120,29 @@ function fixture(state) {
     if (p === '/v1/workspaces/acme') return send(workspace);
     if (p.endsWith('/settings'))
       return send({ workspaceId: wid, name: workspace.name, slug: 'acme', revision: 1, canManage: true });
-    if (p.endsWith('/personal-memory'))
-      return send({ content: '', revision: 1, history: { trashed: false, undo: false } });
-    if (p.endsWith('/personal-memory/proposals'))
-      return send({ memory: { content: '', revision: 1, history: { trashed: false, undo: false } }, proposals: [] });
+    if (p.endsWith('/personal-memory/files'))
+      return send({
+        files: [
+          {
+            path: '/profile.md',
+            name: 'Preferences',
+            description: 'How you want Bud to respond',
+            group: 'you',
+            revisionId: null,
+            updatedAt: null,
+            size: 0,
+          },
+          {
+            path: '/you/about.md',
+            name: 'Profile',
+            description: 'Who you are and what you do',
+            group: 'you',
+            revisionId: null,
+            updatedAt: null,
+            size: 0,
+          },
+        ],
+      });
     if (p.endsWith('/credits'))
       return send({ available: 100, granted: 100, used: 0, held: 0, days: [], breakdown: [], series: [] });
     if (p.endsWith('/governance/me'))

@@ -17,6 +17,7 @@ export const agentAuthoringLimits = {
   responseBytes: 262144,
   improvementTokens: 4096,
   previewTokens: 2048,
+  memoryTokens: 4096,
   timeoutMs: modelCallTimeoutMs,
   abandonedSeconds: 180,
   workspaceConcurrency: 1,
