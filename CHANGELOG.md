@@ -15,8 +15,10 @@ One version identifies all apps and images of a release.
   removed. Nothing moves from the earlier memory: members start with empty
   memory in Keep. Without `KEEP_ENDPOINT`, personal memory reports that it
   can't be reached, chats aren't learned from, and Knowledge search uses the
-  local search index. Forgetting text from chat always asks first, and
-  can't be undone.
+  local search index. Documents Keep hasn't received yet, or refused, are
+  still found through the local search index alongside Keep's results.
+  Forgetting text from chat always asks first, and can't be undone. Undo and
+  restore cards created by the earlier memory no longer change memory.
 - The development and self-hosted Compose stacks run Keep as a `keep`
   service in its own `keep` database on their Postgres. `pnpm dev:setup` and
   `pnpm self-host:setup` set `KEEP_ENDPOINT` and `KEEP_TOKEN` for the API and

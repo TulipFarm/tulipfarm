@@ -66,7 +66,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     await drafts.decide(w.id, w.userId, chatId, draftId, { commandId: randomUUID(), digest: pending.digest, decision });
     return drafts.read(w.id, w.userId, chatId, draftId);
   }
-  return { w, runtime, chats, chatId, drafts, tool, decide, keep, memory: createPersonalMemoryService(runtime) };
+  return { db, w, runtime, chats, chatId, drafts, tool, decide, keep, memory: createPersonalMemoryService(runtime) };
 }
 
 test('chat reads memory and edits it only through an approved card', async t => {
@@ -102,6 +102,30 @@ test('chat reads memory and edits it only through an approved card', async t => 
   assert.equal((await drafts.read(w.id, w.userId, chatId, late.draftId)).status, 'stale');
   await assert.rejects(decide(late.draftId), { code: 'draft-stale' });
   assert.equal((await memory.read(w.id, w.userId)).content, 'Changed in settings.');
+});
+
+test('restore cards from the earlier memory never change Keep memory, even at a matching revision', async t => {
+  const { db, tool, decide, memory, drafts, chatId, runtime, w } = await setup(t);
+  const live = await memory.save(w.id, w.userId, { content: 'Current memory.', expectedRevision: 0 });
+  const card = await tool({ tool: 'memory.edit', revision: live.revision, content: 'Current memory.\nMore.' });
+  const schema = await runtime.transaction(w.id, commonCompatibility, async tx => tx.schema);
+  // The runtime role cannot rewrite a card, so plant the earlier store's restore card as the database owner.
+  await db.databaseAdmin.query(
+    `UPDATE "${schema}".tf_chat_authoring_drafts SET proposal = jsonb_set(proposal, '{input}', $2::jsonb) WHERE id=$1`,
+    [
+      card.draftId,
+      JSON.stringify({
+        operation: 'restore',
+        expectedRevision: live.revision,
+        previousContent: 'Current memory.',
+        content: 'Earlier memory text.',
+        forgotten: 'Earlier memory text.',
+      }),
+    ],
+  );
+  assert.equal((await drafts.read(w.id, w.userId, chatId, card.draftId)).status, 'stale');
+  await assert.rejects(decide(card.draftId), { code: 'draft-stale' });
+  assert.deepEqual(await memory.read(w.id, w.userId), live);
 });
 
 test('memory tools refuse project chats', async t => {

@@ -32,14 +32,16 @@ function PreferenceCard({ preference }: { preference: BudPreference }) {
         <>
           <p role="status">Remembered for this workspace</p>
           <p>{preference.value}</p>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={() => void command({ kind: 'undo-preference', id: preference.id })}
-          >
-            Undo
-          </Button>
+          {preference.savedRevision !== null && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => void command({ kind: 'undo-preference', id: preference.id })}
+            >
+              Undo
+            </Button>
+          )}
         </>
       ) : (
         <>

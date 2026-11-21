@@ -15,6 +15,8 @@ import { budGreeting } from '../../src/bud-contracts.ts';
 import { registerExtension } from '@tulipfarm/extensions';
 import { creditAccountExtension } from '@tulipfarm/workspace-storage/credit-account';
 import { fakeKeep } from '../fake-keep.mjs';
+import { applyCommonMigrations, inTransaction } from '../../../workspace-storage/src/provisioning.ts';
+import { workspaceTableMigrations } from '../../../workspaces/src/table-migrations.ts';
 
 // These tests exhaust workspace balances, so they fund work from the credit account as a billing extension would.
 await registerExtension(creditAccountExtension, { app: 'worker', env: {} });
@@ -366,4 +368,54 @@ test('Bud persists one private thread, consent, undo, and quiet nudges per membe
     await runtime?.close();
     await db.close();
   }
+});
+
+test('a preference saved in the earlier memory can no longer be undone over Keep', { timeout: 60000 }, async t => {
+  t.after(configureKeepPersonalMemory({ client: fakeKeep().client }));
+  const db = await fixture();
+  let runtime;
+  t.after(async () => {
+    await runtime?.close();
+    await db.close();
+  });
+  const migrations = await workspaceTableMigrations();
+  const index = migrations.findIndex(item => item.name === '0099_drop_legacy_personal_memory.sql');
+  assert.ok(index > 0);
+  const w = await db.create(migrations.slice(0, index));
+  const table = name => qualified(w.names.schema, name);
+  runtime = createWorkspaceRuntime({
+    replicaCount: 1,
+    reservedConnections: 2,
+    databaseConnectionBudget: 30,
+    resolveCredential: async () => ({ workspaceId: w.id, generation: 1, connectionString: db.login(w) }),
+  });
+  const bud = createBudAssistant(runtime),
+    memory = createPersonalMemoryService(runtime);
+  await bud.command(w.id, w.userId, { kind: 'bootstrap' });
+  const { conversationId } = await bud.command(w.id, w.userId, { kind: 'open' });
+  const live = await memory.save(w.id, w.userId, { content: 'Kept in Keep.', expectedRevision: 0 });
+  const id = randomUUID();
+  // The earlier memory counted revisions 1, 2, 3, so a saved receipt's revision can match a live Keep revision.
+  await db.platform.query(
+    `INSERT INTO ${table('tf_bud_preferences')}
+      (id,membership_id,conversation_id,turn_id,topic,question,value,status,expected_revision,saved_revision,previous_content)
+     VALUES ($1,$2,$3,$4,'role','What do you do?','Sales','saved',1,$5,'Earlier memory text.')`,
+    [id, w.membershipId, conversationId, randomUUID(), live.revision],
+  );
+  await inTransaction(db.platform, client => applyCommonMigrations(client, w.id, migrations));
+  assert.deepEqual(
+    (
+      await db.platform.query(
+        `SELECT saved_revision,previous_content FROM ${table('tf_bud_preferences')} WHERE id=$1`,
+        [id],
+      )
+    ).rows[0],
+    { saved_revision: null, previous_content: null },
+  );
+  await assert.rejects(
+    bud.command(w.id, w.userId, { kind: 'undo-preference', id }),
+    error => error instanceof BudConflict && error.message === 'preference-changed',
+  );
+  assert.equal((await memory.read(w.id, w.userId)).content, 'Kept in Keep.');
+  assert.equal((await memory.read(w.id, w.userId)).revision, live.revision);
 });

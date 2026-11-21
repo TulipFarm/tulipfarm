@@ -50,6 +50,9 @@ export async function requireMemoryChat(tx: AgentTransaction, actor: HumanActor,
 }
 
 export async function memoryStale(tx: AgentTransaction, actor: HumanActor, proposal: MemoryProposal) {
+  // Restore cards came from the earlier memory store. Their revisions count differently from Keep's, so a match
+  // would be a coincidence, and their text must never replace what Keep holds.
+  if (proposal.input.operation === 'restore') return true;
   try {
     return (await readPersonalMemory(tx, actor)).revision !== proposal.input.expectedRevision;
   } catch (error) {
@@ -64,7 +67,8 @@ export async function applyMemory(
 ): Promise<DraftOutcome> {
   const { input } = proposal;
   // A decided forget card no longer holds its text, so it can never be applied again.
-  if (input.operation === 'forget' && !input.forgotten) throw new AgentError('draft-stale');
+  if ((input.operation === 'forget' && !input.forgotten) || input.operation === 'restore')
+    throw new AgentError('draft-stale');
   try {
     const saved =
       input.operation === 'forget'
