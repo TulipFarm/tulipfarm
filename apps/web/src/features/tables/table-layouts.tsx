@@ -398,6 +398,7 @@ export function BoardView({
         }}
         itemActions={menu && (({ record }) => menu(record))}
         onItemOpen={open && (({ record }) => open(record))}
+        renamable={false}
         onItemsChange={movable ? moveCard : undefined}
       />
     </div>
