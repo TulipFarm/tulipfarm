@@ -241,7 +241,7 @@ test(
                         id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
                         tool: 'memory.edit',
                         status: 'completed',
-                        memoryChange: { store: 'memory', operation: 'edit' },
+                        memoryChange: { store: 'memory', operation: 'edit', title: 'Preferences' },
                       },
                     ],
                   },

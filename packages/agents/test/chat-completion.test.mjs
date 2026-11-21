@@ -1885,8 +1885,14 @@ test('every pending review-card family has an explicit receipt and excludes comp
     ['skills.import', { importId: 'import', status: 'installed' }],
     ['skills.import.status', { importId: 'import', status: 'failed' }],
     ['plans.create', { planId: 'plan', version: 1, added: [] }],
-    ['memory.forget', { status: 'applied', change: { store: 'memory', operation: 'forget' }, revision: 2 }],
-    ['memory.edit', { status: 'applied', change: { store: 'memory', operation: 'edit' }, revision: 2 }],
+    [
+      'memory.forget',
+      { status: 'applied', change: { store: 'memory', operation: 'forget', title: 'Preferences' }, revision: 2 },
+    ],
+    [
+      'memory.edit',
+      { status: 'applied', change: { store: 'memory', operation: 'edit', title: 'Preferences' }, revision: 2 },
+    ],
     ['knowledge.add', { status: 'applied', change: { store: 'knowledge', operation: 'add', title: 'FAQ' } }],
     ['knowledge.remove', { draftId: 'draft', digest: 'digest', status: 'review-required' }],
     ['present.choice', { requestId: 'question', status: 'pending' }],

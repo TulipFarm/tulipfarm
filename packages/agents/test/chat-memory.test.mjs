@@ -75,7 +75,7 @@ for (const { label, format, route } of routes)
           calls.push(call);
           if (call.tool === 'memory.read') return memory;
           assert.equal(call.tool, `memory.${operation}`);
-          return { status: 'applied', change: { store: 'memory', operation }, revision: 2 };
+          return { status: 'applied', change: { store: 'memory', operation, title: 'Preferences' }, revision: 2 };
         },
         undefined,
         false,

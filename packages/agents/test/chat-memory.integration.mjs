@@ -116,7 +116,7 @@ test('chat reads memory and edits it at once, refusing a stale revision', async 
   });
   const current = await memory.read(w.id, w.userId);
   assert.equal(edit.status, 'applied');
-  assert.deepEqual(edit.change, { store: 'memory', operation: 'edit' });
+  assert.deepEqual(edit.change, { store: 'memory', operation: 'edit', title: 'Preferences' });
   assert.equal(edit.revision, current.revision);
   assert.equal(current.content, 'I prefer short replies.\nI work in sales.');
   const drafts = await runtime.transaction(w.id, commonCompatibility, tx =>
@@ -196,7 +196,7 @@ test('chat forget is permanent at once, keeps no copy, clears Bud preferences, a
   const forgotten = await tool({ tool: 'memory.forget', text: 'Lives in Berlin' });
   const current = await memory.read(w.id, w.userId);
   assert.equal(forgotten.status, 'applied');
-  assert.deepEqual(forgotten.change, { store: 'memory', operation: 'forget' });
+  assert.deepEqual(forgotten.change, { store: 'memory', operation: 'forget', title: 'Preferences' });
   assert.equal(forgotten.revision, current.revision);
   assert.equal(JSON.stringify(forgotten).includes('Lives in Berlin'), false, 'the result never repeats the text');
   assert.equal(current.content.includes('Lives in Berlin'), false);

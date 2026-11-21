@@ -3946,6 +3946,9 @@ const noKnowledgeChange = (error: string, instruction: string) => ({
   instruction: `Nothing changed. ${instruction}`,
 });
 
+// The name the chat shows for the changed memory file. Personal memory is one document today.
+const personalMemoryTitle = 'Preferences';
+
 async function invokeMemory(
   runtime: AgentStorage,
   workspaceId: string,
@@ -3961,7 +3964,7 @@ async function invokeMemory(
     return forgotten?.kind === 'memory'
       ? {
           status: 'applied',
-          change: { store: 'memory', operation: 'forget' },
+          change: { store: 'memory', operation: 'forget', title: personalMemoryTitle },
           revision: forgotten.revision,
           instruction:
             'The text is forgotten for good. Confirm it briefly in one sentence without repeating the forgotten text.',
@@ -3987,7 +3990,7 @@ async function invokeMemory(
   });
   return {
     status: 'applied',
-    change: { store: 'memory', operation: 'edit' },
+    change: { store: 'memory', operation: 'edit', title: personalMemoryTitle },
     revision: saved.kind === 'memory' ? saved.revision : undefined,
     instruction: 'Memory is updated. Confirm it briefly in one sentence.',
   };
