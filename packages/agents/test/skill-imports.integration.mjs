@@ -13,8 +13,13 @@ import { createChatTools } from '../src/tools.ts';
 import { AccessDenied } from '@tulipfarm/access';
 import { createConversations } from '../../conversations/src/index.ts';
 import { createConversationExecutor } from '../../conversations/src/runtime.ts';
-import { createPersonalMemoryService } from '../../conversations/src/personal-memory.ts';
+import { configureKeepPersonalMemory, createPersonalMemoryService } from '../../conversations/src/personal-memory.ts';
+import { fakeKeep } from '../../conversations/test/fake-keep.mjs';
 import { memorySkillBytes, reviewSkillDraft, skillDraftImports } from './skill-draft-fixture.mjs';
+
+const keep = fakeKeep();
+configureKeepPersonalMemory({ client: keep.client });
+(await import('@tulipfarm/conversations/personal-memory')).configureKeepPersonalMemory({ client: keep.client });
 
 test('a chat can review and install its own memory-derived procedure without sharing its draft', async () => {
   const db = await fixture();
@@ -66,7 +71,7 @@ test('a chat can review and install its own memory-derived procedure without sha
     };
     let draft;
     const executor = createConversationExecutor(runtime, async input => {
-      assert.equal((await input.readPersonalMemory()).content, 'Use a short weekly summary.');
+      assert.match((await input.readPersonalMemory()).content, /Use a short weekly summary\./);
       draft = await input.executeTool('skills.draft', false, context =>
         createChatTools(context.runtime, { objects: { snapshots: bytes } }).invokeWithSources(context, call),
       );

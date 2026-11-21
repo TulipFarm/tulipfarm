@@ -103,7 +103,20 @@ export async function startFixture() {
       else if (path === `${base}/settings`)
         json = { workspaceId: id, name: workspace.name, slug: workspace.slug, revision: 1, canManage: true };
       else if (path === `${base}/personal-memory`)
-        json = { content: 'Use concise answers and include next steps.', revision: 1 };
+        json = {
+          content: 'Use concise answers and include next steps.',
+          revision: 1,
+          history: { trashed: false, undo: false },
+        };
+      else if (path === `${base}/personal-memory/proposals`)
+        json = {
+          memory: {
+            content: 'Use concise answers and include next steps.',
+            revision: 1,
+            history: { trashed: false, undo: false },
+          },
+          proposals: [],
+        };
       else if (path === `${base}/credits`)
         json = {
           available: state.available,

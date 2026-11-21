@@ -234,7 +234,20 @@ try {
       if (p.endsWith('/settings'))
         return send({ workspaceId: wid, name: workspace.name, slug: 'acme', revision: 1, canManage: true });
       if (p.endsWith('/personal-memory'))
-        return send({ content: 'Use concise answers and include next steps.', revision: 1 });
+        return send({
+          content: 'Use concise answers and include next steps.',
+          revision: 1,
+          history: { trashed: false, undo: false },
+        });
+      if (p.endsWith('/personal-memory/proposals'))
+        return send({
+          memory: {
+            content: 'Use concise answers and include next steps.',
+            revision: 1,
+            history: { trashed: false, undo: false },
+          },
+          proposals: [],
+        });
       if (p.endsWith('/governance/me'))
         return send({
           membershipId: mid,

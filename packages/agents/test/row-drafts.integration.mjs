@@ -6,7 +6,8 @@ import { inTransaction } from '@tulipfarm/workspace-storage/provisioning';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { activateGeneration, createGeneration, readRecords, writePhysicalRecord } from '@tulipfarm/tables/store';
 import { createConversationExecutor } from '../../conversations/src/runtime.ts';
-import { createPersonalMemoryService } from '../../conversations/src/personal-memory.ts';
+import { configureKeepPersonalMemory, createPersonalMemoryService } from '../../conversations/src/personal-memory.ts';
+import { fakeKeep } from '../../conversations/test/fake-keep.mjs';
 import { conversationFixture } from '../../conversations/test/fixture.mjs';
 import { createTableWithRows, tableDefinition, textField } from '../../tables/test/fixture.mjs';
 import { connect } from '../../workspace-storage/test/integration/fixture.mjs';
@@ -19,6 +20,10 @@ import {
   createLocalKnowledge,
   withKnowledgeSourceAuthorization,
 } from '../../knowledge/dist/index.js';
+
+const keep = fakeKeep();
+configureKeepPersonalMemory({ client: keep.client });
+(await import('@tulipfarm/conversations/personal-memory')).configureKeepPersonalMemory({ client: keep.client });
 
 const web = { kind: 'public-web', url: 'https://attacker.example.net/page' };
 const text = value => ({ kind: 'text', value });

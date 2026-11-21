@@ -9,7 +9,8 @@ import { activateGeneration, createGeneration } from '@tulipfarm/tables/store';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { createWorkflows } from '@tulipfarm/workflows';
 import { createConversations } from '../../conversations/src/index.ts';
-import { createPersonalMemoryService } from '../../conversations/src/personal-memory.ts';
+import { configureKeepPersonalMemory, createPersonalMemoryService } from '../../conversations/src/personal-memory.ts';
+import { fakeKeep } from '../../conversations/test/fake-keep.mjs';
 import { createConversationExecutor } from '../../conversations/src/runtime.ts';
 import { conversationFixture } from '../../conversations/test/fixture.mjs';
 import { connect, fixture } from '../../workspace-storage/test/integration/fixture.mjs';
@@ -17,6 +18,10 @@ import { createAuthoringDrafts } from '../src/drafts.ts';
 import { createChatTools } from '../src/tools.ts';
 import { savedTaskAgent } from './task-fixture.mjs';
 import { providerSetupFetch } from '../../workflows/test/provider-fixture.mjs';
+
+const keep = fakeKeep();
+configureKeepPersonalMemory({ client: keep.client });
+(await import('@tulipfarm/conversations/personal-memory')).configureKeepPersonalMemory({ client: keep.client });
 
 const weekdayReview = {
   version: 1,
