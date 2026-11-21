@@ -1595,6 +1595,24 @@ test('an app chat edit request answered after reading and building but writing n
     unbackedAppClaim('The page already has that paragraph, so nothing needed changing.', 'public', built, request),
     undefined,
   );
+  const status = new Set(['apps.status']);
+  for (const claim of [
+    // eslint-disable-next-line tulipfarm/product-copy -- The model's own reply under test, not product copy.
+    'Build complete. Open the preview to see the light yellow background.',
+    'Your footer with the copyright line is in.',
+    'Your page has the new button label, take a look.',
+  ])
+    assert.equal(
+      unbackedAppClaim(claim, 'public', status, 'Rename the button to Get started.')?.missing,
+      'edit',
+      claim,
+    );
+  for (const honest of [
+    'I stopped before changing or building the app.',
+    "I couldn't write the file, so nothing was changed.",
+    'No changes were made yet. Tell me which colour you prefer.',
+  ])
+    assert.equal(unbackedAppClaim(honest, 'public', status, 'Rename the button to Get started.'), undefined, honest);
   assert.equal(
     // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
     unbackedAppClaim(reply, 'public', new Set(['apps.files.write', 'apps.preview.build']), request),
