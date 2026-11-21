@@ -119,6 +119,7 @@ test('chat row writes after untrusted content become member-approved review draf
       before = [],
       memory = false,
       midTurn,
+      failWith,
       invoke,
       reply = 'Done.',
       chatId = randomUUID(),
@@ -149,6 +150,7 @@ test('chat row writes after untrusted content become member-approved review draf
           sources,
           call,
         );
+        if (failWith) throw new Error(failWith);
         return { text: reply, sources: [] };
       },
       undefined,
@@ -158,8 +160,20 @@ test('chat row writes after untrusted content become member-approved review draf
     );
     assert.equal(
       await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
-      'completed',
+      failWith ? 'failed' : 'completed',
     );
+    // The person cancels the failed reply, as they must before the chat answers anything else.
+    if (failWith) {
+      const { generation } = (
+        await f.db.platform.query(`SELECT generation FROM ${f.table('tf_conversation_turns')} WHERE id=$1`, [
+          sent.turnId,
+        ])
+      ).rows[0];
+      await f.store.cancel(w.id, owner.userId, chatId, sent.turnId, {
+        commandId: randomUUID(),
+        expectedGeneration: generation,
+      });
+    }
     return { chatId, result: output.result, waitingCards, sourceMessages };
   }
   const decide = (actor, chatId, draft, decision, commandId = randomUUID()) =>
@@ -614,7 +628,7 @@ test('chat row writes after untrusted content become member-approved review draf
     assert.equal(typeof revised.result.id, 'string');
   });
 
-  await t.test('rows this chat already added are not added or offered again in a later reply', async () => {
+  await t.test('rows a failed reply added are not added or offered again in a later reply', async () => {
     const chatId = randomUUID();
     const row = value => ({ values: { [note.id]: text(value) } });
     const batch = values => ({
@@ -624,7 +638,11 @@ test('chat row writes after untrusted content become member-approved review draf
       rows: values.map(row),
     });
     const flowers = ['Tulip Red', 'Daisy White', 'Iris Purple'];
-    const first = await chatTool(batch(flowers), [], { chatId, message: `Add these rows to Notes: ${flowers}.` });
+    const first = await chatTool(batch(flowers), [], {
+      chatId,
+      message: `Add these rows to Notes: ${flowers}.`,
+      failWith: 'model-output-limit',
+    });
     assert.equal(first.result.records.length, 3);
     const before = await live();
     const again = await chatTool(batch(flowers), [], { chatId, message: 'Now build the app.' });
@@ -643,6 +661,18 @@ test('chat row writes after untrusted content become member-approved review draf
     assert.equal(drafts.rowCount, 0);
     const duplicate = await chatTool(batch(['Tulip Red']), [], { chatId, message: 'Add a duplicate Tulip Red row.' });
     assert.equal(duplicate.result.records.length, 1);
+  });
+
+  await t.test('a row from a reply that finished can be added again when the person asks', async () => {
+    const chatId = randomUUID();
+    const sale = createCall('Coffee sale 3');
+    const first = await chatTool(sale, [], { chatId, message: 'Add a coffee sale for 3 to Notes.' });
+    assert.equal(typeof first.result.id, 'string');
+    const before = await live();
+    const again = await chatTool(sale, [], { chatId, message: 'Add another coffee sale for 3.' });
+    assert.equal(typeof again.result.id, 'string', JSON.stringify(again.result));
+    assert.notEqual(again.result.id, first.result.id);
+    assert.equal((await live()).length, before.length + 1);
   });
 
   await t.test('rows of a dismissed card are not offered again unless the person asks for them', async () => {

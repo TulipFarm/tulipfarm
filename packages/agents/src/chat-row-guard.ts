@@ -292,10 +292,11 @@ const mentioned = (row: unknown, text: string) => {
 };
 
 /**
- * Refuses new rows that repeat rows this chat already added to the table and that are still there, or rows of a
- * card for this table the person dismissed or rejected. A failed or stopped reply can leave its rows written while
- * the model never sees that, and a later reply would then offer them again. A dismissed card's rows are offered
- * again only when the person's latest message names them and the card was dismissed before that message.
+ * Refuses new rows that repeat rows a failed, stopped or blocked reply in this chat added and that are still in the
+ * table, or rows of a card for this table the person dismissed or rejected. Later replies never see what such a
+ * reply wrote, so they would offer its rows again. Rows from replies that finished, or from this reply, were seen
+ * and may be added again. A dismissed card's rows are offered again only when the person's latest message names
+ * them and the card was dismissed before that message.
  */
 async function repeatedRows(
   tx: GuardTransaction,
@@ -311,9 +312,11 @@ async function repeatedRows(
     await tx.client.query<EarlierWrite>(
       `SELECT c.tool,s.call,s.output,false AS drafted
         FROM ${relation(tx, 'tf_conversation_tool_calls')} c JOIN ${relation(tx, 'tf_conversation_execution_steps')} s ON s.call_id=c.id AND s.turn_id=c.turn_id
-        WHERE c.conversation_id=$1 AND c.id<>$2 AND c.tool IN ('rows.create','rows.create.batch') AND s.call->>'tableId'=$3
-        AND NOT EXISTS (SELECT 1 FROM ${relation(tx, 'tf_chat_authoring_drafts')} d WHERE d.id=c.id)`,
-      [origin.conversationId, callId, tableId],
+          JOIN ${relation(tx, 'tf_conversation_turns')} t ON t.id=c.turn_id AND t.conversation_id=c.conversation_id
+        WHERE c.conversation_id=$1 AND c.turn_id<>$2 AND t.status IN ('failed','cancelled','blocked')
+          AND c.tool IN ('rows.create','rows.create.batch') AND s.call->>'tableId'=$3
+          AND NOT EXISTS (SELECT 1 FROM ${relation(tx, 'tf_chat_authoring_drafts')} d WHERE d.id=c.id)`,
+      [origin.conversationId, origin.turnId, tableId],
     )
   ).rows;
   const cards = (
@@ -324,7 +327,7 @@ async function repeatedRows(
         FROM ${relation(tx, 'tf_chat_authoring_drafts')} d JOIN ${relation(tx, 'tf_chat_authoring_decisions')} decision ON decision.draft_id=d.id
         WHERE d.conversation_id=$1 AND d.id<>$3 AND d.proposal->>'kind'='row' AND d.proposal->'input'->>'tableId'=$4
           AND d.proposal->'input'->>'tool' IN ('rows.create','rows.create.batch')
-          AND decision.outcome->>'kind' IN ('row','dismissed','rejected')`,
+          AND decision.outcome->>'kind' IN ('dismissed','rejected')`,
       [origin.conversationId, origin.turnId, callId, tableId],
     )
   ).rows;
@@ -334,18 +337,11 @@ async function repeatedRows(
     const input = record(card.input);
     const rows =
       input.tool === 'rows.create.batch' && Array.isArray(input.rows) ? input.rows : [{ values: input.values }];
-    const outcome = record(card.outcome);
-    if (outcome.kind === 'row') {
-      const ids = Array.isArray(outcome.recordIds) ? outcome.recordIds : [outcome.recordId];
-      rows.forEach((row, index) => {
-        if (typeof ids[index] === 'string') added.push({ recordId: ids[index], row });
-      });
-    } else
-      for (const row of rows)
-        if (card.duringTurn || !mentioned(row, latest)) {
-          const key = rowKey(row);
-          if (key) dismissed.add(key);
-        }
+    for (const row of rows)
+      if (card.duringTurn || !mentioned(row, latest)) {
+        const key = rowKey(row);
+        if (key) dismissed.add(key);
+      }
   }
   const live = new Set<string>();
   if (added.length && !duplicateRequest.test(latest))
@@ -376,7 +372,7 @@ async function repeatedRows(
     dismissedRows = rowSummaries(declined, shownRepeats);
   const reasons = [
     alreadyAdded.length &&
-      `${alreadyAdded.join(', ')} ${alreadyAdded.length === 1 ? 'is' : 'are'} already in "${label}": this chat added ${alreadyAdded.length === 1 ? 'it' : 'them'} earlier, even if that reply failed or was stopped, and ${alreadyAdded.length === 1 ? 'it is' : 'they are'} still there`,
+      `${alreadyAdded.join(', ')} ${alreadyAdded.length === 1 ? 'is' : 'are'} already in "${label}": an earlier reply in this chat that failed or was stopped added ${alreadyAdded.length === 1 ? 'it' : 'them'}, and ${alreadyAdded.length === 1 ? 'it is' : 'they are'} still there`,
     dismissedRows.length &&
       `the person dismissed the card that would have added ${dismissedRows.join(', ')} to "${label}"`,
   ].filter(Boolean);
