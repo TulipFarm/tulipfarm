@@ -1550,10 +1550,19 @@ test('an app chat edit request answered after only a status check must make the 
   const builtClaim = 'The preview build succeeded.';
   for (const claim of [builtClaim, 'The draft build succeeded.', 'Done. Open it to see the background.'])
     assert.equal(unbackedAppClaim(claim, 'public', status, request)?.missing, 'edit', claim);
+  for (const ask of [
+    'Create a contact page',
+    'Put a footer on the page',
+    'Implement dark mode',
+    'Build a pricing page',
+  ])
+    assert.equal(unbackedAppClaim(builtClaim, 'public', status, ask)?.missing, 'edit', ask);
   for (const rebuild of [
     'Rebuild the app.',
     'Rebuild it and show it to me',
     'Please rebuild it using the latest files',
+    'Build it',
+    'Rebuild it so I can see the last edit',
   ])
     assert.equal(unbackedAppClaim(builtClaim, 'public', status, rebuild)?.missing, 'build', rebuild);
   for (const [ask, reply] of [

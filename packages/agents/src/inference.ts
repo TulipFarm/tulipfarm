@@ -2362,6 +2362,7 @@ const alreadyClaim =
   /\balready (?:has|have|contains?|includes?|serves?|returns?|responds?|exposes?|defines?|handles?|reads?|says?|shows?|uses?)\b/i;
 // After "the" or "latest", "update" or "edit" names a thing; "build it" asks for a build, not new code.
 const editRequest = new RegExp(
+  // eslint-disable-next-line tulipfarm/product-copy -- A pattern over the person's words, not product copy.
   String.raw`(?<!\b(?:the|a|an|last|latest|newest|new|this|that|my|your|our|its) )\b(?:add|change|create|write|rewrite|implement|put|include|insert|make|turn|set|rename|replace|remove|delete|fix|move|swap|update|edit|switch|restyle|style|redesign|refactor|convert|hook|wire|drop|hide|enable|disable|translate|resize|cent(?:er|re)|align|bold|capitali[sz]e|recolou?r|build(?! (?:it|this|that|again|the (?:app|site|preview|draft|page)\b)))\b`,
   'i',
 );

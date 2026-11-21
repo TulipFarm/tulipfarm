@@ -1354,6 +1354,7 @@ test("an app chat's own file names are not a Files save, but a save naming Files
   const app = createFileJobGuard(request, [], true);
   assert.equal(app.needsCheck('index.html is created and saved.'), false);
   assert.equal(app.holdPreview, false);
+  assert.equal(createFileJobGuard('Add a link to the files page', [], true).needsCheck('I created index.html.'), false);
   assert.equal(createFileJobGuard(request).needsCheck(''), true);
   assert.equal(
     createFileJobGuard('Summarize this chat', [], true).needsCheck('Your summary PDF is ready in Files.'),
