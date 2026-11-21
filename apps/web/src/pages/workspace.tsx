@@ -29,6 +29,7 @@ import { ShieldUser } from 'reicon-react/icons/ShieldUser';
 import { User } from 'reicon-react/icons/User';
 import { UserCircle } from 'reicon-react/icons/UserCircle';
 import { Inbox } from 'reicon-react/icons/Inbox';
+import { Checklist } from 'reicon-react/icons/Checklist';
 import { Plug } from 'reicon-react/icons/Plug';
 import { Logout } from 'reicon-react/icons/Logout';
 import { Monitor } from 'reicon-react/icons/Monitor';
@@ -106,6 +107,7 @@ export type WorkspacePath =
   | '/$workspaceSlug'
   | '/$workspaceSlug/chat'
   | '/$workspaceSlug/inbox'
+  | '/$workspaceSlug/tasks'
   | '/$workspaceSlug/calendar'
   | '/$workspaceSlug/agents'
   | '/$workspaceSlug/projects'
@@ -143,6 +145,7 @@ const SidebarMockPage = import.meta.env.DEV
 const newChat: Page = { label: 'New chat', to: '/$workspaceSlug', icon: PenSquare };
 const chats: Page = { label: 'Chats', to: '/$workspaceSlug/chat', icon: ChatRound, recent: 'chat' };
 const inbox: Page = { label: 'Inbox', to: '/$workspaceSlug/inbox', icon: Inbox };
+const tasks: Page = { label: 'Tasks', to: '/$workspaceSlug/tasks', icon: Checklist };
 const settings: Page = { label: 'Settings', to: '/$workspaceSlug/settings', icon: Setting2 };
 const account: Page = { label: 'Account', to: '/$workspaceSlug/settings/account', icon: UserCircle };
 const secrets: Page = { label: 'Secrets', to: '/$workspaceSlug/settings/secrets', icon: LockKeyhole };
@@ -225,6 +228,7 @@ const pages = [
   newChat,
   chats,
   inbox,
+  tasks,
   account,
   secrets,
   models,
@@ -362,6 +366,12 @@ function InboxNavItem({ workspaceId }: { workspaceId: string }) {
       </SidebarMenuButton>
     </SidebarMenuItem>
   );
+}
+
+/** Tasks, the built-in table people and agents are assigned work in, shows only while assignable tasks are on. */
+function TasksNavItem() {
+  if (!useFlag('assignable-tasks')) return null;
+  return <StandardNavItem page={tasks} />;
 }
 
 function MenuAvatar({ seed, name, image, size = 'md', shape = 'circle' }: ComponentProps<typeof EntityAvatar>) {
@@ -661,6 +671,7 @@ function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
                   <SidebarMenu>
                     <StandardNavItem page={chats} />
                     {workspace.status === 'ready' && <InboxNavItem workspaceId={workspace.id} />}
+                    {workspace.status === 'ready' && <TasksNavItem />}
                     <StandardNavItem page={agents} />
                     <SidebarMenuItem>
                       <SidebarMenuButton

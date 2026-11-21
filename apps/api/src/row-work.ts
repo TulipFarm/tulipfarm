@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied } from '@tulipfarm/access';
+import { TaskTableError } from '@tulipfarm/tables/tasks-table';
 import {
   AssignmentLimitsError,
   assignmentLimitsInputSchema,
@@ -11,6 +12,8 @@ import {
   inboxSlackInputSchema,
   inboxSlackSchema,
   rowThreadSchema,
+  taskActivitySchema,
+  tasksTableSchema,
 } from '@tulipfarm/agents/row-work';
 import { isFeatureEnabled } from '@tulipfarm/observability';
 import { commonCompatibility, StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
@@ -50,6 +53,7 @@ export function registerRowWork(
       if (requestBoundaryError(error, reply)) return;
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'not-found' });
       if (error instanceof AssignmentLimitsError) return reply.code(400).send({ error: error.code });
+      if (error instanceof TaskTableError) return reply.code(error.status).send({ error: error.code });
       if (error instanceof StorageUnavailableError) return reply.code(503).send({ error: 'workspace-unavailable' });
       if (error instanceof z.ZodError || (typeof error === 'object' && error !== null && 'validation' in error))
         return reply.code(400).send({ error: 'invalid-request' });
@@ -117,6 +121,24 @@ export function registerRowWork(
         return service.runNow(p.workspaceId, user(request), p.tableId, p.rowId);
       },
     );
+    routes.post(
+      `${base}/done`,
+      { schema: { operationId: 'rowMarkDone', params: validation.json(row), response: thread } },
+      async request => {
+        const p = row.parse(request.params);
+        await enabled(p.workspaceId);
+        return service.completeTask(p.workspaceId, user(request), p.tableId, p.rowId);
+      },
+    );
+    routes.delete(
+      `${base}/done`,
+      { schema: { operationId: 'rowReopen', params: validation.json(row), response: thread } },
+      async request => {
+        const p = row.parse(request.params);
+        await enabled(p.workspaceId);
+        return service.reopenTask(p.workspaceId, user(request), p.tableId, p.rowId);
+      },
+    );
     routes.delete(
       `${base}/wake`,
       { schema: { operationId: 'rowClearWake', params: validation.json(row), response: thread } },
@@ -124,6 +146,38 @@ export function registerRowWork(
         const p = row.parse(request.params);
         await enabled(p.workspaceId);
         return service.clearWake(p.workspaceId, user(request), p.tableId, p.rowId);
+      },
+    );
+    routes.get(
+      '/workspaces/:workspaceId/tasks-table',
+      {
+        logLevel: 'silent',
+        schema: {
+          operationId: 'workspaceTasksTable',
+          params: validation.json(workspace),
+          response: { 200: validation.json(tasksTableSchema), ...errors },
+        },
+      },
+      async request => {
+        const p = workspace.parse(request.params);
+        await enabled(p.workspaceId);
+        return service.tasksTable(p.workspaceId, user(request));
+      },
+    );
+    routes.get(
+      '/workspaces/:workspaceId/tasks/activity',
+      {
+        logLevel: 'silent',
+        schema: {
+          operationId: 'workspaceTaskActivity',
+          params: validation.json(workspace),
+          response: { 200: validation.json(taskActivitySchema), ...errors },
+        },
+      },
+      async request => {
+        const p = workspace.parse(request.params);
+        await enabled(p.workspaceId);
+        return service.taskActivity(p.workspaceId, user(request));
       },
     );
     routes.get(

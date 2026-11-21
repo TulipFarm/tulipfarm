@@ -10,6 +10,7 @@ import { runStateOf, taskFields } from '@tulipfarm/tables/tasks-table';
 import { fixture, loadPlatformBaseline } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createInboxSlackNotifier } from '../src/inbox-slack.ts';
 import { createRowAssignments, deliverComment } from '../src/row-assignments.ts';
+import { createRowWork } from '../src/row-work.ts';
 
 async function harness(t) {
   const db = await fixture();
@@ -378,4 +379,68 @@ test('a working run stops when its agent is turned off or its sponsor leaves', {
     reason: 'Needs reassignment',
     current_task_id: null,
   });
+});
+
+test('the Tasks page reads live activity and marks tasks done or reopens them', { timeout: 60000 }, async t => {
+  const {
+    workspace: ws,
+    s,
+    query,
+    tableId,
+    tables,
+    base,
+    create,
+    runState,
+    assignment,
+    engine,
+    runtime,
+  } = await harness(t);
+  const work = createRowWork(runtime, commonCompatibility);
+  assert.deepEqual(await work.tasksTable(ws.id, ws.userId), { tableId });
+
+  const running = await create('Reconcile the invoices');
+  const waiting = await create('Chase the late payment');
+  await engine.step(ws.id, true);
+  const activity = await work.taskActivity(ws.id, ws.userId);
+  assert.equal(activity.tableId, tableId);
+  assert.equal(activity.me, ws.membershipId);
+  const byRow = new Map(activity.tasks.map(task => [task.rowId, task]));
+  assert.equal(byRow.get(running.id).runState, 'working');
+  assert.equal(byRow.get(running.id).run.steps, 0);
+  assert.equal(byRow.get(waiting.id).runState, 'queued');
+  assert.match(byRow.get(waiting.id).reason, /working on 1 rows/);
+
+  await assert.rejects(work.completeTask(ws.id, ws.userId, tableId, running.id), { code: 'run-state-protected' });
+  await assert.rejects(work.reopenTask(ws.id, ws.userId, tableId, waiting.id), { code: 'run-state-protected' });
+
+  await work.completeTask(ws.id, ws.userId, tableId, waiting.id);
+  assert.equal((await assignment(waiting.id)).run_state, 'done');
+  assert.equal(await runState(waiting.id), 'done');
+  assert.deepEqual(
+    await query(`SELECT count(*)::int AS n FROM ${s}.tf_inbox_items WHERE row_id=$1 AND resolved_at IS NULL`, [
+      waiting.id,
+    ]),
+    [{ n: 0 }],
+    'A done task leaves nothing open in the Inbox',
+  );
+
+  const plain = await tables.mutate(ws.id, ws.userId, {
+    ...base,
+    kind: 'create',
+    recordId: randomUUID(),
+    values: { [taskFields.title]: { kind: 'text', value: 'Order new labels' } },
+  });
+  await work.completeTask(ws.id, ws.userId, tableId, plain.id);
+  assert.equal(await runState(plain.id), 'done');
+  await work.reopenTask(ws.id, ws.userId, tableId, plain.id);
+  assert.equal(await runState(plain.id), null);
+  assert.deepEqual(
+    (
+      await query(
+        `SELECT event->>'type' AS type FROM ${s}.tf_row_thread_items WHERE row_id=$1 AND kind='event' ORDER BY created_at`,
+        [plain.id],
+      )
+    ).map(row => row.type),
+    ['marked-done', 'reopened'],
+  );
 });

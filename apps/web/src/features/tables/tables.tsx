@@ -455,7 +455,9 @@ export function Records({
   );
   const view = tableView(search, queryDefinition(table.definition));
   const layoutPanel = useId();
-  const [layout, setLayout] = useState<Layout>(() => search.view ?? storedLayout(tableId) ?? 'table');
+  const [layout, setLayout] = useState<Layout>(
+    () => search.view ?? storedLayout(tableId) ?? (systemKind === 'tasks' ? 'board' : 'table'),
+  );
   useEffect(() => {
     if (search.view) setLayout(search.view);
   }, [search.view]);
@@ -1282,7 +1284,7 @@ function GroupLinkProblem({
   );
 }
 
-/** Tasks' three starting views: rows assigned to me, a board grouped by Status, and every task. */
+/** Tasks' three starting views: rows assigned to me, a board grouped by Status (or Run state), and every task. */
 function TaskPresets({
   table,
   where,
@@ -1304,9 +1306,10 @@ function TaskPresets({
     op: 'is-me',
     values: [],
   });
-  const status = table.definition.fields.find(
-    field => field.kind === 'single-select' && field.label.trim().toLowerCase() === 'status',
-  );
+  const status =
+    table.definition.fields.find(
+      field => field.kind === 'single-select' && field.label.trim().toLowerCase() === 'status',
+    ) ?? table.definition.fields.find(field => field.id === taskFields.runState && field.kind === 'single-select');
   const current = where === mine ? 'mine' : !where && layout === 'board' ? 'board' : !where ? 'all' : null;
   return (
     <div role="group" aria-label="Task views" className="flex flex-wrap items-center gap-2">
