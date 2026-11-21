@@ -1543,6 +1543,46 @@ test('an app chat reply cannot say the app now has what a change request asked f
   }
 });
 
+test('an app chat edit request answered after only a status check must make the edit, whatever the reply claims', () => {
+  const status = new Set(['apps.status']);
+  const request = 'Change the page background colour to light yellow (#fff8dc) and rebuild.';
+  // eslint-disable-next-line tulipfarm/product-copy -- The model's own reply under test, not product copy.
+  const builtClaim = 'The preview build succeeded.';
+  for (const claim of [builtClaim, 'The draft build succeeded.', 'Done. Open it to see the background.'])
+    assert.equal(unbackedAppClaim(claim, 'public', status, request)?.missing, 'edit', claim);
+  for (const ask of [
+    'Create a contact page',
+    'Put a footer on the page',
+    'Implement dark mode',
+    'Build a pricing page',
+  ])
+    assert.equal(unbackedAppClaim(builtClaim, 'public', status, ask)?.missing, 'edit', ask);
+  for (const rebuild of [
+    'Rebuild the app.',
+    'Rebuild it and show it to me',
+    'Please rebuild it using the latest files',
+    'Build it',
+    'Rebuild it so I can see the last edit',
+  ])
+    assert.equal(unbackedAppClaim(builtClaim, 'public', status, rebuild)?.missing, 'build', rebuild);
+  for (const [ask, reply] of [
+    ['Give me the address of the app', 'Your app is at https://x.tulipfarm.site.'],
+    ['Get me a summary of the app', 'Your app is a to-do list with three pages and a login form.'],
+    ['Add Stripe checkout', 'I can not add real payments to this static app; it has no server.'],
+    ['Make it better', 'Sure. Tell me which section you want to change first.'],
+  ])
+    assert.equal(unbackedAppClaim(reply, 'public', status, ask), undefined, ask);
+  assert.equal(unbackedAppClaim('Which shade of yellow do you want?', 'public', status, request), undefined);
+  // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
+  const edited = new Set(['apps.status', 'apps.files.write', 'apps.preview.build']);
+  assert.equal(unbackedAppClaim(builtClaim, 'public', edited, request), undefined);
+  assert.equal(
+    unbackedAppClaim('Your site now has the footer and is rebuilt.', 'public', new Set(['apps.files.write']), request)
+      ?.missing,
+    'build',
+  );
+});
+
 test('an import presented for review needs a pending proposal receipt from this reply', () => {
   const pending = [
     {

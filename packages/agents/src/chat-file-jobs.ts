@@ -51,7 +51,18 @@ export function fileListingQuery(request: string): string | undefined {
   return query?.slice(1).find(Boolean)?.slice(0, 255);
 }
 
-export function createFileJobGuard(request: string, prior: readonly { call: unknown; result: unknown }[] = []) {
+/** The Files library, as opposed to an app's own files such as index.html. */
+const filesLibrary =
+  /\b(?:[Ii]n|[Tt]o|[Ii]nto|[Ff]rom)\s+(?:(?:my|your|the)\s+)?Files\b(?!\s+(?:page|folder|directory|section|tab|list|route|view|link)\b)/;
+/**
+ * In an app's chat, file names and "created" describe the app's own files, so only a save that names the Files library,
+ * or a real Files save attempt, is checked.
+ */
+export function createFileJobGuard(
+  request: string,
+  prior: readonly { call: unknown; result: unknown }[] = [],
+  appChat = false,
+) {
   let calls = 0;
   let attempted = false;
   let saved = false;
@@ -62,10 +73,13 @@ export function createFileJobGuard(request: string, prior: readonly { call: unkn
   const needsCheck = (text = '') =>
     !saved &&
     (attempted ||
-      filePrefilter.test(request) ||
-      wordApp.test(request) ||
-      fileSavedClaim.test(text) ||
-      readyFileClaim.test(text));
+      (appChat
+        ? filesLibrary.test(request) ||
+          (filesLibrary.test(text) && (fileSavedClaim.test(text) || readyFileClaim.test(text)))
+        : filePrefilter.test(request) ||
+          wordApp.test(request) ||
+          fileSavedClaim.test(text) ||
+          readyFileClaim.test(text)));
   const record = (call: { tool: string }, value: unknown) => {
     if (!call.tool.startsWith('files.')) return;
     calls++;

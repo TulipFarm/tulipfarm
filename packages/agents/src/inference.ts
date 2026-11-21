@@ -2343,7 +2343,7 @@ const toolsDenied =
   /\b(?:my|(?:file|write|writing|edit|editing|build|building)(?: or \w+)?(?: \w+)?) tools?\b[^.]*\b(?:not available|unavailable|not offered)\b|(?:\b(?:no|not have|without)|n['’]t have)(?: a| any| the)? (?:file|write|editing|build)\b[\w\s-]{0,24}\btools?\b/i;
 const firstPerson = /\b(?:i|we|my)\b/i;
 const buildClaim =
-  /^(?:and |so )?(?:the |your )?(?:re)?build (?:succeeded|passed|worked|completed|finished|(?:is|was) (?:complete|done|finished|successful))\b|^(?:and |so )?(?:i|we) (?:re)?built\b|\b(?:i|we)(?:(?:'|’)ve| have) (?:re)?built\b|^(?:re)?built (?:the|your|this) (?:app|server|site)\b/i;
+  /^(?:and |so )?(?:the |your )?(?:(?:preview|draft|app|site|server|page) )?(?:re)?build (?:succeeded|passed|worked|completed|finished|(?:is|was) (?:complete|done|finished|successful))\b|\b(?:is|was|has been|have been) (?:now )?rebuilt\b|^(?:and |so )?(?:i|we) (?:re)?built\b|\b(?:i|we)(?:(?:'|’)ve| have) (?:re)?built\b|^(?:re)?built (?:the|your|this) (?:app|server|site)\b/i;
 const conditional = /\b(?:if|when|once|after|whether|unless|until)\b/i;
 const editVerb = String.raw`(?:updated|edited|changed|modified|rewrote|wrote|replaced|inserted|deleted|removed|added|created|implemented|fixed|corrected|put(?! together)|renamed|moved|set|swapped|switched|hid|hidden|appended|restyled|translated|enabled|disabled|made(?! sure\b)|tweaked|adjusted|increased|decreased|styled|bolded)`;
 const editClaim = new RegExp(String.raw`\b(?:i|we)(?:'|’)?(?:ve| have)?${adverbs} ${editVerb}\b`, 'i');
@@ -2360,6 +2360,15 @@ const nowClaim =
 /** A clause that says the app already holds something, which only reading its files in this reply could show. */
 const alreadyClaim =
   /\balready (?:has|have|contains?|includes?|serves?|returns?|responds?|exposes?|defines?|handles?|reads?|says?|shows?|uses?)\b/i;
+// After "the" or "latest", "update" or "edit" names a thing; "build it" asks for a build, not new code.
+const editRequest = new RegExp(
+  // eslint-disable-next-line tulipfarm/product-copy -- A pattern over the person's words, not product copy.
+  String.raw`(?<!\b(?:the|a|an|last|latest|newest|new|this|that|my|your|our|its) )\b(?:add|change|create|write|rewrite|implement|put|include|insert|make|turn|set|rename|replace|remove|delete|fix|move|swap|update|edit|switch|restyle|style|redesign|refactor|convert|hook|wire|drop|hide|enable|disable|translate|resize|cent(?:er|re)|align|bold|capitali[sz]e|recolou?r|build(?! (?:it|this|that|again|the (?:app|site|preview|draft|page)\b)))\b`,
+  'i',
+);
+/** A short reply that reports the work finished without naming it. */
+const doneClaim =
+  /^\s*(?:all )?(?:done|finished|complete|updated)\b|\b(?:is|are) (?:all )?(?:done|ready|live|updated|in place)\b/i;
 const toReader = /\b(?:below|for you|here(?:'|’)?s|here is|here are)\b/i;
 /** Verbs that ask for a change, in any inflection. */
 const changeVerb = String.raw`(?:add(?:s|ed|ing)?|chang(?:e|es|ed|ing)|creat(?:e|es|ed|ing)|writ(?:e|es|ing)|wrote|written|rewrit(?:e|es|ing)|rewrote|implement(?:s|ed|ing)?|turn(?:s|ed|ing)?|mak(?:e|es|ing)|made|(?:re)?build(?:s|ing)?|(?:re)?built|set(?:s|ting)?|renam(?:e|es|ed|ing)|replac(?:e|es|ed|ing)|remov(?:e|es|ed|ing)|delet(?:e|es|ed|ing)|fix(?:es|ed|ing)?|insert(?:s|ed|ing)?|mov(?:e|es|ed|ing)|swap(?:s|ped|ping)?|publish(?:es|ed|ing)?|deploy(?:s|ed|ing)?|updat(?:e|es|ed|ing)|edit(?:s|ed|ing)?|switch(?:es|ed|ing)?|(?:re)?styl(?:e|es|ed|ing)|redesign(?:s|ed|ing)?|refactor(?:s|ed|ing)?|convert(?:s|ed|ing)?|hook(?:s|ed|ing)?|wir(?:e|es|ed|ing)|drop(?:s|ped|ping)?|hid(?:e|es|ing)|hidden|enabl(?:e|es|ed|ing)|disabl(?:e|es|ed|ing)|translat(?:e|es|ed|ing)|resiz(?:e|es|ed|ing)|cent(?:er|re)(?:s|ed|ing)?|align(?:s|ed|ing)?|put(?:s|ting)?|includ(?:e|es|ed|ing)|giv(?:e|es|ing)|gave|given|get(?:s|ting)?|got|us(?:e|es|ed|ing)|show(?:s|ed|ing|n)?)`;
@@ -2439,13 +2448,16 @@ export function unbackedAppClaim(candidate: string, apps: AppKind | undefined, r
   const changed = ran.has('apps.files.write') || ran.has('apps.files.delete');
   const looked = changed || ran.has(buildTool) || ran.has('apps.status') || ran.has('apps.files.read');
   const asked = !appQuestionAsked(request);
+  // Only an edit verb asks for an edit that a build of unchanged files can't back; "rebuild and show it" asks for a build.
+  const editAsked = asked && editRequest.test(request.replace(notAsked, ''));
   const unconditional = sentences.filter(sentence => !conditional.test(sentence));
   const settled = unconditional.filter(sentence => !earlierOutcome.test(sentence));
   // 'edit' is an explicit edit claim, the only kind a forced write can back; 'change' says the app reads as asked.
   const missing = (clause: string): 'edit' | 'change' | 'build' | 'read' | undefined => {
     if (toReader.test(clause)) return undefined;
     const build = buildClaim.exec(clause);
-    if (build && !negatedClaim(clause, build)) return ran.has(buildTool) ? undefined : 'build';
+    if (build && !negatedClaim(clause, build))
+      return ran.has(buildTool) ? undefined : editAsked && !changed ? 'edit' : 'build';
     const saved = savedClaim.exec(clause);
     if (saved && !negatedClaim(clause, saved)) return changed ? undefined : 'edit';
     const now = nowClaim.exec(clause);
@@ -2473,7 +2485,16 @@ export function unbackedAppClaim(candidate: string, apps: AppKind | undefined, r
       };
     }),
   ];
-  const unbacked = claims.find(claim => claim.missing);
+  // An edit request answered after only checking status changed nothing, whatever the reply says.
+  const untouched =
+    editAsked &&
+    ran.size === 1 &&
+    ran.has('apps.status') &&
+    !candidate.includes('?') &&
+    (claimsActionOutcome(candidate) || doneClaim.test(candidate))
+      ? { clause: candidate.trim(), missing: 'edit' as const }
+      : undefined;
+  const unbacked = claims.find(claim => claim.missing) ?? untouched;
   return unbacked === undefined
     ? undefined
     : {
@@ -4203,7 +4224,7 @@ export async function inferWithTools(
   let request = rowReviewCandidate ?? (latest ? textTurn(latest).text : '');
   let rowReviewRequested = false;
   const fileRequest = latest ? textTurn(latest).text : '';
-  const fileJob = createFileJobGuard(fileRequest, tools?.priorFileResults);
+  const fileJob = createFileJobGuard(fileRequest, tools?.priorFileResults, Boolean(tools?.apps));
   const fileQuery = fileListingQuery(fileRequest);
   const earlier = messages
     .filter(turn => turn !== latest)
