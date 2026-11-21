@@ -2601,10 +2601,6 @@ const authoringReviewTools = new Set(
     'files.trash',
     'files.restore',
     'files.share',
-    'knowledge.add',
-    'knowledge.update',
-    'knowledge.remove',
-    'memory.edit',
   ].map(nativeToolName),
 );
 const skillImportReviewTools = new Set(
@@ -2665,10 +2661,6 @@ export function reviewCardReceipt(name: string, value: unknown): CardReceipt | u
     receipt.importId
   )
     return metadata(receipt.importId, receipt.status);
-  if (name === nativeToolName('memory.forget'))
-    return receipt.status === 'confirm' && typeof receipt.draftId === 'string' && receipt.draftId
-      ? metadata(receipt.draftId, receipt.status)
-      : undefined;
   return authoringReviewTools.has(name) &&
     receipt.status === 'review-required' &&
     typeof receipt.draftId === 'string' &&

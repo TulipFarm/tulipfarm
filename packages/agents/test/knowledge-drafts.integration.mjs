@@ -54,7 +54,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           await executeTool(
             call.tool,
             false,
-            context => createChatTools(context.runtime).invokeWithSources(context, call),
+            fields.invoke ??
+              (context =>
+                createChatTools(context.runtime, {
+                  objects: { attachments: bytes, snapshots: bytes },
+                }).invokeWithSources(context, call)),
             sources,
             call,
             fields.activity,
@@ -66,7 +70,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 });
     return output;
   }
-  const tool = call => reply('Review the card.', call);
+  const tool = call => reply('Done.', call);
   const objects = new Map();
   const bytes = {
     putIfAbsent: async (key, body) => void objects.set(key, Buffer.from(body)),
@@ -74,84 +78,90 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     remove: async key => void objects.delete(key),
   };
   const drafts = createAuthoringDrafts(runtime, undefined, undefined, undefined, undefined, undefined, bytes);
-  async function approve(proposed) {
-    assert.equal((await drafts.read(w.id, w.userId, chatId, proposed.draftId)).status, 'pending');
-    const decision = { commandId: randomUUID(), digest: proposed.digest, decision: 'save' };
-    await drafts.decide(w.id, w.userId, chatId, proposed.draftId, decision);
-    await drafts.decide(w.id, w.userId, chatId, proposed.draftId, decision);
-    return drafts.read(w.id, w.userId, chatId, proposed.draftId);
-  }
-  return { w, db, runtime, chats, chatId, drafts, tool, reply, approve, files: createFiles(runtime, bytes) };
+  /** A Knowledge card from before chat changed Knowledge at once, as older chats still hold. */
+  const legacyCard = (title, text, sources = []) =>
+    reply('Review the card.', { tool: 'knowledge.add', title, text }, sources, {
+      invoke: async context => ({
+        result: await createAuthoringDrafts(context.runtime).propose(
+          context.workspaceId,
+          context.actor,
+          context.callId,
+          context.origin,
+          {
+            kind: 'knowledge',
+            targetId: randomUUID(),
+            input: { operation: 'add', title, content: { kind: 'note', text } },
+          },
+        ),
+        sources: [],
+      }),
+    });
+  const entry = async documentId => (await tool({ tool: 'knowledge.list', documentId })).entry;
+  return { w, db, runtime, chats, chatId, drafts, tool, reply, legacyCard, entry, files: createFiles(runtime, bytes) };
 }
 
-test('chat adds, updates and removes a Knowledge note only through approved cards', async t => {
-  const { tool, approve, drafts, w, chatId } = await setup(t);
+test('chat adds, updates and removes a Knowledge note at once, refusing a stale revision', async t => {
+  const { tool, entry, runtime, w } = await setup(t);
   const added = await tool({ tool: 'knowledge.add', title: 'Pricing', text: 'Starter is $10.' });
-  assert.equal(added.status, 'review-required');
-  assert.deepEqual((await tool({ tool: 'knowledge.list' })).entries, []);
-  const saved = await approve(added);
-  assert.equal(saved.status, 'saved');
-  assert.deepEqual(saved.outcome, { kind: 'knowledge', operation: 'add', documentId: added.documentId });
-
-  const [entry] = (await tool({ tool: 'knowledge.list' })).entries;
-  assert.equal(entry.title, 'Pricing');
-  assert.equal(
-    (await tool({ tool: 'knowledge.list', documentId: entry.documentId })).entry.noteText,
-    'Starter is $10.',
-  );
+  assert.equal(added.status, 'applied');
+  assert.deepEqual(added.change, { store: 'knowledge', operation: 'add', title: 'Pricing' });
+  const [listed] = (await tool({ tool: 'knowledge.list' })).entries;
+  assert.equal(listed.documentId, added.documentId);
+  assert.equal(listed.title, 'Pricing');
+  assert.equal((await entry(added.documentId)).noteText, 'Starter is $10.');
   assert.equal(
     (
       await tool({
         tool: 'knowledge.update',
-        documentId: entry.documentId,
-        revisionId: entry.revisionId,
+        documentId: listed.documentId,
+        revisionId: listed.revisionId,
         title: 'Pricing',
       })
     ).error,
     'no-change',
   );
 
-  const first = await tool({
+  const renamed = await tool({
     tool: 'knowledge.update',
-    documentId: entry.documentId,
-    revisionId: entry.revisionId,
-    text: 'Starter is $12.',
-  });
-  const second = await tool({
-    tool: 'knowledge.update',
-    documentId: entry.documentId,
-    revisionId: entry.revisionId,
+    documentId: listed.documentId,
+    revisionId: listed.revisionId,
     title: 'Plans and pricing',
   });
-  assert.equal((await approve(second)).status, 'saved');
-  // The first card was drafted against the replaced revision, so approving it now would lose the new title.
-  assert.equal((await drafts.read(w.id, w.userId, chatId, first.draftId)).status, 'stale');
-  await assert.rejects(
-    drafts.decide(w.id, w.userId, chatId, first.draftId, {
-      commandId: randomUUID(),
-      digest: first.digest,
-      decision: 'save',
-    }),
-    { code: 'draft-stale' },
-  );
-  const updated = (await tool({ tool: 'knowledge.list', documentId: entry.documentId })).entry;
+  assert.equal(renamed.status, 'applied');
+  assert.deepEqual(renamed.change, { store: 'knowledge', operation: 'update', title: 'Plans and pricing' });
+  // A change made against the replaced revision would lose the new title.
+  const late = await tool({
+    tool: 'knowledge.update',
+    documentId: listed.documentId,
+    revisionId: listed.revisionId,
+    text: 'Starter is $12.',
+  });
+  assert.equal(late.error, 'draft-stale');
+  assert.match(late.instruction, /^Nothing changed\./);
+  const updated = await entry(listed.documentId);
   assert.equal(updated.title, 'Plans and pricing');
   assert.equal(updated.noteText, 'Starter is $10.');
 
-  const removed = await tool({ tool: 'knowledge.remove', documentId: entry.documentId, revisionId: entry.revisionId });
-  assert.equal(removed.error, 'draft-stale');
-  const removal = await tool({
+  assert.equal(
+    (await tool({ tool: 'knowledge.remove', documentId: listed.documentId, revisionId: listed.revisionId })).error,
+    'draft-stale',
+  );
+  const removed = await tool({
     tool: 'knowledge.remove',
-    documentId: entry.documentId,
+    documentId: listed.documentId,
     revisionId: updated.revisionId,
   });
-  assert.equal((await approve(removal)).status, 'saved');
+  assert.deepEqual(removed.change, { store: 'knowledge', operation: 'remove', title: 'Plans and pricing' });
   assert.deepEqual((await tool({ tool: 'knowledge.list' })).entries, []);
-  assert.equal((await tool({ tool: 'knowledge.list', documentId: entry.documentId })).error, 'not-found');
+  assert.equal((await tool({ tool: 'knowledge.list', documentId: listed.documentId })).error, 'not-found');
+  const cards = await runtime.transaction(w.id, commonCompatibility, tx =>
+    tx.client.query(`SELECT count(*)::int AS n FROM "${tx.schema}".tf_chat_authoring_drafts`),
+  );
+  assert.equal(cards.rows[0].n, 0, 'no review card is made');
 });
 
 test('chat adds a file from Files to Knowledge once', async t => {
-  const { tool, approve, files, w } = await setup(t);
+  const { tool, chats, chatId, files, w } = await setup(t);
   const file = await files.upload(
     w.id,
     w.userId,
@@ -162,8 +172,7 @@ test('chat adds a file from Files to Knowledge once', async t => {
   const fileId = file.item?.id ?? file.id;
   assert.equal((await tool({ tool: 'knowledge.add', fileId, text: 'x', title: 'x' })).error, 'invalid-arguments');
   const added = await tool({ tool: 'knowledge.add', fileId });
-  const saved = await approve(added);
-  assert.equal(saved.status, 'saved');
+  assert.deepEqual(added.change, { store: 'knowledge', operation: 'add', title: 'faq.md' });
   const [entry] = (await tool({ tool: 'knowledge.list' })).entries;
   assert.equal(entry.kind, 'file');
   assert.equal(entry.fileId, fileId);
@@ -180,13 +189,20 @@ test('chat adds a file from Files to Knowledge once', async t => {
     revisionId: entry.revisionId,
     title: 'Support FAQ',
   });
-  assert.equal((await approve(renamed)).status, 'saved');
+  assert.equal(renamed.status, 'applied');
   assert.equal((await tool({ tool: 'knowledge.list' })).entries[0].title, 'Support FAQ');
+  const receipts = (await chats.history(w.id, w.userId, chatId)).messages.flatMap(message =>
+    message.tools.flatMap(step => (step.memoryChange ? [step.memoryChange] : [])),
+  );
+  assert.deepEqual(receipts, [
+    { store: 'knowledge', operation: 'add', title: 'faq.md' },
+    { store: 'knowledge', operation: 'update', title: 'Support FAQ' },
+  ]);
 });
 
 for (const change of ['remove note', 'replace note', 'remove file']) {
   test(`${change} preserves unrelated replies and owner-only Knowledge receipts`, async t => {
-    const { w, db, runtime, chats, chatId, drafts, tool, reply, approve, files } = await setup(t);
+    const { w, db, runtime, chats, chatId, drafts, tool, reply, legacyCard, entry, files } = await setup(t);
     const text = 'Private source passage: Starter costs $10.';
     const unrelatedText = 'Good morning. This reply predates the Knowledge source.';
     await reply(unrelatedText, { tool: 'tables.definitions' }, [], { narration: 'Reading workspace tables.' });
@@ -208,14 +224,14 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
     const added = await tool(
       fileId ? { tool: 'knowledge.add', fileId } : { tool: 'knowledge.add', title: 'Private pricing', text },
     );
-    await approve(added);
-    const before = await tool({ tool: 'knowledge.add', title: 'Independent draft', text: 'An unrelated note.' });
+    const { revisionId } = await entry(added.documentId);
+    const before = await legacyCard('Independent draft', 'An unrelated note.');
     const actor = { kind: 'human', membershipId: w.membershipId, userId: w.userId };
     const publicationId = randomUUID();
     await createKnowledge({ runtime }).publishLexical(w.id, actor, {
       id: publicationId,
       documentId: added.documentId,
-      revisionId: added.draftId,
+      revisionId,
       markdown: text,
       pages: 0,
       tokens: 10,
@@ -233,20 +249,13 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
       workspaceId: w.id,
       sourceId: sourceRow.source_id,
       documentId: added.documentId,
-      revisionId: added.draftId,
+      revisionId,
       publicationId,
       accessEpoch: sourceRow.access_epoch,
     };
     const citedText = `${text} [Pricing](#knowledge-citation=${publicationId}:0)`;
-    const dependent = await reply(
-      citedText,
-      {
-        tool: 'knowledge.add',
-        title: 'Source-dependent draft',
-        text: 'Based on the source.',
-      },
-      [source],
-    );
+    const dependent = await legacyCard('Source-dependent draft', 'Based on the source.', [source]);
+    await reply(citedText, undefined, [source]);
     // Both cited and uncited reuse expose the model to the earlier source.
     await reply(`See [Pricing](#knowledge-citation=${publicationId}:0).`);
     const copyFromContext = messages => {
@@ -427,20 +436,18 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
         [opaqueText, JSON.stringify(legacySources)],
       );
     }
-    const after = await tool({ tool: 'knowledge.add', title: 'Other entry', text: 'Unrelated content.' });
-    await approve(after);
+    await tool({ tool: 'knowledge.add', title: 'Other entry', text: 'Unrelated content.' });
     const changed = await tool(
       change === 'replace note'
         ? {
             tool: 'knowledge.update',
             documentId: added.documentId,
-            revisionId: added.draftId,
+            revisionId,
             text: 'Starter now costs $12.',
           }
-        : { tool: 'knowledge.remove', documentId: added.documentId, revisionId: added.draftId },
+        : { tool: 'knowledge.remove', documentId: added.documentId, revisionId },
     );
-    const decision = { commandId: randomUUID(), digest: changed.digest, decision: 'save' };
-    await drafts.decide(w.id, w.userId, chatId, changed.draftId, decision);
+    assert.equal(changed.status, 'applied');
     if (legacyFollowUpReply)
       await t.test('legacy standalone replies retain generated instruction provenance', async () => {
         const history = await chats.history(w.id, w.userId, chatId);
@@ -478,23 +485,16 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
 
     for (let reload = 0; reload < 2; reload++) {
       const reader = createAuthoringDrafts(runtime);
-      for (const [card, operation] of [
-        [added, 'add'],
-        [after, 'add'],
-        [changed, change === 'replace note' ? 'update' : 'remove'],
-      ]) {
-        const view = await reader.read(w.id, w.userId, chatId, card.draftId);
-        assert.equal(view.status, 'saved');
-        assert.equal(view.outcome.operation, operation);
-        assert.deepEqual(view.proposal, {
-          kind: 'knowledge-receipt',
-          targetId: card.documentId,
-          input: { operation, entry: card === after ? 'note' : fileId ? 'file' : 'note' },
-        });
-        assert.doesNotMatch(JSON.stringify(view), /Private source passage|Private pricing|private-pricing/);
-      }
       assert.equal((await reader.read(w.id, w.userId, chatId, before.draftId)).status, 'pending');
       const history = await createConversations(runtime).history(w.id, w.userId, chatId);
+      // Later replies had the changed source in their context, so their steps are withheld with them.
+      assert.deepEqual(
+        history.messages.flatMap(message =>
+          message.tools.flatMap(step => (step.memoryChange ? [step.memoryChange.operation] : [])),
+        ),
+        ['add'],
+      );
+      assert.doesNotMatch(JSON.stringify(history.messages.flatMap(message => message.tools)), /Private source passage/);
       const texts = history.messages
         .filter(message => message.author === 'assistant')
         .map(message => message.parts.map(part => part.text ?? '').join(''));
@@ -506,10 +506,6 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
       assert.ok(!texts.includes(opaqueText), 'unattributed legacy dependencies stay withheld');
       assert.doesNotMatch(unavailable.join(''), /access changed|access to it ended|Some work failed/);
     }
-    assert.equal(
-      (await drafts.decide(w.id, w.userId, chatId, changed.draftId, decision)).operation,
-      change === 'replace note' ? 'update' : 'remove',
-    );
     if (legacySources) {
       const stored = (
         await db.platform.query(
@@ -754,7 +750,7 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
       `INSERT INTO "${w.names.schema}".tf_memberships (id,user_id,role) VALUES ($1,$2,'member')`,
       [outsider.membershipId, outsider.userId],
     );
-    await assert.rejects(drafts.read(w.id, outsider.userId, chatId, added.draftId), AccessDenied);
+    await assert.rejects(drafts.read(w.id, outsider.userId, chatId, before.draftId), AccessDenied);
     await assert.rejects(chats.history(w.id, outsider.userId, chatId), AccessDenied);
     await assert.rejects(chats.canReadStream(w.id, outsider.userId, chatId, streamReference), AccessDenied);
     await runtime.transaction(w.id, commonCompatibility, async tx => {
@@ -766,7 +762,7 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
     await db.platform.query(`UPDATE "${w.names.schema}".tf_memberships SET removed_at=clock_timestamp() WHERE id=$1`, [
       w.membershipId,
     ]);
-    await assert.rejects(drafts.read(w.id, w.userId, chatId, changed.draftId), AccessDenied);
+    await assert.rejects(drafts.read(w.id, w.userId, chatId, before.draftId), AccessDenied);
     await assert.rejects(chats.history(w.id, w.userId, chatId), AccessDenied);
     await assert.rejects(chats.canReadStream(w.id, w.userId, chatId, streamReference), AccessDenied);
   });

@@ -100,6 +100,7 @@ import {
   controlResultSchema,
   turnStatusSchema,
   toolReceiptSchema,
+  memoryChangeSchema,
   timeZoneSchema,
   stopSubagentSchema,
   modelFallbackCodePrefix,
@@ -192,6 +193,22 @@ const pinnedColumn = (tx: AuthorizationTransaction, membership: string) =>
   hasPins(tx)
     ? `EXISTS (SELECT 1 FROM ${table(tx, 'tf_conversation_pins')} pin WHERE pin.conversation_id = c.id AND pin.membership_id = ${membership}) AS pinned`
     : 'false AS pinned';
+const memoryChangeTools = new Set([
+  'memory.edit',
+  'memory.forget',
+  'knowledge.add',
+  'knowledge.update',
+  'knowledge.remove',
+]);
+function memoryChangeOutput(row: { tool: string; status: string; output?: unknown }) {
+  if (row.status !== 'completed' || !memoryChangeTools.has(row.tool)) return {};
+  const output = z
+    .object({ result: z.object({ status: z.literal('applied'), change: memoryChangeSchema }) })
+    .safeParse(row.output);
+  return output.success && output.data.result.change.store === (row.tool.startsWith('memory.') ? 'memory' : 'knowledge')
+    ? { memoryChange: output.data.result.change }
+    : {};
+}
 function followUpOutput(row: { tool: string; status: string; output?: unknown }) {
   if (row.status !== 'completed' || row.tool !== 'followups.schedule') return {};
   const output = z.object({ result: z.object({ followUp: z.object({ id: uuidSchema }) }) }).safeParse(row.output);
@@ -1114,6 +1131,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
                       ...skillImportOutput(row),
                       ...followUpOutput(row),
                       ...integrationCard(row),
+                      ...memoryChangeOutput(row),
                     }),
                 ...(!hidden.size && row.tool === 'images.generate'
                   ? {

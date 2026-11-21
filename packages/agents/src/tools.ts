@@ -900,11 +900,11 @@ const descriptions: Record<ToolName, string> = {
   'knowledge.list':
     "List the human's own Knowledge entries, the notes and files they added for agents to search, with each documentId, revisionId, kind, title and parsing state, 100 at a time. Pass documentId for one entry with its note text. Use knowledge.retrieve to search what entries say. Changes nothing.",
   'knowledge.add':
-    "Prepare a review card that adds one entry to the human's own Knowledge: a note (title and Markdown text) or a file from files.list by fileId. Changes nothing until the human approves it. Never treat chat text as approval.",
+    "Add one entry to the human's own Knowledge at once: a note (title and Markdown text) or a file from files.list by fileId. Use it only when the human asks in this chat. There is no review card and no undo.",
   'knowledge.update':
-    "Prepare a review card that changes one of the human's own Knowledge entries from knowledge.list: a new title, or a note's full replacement text. Read the note first with knowledge.list and its documentId. Changes nothing until the human approves it. Never treat chat text as approval.",
+    "Change one of the human's own Knowledge entries from knowledge.list at once: a new title, or a note's full replacement text. Read the note first with knowledge.list and its documentId. Use it only when the human asks in this chat. There is no review card and no undo.",
   'knowledge.remove':
-    "Prepare a review card that removes one of the human's own Knowledge entries from knowledge.list, so agents stop finding it. A removed file stays in Files. Changes nothing until the human approves it. Never treat chat text as approval.",
+    "Remove one of the human's own Knowledge entries from knowledge.list at once, so agents stop finding it. A removed file stays in Files. Use it only when the human asks in this chat. There is no review card and no undo.",
   'integrations.list':
     "List the human's connected accounts (Google, GitHub, Jira and Confluence, Trello) with each connectionId, account, state and, for Google, the apps granted; and the apps this server can connect. Never returns credentials. Changes nothing.",
   'integrations.connect':
@@ -916,9 +916,9 @@ const descriptions: Record<ToolName, string> = {
   'memory.read':
     "Read the human's own personal memory: the preferences they saved for how you reply, with its revision. Works only in their private chats outside projects and Slack. Changes nothing.",
   'memory.edit':
-    "Prepare a review card that replaces the human's own personal memory with new full text, for example to add, reword or reorder preferences. Call memory.read first and pass its revision. The card shows the change; nothing changes until the human approves it. Never treat chat text as approval. To remove something, use memory.forget.",
+    "Replace the human's own personal memory with new full text at once, for example to add, reword or reorder preferences. Call memory.read first and pass its revision. Use it only when the human asks in this chat. There is no review card and no undo. To remove something, use memory.forget.",
   'memory.forget':
-    "Forget exact text from the human's own personal memory when they ask you to. Copy the text exactly from memory.read. Forgetting is permanent, so the card under your reply asks them to confirm first. Don't repeat the text.",
+    "Forget exact text from the human's own personal memory at once, when they ask you to. Copy the text exactly from memory.read. Forgetting is permanent and has no review card or undo. Don't repeat the text.",
   'integrations.disconnect':
     'Show a card under your reply that lets the human disconnect one connection from integrations.list. The card shows what stops working. Nothing changes until the human confirms on the card. Never treat chat text as approval.',
   'files.read':
@@ -2212,15 +2212,46 @@ export function createChatTools(
         const knowledge = createKnowledgeDrafts(runtime, workspaceId);
         const proposal = await knowledgeProposal(knowledge, workspaceId, actor, call);
         if ('error' in proposal) return proposal;
+        const drafts = createAuthoringDrafts(
+          runtime,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          objects?.attachments && {
+            read: objects.attachments.read,
+            putIfAbsent: () => Promise.reject(new AgentError('knowledge-file-unavailable', 503)),
+            remove: () => Promise.reject(new AgentError('knowledge-file-unavailable', 503)),
+          },
+        );
         try {
-          return await createAuthoringDrafts(runtime).propose(workspaceId, actor, callId, context.origin, proposal);
-        } catch (error) {
-          if (!(error instanceof AgentError) || error.code !== 'draft-stale') throw error;
+          const outcome = await drafts.change(workspaceId, actor, callId, context.origin, proposal);
+          const { operation, title } = proposal.input;
           return {
-            error: 'draft-stale',
-            instruction:
-              'No draft was created. The entry or file changed while drafting. Call knowledge.list and try again.',
+            status: 'applied',
+            change: { store: 'knowledge', operation, title },
+            documentId: outcome.kind === 'knowledge' ? outcome.documentId : proposal.targetId,
+            instruction: `The entry is ${operation === 'add' ? 'added to' : operation === 'update' ? 'updated in' : 'removed from'} Knowledge. Confirm it briefly in one sentence.`,
           };
+        } catch (error) {
+          if (!(error instanceof AgentError)) throw error;
+          if (error.code === 'draft-stale')
+            return noKnowledgeChange(
+              'draft-stale',
+              'The entry or file changed meanwhile. Call knowledge.list and try again.',
+            );
+          if (error.code === 'knowledge-quota')
+            return noKnowledgeChange(
+              'knowledge-quota',
+              'Knowledge is full, or the file is too large. Tell the human to remove entries in Knowledge first.',
+            );
+          if (error.code === 'knowledge-file-unavailable')
+            return noKnowledgeChange(
+              'file-unavailable',
+              'The file cannot be read right now. Tell the human to try again later.',
+            );
+          throw error;
         }
       }
       case 'memory.read':
@@ -2252,7 +2283,7 @@ export function createChatTools(
           if (error.code === 'draft-stale')
             return {
               error: 'draft-stale',
-              instruction: 'No draft was created. Memory changed since memory.read. Call memory.read and try again.',
+              instruction: 'Nothing changed. Memory changed since memory.read. Call memory.read and try again.',
             };
           throw error;
         }
@@ -3910,9 +3941,9 @@ async function ownKnowledgeEntry(knowledge: KnowledgeDrafts, workspaceId: string
   }
 }
 
-const noKnowledgeDraft = (error: string, instruction: string) => ({
+const noKnowledgeChange = (error: string, instruction: string) => ({
   error,
-  instruction: `No draft was created. ${instruction}`,
+  instruction: `Nothing changed. ${instruction}`,
 });
 
 async function invokeMemory(
@@ -3920,20 +3951,20 @@ async function invokeMemory(
   workspaceId: string,
   actor: HumanActor,
   callId: string,
-  origin: Parameters<ReturnType<typeof createAuthoringDrafts>['propose']>[3],
+  origin: Parameters<ReturnType<typeof createAuthoringDrafts>['change']>[3],
   call: Extract<FrameworkCall, { tool: 'memory.read' | 'memory.edit' | 'memory.forget' }>,
 ) {
   const drafts = createAuthoringDrafts(runtime);
   if (call.tool === 'memory.read') return drafts.readMemory(workspaceId, actor, origin.conversationId);
   if (call.tool === 'memory.forget') {
     const forgotten = await drafts.forgetMemory(workspaceId, actor, callId, origin, call.text);
-    return forgotten
+    return forgotten?.kind === 'memory'
       ? {
-          status: 'confirm',
-          draftId: forgotten.draftId,
+          status: 'applied',
+          change: { store: 'memory', operation: 'forget' },
           revision: forgotten.revision,
           instruction:
-            'Nothing is forgotten yet. Forgetting is permanent, so the card under your reply asks the human to confirm. Say so briefly without repeating the text.',
+            'The text is forgotten for good. Confirm it briefly in one sentence without repeating the forgotten text.',
         }
       : {
           error: 'not-found',
@@ -3944,8 +3975,8 @@ async function invokeMemory(
   const current = await drafts.readMemory(workspaceId, actor, origin.conversationId);
   if (current.revision !== call.revision) throw new AgentError('draft-stale');
   if (current.content === call.content)
-    return { error: 'no-change', instruction: 'No draft was created. Memory already says exactly this.' };
-  return drafts.propose(workspaceId, actor, callId, origin, {
+    return { error: 'no-change', instruction: 'Nothing changed. Memory already says exactly this.' };
+  const saved = await drafts.change(workspaceId, actor, callId, origin, {
     kind: 'memory',
     input: {
       operation: 'edit',
@@ -3954,6 +3985,12 @@ async function invokeMemory(
       content: call.content,
     },
   });
+  return {
+    status: 'applied',
+    change: { store: 'memory', operation: 'edit' },
+    revision: saved.kind === 'memory' ? saved.revision : undefined,
+    instruction: 'Memory is updated. Confirm it briefly in one sentence.',
+  };
 }
 async function knowledgeProposal(
   knowledge: KnowledgeDrafts,
@@ -3966,7 +4003,7 @@ async function knowledgeProposal(
       return await knowledge.readableFile(actor, fileId);
     } catch (error) {
       if (!(error instanceof AccessDenied)) throw error;
-      return noKnowledgeDraft(
+      return noKnowledgeChange(
         'file-unavailable',
         'The human cannot open that file, or it is a folder or in Trash. Pick a file from files.list.',
       );
@@ -3974,9 +4011,9 @@ async function knowledgeProposal(
   }
   if (call.tool === 'knowledge.add') {
     if ((call.text === undefined) === (call.fileId === undefined))
-      return noKnowledgeDraft('invalid-arguments', 'Give text for a note or fileId for a file, not both.');
+      return noKnowledgeChange('invalid-arguments', 'Give text for a note or fileId for a file, not both.');
     if (call.text !== undefined) {
-      if (!call.title) return noKnowledgeDraft('invalid-arguments', 'A note needs a title.');
+      if (!call.title) return noKnowledgeChange('invalid-arguments', 'A note needs a title.');
       return {
         kind: 'knowledge',
         targetId: randomUUID(),
@@ -3989,7 +4026,7 @@ async function knowledgeProposal(
       const page = await knowledge.list(workspaceId, actor.userId, cursor ? { cursor } : {});
       const added = page.items.find(item => item.kind === 'file' && item.fileId === found.id);
       if (added)
-        return noKnowledgeDraft(
+        return noKnowledgeChange(
           'already-added',
           `“${found.name}” is already in Knowledge as documentId ${added.documentId}. Use knowledge.update to rename it.`,
         );
@@ -4008,7 +4045,10 @@ async function knowledgeProposal(
   const current = await ownKnowledgeEntry(knowledge, workspaceId, actor.userId, call.documentId);
   if ('error' in current) return current;
   if (current.revisionId !== call.revisionId)
-    return noKnowledgeDraft('draft-stale', 'The entry changed since it was listed. Call knowledge.list and try again.');
+    return noKnowledgeChange(
+      'draft-stale',
+      'The entry changed since it was listed. Call knowledge.list and try again.',
+    );
   if (call.tool === 'knowledge.remove')
     return {
       kind: 'knowledge',
@@ -4016,12 +4056,12 @@ async function knowledgeProposal(
       input: { operation: 'remove', expectedRevisionId: current.revisionId, title: current.title, entry: current.kind },
     };
   if (call.title === undefined && call.text === undefined)
-    return noKnowledgeDraft('no-change', 'Give a new title, new note text, or both.');
+    return noKnowledgeChange('no-change', 'Give a new title, new note text, or both.');
   const title = call.title ?? current.title;
   let content: Extract<KnowledgeProposal['input'], { operation: 'update' }>['content'];
   if (current.kind === 'file') {
     if (call.text !== undefined)
-      return noKnowledgeDraft(
+      return noKnowledgeChange(
         'invalid-arguments',
         'A Files entry takes only a new title. Change the file itself in Files.',
       );
@@ -4031,14 +4071,14 @@ async function knowledgeProposal(
   } else {
     const text = call.text ?? current.noteText ?? '';
     if (text.length > 100_000)
-      return noKnowledgeDraft('note-too-long', 'This note is too long to change in chat. Edit it in Knowledge.');
+      return noKnowledgeChange('note-too-long', 'This note is too long to change in chat. Edit it in Knowledge.');
     content = { kind: 'note', text };
   }
   if (
     title === current.title &&
     (current.kind === 'file' || content.kind === 'file' || content.text === current.noteText)
   )
-    return noKnowledgeDraft('no-change', 'The entry already has that title and text.');
+    return noKnowledgeChange('no-change', 'The entry already has that title and text.');
   return {
     kind: 'knowledge',
     targetId: current.documentId,

@@ -65,6 +65,7 @@ import {
   type ConversationPart,
   type SkillReference,
 } from './conversation-api';
+import { MemoryChanges } from './memory-change';
 import { ConversationAccess } from './conversation-access';
 import { CommandFeedback, ConversationRead } from './conversation-feedback';
 import { useConversationCommand } from './conversation-state';
@@ -1465,6 +1466,7 @@ function ConversationDetail({
                                   }
                                   onToggle={() => inspectActivity(thinking && !!turn && message.turn?.id === turn.id)}
                                 />
+                                <MemoryChanges tools={message.tools} />
                                 {message.turn?.id === turn?.id && !continuesBelow && (
                                   <LiveNarration text={narration} saved={savedNarration} />
                                 )}
@@ -2327,6 +2329,7 @@ function ConversationTools({
           tool =>
             succeeded(tool) &&
             !tool.importId &&
+            !tool.memoryChange &&
             ([
               'agents.draft',
               'skills.draft',

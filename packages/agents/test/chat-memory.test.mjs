@@ -21,7 +21,6 @@ const routes = [
   })),
 ];
 const memory = { content: 'Keep replies short.', revision: 1 };
-const draftId = '11111111-1111-4111-8111-111111111111';
 const platformPrompt = body =>
   JSON.stringify(body.system ?? body.systemInstruction ?? body.messages?.[0] ?? body.input?.[0]);
 
@@ -30,10 +29,7 @@ for (const { label, format, route } of routes)
     test(`${label} can ${operation} personal memory without discovering tools or making generic API calls`, async t => {
       let step = 0;
       const calls = [];
-      const reply =
-        operation === 'edit'
-          ? 'Review the memory change in the card. Nothing changes until you save it.'
-          : 'Nothing is forgotten yet. Confirm on the card below.';
+      const reply = operation === 'edit' ? 'Done. I will use metric units.' : 'Done. I have forgotten that preference.';
       t.mock.method(globalThis, 'fetch', async (_url, init) => {
         const body = JSON.parse(init.body);
         if (isCompletionRequest(body)) return Response.json(completionReply(format));
@@ -43,7 +39,7 @@ for (const { label, format, route } of routes)
         assert.match(prompt, /Only change personal memory when the user explicitly asks in this chat/);
         assert.match(prompt, /Never use api\.request.*memory/);
         assert.doesNotMatch(prompt, /Do not copy it into transcripts, saved definitions, shared outputs, or memory\./);
-        assert.ok(step < 3, 'a successful memory card must not trigger reply corrections');
+        assert.ok(step < 3, 'an applied memory change must not trigger reply corrections');
         return Response.json(
           nativeReply(
             format,
@@ -79,9 +75,7 @@ for (const { label, format, route } of routes)
           calls.push(call);
           if (call.tool === 'memory.read') return memory;
           assert.equal(call.tool, `memory.${operation}`);
-          return operation === 'edit'
-            ? { status: 'review-required', draftId, digest: 'a'.repeat(64) }
-            : { status: 'confirm', draftId, revision: 1 };
+          return { status: 'applied', change: { store: 'memory', operation }, revision: 2 };
         },
         undefined,
         false,
