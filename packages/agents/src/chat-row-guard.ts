@@ -82,7 +82,7 @@ export type ChatRowReview = {
 };
 /** Nothing is written and no card is made: the model must stop or change its call. */
 export type ChatRowRefusal = {
-  error: 'approval-pending' | 'batch-required';
+  error: 'approval-pending' | 'batch-required' | 'rows-already-added';
   table: string;
   instruction: string;
   /** The undecided card this change waits behind, for `approval-pending`. */
@@ -91,6 +91,10 @@ export type ChatRowRefusal = {
   waitingCard?: WaitingCardChange;
   /** Short summaries of the rows this refused call asked for, which are on no card. */
   notAdded?: string[];
+  /** For `rows-already-added`: the sent rows this chat already added to the table and that are still there. */
+  alreadyAdded?: string[];
+  /** For `rows-already-added`: the sent rows the person dismissed on a card. */
+  dismissed?: string[];
 };
 
 /** A waiting row card's change: its tool, how many rows it touches, a few of their values, and a phrase for it. */
@@ -211,6 +215,10 @@ export async function chatRowReview(
       sent,
     );
     if (held) return held;
+    if (call.tool === 'rows.create' || call.tool === 'rows.create.batch') {
+      const repeated = await repeatedRows(tx, origin, callId, call.tableId, label, sent, texts.at(-1) ?? '');
+      if (repeated) return repeated;
+    }
     const named = namesTable(texts, label);
     // Rows of a waiting card sent to a table the person never named are that card's request, not a new table's.
     const moved = named ? null : await waitingCardElsewhere(tx, origin.conversationId, callId, call.tableId, sent);
@@ -272,6 +280,119 @@ export async function chatRowReview(
 }
 
 type GuardTransaction = Parameters<Parameters<typeof withHuman>[4]>[0];
+
+const shownRepeats = 10;
+// Only an explicit request for a second copy adds a row this chat already added.
+const duplicateRequest = /\b(?:duplicates?|duplicated?|copies|(?:second|another|extra) cop(?:y|ies))\b/i;
+/** Whether the person's message names every shown value of a row, so it asks for that row again. */
+const mentioned = (row: unknown, text: string) => {
+  const values = rowKey(row).split('\u0000').filter(Boolean);
+  const lower = text.toLowerCase();
+  return values.length > 0 && values.every(value => lower.includes(value));
+};
+
+/**
+ * Refuses new rows that repeat rows this chat already added to the table and that are still there, or rows of a
+ * card for this table the person dismissed or rejected. A failed or stopped reply can leave its rows written while
+ * the model never sees that, and a later reply would then offer them again. A dismissed card's rows are offered
+ * again only when the person's latest message names them and the card was dismissed before that message.
+ */
+async function repeatedRows(
+  tx: GuardTransaction,
+  origin: { conversationId: string; turnId: string },
+  callId: string,
+  tableId: string,
+  label: string,
+  sent: readonly unknown[],
+  latest: string,
+): Promise<ChatRowRefusal | null> {
+  if (!sent.some(row => rowKey(row))) return null;
+  const direct = (
+    await tx.client.query<EarlierWrite>(
+      `SELECT c.tool,s.call,s.output,false AS drafted
+        FROM ${relation(tx, 'tf_conversation_tool_calls')} c JOIN ${relation(tx, 'tf_conversation_execution_steps')} s ON s.call_id=c.id AND s.turn_id=c.turn_id
+        WHERE c.conversation_id=$1 AND c.id<>$2 AND c.tool IN ('rows.create','rows.create.batch') AND s.call->>'tableId'=$3
+        AND NOT EXISTS (SELECT 1 FROM ${relation(tx, 'tf_chat_authoring_drafts')} d WHERE d.id=c.id)`,
+      [origin.conversationId, callId, tableId],
+    )
+  ).rows;
+  const cards = (
+    await tx.client.query<{ input: unknown; outcome: unknown; duringTurn: boolean }>(
+      `SELECT d.proposal->'input' AS input,decision.outcome,
+          decision.created_at > (SELECT m.created_at FROM ${relation(tx, 'tf_conversation_turns')} t
+            JOIN ${relation(tx, 'tf_conversation_messages')} m ON m.id=t.source_message_id WHERE t.id=$2) AS "duringTurn"
+        FROM ${relation(tx, 'tf_chat_authoring_drafts')} d JOIN ${relation(tx, 'tf_chat_authoring_decisions')} decision ON decision.draft_id=d.id
+        WHERE d.conversation_id=$1 AND d.id<>$3 AND d.proposal->>'kind'='row' AND d.proposal->'input'->>'tableId'=$4
+          AND d.proposal->'input'->>'tool' IN ('rows.create','rows.create.batch')
+          AND decision.outcome->>'kind' IN ('row','dismissed','rejected')`,
+      [origin.conversationId, origin.turnId, callId, tableId],
+    )
+  ).rows;
+  const added = earlierRowWrites(direct, tableId).created.map(row => ({ recordId: row.recordId, row }));
+  const dismissed = new Set<string>();
+  for (const card of cards) {
+    const input = record(card.input);
+    const rows =
+      input.tool === 'rows.create.batch' && Array.isArray(input.rows) ? input.rows : [{ values: input.values }];
+    const outcome = record(card.outcome);
+    if (outcome.kind === 'row') {
+      const ids = Array.isArray(outcome.recordIds) ? outcome.recordIds : [outcome.recordId];
+      rows.forEach((row, index) => {
+        if (typeof ids[index] === 'string') added.push({ recordId: ids[index], row });
+      });
+    } else
+      for (const row of rows)
+        if (card.duringTurn || !mentioned(row, latest)) {
+          const key = rowKey(row);
+          if (key) dismissed.add(key);
+        }
+  }
+  const live = new Set<string>();
+  if (added.length && !duplicateRequest.test(latest))
+    for (const { row: id } of (
+      await tx.client.query<{ row: string }>(
+        `SELECT row_id::text AS row FROM ${relation(tx, 'tf_table_identities')} WHERE table_id=$1 AND row_id=ANY($2::uuid[]) AND live`,
+        [tableId, added.map(row => row.recordId).filter(id => uuid.test(id))],
+      )
+    ).rows)
+      live.add(id);
+  const present = new Set(added.filter(row => live.has(row.recordId)).map(row => rowKey(row.row)));
+  const seen = new Set<string>();
+  const unique = sent.filter(row => {
+    const key = rowKey(row);
+    if (!key) return true;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const inTable = unique.filter(row => present.has(rowKey(row)));
+  const declined = unique.filter(row => !present.has(rowKey(row)) && dismissed.has(rowKey(row)));
+  if (!inTable.length && !declined.length) return null;
+  const rest = rowSummaries(
+    unique.filter(row => !inTable.includes(row) && !declined.includes(row)),
+    shownRepeats,
+  );
+  const alreadyAdded = rowSummaries(inTable, shownRepeats),
+    dismissedRows = rowSummaries(declined, shownRepeats);
+  const reasons = [
+    alreadyAdded.length &&
+      `${alreadyAdded.join(', ')} ${alreadyAdded.length === 1 ? 'is' : 'are'} already in "${label}": this chat added ${alreadyAdded.length === 1 ? 'it' : 'them'} earlier, even if that reply failed or was stopped, and ${alreadyAdded.length === 1 ? 'it is' : 'they are'} still there`,
+    dismissedRows.length &&
+      `the person dismissed the card that would have added ${dismissedRows.join(', ')} to "${label}"`,
+  ].filter(Boolean);
+  return {
+    error: 'rows-already-added',
+    table: label,
+    ...(alreadyAdded.length && { alreadyAdded }),
+    ...(dismissedRows.length && { dismissed: dismissedRows }),
+    ...(rest.length && { notAdded: rest }),
+    instruction: `Nothing from this call was written and no card was made: ${reasons.join('; and ')}. Do not add, draft or propose these rows again in this reply. ${
+      rest.length
+        ? `If the person asked for the other rows (${rest.join(', ')}), call the row tool again with only those.`
+        : 'Nothing else is needed for these rows.'
+    } Tell the person plainly which rows are already in the table${dismissedRows.length ? ' and which they dismissed' : ''}. Never say anything failed or was denied.`,
+  };
+}
 /**
  * Refuses a row change on a table whose earlier row card in this chat still waits, naming that card's change and
  * the sent rows that are on no card. Null when no card waits.

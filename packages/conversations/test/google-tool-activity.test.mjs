@@ -2,7 +2,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { googleToolActivity } from '../src/google-tool-activity.ts';
 import { deniedProposalDetail, rowReviewDetail, storedToolActivity } from '../src/tool-activity-history.ts';
-import { apiCallProblem, apiCallReceipt, executionReceipt, toolPresentation } from '../src/tool-activity.ts';
+import {
+  apiCallProblem,
+  apiCallReceipt,
+  executionReceipt,
+  toolOutcomeStatus,
+  toolPresentation,
+} from '../src/tool-activity.ts';
 
 for (const [error, detail] of [
   ['file-source-required', "Couldn't tell which file to read"],
@@ -189,6 +195,9 @@ test('a chat row write held for approval names the rule in Tool activity', () =>
     /to Contacts .*still waiting for your approval/,
   );
   assert.match(rowReviewDetail('rows.create', { error: 'batch-required' }), /^Not written: several new rows/);
+  const repeated = { error: 'rows-already-added', table: 'Plants', alreadyAdded: ['Tulip Red'] };
+  assert.equal(rowReviewDetail('rows.create', repeated), 'Not added again: this row is already in Plants.');
+  assert.equal(toolOutcomeStatus(repeated), 'completed');
   assert.match(
     rowReviewDetail('rows.create.batch', { draftId: 'd', reason: 'too-many-rows', alreadyWritten: 3 }),
     /^Not written yet\. This reply already added 3 rows directly, and those stay\. .*more than 5 rows/,

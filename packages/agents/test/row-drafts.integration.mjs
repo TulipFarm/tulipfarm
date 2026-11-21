@@ -118,6 +118,7 @@ test('chat row writes after untrusted content become member-approved review draf
       parts = [],
       before = [],
       memory = false,
+      midTurn,
       invoke,
       reply = 'Done.',
       chatId = randomUUID(),
@@ -140,6 +141,7 @@ test('chat row writes after untrusted content become member-approved review draf
         if (memory) assert.notEqual((await readPersonalMemory()).content, '');
         for (const tool of before)
           await executeTool(tool, false, async () => ({ result: { packages: [] }, sources: [] }), [], { tool });
+        await midTurn?.();
         output = await executeTool(
           call.tool,
           false,
@@ -610,6 +612,61 @@ test('chat row writes after untrusted content become member-approved review draf
       },
     );
     assert.equal(typeof revised.result.id, 'string');
+  });
+
+  await t.test('rows this chat already added are not added or offered again in a later reply', async () => {
+    const chatId = randomUUID();
+    const row = value => ({ values: { [note.id]: text(value) } });
+    const batch = values => ({
+      tool: 'rows.create.batch',
+      tableId: table.tableId,
+      expectedAppliedRevision: table.revision,
+      rows: values.map(row),
+    });
+    const flowers = ['Tulip Red', 'Daisy White', 'Iris Purple'];
+    const first = await chatTool(batch(flowers), [], { chatId, message: `Add these rows to Notes: ${flowers}.` });
+    assert.equal(first.result.records.length, 3);
+    const before = await live();
+    const again = await chatTool(batch(flowers), [], { chatId, message: 'Now build the app.' });
+    assert.equal(again.result.error, 'rows-already-added', JSON.stringify(again.result));
+    assert.deepEqual(again.result.alreadyAdded, flowers);
+    assert.equal(again.result.draftId, undefined);
+    const partial = await chatTool(batch(['tulip red', 'Lily Yellow']), [], { chatId, message: 'Add Lily Yellow.' });
+    assert.equal(partial.result.error, 'rows-already-added');
+    assert.deepEqual(partial.result.alreadyAdded, ['tulip red']);
+    assert.deepEqual(partial.result.notAdded, ['Lily Yellow']);
+    assert.deepEqual(await live(), before);
+    const drafts = await f.db.platform.query(
+      `SELECT 1 FROM ${f.table('tf_chat_authoring_drafts')} WHERE conversation_id=$1`,
+      [chatId],
+    );
+    assert.equal(drafts.rowCount, 0);
+    const duplicate = await chatTool(batch(['Tulip Red']), [], { chatId, message: 'Add a duplicate Tulip Red row.' });
+    assert.equal(duplicate.result.records.length, 1);
+  });
+
+  await t.test('rows of a dismissed card are not offered again unless the person asks for them', async () => {
+    const chatId = randomUUID();
+    const fruits = ['Kiwi', 'Lemon', 'Mango', 'Nectarine', 'Olive', 'Papaya'];
+    const call = {
+      tool: 'rows.create.batch',
+      tableId: table.tableId,
+      expectedAppliedRevision: table.revision,
+      rows: fruits.map(value => ({ values: { [note.id]: text(value) } })),
+    };
+    const { result: card } = await chatTool(call, [], { chatId, message: `Add these rows to Notes: ${fruits}.` });
+    assert.equal(card.status, 'review-required');
+    const during = await chatTool(call, [], {
+      chatId,
+      message: `Add these rows to Notes: ${fruits}.`,
+      midTurn: () => decide(owner, chatId, card, 'dismiss'),
+    });
+    assert.equal(during.result.error, 'rows-already-added', JSON.stringify(during.result));
+    assert.deepEqual(during.result.dismissed, fruits);
+    const later = await chatTool(call, [], { chatId, message: 'Now build the app.' });
+    assert.equal(later.result.error, 'rows-already-added');
+    const asked = await chatTool(call, [], { chatId, message: `Add these rows to Notes after all: ${fruits}.` });
+    assert.equal(asked.result.status, 'review-required', JSON.stringify(asked.result));
   });
 
   await t.test('dismissing commits nothing and closes the draft', async () => {
