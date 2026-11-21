@@ -125,11 +125,18 @@ export function fuseKnowledgeCandidates(lexical: Candidate[], semantic: Candidat
 /** A ranked passage from an external Knowledge index, already mapped to TulipFarm ids. */
 export type KnowledgeIndexHit = { documentId: string; publicationId: string; ordinal: number; score: number };
 /**
- * An external Knowledge index that replaces keyword and vector matching whenever it is configured.
+ * An external Knowledge index. When configured, it answers for the documents whose current publication it holds; every
+ * other eligible document, such as one still waiting to be sent or one the index refused, is matched by the local
+ * keyword and vector index, and the two result lists are merged.
  * `search` receives only document ids the actor may read now and throws `KnowledgeSearchUnavailable` when it cannot answer.
  */
-export type KnowledgeIndexSearch = {
+export type KnowledgeIndexSearch<Context = unknown> = {
   configured(): boolean;
+  /** Which of these documents the index holds at exactly the given publication, read in the search transaction. */
+  held(
+    context: Context,
+    publications: readonly { documentId: string; publicationId: string }[],
+  ): Promise<ReadonlySet<string>>;
   search(workspaceId: string, query: string, documentIds: string[]): Promise<KnowledgeIndexHit[]>;
 };
 
@@ -148,7 +155,7 @@ export type SearchEngineOptions<Context, Source extends { kind: string }> = {
   clock: Clock;
   callTimeoutMs: number;
   profile: { id: string };
-  index?: KnowledgeIndexSearch;
+  index?: KnowledgeIndexSearch<Context>;
 };
 export function createSearchEngine<Context, Source extends { kind: string }>({
   runtime,
@@ -208,6 +215,7 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
     typing: boolean,
     deadlineAt: number,
     allowKeywordFallback = false,
+    externalIndex?: KnowledgeIndexSearch<Context>,
   ) {
     return transaction(workspaceId, userId, deadlineAt, false, async (tx, actor) => {
       const prefix = (query.match(/[\p{L}\p{N}]+/gu) ?? [])
@@ -216,11 +224,21 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
         .join(' & ');
       // Load eligibility once, then drive matching from the GIN indexes with a hashed publication filter.
       // A join against the eligibility CTE is misestimated as one row and scans every eligible chunk.
-      const eligible = z
+      const readable = z
         .array(eligibleLexicalSchema)
         .parse(
           (await lexicalIndex(tx).eligiblePublications([...values(actor, filters), knowledgeEmbeddingProfile.id])).rows,
         );
+      // Documents the external index holds are answered by it; the rest stay with the local index.
+      const held =
+        externalIndex && readable.length
+          ? await externalIndex.held(
+              tx,
+              readable.map(row => ({ documentId: row.document_id, publicationId: row.publication_id })),
+            )
+          : new Set<string>();
+      const indexed = readable.filter(row => held.has(row.document_id));
+      const eligible = readable.filter(row => !held.has(row.document_id));
       const coverage = { lexical: eligible.length, semantic: eligible.filter(row => row.semantic).length };
       const byPublication = new Map(eligible.map(row => [row.publication_id, row]));
       const match = async (broaden: boolean) =>
@@ -274,6 +292,7 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
         candidates: z.array(candidateSchema).parse(candidates),
         coverage,
         unavailable,
+        indexed,
       };
     });
   }
@@ -283,6 +302,7 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
     filters: KnowledgeSearchFilters,
     vector: number[],
     deadlineAt: number,
+    indexed: ReadonlySet<string>,
   ) {
     return transaction(workspaceId, userId, deadlineAt, false, async (tx, actor) => {
       // Load eligible publications first. Joining the eligibility CTE inside the vector query lets the
@@ -291,7 +311,8 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
         .array(eligibleVectorSchema)
         .parse(
           (await vectorIndex(tx).eligiblePublications([...values(actor, filters), knowledgeEmbeddingProfile.id])).rows,
-        );
+        )
+        .filter(row => !indexed.has(row.document_id));
       if (!eligible.length) return [];
       const byVector = new Map(eligible.map(row => [row.vector_publication_id, row]));
       const ids = [...byVector.keys()];
@@ -351,22 +372,12 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
     });
   }
   async function indexed(
-    externalIndex: KnowledgeIndexSearch,
+    externalIndex: KnowledgeIndexSearch<Context>,
     workspaceId: string,
-    userId: string,
     query: string,
-    filters: KnowledgeSearchFilters,
-    deadlineAt: number,
+    held: z.infer<typeof eligibleLexicalSchema>[],
   ) {
-    const { eligible, unavailable } = await transaction(workspaceId, userId, deadlineAt, false, async (tx, actor) => ({
-      eligible: z
-        .array(eligibleLexicalSchema)
-        .parse(
-          (await lexicalIndex(tx).eligiblePublications([...values(actor, filters), knowledgeEmbeddingProfile.id])).rows,
-        ),
-      unavailable: await availability(tx, actor, filters),
-    }));
-    const byDocument = new Map(eligible.map(row => [row.document_id, row]));
+    const byDocument = new Map(held.map(row => [row.document_id, row]));
     // The index only sees documents this actor may read now; page() re-checks each hit before returning it.
     const hits = byDocument.size ? await externalIndex.search(workspaceId, query, [...byDocument.keys()]) : [];
     const documents = new Set<string>();
@@ -390,7 +401,7 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
       });
       if (candidates.length === 100) break;
     }
-    return { candidates: z.array(candidateSchema).parse(candidates), unavailable };
+    return z.array(candidateSchema).parse(candidates);
   }
   async function readSession(workspaceId: string, userId: string, id: string, deadlineAt: number) {
     return transaction(workspaceId, userId, deadlineAt, false, async (tx, actor) =>
@@ -595,21 +606,6 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
         return page(workspaceId, userId, previous, 0, deadlineAt, false);
       }
     }
-    if (index?.configured()) {
-      const found = await indexed(index, workspaceId, userId, input.query, filters, deadlineAt - 400);
-      const session: Session = {
-        id: input.kind === 'submitted' ? input.commandId : randomUUID(),
-        fingerprint: hash,
-        filters,
-        candidates: found.candidates,
-        mode: 'hybrid',
-        reason: input.kind === 'typing' ? 'typing' : null,
-        coverage: found.unavailable ? 'partial' : 'complete',
-        expires_at: new Date(clock.now() + 300000),
-      };
-      const result = await page(workspaceId, userId, session, 0, deadlineAt, input.kind === 'submitted');
-      return input.kind === 'typing' ? { ...result, continuation: null } : result;
-    }
     const lexicalResult = await lexical(
       workspaceId,
       userId,
@@ -618,7 +614,12 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
       input.kind === 'typing',
       deadlineAt - 400,
       attribution?.allowKeywordFallback,
+      index?.configured() ? index : undefined,
     );
+    const held = lexicalResult.indexed;
+    const heldCandidates = index && held.length ? await indexed(index, workspaceId, input.query, held) : [];
+    // With an external index configured and every readable document held there, it alone answers the search.
+    const indexOnly = index?.configured() === true && lexicalResult.coverage.lexical === 0;
     let semanticCandidates: Candidate[] = [];
     let reason: KnowledgeSearchResult['reason'] = input.kind === 'typing' ? 'typing' : 'no-semantic-content';
     let hybrid = false;
@@ -667,7 +668,14 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
           status = await embeddings.queryStatus(workspaceId, userId, prepared.commandId, deadlineAt - 550);
         }
         if (status.state === 'ready' && status.vector?.some(value => value !== 0)) {
-          semanticCandidates = await semantic(workspaceId, userId, filters, status.vector, deadlineAt - 350);
+          semanticCandidates = await semantic(
+            workspaceId,
+            userId,
+            filters,
+            status.vector,
+            deadlineAt - 350,
+            new Set(held.map(row => row.document_id)),
+          );
           hybrid = true;
           reason = null;
         } else
@@ -691,16 +699,23 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
       id: input.kind === 'submitted' ? input.commandId : randomUUID(),
       fingerprint: hash,
       filters,
-      candidates: fuseKnowledgeCandidates(lexicalResult.candidates, semanticCandidates),
-      mode: hybrid ? 'hybrid' : 'keyword-only',
-      reason,
+      candidates: held.length
+        ? fuseKnowledgeCandidates(heldCandidates, fuseKnowledgeCandidates(lexicalResult.candidates, semanticCandidates))
+        : fuseKnowledgeCandidates(lexicalResult.candidates, semanticCandidates),
+      mode: hybrid || held.length || indexOnly ? 'hybrid' : 'keyword-only',
+      // The external index ranks by meaning, so a mixed search is hybrid; its coverage says whether every local document had vectors.
+      reason: held.length || indexOnly ? (input.kind === 'typing' ? 'typing' : null) : reason,
       coverage: lexicalResult.unavailable
         ? 'partial'
-        : hybrid
-          ? lexicalResult.coverage.lexical === lexicalResult.coverage.semantic
-            ? 'complete'
-            : 'partial'
-          : 'keyword-only',
+        : indexOnly
+          ? 'complete'
+          : hybrid
+            ? lexicalResult.coverage.lexical === lexicalResult.coverage.semantic
+              ? 'complete'
+              : 'partial'
+            : held.length
+              ? 'partial'
+              : 'keyword-only',
       expires_at: new Date(clock.now() + 300000),
     };
     const result = await page(workspaceId, userId, session, 0, deadlineAt, input.kind === 'submitted');

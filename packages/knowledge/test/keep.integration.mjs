@@ -405,6 +405,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       const w = await setup({
         index: ws => ({
           configured: () => true,
+          held: async (_, publications) => new Set(publications.map(item => item.documentId)),
           search: async (workspaceId, query, documentIds) => {
             assert.equal(workspaceId, ws.id);
             const hits = documentIds.map((documentId, rank) => ({
@@ -436,6 +437,34 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       const returned = found.sources.map(source => source.documentId);
       assert.equal(returned.length, 1, 'the stale publication and the revoked document are both dropped');
       assert.ok(!returned.includes(revoked.documentId));
+    });
+
+    await t.test('documents Keep does not hold at their current publication are matched locally', async () => {
+      const w = await setup();
+      const delivered = await w.note('supplier payment deadline', 'Supplier policy');
+      const edited = await w.note('supplier onboarding checklist', 'Onboarding');
+      const refused = await w.note('supplier contract renewal', 'Contracts');
+      w.keep.state.timeouts.add(refused.documentId);
+      for (const work of await w.feed.due(w.ws.id, null, 100))
+        try {
+          await w.feed.sync(w.ws.id, work.document_id);
+        } catch (error) {
+          assert.ok(error instanceof KnowledgeKeepUnavailable);
+          await w.feed.recordFailure(w.ws.id, work.document_id, error.message, 'permanent');
+        }
+      assert.equal((await w.row(refused.documentId)).failed_publication_id, await w.publication(refused.documentId));
+      await w.note('supplier onboarding checklist, revised', 'Onboarding', edited.documentId, edited.revisionId);
+      const waiting = await w.note('supplier visit schedule', 'Visits');
+
+      const found = await ask(w, 'supplier');
+      const search = w.keep.calls.findLast(call => call.op === 'search');
+      assert.deepEqual(search.sourceIds, [delivered.documentId], 'Keep is asked only about what it holds');
+      assert.deepEqual(
+        new Set(found.sources.map(source => source.documentId)),
+        new Set([delivered.documentId, edited.documentId, refused.documentId, waiting.documentId]),
+      );
+      const revised = found.sources.find(source => source.documentId === edited.documentId);
+      assert.notEqual(revised.revisionId, edited.revisionId, 'the edited document is found at its new revision');
     });
 
     await t.test('Keep unavailable is a typed failure, never an empty result', async () => {

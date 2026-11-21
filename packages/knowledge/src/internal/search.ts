@@ -46,8 +46,8 @@ export function createKnowledgeSearch({
   atlassian?: AtlassianKnowledge;
   clock?: Clock;
   callTimeoutMs?: number;
-  /** Answers searches instead of the local keyword and vector index when configured. Defaults to Keep. */
-  index?: KnowledgeIndexSearch;
+  /** Answers searches for the documents it holds; the local keyword and vector index answers the rest. Defaults to Keep. */
+  index?: KnowledgeIndexSearch<Transaction>;
 }) {
   const store = createKnowledgeStore({
     runtime,

@@ -53,14 +53,32 @@ function failure(result: Exclude<KeepMemoryResult<unknown>, { status: 'ok' }>) {
 }
 
 /**
- * Searches a workspace's Knowledge in Keep whenever this deployment has a Keep endpoint. Keep sees only the document ids passed in, which the search engine takes
- * from the actor's current authorization, and every hit is mapped back to the TulipFarm publication it came from.
+ * Searches a workspace's Knowledge in Keep whenever this deployment has a Keep endpoint. Keep answers only for documents
+ * whose current publication it has received; the search engine matches the rest locally. Keep sees only the document
+ * ids passed in, which the search engine takes from the actor's current authorization, and every hit is mapped back to
+ * the TulipFarm publication it came from.
  */
 export function createKnowledgeKeepIndex({
   client = defaultClient(searchTimeoutMs),
-}: KnowledgeKeepDependencies = {}): KnowledgeIndexSearch {
+}: KnowledgeKeepDependencies = {}): KnowledgeIndexSearch<KnowledgeTransaction> {
   return {
     configured: () => client() !== undefined,
+    async held(tx, publications) {
+      if (tx.commonVersion < keepKnowledgeVersion || !publications.length) return new Set();
+      const { rows } = await tx.client.query(
+        `SELECT k.document_id FROM ${qualified(tx.schema, 'tf_keep_knowledge')} k
+          JOIN unnest($1::uuid[], $2::uuid[]) AS p(document_id, publication_id)
+            ON p.document_id=k.document_id AND p.publication_id=k.publication_id
+          WHERE k.held`,
+        [publications.map(item => item.documentId), publications.map(item => item.publicationId)],
+      );
+      return new Set(
+        z
+          .array(z.object({ document_id: z.uuid() }))
+          .parse(rows)
+          .map(row => row.document_id),
+      );
+    },
     async search(workspaceId, query, documentIds) {
       const keep = client();
       if (!keep) throw new KnowledgeSearchUnavailable('not-configured');

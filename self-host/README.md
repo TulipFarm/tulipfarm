@@ -107,7 +107,9 @@ the pinned Keep image on the stack's Postgres, in its own `keep` database and
 login, with embeddings computed locally. It publishes no port. Setup creates
 the database and writes `keep.env` with its URL and API token, and points the
 API and worker at `http://keep:7357` with `KEEP_ENDPOINT` and `KEEP_TOKEN`.
-Keep's local files live in the `keep-data` volume.
+Keep's local files live in the `keep-data` volume. Knowledge is sent to Keep in the
+background; until Keep holds a document, search finds it through the local
+search index.
 
 To run Keep elsewhere, set `KEEP_ENDPOINT` and `KEEP_TOKEN` for the API and
 worker to its origin and API token. Use HTTPS outside a private network.
