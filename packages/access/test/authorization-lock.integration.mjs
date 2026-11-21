@@ -1,8 +1,33 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { metrics } from '@opentelemetry/api';
+import {
+  AggregationTemporality,
+  InMemoryMetricExporter,
+  MeterProvider,
+  PeriodicExportingMetricReader,
+} from '@opentelemetry/sdk-metrics';
 import { fixture, connect } from '../../workspace-storage/test/integration/fixture.mjs';
 import { inTransaction } from '../../workspace-storage/src/provisioning.ts';
 import { lockAuthorization } from '../src/index.ts';
+
+// Counts lock acquisitions by mode and outcome, and retried waits, from the metrics the lock records.
+function captureLockMetrics(t) {
+  const exporter = new InMemoryMetricExporter(AggregationTemporality.CUMULATIVE);
+  const reader = new PeriodicExportingMetricReader({ exporter, exportIntervalMillis: 60000 });
+  metrics.disable();
+  assert.ok(metrics.setGlobalMeterProvider(new MeterProvider({ readers: [reader] })));
+  t.after(() => metrics.disable());
+  return async name => {
+    await reader.forceFlush();
+    return exporter
+      .getMetrics()
+      .flatMap(resource => resource.scopeMetrics.flatMap(scope => scope.metrics))
+      .filter(metric => metric.descriptor.name === name)
+      .flatMap(metric => metric.dataPoints)
+      .map(point => [point.attributes.mode, point.attributes.outcome, point.value]);
+  };
+}
 
 async function lockFixture() {
   const setup = await fixture();
@@ -16,13 +41,13 @@ async function lockFixture() {
     holder,
     waiter,
     reader,
-    // Holds a shared authorization lock until the returned release is called.
-    async share() {
+    // Holds the authorization lock in `mode` until the returned release is called.
+    async share(mode = 'read') {
       let release;
       let held;
       const locked = new Promise(resolve => (held = resolve));
       const done = inTransaction(holder, async client => {
-        await lockAuthorization({ client, schema });
+        await lockAuthorization({ client, schema }, mode);
         held();
         await new Promise(resolve => (release = resolve));
       });
@@ -67,7 +92,15 @@ test('a waiting write is not overtaken by reads that arrive after it', async () 
     await assert.rejects(
       inTransaction(locks.reader, async client => {
         await client.query(`SET LOCAL lock_timeout = '200ms'`);
-        await lockAuthorization({ client, schema: locks.schema });
+        await lockAuthorization({ client, schema: locks.schema }, 'read', { retry: false });
+      }),
+      { code: '55P03' },
+    );
+    // Trying the lock without waiting must not let a read past the queued write either.
+    await assert.rejects(
+      inTransaction(locks.reader, async client => {
+        await client.query(`SET LOCAL lock_timeout = '50ms'`);
+        await lockAuthorization({ client, schema: locks.schema }, 'read', { budgetMs: 200 });
       }),
       { code: '55P03' },
     );
@@ -117,7 +150,7 @@ test('a write that times out waiting for the lock tries again without losing its
       await assert.rejects(
         inTransaction(locks.waiter, async client => {
           await client.query(`SET LOCAL lock_timeout = '50ms'`);
-          await lockAuthorization({ client, schema: locks.schema }, 'write');
+          await lockAuthorization({ client, schema: locks.schema }, 'write', { budgetMs: 300 });
         }),
         { code: '55P03' },
       );
@@ -131,6 +164,61 @@ test('a write that times out waiting for the lock tries again without losing its
     } finally {
       await release();
     }
+  } finally {
+    await locks.close();
+  }
+});
+
+test('a read that times out waiting behind a write tries again and reads once the write commits', async t => {
+  const lockMetrics = captureLockMetrics(t);
+  const locks = await lockFixture();
+  try {
+    const release = await locks.share('write');
+    setTimeout(release, 400);
+    const started = Date.now();
+    const read = await inTransaction(locks.reader, async client => {
+      await client.query(`SET LOCAL lock_timeout = '100ms'`);
+      await client.query(`SELECT set_config('tf.earlier_work', 'kept', true)`);
+      await lockAuthorization({ client, schema: locks.schema });
+      return (await client.query(`SELECT current_setting('tf.earlier_work') AS value`)).rows[0].value;
+    });
+    assert.equal(read, 'kept');
+    assert.ok(Date.now() - started >= 300, 'The read waited for the write to commit');
+    const acquisitions = await lockMetrics('cloud_authorization_lock_acquisitions');
+    assert.deepEqual(
+      acquisitions.filter(([, outcome]) => outcome !== 'acquired'),
+      [['read', 'retried', 1]],
+    );
+    const [[, , retries]] = await lockMetrics('cloud_authorization_lock_retries');
+    assert.ok(retries >= 1);
+  } finally {
+    await locks.close();
+  }
+});
+
+test('a read still waiting when its retry budget runs out fails and is counted as failed', async t => {
+  const lockMetrics = captureLockMetrics(t);
+  const locks = await lockFixture();
+  try {
+    const release = await locks.share('write');
+    try {
+      const started = Date.now();
+      await assert.rejects(
+        inTransaction(locks.reader, async client => {
+          await client.query(`SET LOCAL lock_timeout = '50ms'`);
+          await lockAuthorization({ client, schema: locks.schema }, 'read', { budgetMs: 300 });
+        }),
+        { code: '55P03' },
+      );
+      assert.ok(Date.now() - started < 2_000, 'The retry budget bounds the wait');
+    } finally {
+      await release();
+    }
+    const acquisitions = await lockMetrics('cloud_authorization_lock_acquisitions');
+    assert.deepEqual(
+      acquisitions.filter(([, outcome]) => outcome !== 'acquired'),
+      [['read', 'failed', 1]],
+    );
   } finally {
     await locks.close();
   }

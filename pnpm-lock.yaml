@@ -745,6 +745,9 @@ importers:
 
   packages/access:
     dependencies:
+      '@tulipfarm/observability':
+        specifier: workspace:*
+        version: link:../observability
       pg:
         specifier: 8.23.0
         version: 8.23.0
@@ -752,6 +755,12 @@ importers:
         specifier: 4.6.6
         version: 4.6.6
     devDependencies:
+      '@opentelemetry/api':
+        specifier: 1.9.0
+        version: 1.9.0
+      '@opentelemetry/sdk-metrics':
+        specifier: 2.9.0
+        version: 2.9.0(@opentelemetry/api@1.9.0)
       '@tulipfarm/typescript-config':
         specifier: workspace:*
         version: link:../typescript-config

@@ -31,10 +31,13 @@
     "test:integration": "node --test --test-concurrency=1 test/*.integration.mjs"
   },
   "dependencies": {
+    "@tulipfarm/observability": "workspace:*",
     "pg": "8.23.0",
     "zod": "4.6.6"
   },
   "devDependencies": {
+    "@opentelemetry/api": "1.9.0",
+    "@opentelemetry/sdk-metrics": "2.9.0",
     "@tulipfarm/typescript-config": "workspace:*",
     "@types/node": "26.6.3",
     "@types/pg": "8.23.1"

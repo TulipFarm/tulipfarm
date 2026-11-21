@@ -1,6 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { escapeIdentifier, type Client } from 'pg';
 import { z } from 'zod';
+import { recordAuthorizationLock } from '@tulipfarm/observability';
 import {
   actorSchema,
   assetPermissionSchema,
@@ -96,45 +97,81 @@ function table(transaction: AuthorizationTransaction, name: string) {
   return `${escapeIdentifier(transaction.schema)}.${escapeIdentifier(name)}`;
 }
 
-const lockAttempts = 3;
+/** How long one lock acquisition may keep retrying waits that time out, before the last error is returned. */
+const lockBudgetMs = 15_000;
 
 /**
  * Takes the workspace authorization lock, shared for reads and exclusive for writes.
  *
  * Postgres lets a new shared row lock past a queued exclusive one, so steady reads could hold off a write forever.
- * Every caller therefore queues on a matching advisory lock first, which Postgres grants in arrival order. A write
- * that times out or deadlocks waiting rolls back to a savepoint taken just before the wait and tries again, so
- * nothing else in the transaction is repeated or lost. A caller that retries its whole transaction passes
- * `retry: false`.
+ * Every caller therefore queues on a matching advisory lock first, which Postgres grants in arrival order.
+ *
+ * A wait that hits `lock_timeout` or a deadlock rolls back to a savepoint taken just before it and tries again after
+ * a jittered backoff, until about 15 seconds have passed; the last wait can run past that by up to one
+ * `lock_timeout`. Only the lock statement is repeated, so nothing else in the transaction is repeated or lost, which
+ * makes the retry safe for reads and writes alike. A read first tries the lock without waiting, so the usual
+ * uncontended read needs no savepoint. A caller that retries its whole transaction passes `retry: false`.
  */
 export async function lockAuthorization(
   transaction: AuthorizationTransaction,
   mode: 'read' | 'write' = 'read',
-  { retry = true }: { retry?: boolean } = {},
+  { retry = true, budgetMs = lockBudgetMs }: { retry?: boolean; budgetMs?: number } = {},
 ) {
+  const lockTable = table(transaction, 'tf_authorization_lock');
   // The row is locked only after the join has produced it, so the queue is always joined first.
   const take = () =>
     transaction.client.query(
-      `SELECT authorization_lock.id FROM (SELECT ${mode === 'write' ? 'pg_advisory_xact_lock' : 'pg_advisory_xact_lock_shared'}(hashtextextended($1, 518204))) queue, ${table(transaction, 'tf_authorization_lock')} authorization_lock WHERE authorization_lock.id = 1 FOR ${mode === 'write' ? 'UPDATE' : 'SHARE'} OF authorization_lock`,
+      `SELECT authorization_lock.id FROM (SELECT ${mode === 'write' ? 'pg_advisory_xact_lock' : 'pg_advisory_xact_lock_shared'}(hashtextextended($1, 518204))) queue, ${lockTable} authorization_lock WHERE authorization_lock.id = 1 FOR ${mode === 'write' ? 'UPDATE' : 'SHARE'} OF authorization_lock`,
       [transaction.schema],
     );
-  const result = mode === 'write' && retry ? await retryLockWait(transaction, take) : await take();
-  if (result.rowCount !== 1) throw new AccessDenied();
+  if (!retry) {
+    if ((await take()).rowCount !== 1) throw new AccessDenied();
+    return;
+  }
+  if (mode === 'read') {
+    // Neither lock waits here, and a busy lock returns no row instead of an error that would abort the transaction.
+    const free = await transaction.client.query(
+      `SELECT authorization_lock.id FROM (SELECT pg_try_advisory_xact_lock_shared(hashtextextended($1, 518204)) AS taken) queue, ${lockTable} authorization_lock WHERE queue.taken AND authorization_lock.id = 1 FOR SHARE OF authorization_lock SKIP LOCKED`,
+      [transaction.schema],
+    );
+    if (free.rowCount === 1) {
+      recordAuthorizationLock(mode, 'acquired', 0, 0);
+      return;
+    }
+  }
+  if ((await retryLockWait(transaction, mode, budgetMs, take)).rowCount !== 1) throw new AccessDenied();
 }
 
-async function retryLockWait<T>(transaction: AuthorizationTransaction, take: () => Promise<T>) {
-  for (let attempt = 1; ; attempt++) {
+function lockWaitFailed(error: unknown) {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === '55P03' || code === '40P01';
+}
+
+async function retryLockWait<T extends { rowCount: number | null }>(
+  transaction: AuthorizationTransaction,
+  mode: 'read' | 'write',
+  budgetMs: number,
+  take: () => Promise<T>,
+) {
+  const started = performance.now();
+  for (let retries = 0; ; retries++) {
     await transaction.client.query('SAVEPOINT tf_authorization_lock');
     try {
       const result = await take();
       await transaction.client.query('RELEASE SAVEPOINT tf_authorization_lock');
+      recordAuthorizationLock(mode, retries === 0 ? 'acquired' : 'retried', retries, performance.now() - started);
       return result;
     } catch (error) {
-      const code = (error as { code?: unknown } | null)?.code;
-      if (attempt >= lockAttempts || (code !== '55P03' && code !== '40P01')) throw error;
+      if (!lockWaitFailed(error)) throw error;
+      const now = performance.now();
+      const backoff = Math.min(1_000, 50 * 2 ** retries) * (0.5 + Math.random());
+      if (now - started + backoff >= budgetMs) {
+        recordAuthorizationLock(mode, 'failed', retries, now - started);
+        throw error;
+      }
       await transaction.client.query('ROLLBACK TO SAVEPOINT tf_authorization_lock');
       await transaction.client.query('RELEASE SAVEPOINT tf_authorization_lock');
-      await delay(50 * attempt * (0.5 + Math.random()));
+      await delay(backoff);
     }
   }
 }
