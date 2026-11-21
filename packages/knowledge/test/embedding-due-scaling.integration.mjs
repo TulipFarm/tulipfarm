@@ -20,7 +20,7 @@ function nodes(plan) {
   return [plan, ...(plan.Plans ?? []).flatMap(nodes)];
 }
 
-test('the embedding sweep reads due jobs without visiting published history', async t => {
+test('the embedding sweep reads due jobs without visiting published history or holding the lock', async t => {
   const db = await fixture();
   let runtime;
   try {
@@ -50,11 +50,13 @@ test('the embedding sweep reads due jobs without visiting published history', as
     let failForget = false;
     const observed = {
       transaction: (id, range, operation) =>
-        runtime.transaction(id, range, tx =>
-          operation({
+        runtime.transaction(id, range, tx => {
+          let locked = false;
+          return operation({
             ...tx,
             client: {
               query: async (...args) => {
+                if (args[0].includes('pg_advisory_xact_lock')) locked = true;
                 if (args[0].includes('IS DISTINCT FROM $1 LIMIT $2')) {
                   if (failForget) {
                     failForget = false;
@@ -69,6 +71,7 @@ test('the embedding sweep reads due jobs without visiting published history', as
                 if (label)
                   plans.push({
                     label,
+                    locked,
                     ...(await tx.client.query(`EXPLAIN (ANALYZE,FORMAT JSON) ${args[0]}`, args[1])).rows[0][
                       'QUERY PLAN'
                     ][0],
@@ -76,8 +79,8 @@ test('the embedding sweep reads due jobs without visiting published history', as
                 return tx.client.query(...args);
               },
             },
-          }),
-        ),
+          });
+        }),
     };
     const embeddings = createKnowledgeEmbeddings({
       runtime: observed,
@@ -152,7 +155,15 @@ test('the embedding sweep reads due jobs without visiting published history', as
         );
     plans = [];
     assert.deepEqual(await embeddings.due(ws.id), []);
-    const [due] = plans.filter(plan => plan.label === 'due');
+    // Nothing is due, so the scan runs without the authorization lock and the locked transaction has nothing to check.
+    assert.deepEqual(
+      plans.map(({ label, locked }) => ({ label, locked })),
+      [
+        { label: 'due', locked: false },
+        { label: 'undiscovered', locked: true },
+      ],
+    );
+    const [due] = plans;
     const jobs = visited(due, 'embedding_jobs'),
       documents = visited(due, 'documents');
     t.diagnostic(JSON.stringify({ published, jobs, documents, ms: due['Execution Time'] }));
@@ -184,16 +195,30 @@ test('the embedding sweep reads due jobs without visiting published history', as
 
     plans = [];
     assert.deepEqual(await embeddings.due(ws.id), []);
+    // The due scan runs before the lock; under the lock only the candidates it found and the job discovery just
+    // created are checked again.
     assert.deepEqual(
-      plans.map(plan => plan.label),
-      ['undiscovered', 'candidate', 'due'],
+      plans.map(({ label, locked }) => ({ label, locked })),
+      [
+        { label: 'due', locked: false },
+        { label: 'undiscovered', locked: true },
+        { label: 'candidate', locked: true },
+        { label: 'due', locked: true },
+      ],
     );
-    const backlog = Object.fromEntries(
-      plans.map(plan => [plan.label, { documents: visited(plan, 'documents'), ms: plan['Execution Time'] }]),
-    );
+    const backlog = plans.map(plan => ({
+      label: plan.label,
+      locked: plan.locked,
+      documents: visited(plan, 'documents'),
+      jobs: visited(plan, 'embedding_jobs'),
+      ms: plan['Execution Time'],
+    }));
     t.diagnostic(JSON.stringify({ published, stuck, backlog }));
-    for (const [label, rows] of Object.entries(backlog))
-      assert.ok(rows.documents <= 2 * stuck, `The ${label} query visited ${rows.documents} document rows`);
+    for (const rows of backlog)
+      assert.ok(rows.documents <= 2 * stuck, `The ${rows.label} query visited ${rows.documents} document rows`);
+    const recheck = backlog.at(-1);
+    assert.ok(recheck.documents <= 2, `The locked due check visited ${recheck.documents} document rows`);
+    assert.ok(recheck.jobs <= 2, `The locked due check visited ${recheck.jobs} job rows`);
     assert.equal(
       (
         await db.platform.query(`SELECT 1 FROM ${table('embedding_jobs')} WHERE publication_id=$1 AND profile_id=$2`, [

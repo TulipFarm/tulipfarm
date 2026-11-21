@@ -88,7 +88,8 @@ export type EmbeddingEngineOptions<Context, Source extends { kind: string }> = {
     documentId: string | undefined,
     selection: EligibilitySelection,
   ): Promise<unknown>;
-  changedOwners(context: Context): Promise<unknown>;
+  /** Jobs whose conversation owner changed; only `jobIds` when given, which are locked for update. */
+  changedOwners(context: Context, jobIds: readonly string[] | null): Promise<unknown>;
   selection(context: Context): EligibilitySelection;
   conversationEnabled(context: Context): boolean;
   tenantId(context: Context): string;
@@ -223,10 +224,12 @@ export function createEmbeddingEngine<Context, Source extends { kind: string }>(
     await authorized(tx, current, actor);
     return current;
   }
-  async function rebindGoogleJobs(tx: Transaction) {
+  /** Rebinds those of the candidate jobs whose source access still changed, and returns the ids it rebound. */
+  async function rebindChangedAccess(tx: Transaction, ids: readonly string[]) {
     const providers = externalProviders();
-    if (!providers.length) return;
-    const jobs = z.array(jobSchema).parse((await repository(tx).changedEpochJobs([providers])).rows);
+    const rebound: string[] = [];
+    if (!providers.length || !ids.length) return rebound;
+    const jobs = z.array(jobSchema).parse((await repository(tx).changedEpochJobs([providers, [...ids]])).rows);
     for (const job of jobs) {
       let current;
       try {
@@ -237,7 +240,55 @@ export function createEmbeddingEngine<Context, Source extends { kind: string }>(
       }
       if (current.purpose !== 'ingestion') continue;
       await repository(tx).rebindEpoch([job.id, current.access_epoch]);
+      rebound.push(job.id);
     }
+    return rebound;
+  }
+  /** Rebinds those of the candidate jobs whose conversation owner still changed, and returns the ids it rebound. */
+  async function rebindChangedOwners(tx: Transaction, ids: readonly string[]) {
+    const rebound: string[] = [];
+    if (!conversationEnabled(tx) || !ids.length) return rebound;
+    const changed = z
+      .array(z.object({ job: jobSchema, membership_id: uuidSchema, user_id: z.string() }))
+      .parse(await changedConversationEmbeddingOwners(tx, ids));
+    for (const row of changed) {
+      const current = { ...row.job, owner_membership_id: row.membership_id, owner_user_id: row.user_id };
+      try {
+        await authorized(tx, current);
+      } catch (error) {
+        if (error instanceof AccessDenied || error instanceof KnowledgeError) continue;
+        throw error;
+      }
+      await repository(tx).rebindOwner([row.job.id, row.membership_id, row.user_id]);
+      rebound.push(row.job.id);
+    }
+    return rebound;
+  }
+  /**
+   * Finds the jobs the sweep may need to change or dispatch. These scans can read a large part of the knowledge base,
+   * so they run without the authorization lock: holding it exclusively that long would queue every chat and read in
+   * the workspace behind the sweep. Nothing here is decided; the locked transaction checks each candidate again.
+   */
+  async function sweepCandidates(workspaceId: string, held: string[]) {
+    return runtime.transaction(uuidSchema.parse(workspaceId), {}, async raw => {
+      const tx = store.bind(raw);
+      const ids = (rows: unknown) =>
+        z
+          .array(z.object({ id: uuidSchema }))
+          .parse(rows)
+          .map(row => row.id);
+      const providers = externalProviders();
+      return {
+        owners: conversationEnabled(tx)
+          ? z
+              .array(z.object({ job: z.object({ id: uuidSchema }) }))
+              .parse(await changedConversationEmbeddingOwners(tx, null))
+              .map(row => row.job.id)
+          : [],
+        access: providers.length ? ids((await repository(tx).changedEpochJobs([providers, null])).rows) : [],
+        due: ids((await repository(tx).dueJobs([profile.id, held, null])).rows),
+      };
+    });
   }
   async function readJob(tx: Transaction, id: string) {
     const job = jobSchema.optional().parse((await repository(tx).lockJob([id])).rows[0]);
@@ -485,7 +536,8 @@ export function createEmbeddingEngine<Context, Source extends { kind: string }>(
       return queryDto(tx, await queryJob(tx, actor, queryCommandId));
     });
   }
-  async function discover(tx: Transaction, documentId?: string) {
+  /** Creates the job for the next document that has none, and returns its id. */
+  async function discover(tx: Transaction, documentId?: string): Promise<string | undefined> {
     await installProfile(tx);
     const pending = await repository(tx).hasUndiscovered([profile.id, documentId ?? null]);
     if (!pending.rowCount) return;
@@ -523,6 +575,7 @@ export function createEmbeddingEngine<Context, Source extends { kind: string }>(
       return;
     }
     await copyPublicationInputs(tx, job);
+    return id;
   }
   async function recover(tx: Transaction) {
     const expired = z
@@ -547,26 +600,18 @@ export function createEmbeddingEngine<Context, Source extends { kind: string }>(
   }
   async function due(workspaceId: string): Promise<EmbeddingWork[]> {
     const held = gate ? await gate(workspaceId) : [];
+    const candidates = await sweepCandidates(workspaceId, held);
     const { work, forgetting } = await transaction(workspaceId, async tx => {
       await recover(tx);
-      if (conversationEnabled(tx)) {
-        const changed = z
-          .array(z.object({ job: jobSchema, membership_id: uuidSchema, user_id: z.string() }))
-          .parse(await changedConversationEmbeddingOwners(tx));
-        for (const row of changed) {
-          const rebound = { ...row.job, owner_membership_id: row.membership_id, owner_user_id: row.user_id };
-          try {
-            await authorized(tx, rebound);
-          } catch (error) {
-            if (error instanceof AccessDenied || error instanceof KnowledgeError) continue;
-            throw error;
-          }
-          await repository(tx).rebindOwner([row.job.id, row.membership_id, row.user_id]);
-        }
-      }
-      await discover(tx);
-      await rebindGoogleJobs(tx);
-      const jobs = z.array(jobSchema).parse((await repository(tx).dueJobs([profile.id, held])).rows);
+      // Jobs changed here are due at once, so they are checked with the candidates found before the lock.
+      const changed = await rebindChangedOwners(tx, candidates.owners);
+      const discovered = await discover(tx);
+      if (discovered) changed.push(discovered);
+      changed.push(...(await rebindChangedAccess(tx, candidates.access)));
+      const ids = [...new Set([...candidates.due, ...changed])];
+      const jobs = ids.length
+        ? z.array(jobSchema).parse((await repository(tx).dueJobs([profile.id, held, ids])).rows)
+        : [];
       const work: EmbeddingWork[] = [];
       for (const job of jobs) {
         try {

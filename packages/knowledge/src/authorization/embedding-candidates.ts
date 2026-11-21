@@ -33,7 +33,8 @@ export async function embeddingDiscoveryCandidate(
   ).rows[0];
 }
 
-export async function changedConversationEmbeddingOwners(tx: Transaction) {
+/** Jobs whose conversation owner changed; only `jobIds` when given, which are locked for update. */
+export async function changedConversationEmbeddingOwners(tx: Transaction, jobIds: readonly string[] | null) {
   return (
     await tx.client.query(
       `SELECT to_jsonb(j) AS job,m.requester_membership_id AS membership_id,m.requester_user_id AS user_id
@@ -42,7 +43,9 @@ export async function changedConversationEmbeddingOwners(tx: Transaction) {
             JOIN ${qualified(tx.schema, 'tf_conversation_maintenance')} m ON m.conversation_id=r.conversation_id AND m.generation=r.generation
             WHERE j.purpose='ingestion' AND j.state<>'busy' AND m.state IN ('publishing','ready')
               AND (j.owner_membership_id<>m.requester_membership_id OR j.owner_user_id<>m.requester_user_id)
-            ORDER BY j.id LIMIT 100 FOR UPDATE OF j`,
+              AND ($1::uuid[] IS NULL OR j.id=ANY($1::uuid[]))
+            ORDER BY j.id LIMIT 100${jobIds ? ' FOR UPDATE OF j' : ''}`,
+      [jobIds ? [...jobIds] : null],
     )
   ).rows;
 }
