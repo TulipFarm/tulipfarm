@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { createFileOutput } from '../../conversations/src/file-outputs.ts';
 import { inferWithTools } from '../src/inference.ts';
 import { nativeChatTools } from '../src/native-tools.ts';
+import { createFileJobGuard } from '../src/chat-file-jobs.ts';
 import {
   azureStreamReply,
   isCompletionRequest,
@@ -1346,4 +1347,15 @@ test('three identical failed file operations stop instead of looping', async t =
   );
   assert.equal(calls, 3);
   assert.equal(result.text, 'I stopped because the same file request kept failing. Ask me to try again.');
+});
+
+test("an app chat's own file names and save wording are not a Files save, but a real Files save attempt is", () => {
+  const request = "Build a simple static web page: index.html with a heading 'Home'.";
+  const app = createFileJobGuard(request, [], true);
+  assert.equal(app.needsCheck('index.html is created and saved.'), false);
+  assert.equal(app.holdPreview, false);
+  assert.equal(createFileJobGuard(request).needsCheck(''), true);
+  const attempted = createFileJobGuard(request, [{ call: { tool: 'files.create' }, result: quota }], true);
+  assert.equal(attempted.needsCheck(''), true);
+  assert.equal(attempted.reply(), full);
 });

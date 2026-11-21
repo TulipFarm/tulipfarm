@@ -2343,7 +2343,7 @@ const toolsDenied =
   /\b(?:my|(?:file|write|writing|edit|editing|build|building)(?: or \w+)?(?: \w+)?) tools?\b[^.]*\b(?:not available|unavailable|not offered)\b|(?:\b(?:no|not have|without)|n['’]t have)(?: a| any| the)? (?:file|write|editing|build)\b[\w\s-]{0,24}\btools?\b/i;
 const firstPerson = /\b(?:i|we|my)\b/i;
 const buildClaim =
-  /^(?:and |so )?(?:the |your )?(?:re)?build (?:succeeded|passed|worked|completed|finished|(?:is|was) (?:complete|done|finished|successful))\b|^(?:and |so )?(?:i|we) (?:re)?built\b|\b(?:i|we)(?:(?:'|’)ve| have) (?:re)?built\b|^(?:re)?built (?:the|your|this) (?:app|server|site)\b/i;
+  /^(?:and |so )?(?:the |your )?(?:(?:preview|draft|app|site|server|page) )?(?:re)?build (?:succeeded|passed|worked|completed|finished|(?:is|was) (?:complete|done|finished|successful))\b|\b(?:is|was|has been|have been) (?:now )?rebuilt\b|^(?:and |so )?(?:i|we) (?:re)?built\b|\b(?:i|we)(?:(?:'|’)ve| have) (?:re)?built\b|^(?:re)?built (?:the|your|this) (?:app|server|site)\b/i;
 const conditional = /\b(?:if|when|once|after|whether|unless|until)\b/i;
 const editVerb = String.raw`(?:updated|edited|changed|modified|rewrote|wrote|replaced|inserted|deleted|removed|added|created|implemented|fixed|corrected|put(?! together)|renamed|moved|set|swapped|switched|hid|hidden|appended|restyled|translated|enabled|disabled|made(?! sure\b)|tweaked|adjusted|increased|decreased|styled|bolded)`;
 const editClaim = new RegExp(String.raw`\b(?:i|we)(?:'|’)?(?:ve| have)?${adverbs} ${editVerb}\b`, 'i');
@@ -2439,13 +2439,16 @@ export function unbackedAppClaim(candidate: string, apps: AppKind | undefined, r
   const changed = ran.has('apps.files.write') || ran.has('apps.files.delete');
   const looked = changed || ran.has(buildTool) || ran.has('apps.status') || ran.has('apps.files.read');
   const asked = !appQuestionAsked(request);
+  // "Rebuild" alone asks for a build; any other change word asks for an edit that a build of unchanged files can't back.
+  const editAsked = asked && changeWord.test(request.replace(/\b(?:re)?buil(?:d|t)(?:s|ing)?\b/gi, ''));
   const unconditional = sentences.filter(sentence => !conditional.test(sentence));
   const settled = unconditional.filter(sentence => !earlierOutcome.test(sentence));
   // 'edit' is an explicit edit claim, the only kind a forced write can back; 'change' says the app reads as asked.
   const missing = (clause: string): 'edit' | 'change' | 'build' | 'read' | undefined => {
     if (toReader.test(clause)) return undefined;
     const build = buildClaim.exec(clause);
-    if (build && !negatedClaim(clause, build)) return ran.has(buildTool) ? undefined : 'build';
+    if (build && !negatedClaim(clause, build))
+      return ran.has(buildTool) ? undefined : editAsked && !changed ? 'edit' : 'build';
     const saved = savedClaim.exec(clause);
     if (saved && !negatedClaim(clause, saved)) return changed ? undefined : 'edit';
     const now = nowClaim.exec(clause);
@@ -2473,7 +2476,12 @@ export function unbackedAppClaim(candidate: string, apps: AppKind | undefined, r
       };
     }),
   ];
-  const unbacked = claims.find(claim => claim.missing);
+  // An edit request answered after only checking status changed nothing, whatever the reply says.
+  const untouched =
+    editAsked && !candidate.includes('?') && [...ran].every(tool => tool === 'apps.status')
+      ? { clause: candidate.trim(), missing: 'edit' as const }
+      : undefined;
+  const unbacked = claims.find(claim => claim.missing) ?? untouched;
   return unbacked === undefined
     ? undefined
     : {
@@ -4203,7 +4211,7 @@ export async function inferWithTools(
   let request = rowReviewCandidate ?? (latest ? textTurn(latest).text : '');
   let rowReviewRequested = false;
   const fileRequest = latest ? textTurn(latest).text : '';
-  const fileJob = createFileJobGuard(fileRequest, tools?.priorFileResults);
+  const fileJob = createFileJobGuard(fileRequest, tools?.priorFileResults, Boolean(tools?.apps));
   const fileQuery = fileListingQuery(fileRequest);
   const earlier = messages
     .filter(turn => turn !== latest)

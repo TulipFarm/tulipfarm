@@ -51,7 +51,14 @@ export function fileListingQuery(request: string): string | undefined {
   return query?.slice(1).find(Boolean)?.slice(0, 255);
 }
 
-export function createFileJobGuard(request: string, prior: readonly { call: unknown; result: unknown }[] = []) {
+/**
+ * In an app's chat, file names and "created" describe the app's own files, so only a real Files save attempt is checked.
+ */
+export function createFileJobGuard(
+  request: string,
+  prior: readonly { call: unknown; result: unknown }[] = [],
+  appChat = false,
+) {
   let calls = 0;
   let attempted = false;
   let saved = false;
@@ -62,10 +69,11 @@ export function createFileJobGuard(request: string, prior: readonly { call: unkn
   const needsCheck = (text = '') =>
     !saved &&
     (attempted ||
-      filePrefilter.test(request) ||
-      wordApp.test(request) ||
-      fileSavedClaim.test(text) ||
-      readyFileClaim.test(text));
+      (!appChat &&
+        (filePrefilter.test(request) ||
+          wordApp.test(request) ||
+          fileSavedClaim.test(text) ||
+          readyFileClaim.test(text))));
   const record = (call: { tool: string }, value: unknown) => {
     if (!call.tool.startsWith('files.')) return;
     calls++;

@@ -1543,6 +1543,25 @@ test('an app chat reply cannot say the app now has what a change request asked f
   }
 });
 
+test('an app chat edit request answered after only a status check must make the edit, whatever the reply claims', () => {
+  const status = new Set(['apps.status']);
+  const request = 'Change the page background colour to light yellow (#fff8dc) and rebuild.';
+  // eslint-disable-next-line tulipfarm/product-copy -- The model's own reply under test, not product copy.
+  const builtClaim = 'The preview build succeeded.';
+  for (const claim of [builtClaim, 'The draft build succeeded.', 'Done. Open it to see the background.'])
+    assert.equal(unbackedAppClaim(claim, 'public', status, request)?.missing, 'edit', claim);
+  assert.equal(unbackedAppClaim(builtClaim, 'public', status, 'Rebuild the app.')?.missing, 'build');
+  assert.equal(unbackedAppClaim('Which shade of yellow do you want?', 'public', status, request), undefined);
+  // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
+  const edited = new Set(['apps.status', 'apps.files.write', 'apps.preview.build']);
+  assert.equal(unbackedAppClaim(builtClaim, 'public', edited, request), undefined);
+  assert.equal(
+    unbackedAppClaim('Your site now has the footer and is rebuilt.', 'public', new Set(['apps.files.write']), request)
+      ?.missing,
+    'build',
+  );
+});
+
 test('an import presented for review needs a pending proposal receipt from this reply', () => {
   const pending = [
     {
