@@ -39,7 +39,7 @@ import type { KnowledgeSourceGate } from './rolling.ts';
 import type { SourceDependency } from '../authorization/contracts.ts';
 
 /** The common migration that records each workspace's active embedding profile. */
-const activeEmbeddingProfileVersion = 102;
+const activeEmbeddingProfileVersion = 103;
 export type KnowledgeEmbeddingCapacity = (input: {
   workspaceId: string;
   purpose: 'query' | 'ingestion';
