@@ -108,6 +108,9 @@ export type EmbeddingEngineOptions<Context, Source extends { kind: string }> = {
   gate?: (tenantId: string) => Promise<string[]>;
 };
 
+/** Documents cleared per sweep after the active profile changes. */
+const forgetBatchSize = 2000;
+
 export function createEmbeddingEngine<Context, Source extends { kind: string }>({
   runtime,
   store,
@@ -194,10 +197,15 @@ export function createEmbeddingEngine<Context, Source extends { kind: string }>(
       .parse((await repository(tx).profileMatches([profile.id, profile])).rows[0]);
     if (!stored.matches) throw new KnowledgeError('conflict');
     // Search and the sweep only use vectors of the active profile. Whenever that changes, including a rollback to an
-    // earlier one, documents pointing at another profile's vectors become unembedded, so the sweep finds them through
-    // the unembedded index.
-    if ((await repository(tx).activateProfile([profile.id])).rowCount)
-      await repository(tx).forgetOtherProfileVectors([profile.id]);
+    // earlier one, the sweep clears pointers to other profiles' vectors in batches (see `forgetBatch`), so those
+    // documents become unembedded and the sweep finds them through the unembedded index.
+    await repository(tx).activateProfile([profile.id]);
+  }
+  // Each batch commits on its own and stays well under a second, so a large clear makes progress on every sweep
+  // without holding the authorization lock for long. Search ignores other profiles' vectors meanwhile.
+  async function forgetBatch(tx: Transaction) {
+    const cleared = await repository(tx).forgetOtherProfileVectors([profile.id, forgetBatchSize]);
+    if ((cleared.rowCount ?? 0) < forgetBatchSize) await repository(tx).finishForgetting([profile.id]);
   }
   async function currentIncarnation(tx: Transaction, job: Job, actor?: HumanActor) {
     if (job.purpose !== 'ingestion' || !externalProviders().length) {
@@ -539,7 +547,7 @@ export function createEmbeddingEngine<Context, Source extends { kind: string }>(
   }
   async function due(workspaceId: string): Promise<EmbeddingWork[]> {
     const held = gate ? await gate(workspaceId) : [];
-    return transaction(workspaceId, async tx => {
+    const { work, forgetting } = await transaction(workspaceId, async tx => {
       await recover(tx);
       if (conversationEnabled(tx)) {
         const changed = z
@@ -575,8 +583,10 @@ export function createEmbeddingEngine<Context, Source extends { kind: string }>(
         else if (status.state === 'busy') await repository(tx).deferJob([job.id]);
         else await repository(tx).setJobState([job.id, status.state]);
       }
-      return work;
+      return { work, forgetting: Boolean((await repository(tx).forgettingOtherProfiles([profile.id])).rowCount) };
     });
+    if (forgetting) await transaction(workspaceId, forgetBatch);
+    return work;
   }
   async function documentJob(tx: Transaction, actor: HumanActor, documentId: string) {
     const doc = await store.document(tx, documentId);

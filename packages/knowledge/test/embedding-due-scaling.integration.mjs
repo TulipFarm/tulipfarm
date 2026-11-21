@@ -46,6 +46,8 @@ test('the embedding sweep reads due jobs without visiting published history', as
     });
     for (const work of await local.due(ws.id)) await local.process(work);
     let plans = [];
+    const forgets = [];
+    let failForget = false;
     const observed = {
       transaction: (id, range, operation) =>
         runtime.transaction(id, range, tx =>
@@ -53,6 +55,16 @@ test('the embedding sweep reads due jobs without visiting published history', as
             ...tx,
             client: {
               query: async (...args) => {
+                if (args[0].includes('IS DISTINCT FROM $1 LIMIT $2')) {
+                  if (failForget) {
+                    failForget = false;
+                    throw new Error('statement timeout');
+                  }
+                  const started = performance.now();
+                  const result = await tx.client.query(...args);
+                  forgets.push({ rows: result.rowCount, ms: performance.now() - started });
+                  return result;
+                }
                 const label = labels.find(([, marker]) => args[0].includes(marker))?.[0];
                 if (label)
                   plans.push({
@@ -191,6 +203,52 @@ test('the embedding sweep reads due jobs without visiting published history', as
       ).rowCount,
       1,
     );
+
+    // Another profile was active and embedded the whole knowledge base; rolling back makes the current profile active
+    // again. The clear of the other profile's pointers is too large for one batch: it persists the activation even
+    // when a batch fails, and finishes over several sweeps in batches that each stay well under a second.
+    await db.platform.query(
+      `UPDATE ${table('embedding_active_profile')} SET profile_id='retired-profile',forgetting=false`,
+    );
+    await db.platform.query(
+      `WITH v AS (
+        INSERT INTO ${table('vector_publications')} (id,document_id,revision_id,lexical_publication_id,profile,profile_id)
+        SELECT gen_random_uuid(),d.id,d.observed_revision_id,d.lexical_publication_id,p.profile,p.id
+        FROM ${table('documents')} d CROSS JOIN ${table('embedding_profiles')} p
+        WHERE d.vector_publication_id IS NOT NULL AND p.id='retired-profile' RETURNING id,document_id)
+      UPDATE ${table('documents')} d SET vector_publication_id=v.id FROM v WHERE d.id=v.document_id`,
+    );
+    for (const name of ['documents', 'vector_publications']) await db.platform.query(`ANALYZE ${table(name)}`);
+    const retiredPointers = async () =>
+      Number(
+        (
+          await db.platform.query(
+            `SELECT count(*) FROM ${table('documents')} d JOIN ${table('vector_publications')} v
+            ON v.id=d.vector_publication_id WHERE v.profile_id='retired-profile'`,
+          )
+        ).rows[0].count,
+      );
+    const marker = async () =>
+      (await db.platform.query(`SELECT profile_id,forgetting FROM ${table('embedding_active_profile')}`)).rows[0];
+    const retiredBefore = await retiredPointers();
+    assert.ok(retiredBefore > 4 * 2000, `${retiredBefore} documents point at the retired profile`);
+
+    failForget = true;
+    await assert.rejects(embeddings.due(ws.id), /statement timeout/);
+    assert.deepEqual(await marker(), { profile_id: job.profile_id, forgetting: true });
+    assert.equal(await retiredPointers(), retiredBefore);
+    let sweeps = 0;
+    while ((await marker()).forgetting) {
+      assert.ok(++sweeps < 50, 'The clear did not finish');
+      await embeddings.due(ws.id);
+    }
+    t.diagnostic(JSON.stringify({ retiredBefore, sweeps, batches: forgets }));
+    assert.equal(await retiredPointers(), 0);
+    assert.ok(sweeps > retiredBefore / 2000, `The clear finished in ${sweeps} sweeps`);
+    for (const batch of forgets) {
+      assert.ok(batch.rows <= 2000, `A batch cleared ${batch.rows} documents`);
+      assert.ok(batch.ms < 500, `A batch took ${batch.ms} ms`);
+    }
   } finally {
     await runtime?.close();
     await db.close();
@@ -263,8 +321,9 @@ test('documents pointing at vectors of another profile are embedded again for th
       capacity: unexpected,
     });
     await embeddings.due(ws.id);
-    await embeddings.due(ws.id);
     assert.deepEqual(await pointers(), { [retired.documentId]: false, [legacy.documentId]: false });
+    await embeddings.due(ws.id);
+    await embeddings.due(ws.id);
     const jobs = await db.platform.query(
       `SELECT j.document_id FROM ${table('embedding_jobs')} j JOIN ${table('documents')} d
       ON d.lexical_publication_id=j.publication_id WHERE j.profile_id<>'retired-profile' ORDER BY j.document_id`,

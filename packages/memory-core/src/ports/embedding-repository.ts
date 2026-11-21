@@ -3,7 +3,9 @@ import type { RepositoryResult } from './repository-result.ts';
 export interface EmbeddingRepository {
   installProfile(values: [id: string, profile: unknown]): Promise<RepositoryResult>;
   activateProfile(values: [profileId: string]): Promise<RepositoryResult>;
-  forgetOtherProfileVectors(values: [profileId: string]): Promise<RepositoryResult>;
+  forgettingOtherProfiles(values: [profileId: string]): Promise<RepositoryResult>;
+  forgetOtherProfileVectors(values: [profileId: string, limit: number]): Promise<RepositoryResult>;
+  finishForgetting(values: [profileId: string]): Promise<RepositoryResult>;
   profileMatches(values: [id: string, profile: unknown]): Promise<RepositoryResult>;
   changedEpochJobs(values: [providers: string[]]): Promise<RepositoryResult>;
   rebindEpoch(values: [id: string, epoch: number]): Promise<RepositoryResult>;

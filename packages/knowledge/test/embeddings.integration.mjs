@@ -826,7 +826,9 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       await db.platform.query(
         `INSERT INTO ${w.table('embedding_profiles')} (id,profile) VALUES ('next-profile','{"next":true}')`,
       );
-      await db.platform.query(`UPDATE ${w.table('embedding_active_profile')} SET profile_id='next-profile'`);
+      await db.platform.query(
+        `UPDATE ${w.table('embedding_active_profile')} SET profile_id='next-profile',forgetting=false`,
+      );
       await db.platform.query(
         `WITH v AS (
           INSERT INTO ${w.table('vector_publications')} (id,document_id,revision_id,lexical_publication_id,profile,profile_id)
@@ -855,7 +857,10 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       }
       assert.equal((await document()).profile_id, 'next-profile');
 
-      // Rolling back makes the earlier profile active again; its finished vectors are published without new calls.
+      // Rolling back makes the earlier profile active again. The first sweep clears the other profile's pointer, and the
+      // next publishes the earlier profile's finished vectors without new calls.
+      assert.deepEqual(await api.due(w.ws.id), []);
+      assert.equal((await document()).vector_publication_id, null);
       assert.deepEqual(await api.due(w.ws.id), []);
       assert.equal((await document()).vector_publication_id, embedded.vector_publication_id);
       assert.equal(calls, 1);

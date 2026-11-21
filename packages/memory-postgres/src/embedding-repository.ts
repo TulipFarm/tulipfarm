@@ -22,15 +22,32 @@ export function createPostgresEmbeddingRepository(
     async activateProfile(values: [profileId: string]) {
       if (!activeProfile) return { rows: [], rowCount: 0 };
       return client.query(
-        `INSERT INTO ${table('embedding_active_profile')} AS a (id,profile_id) VALUES (1,$1)
-        ON CONFLICT (id) DO UPDATE SET profile_id=excluded.profile_id WHERE a.profile_id<>excluded.profile_id`,
+        `INSERT INTO ${table('embedding_active_profile')} AS a (id,profile_id,forgetting) VALUES (1,$1,true)
+        ON CONFLICT (id) DO UPDATE SET profile_id=excluded.profile_id,forgetting=true WHERE a.profile_id<>excluded.profile_id`,
         values,
       );
     },
-    forgetOtherProfileVectors(values: [profileId: string]) {
+    async forgettingOtherProfiles(values: [profileId: string]) {
+      if (!activeProfile) return { rows: [], rowCount: 0 };
       return client.query(
-        `UPDATE ${table('documents')} d SET vector_publication_id=NULL FROM ${table('vector_publications')} v
-      WHERE v.id=d.vector_publication_id AND v.profile_id IS DISTINCT FROM $1`,
+        `SELECT 1 FROM ${table('embedding_active_profile')} WHERE profile_id=$1 AND forgetting`,
+        values,
+      );
+    },
+    async forgetOtherProfileVectors(values: [profileId: string, limit: number]) {
+      if (!activeProfile) return { rows: [], rowCount: 0 };
+      return client.query(
+        `UPDATE ${table('documents')} SET vector_publication_id=NULL
+      WHERE id IN (SELECT d.id FROM ${table('documents')} d JOIN ${table('vector_publications')} v ON v.id=d.vector_publication_id
+        WHERE v.profile_id IS DISTINCT FROM $1 LIMIT $2)
+        AND EXISTS (SELECT 1 FROM ${table('embedding_active_profile')} WHERE profile_id=$1 AND forgetting)`,
+        values,
+      );
+    },
+    async finishForgetting(values: [profileId: string]) {
+      if (!activeProfile) return { rows: [], rowCount: 0 };
+      return client.query(
+        `UPDATE ${table('embedding_active_profile')} SET forgetting=false WHERE profile_id=$1 AND forgetting`,
         values,
       );
     },
