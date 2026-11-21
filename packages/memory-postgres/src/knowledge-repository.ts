@@ -2,11 +2,22 @@ import type { KnowledgeRepository } from '@tulipfarm/memory-core/ports/knowledge
 import type { MemoryQueryClient } from './query-client.ts';
 import { memoryTable, type PostgresMemoryNames } from './names.ts';
 
+/** `usageTotals` reads quota usage from the maintained `usage` row instead of summing every stored row. */
 export function createPostgresKnowledgeRepository(
   client: MemoryQueryClient,
   names: PostgresMemoryNames,
+  { usageTotals = false }: { usageTotals?: boolean } = {},
 ): KnowledgeRepository {
   const table = (name: string) => memoryTable(names, name);
+  const total = (column: string) => `(SELECT ${column} FROM ${table('usage')} WHERE id=1)`;
+  const documentCount = usageTotals ? total('documents::int') : `(SELECT count(*)::int FROM ${table('documents')})`;
+  const chunkCount = usageTotals ? total('chunks::int') : `(SELECT count(*)::int FROM ${table('chunks')})`;
+  const retainedBytes = usageTotals
+    ? total('bytes')
+    : `(SELECT COALESCE(sum(original_bytes),0) FROM ${table('revisions')}) +
+        (SELECT COALESCE(sum(octet_length(normalized_content)),0) FROM ${table('google_originals')}) +
+        (SELECT COALESCE(sum(octet_length(markdown)),0) FROM ${table('publications')}) +
+        (SELECT COALESCE(sum(octet_length(passage)+octet_length(heading)),0) FROM ${table('chunks')})`;
   return {
     readSource(values: [id: string]) {
       return client.query(`SELECT * FROM ${table('sources')} WHERE id=$1`, values);
@@ -29,12 +40,9 @@ export function createPostgresKnowledgeRepository(
     documentUsage(values: [documentId: string]) {
       return client.query(
         `SELECT
-        (SELECT count(*)::int FROM ${table('documents')}) AS documents,
+        ${documentCount} AS documents,
         (SELECT count(*)::int FROM ${table('revisions')} WHERE document_id=$1) AS revisions,
-        (SELECT COALESCE(sum(original_bytes),0) FROM ${table('revisions')}) +
-        (SELECT COALESCE(sum(octet_length(normalized_content)),0) FROM ${table('google_originals')}) +
-        (SELECT COALESCE(sum(octet_length(markdown)),0) FROM ${table('publications')}) +
-        (SELECT COALESCE(sum(octet_length(passage)+octet_length(heading)),0) FROM ${table('chunks')}) AS bytes`,
+        ${retainedBytes} AS bytes`,
         values,
       );
     },
@@ -80,11 +88,8 @@ export function createPostgresKnowledgeRepository(
       return client.query(
         `SELECT
           (SELECT count(*)::int FROM ${table('publications')} WHERE revision_id=$1) AS publications,
-          (SELECT count(*)::int FROM ${table('chunks')}) AS chunks,
-          (SELECT COALESCE(sum(original_bytes),0) FROM ${table('revisions')}) +
-          (SELECT COALESCE(sum(octet_length(normalized_content)),0) FROM ${table('google_originals')}) +
-          (SELECT COALESCE(sum(octet_length(markdown)),0) FROM ${table('publications')}) +
-          (SELECT COALESCE(sum(octet_length(passage)+octet_length(heading)),0) FROM ${table('chunks')}) AS bytes`,
+          ${chunkCount} AS chunks,
+          ${retainedBytes} AS bytes`,
         values,
       );
     },
@@ -105,37 +110,19 @@ export function createPostgresKnowledgeRepository(
         values,
       );
     },
-    insertSearchChunk(
-      values: [
-        publicationId: string,
-        ordinal: number,
-        heading: string,
-        passage: string,
-        tokens: number,
-        offset: unknown,
-        hash: string,
-        title: string,
-        identifiers: string[],
-      ],
-    ) {
+    insertChunks(values) {
       return client.query(
-        `INSERT INTO ${table('chunks')} (publication_id,ordinal,heading,passage,tokens,source_offset,input_hash,search_title,identifiers) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        `INSERT INTO ${table('chunks')} (publication_id,ordinal,heading,passage,tokens,source_offset,input_hash)
+        SELECT $1,c.ordinal,c.heading,c.passage,c.tokens,c."offset",c.hash
+        FROM unnest($2::jsonb[]) AS chunk, jsonb_to_record(chunk) AS c(ordinal integer,heading text,passage text,tokens integer,"offset" jsonb,hash text)`,
         values,
       );
     },
-    insertChunk(
-      values: [
-        publicationId: string,
-        ordinal: number,
-        heading: string,
-        passage: string,
-        tokens: number,
-        offset: unknown,
-        hash: string,
-      ],
-    ) {
+    insertSearchChunks(values) {
       return client.query(
-        `INSERT INTO ${table('chunks')} (publication_id,ordinal,heading,passage,tokens,source_offset,input_hash) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        `INSERT INTO ${table('chunks')} (publication_id,ordinal,heading,passage,tokens,source_offset,input_hash,search_title,identifiers)
+        SELECT $1,c.ordinal,c.heading,c.passage,c.tokens,c."offset",c.hash,c.title,c.identifiers
+        FROM unnest($2::jsonb[]) AS chunk, jsonb_to_record(chunk) AS c(ordinal integer,heading text,passage text,tokens integer,"offset" jsonb,hash text,title text,identifiers text[])`,
         values,
       );
     },

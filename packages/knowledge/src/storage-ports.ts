@@ -23,6 +23,10 @@ import type { KnowledgeAuthorization } from '@tulipfarm/memory-core/ports/knowle
 import type { ExternalSource } from '@tulipfarm/memory-core/documents/records';
 
 export type KnowledgeTransaction = AuthorizationTransaction & { workspaceId: string; commonVersion: number };
+/** The common migration that keeps Knowledge quota usage in `tf_knowledge_usage`. Before it, usage is summed. */
+export const knowledgeUsageVersion = 99;
+export const tracksKnowledgeUsage = (tx: { commonVersion?: number }) =>
+  (tx.commonVersion ?? 0) >= knowledgeUsageVersion;
 export type KnowledgeRuntime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
 export const knowledgeAccessErrors = { AccessDenied, SourceAuthorizationUnavailable };
 export const knowledgeStorageErrors = {

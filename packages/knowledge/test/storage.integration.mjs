@@ -585,6 +585,119 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         assert.equal((await service.status(one.id, owner, base.documentId)).revisionId, prior.id);
       },
     );
+
+    await t.test('usage totals stay equal to stored rows and enforce each quota at its exact limit', async () => {
+      const limits = { documents: 50_000, retainedChunks: 750_000, retainedBytes: 5 * 1024 * 1024 * 1024 };
+      const scanned = async () =>
+        (
+          await db.platform.query(`SELECT
+            (SELECT count(*) FROM ${table('documents')})::bigint AS documents,
+            (SELECT count(*) FROM ${table('chunks')})::bigint AS chunks,
+            ((SELECT COALESCE(sum(original_bytes),0) FROM ${table('revisions')}) +
+            (SELECT COALESCE(sum(octet_length(normalized_content)),0) FROM ${table('google_originals')}) +
+            (SELECT COALESCE(sum(octet_length(markdown)),0) FROM ${table('publications')}) +
+            (SELECT COALESCE(sum(octet_length(passage)+octet_length(heading)),0) FROM ${table('chunks')}))::bigint AS bytes`)
+        ).rows[0];
+      const counted = async () =>
+        (await db.platform.query(`SELECT documents,chunks,bytes FROM ${table('usage')} WHERE id=1`)).rows[0];
+      const matches = async step => assert.deepEqual(await counted(), await scanned(), step);
+      const shift = (column, amount) =>
+        db.platform.query(`UPDATE ${table('usage')} SET ${column}=${column}+$1 WHERE id=1`, [amount]);
+
+      await matches('backfilled and maintained across earlier writes');
+      const login = await connect(db.login(one));
+      try {
+        await denied(login, `UPDATE ${table('usage')} SET bytes=0`);
+      } finally {
+        await login.end();
+      }
+
+      const sourceId = await source();
+      const first = revision(sourceId);
+      await service.observeRevision(one.id, owner, first);
+      await matches('insert');
+      await service.publishLexical(one.id, owner, publication(first));
+      await matches('publish');
+      const second = revision(sourceId, {
+        documentId: first.documentId,
+        nativeId: first.nativeId,
+        expectedRevisionId: first.id,
+      });
+      await service.observeRevision(one.id, owner, second);
+      await matches('revise and unpublish the prior revision');
+      await service.publishLexical(one.id, owner, publication(second));
+      await db.platform.query(
+        `INSERT INTO ${table('google_originals')} (revision_id,bytes,filename,media_type,normalized_content) VALUES ($1,$2,'a.txt','text/plain',$3)`,
+        [second.id, Buffer.from('original'), 'normalized text'],
+      );
+      await matches('republish and store a normalized original');
+      await service.manageSource(one.id, owner, sourceId, 'remove');
+      await matches('delete');
+
+      // Moves a total to `gap` below its limit and returns how to move it back.
+      const near = async (column, limit, gap) => {
+        const offset = limit - gap - Number((await counted())[column]);
+        await shift(column, offset);
+        return () => shift(column, -offset);
+      };
+      const live = await source();
+      let restore = await near('bytes', limits.retainedBytes, 8);
+      const atLimit = revision(live);
+      await service.observeRevision(one.id, owner, atLimit);
+      await assert.rejects(
+        service.observeRevision(one.id, owner, revision(live, { original: { ...atLimit.original, bytes: 1 } })),
+        code('quota'),
+      );
+      await restore();
+      const build = publication(atLimit);
+      const built = Buffer.byteLength(build.markdown) + Buffer.byteLength('HandbookReturn orders in 30 days.');
+      restore = await near('bytes', limits.retainedBytes, built - 1);
+      await assert.rejects(service.publishLexical(one.id, owner, build), code('quota'));
+      await restore();
+      restore = await near('bytes', limits.retainedBytes, built);
+      await service.publishLexical(one.id, owner, build);
+      await restore();
+      await matches('byte quota rejections leave no usage behind');
+
+      const chunked = revision(live);
+      await service.observeRevision(one.id, owner, chunked);
+      const twoChunks = publication(chunked, {
+        chunks: [
+          { heading: 'One', text: 'First passage.', tokens: 3, offset: { kind: 'page', page: 1 } },
+          { heading: 'Two', text: 'Second passage.', tokens: 3, offset: { kind: 'page', page: 1 } },
+        ],
+      });
+      restore = await near('chunks', limits.retainedChunks, 1);
+      await assert.rejects(service.publishLexical(one.id, owner, twoChunks), code('quota'));
+      await restore();
+      restore = await near('chunks', limits.retainedChunks, 2);
+      await service.publishLexical(one.id, owner, twoChunks);
+      await restore();
+      await matches('chunk quota');
+
+      restore = await near('documents', limits.documents, 1);
+      const last = revision(live);
+      await service.observeRevision(one.id, owner, last);
+      await assert.rejects(service.observeRevision(one.id, owner, revision(live)), code('quota'));
+      await service.observeRevision(
+        one.id,
+        owner,
+        revision(live, { documentId: last.documentId, nativeId: last.nativeId, expectedRevisionId: last.id }),
+      );
+      await restore();
+      await matches('document quota allows revisions of existing documents at the limit');
+
+      const republished = revision(live);
+      await service.observeRevision(one.id, owner, republished);
+      for (let index = 0; index < 8; index++)
+        await service.publishLexical(
+          one.id,
+          owner,
+          publication(republished, { markdown: `# Handbook\nVersion ${index}.` }),
+        );
+      await assert.rejects(service.publishLexical(one.id, owner, publication(republished)), code('quota'));
+      await matches('publication quota');
+    });
   } finally {
     await runtime?.close();
     await db.close();
