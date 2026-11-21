@@ -821,6 +821,9 @@ importers:
       '@tulipfarm/media':
         specifier: workspace:*
         version: link:../media
+      '@tulipfarm/memory-keep':
+        specifier: workspace:*
+        version: link:../memory-keep
       '@tulipfarm/observability':
         specifier: workspace:*
         version: link:../observability

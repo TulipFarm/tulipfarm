@@ -83,6 +83,8 @@ import { registerFiles } from './files.ts';
 import { registerKnowledgeRoutes } from './knowledge-composition.ts';
 import { createStorageServices, registerStorageSweeps } from './storage-services.ts';
 import { createAgentEvals, registerAgentEvals } from './agent-evals.ts';
+import { registerAgentLessons } from './agent-lessons.ts';
+import { createAgentLessons } from '@tulipfarm/agents/agent-lessons-service';
 
 export function registerStorageComposition(
   app: FastifyInstance,
@@ -303,6 +305,7 @@ export function registerStorageComposition(
     evals: createAgentEvals(runtime, modelFamilyEligibility),
     temporal,
   });
+  registerAgentLessons(app, { auth: dependencies.auth, lessons: createAgentLessons(runtime) });
   dependencies.invitationLinks.current = registerGovernance(app, {
     auth: dependencies.auth,
     identity: dependencies.pool,

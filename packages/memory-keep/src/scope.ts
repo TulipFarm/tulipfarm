@@ -44,3 +44,14 @@ export function keepConversationScope(workspaceId: string, conversationId: strin
 
 /** The file that holds a member's personal memory: Keep's "You" profile, always considered for context. */
 export const keepProfilePath = '/profile.md';
+
+/**
+ * The Keep scope of one saved agent's lessons, learned from its earlier runs and shared by everyone who runs it. The
+ * `-a-` infix keeps it apart from member, Knowledge and chat scopes.
+ */
+export function keepAgentScope(workspaceId: string, agentId: string): KeepScope {
+  return { user: `${keepWorkspaceUser(workspaceId)}-a-${id(agentId, 'agentId')}` };
+}
+
+/** The file that holds an agent's lessons and its suggested changes. */
+export const keepLessonsPath = '/lessons.md';

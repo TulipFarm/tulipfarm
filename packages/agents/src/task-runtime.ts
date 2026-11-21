@@ -75,6 +75,7 @@ import {
 } from './task-telemetry.ts';
 import { errorAttributes, log } from '@tulipfarm/observability';
 import { readPersonalMemoryContext } from '@tulipfarm/conversations/personal-memory';
+import { readAgentLessonsContext } from './agent-lessons.ts';
 import { messageLinks } from '@tulipfarm/conversations/links';
 import { defaultImageInputLimits, type ResolvedModel } from '@tulipfarm/config';
 import { readTaskFiles, taskFileStopMessage, type TaskFileReading, type TaskReadingFamily } from './task-files.ts';
@@ -912,6 +913,7 @@ export function createTaskRuntime(
           [runId, step.step, JSON.stringify(await taskMcpSources(tx, owner, taskId, runId))],
         );
       const personalMemory = await readPersonalMemoryContext(tx, owner);
+      const lessons = await readAgentLessonsContext(workspaceId, task.agentId);
       const input = agentModelInputSchema.parse({
         prompt,
         definition: c.definition,
@@ -919,6 +921,7 @@ export function createTaskRuntime(
         procedures: c.procedures,
         task: true,
         personalMemory,
+        ...(lessons ? { lessons } : {}),
         ...(catalog ? { mcp: catalog.model } : {}),
         ...(materializing?.content ? { files: materializing.content } : {}),
         ...((await imageGenerationOffered(workspaceId, c.definition.tools)) ? { images: true as const } : {}),
