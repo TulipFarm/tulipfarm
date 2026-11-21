@@ -1,0 +1,7 @@
+{
+  "suite": "guardrails",
+  "model": "copilot-gpt-luna",
+  "score": 100,
+  "runs": 12,
+  "recordedAt": "2026-11-20"
+}
