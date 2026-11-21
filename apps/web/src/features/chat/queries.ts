@@ -183,7 +183,7 @@ export function useConversationHistory(
     staleTime: freshness.chat,
   });
   const state = useLoadedWindow(read.state, chatId, pages, conversationKeys.history(chatId, pages));
-  const recovery = useReplyResync(state.kind === 'ready' ? state.data : undefined, stream, read.refresh);
+  const recovery = useReplyResync(state.kind === 'ready' ? state.data : undefined, stream, read.check);
   const changes = useConversationChanges();
   const observed = useRef<Set<string> | null>(null);
   useEffect(() => {
