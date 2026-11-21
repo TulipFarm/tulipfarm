@@ -627,9 +627,13 @@ export const newChatSearch = chatScopeSearch.extend({
       'create-workflow',
       'edit-workflow',
       'install-package',
+      'improve-agent',
     ])
     .optional()
     .catch(undefined),
+  agentId: z.uuid().optional().catch(undefined),
+  /** A change the agent's earlier runs suggest, shown to the person before anything is sent. */
+  suggestion: z.string().min(1).max(400).optional().catch(undefined),
   workflowId: z.uuid().optional().catch(undefined),
   tableId: z.uuid().optional().catch(undefined),
   skillId: z.uuid().optional().catch(undefined),

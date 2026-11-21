@@ -6,6 +6,7 @@ export const agentTabValues = [
   'slack',
   'schedules',
   'evals',
+  'lessons',
   'settings',
 ] as const;
 export type AgentTab = (typeof agentTabValues)[number];

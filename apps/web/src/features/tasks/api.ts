@@ -26,7 +26,7 @@ export type TaskCommand =
   | { kind: 'reopen'; id: string; input: z.infer<typeof reopenTaskSchema> };
 export type TaskProposal = z.infer<typeof taskProposalViewSchema>;
 export type TaskAction =
-  | { kind: 'decision'; digest: string; decision: 'approve' | 'reject' }
+  | { kind: 'decision'; digest: string; decision: 'approve' | 'reject'; reason?: string }
   | { kind: 'execute'; actionId: string }
   | { kind: 'recover'; requestId: string; generation: number };
 export function taskApi(workspaceId: string) {

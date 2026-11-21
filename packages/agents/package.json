@@ -354,6 +354,22 @@
     "./coding-run-store": {
       "types": "./dist/coding-run-store.d.ts",
       "default": "./dist/coding-run-store.js"
+    },
+    "./agent-lessons": {
+      "types": "./dist/agent-lessons.d.ts",
+      "default": "./dist/agent-lessons.js"
+    },
+    "./agent-lesson-learning": {
+      "types": "./dist/agent-lesson-learning.d.ts",
+      "default": "./dist/agent-lesson-learning.js"
+    },
+    "./agent-lessons-service": {
+      "types": "./dist/agent-lessons-service.d.ts",
+      "default": "./dist/agent-lessons-service.js"
+    },
+    "./agent-lesson-contracts": {
+      "types": "./dist/agent-lesson-contracts.d.ts",
+      "default": "./dist/agent-lesson-contracts.js"
     }
   },
   "scripts": {
@@ -385,6 +401,7 @@
     "@tulipfarm/knowledge": "workspace:*",
     "@tulipfarm/mcp-catalog": "workspace:*",
     "@tulipfarm/media": "workspace:*",
+    "@tulipfarm/memory-keep": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/plan-documents": "workspace:*",
     "@tulipfarm/secrets": "workspace:*",

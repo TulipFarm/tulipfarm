@@ -28,6 +28,8 @@ import {
 } from './task-approval-contracts.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 
+/** The schema version that stores a rejection's reason. */
+const decisionReasonVersion = 102;
 const digest = (value: unknown) => createHash('sha256').update(canonicalJson(value)).digest('hex');
 type Transaction = AgentTransaction & { commonVersion: number };
 type AppliedDefinition = NonNullable<
@@ -421,6 +423,7 @@ function taskApprovalOperations(runtime: AgentStorage) {
         digest: string;
         membershipId: string;
         decision: 'approve' | 'reject';
+        reason?: string;
       }) => Promise<void>,
     ) {
       const input = taskDecisionSchema.parse(value);
@@ -452,6 +455,9 @@ function taskApprovalOperations(runtime: AgentStorage) {
           digest: proposal.digest,
           membershipId: owner.membershipId,
           decision: input.decision,
+          ...(input.reason && ((tx as { commonVersion?: number }).commonVersion ?? 0) >= decisionReasonVersion
+            ? { reason: input.reason }
+            : {}),
         });
         return { ...status, decision: input.decision };
       });
@@ -483,8 +489,16 @@ export function createTaskApprovalDecision(options: {
           );
           if (!match.rowCount) throw new AccessDenied();
           await tx.client.query(
-            `INSERT INTO ${relation(tx, 'tf_agent_task_decisions')} (proposal_id,digest,membership_id,decision) VALUES ($1,$2,$3,$4)`,
-            [decision.proposalId, decision.digest, decision.membershipId, decision.decision],
+            decision.reason
+              ? `INSERT INTO ${relation(tx, 'tf_agent_task_decisions')} (proposal_id,digest,membership_id,decision,reason) VALUES ($1,$2,$3,$4,$5)`
+              : `INSERT INTO ${relation(tx, 'tf_agent_task_decisions')} (proposal_id,digest,membership_id,decision) VALUES ($1,$2,$3,$4)`,
+            [
+              decision.proposalId,
+              decision.digest,
+              decision.membershipId,
+              decision.decision,
+              ...(decision.reason ? [decision.reason] : []),
+            ],
           );
         },
       });

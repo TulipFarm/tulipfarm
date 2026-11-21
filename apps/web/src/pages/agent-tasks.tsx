@@ -3,6 +3,8 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
 import { workspaceRoute, agentTaskRoute } from '@/router';
 import { Button } from '@tulipfarm/sprout/button';
+import { Field } from '@tulipfarm/sprout/field';
+import { Textarea } from '@tulipfarm/sprout/textarea';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Status } from '@tulipfarm/sprout/status';
 import { Disclosure } from '@/components/disclosure';
@@ -761,6 +763,7 @@ function BatchReview({
 }) {
   const read = useTaskProposal(api, taskId, proposalId);
   const [notice, setNotice] = useState('');
+  const [reason, setReason] = useState('');
   const write = useTableWrite(
     (command: TaskAction) => api.action(taskId, proposalId, command),
     result => {
@@ -825,6 +828,22 @@ function BatchReview({
                 <div className="flex flex-wrap gap-2">
                   {undecided && (
                     <>
+                      <div className="w-full">
+                        <Field
+                          id={`reject-reason-${proposal.id}`}
+                          label="Reason for rejecting"
+                          optional
+                          counter={`${reason.length} / 500`}
+                          helper="The agent learns from this for everyone who runs it. Leave out names, links and numbers."
+                        >
+                          <Textarea
+                            rows={2}
+                            maxLength={500}
+                            value={reason}
+                            onChange={event => setReason(event.target.value)}
+                          />
+                        </Field>
+                      </div>
                       <Button
                         disabled={blocked}
                         onClick={() =>
@@ -837,7 +856,12 @@ function BatchReview({
                         variant="outline"
                         disabled={blocked}
                         onClick={() =>
-                          void write.submit({ kind: 'decision', digest: proposal.digest, decision: 'reject' })
+                          void write.submit({
+                            kind: 'decision',
+                            digest: proposal.digest,
+                            decision: 'reject',
+                            ...(reason.trim() ? { reason: reason.trim() } : {}),
+                          })
                         }
                       >
                         Reject batch
