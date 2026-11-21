@@ -9,6 +9,8 @@ import {
   resolveHuman,
   type HumanActor,
 } from '@tulipfarm/access';
+import { writeRunState } from '@tulipfarm/tables/store';
+import { TaskTableError } from '@tulipfarm/tables/tasks-table';
 import { deliverComment, rowExists, wakeRow } from './row-assignments.ts';
 import { relation, type AgentTransaction } from './store.ts';
 
@@ -55,6 +57,38 @@ export const rowThreadSchema = z.object({
   ),
 });
 export type RowThread = z.infer<typeof rowThreadSchema>;
+
+/** The workspace's built-in Tasks table, or null before the workspace has one. */
+export const tasksTableSchema = z.object({ tableId: z.uuid().nullable() });
+
+/** What the Tasks page shows beside each row: who is working on it, how far the current run got, and the latest note. */
+export const taskActivitySchema = z.object({
+  tableId: z.uuid().nullable(),
+  tasks: z.array(
+    z.object({
+      rowId: z.uuid(),
+      agentId: z.uuid(),
+      sponsorMembershipId: z.uuid(),
+      runState: runStateSchema.exclude(['stopped']),
+      reason: z.string().nullable(),
+      wakeAt: z.string().nullable(),
+      updatedAt: z.string(),
+      run: z
+        .object({
+          taskId: z.uuid(),
+          startedAt: z.string(),
+          endedAt: z.string().nullable(),
+          outcome: z.string().nullable(),
+          steps: z.number().int().nonnegative(),
+        })
+        .nullable(),
+      note: z.object({ body: z.string(), createdAt: z.string() }).nullable(),
+    }),
+  ),
+  comments: z.array(z.object({ rowId: z.uuid(), count: z.number().int().positive() })),
+  me: z.uuid(),
+});
+export type TaskActivity = z.infer<typeof taskActivitySchema>;
 
 export const commentInputSchema = z.strictObject({
   body: z.string().trim().min(1).max(20000),
@@ -128,6 +162,13 @@ const iso = (value: unknown) => (value instanceof Date ? value.toISOString() : S
 async function requireRow(tx: AgentTransaction, actor: HumanActor, tableId: string, rowId: string) {
   await requireTablePermission(tx, actor, tableId, 'table.row.read');
   if (!(await rowExists(tx, tableId, rowId))) throw new AccessDenied();
+}
+
+async function threadEvent(tx: AgentTransaction, actor: HumanActor, tableId: string, rowId: string, type: string) {
+  await tx.client.query(
+    `INSERT INTO ${relation(tx, 'tf_row_thread_items')}(id,table_id,row_id,kind,author_membership_id,event) VALUES($1,$2,$3,'event',$4,$5)`,
+    [randomUUID(), tableId, rowId, actor.membershipId, JSON.stringify({ type })],
+  );
 }
 
 async function mayInvoke(tx: AgentTransaction, actor: HumanActor, agentId: string) {
@@ -271,6 +312,77 @@ export function createRowWork(runtime: Runtime, compatibility: unknown) {
   }
 
   return {
+    tasksTable: (workspaceId: string, userId: string) =>
+      as(workspaceId, userId, async tx => {
+        const row = (
+          await tx.client.query<{ table_id: string }>(
+            `SELECT table_id FROM ${relation(tx, 'tf_system_tables')} WHERE kind='tasks'`,
+          )
+        ).rows[0];
+        return tasksTableSchema.parse({ tableId: row?.table_id ?? null });
+      }),
+
+    taskActivity: (workspaceId: string, userId: string) =>
+      as(workspaceId, userId, async (tx, actor) => {
+        const tableId = (
+          await tx.client.query<{ table_id: string }>(
+            `SELECT table_id FROM ${relation(tx, 'tf_system_tables')} WHERE kind='tasks'`,
+          )
+        ).rows[0]?.table_id;
+        if (!tableId)
+          return taskActivitySchema.parse({ tableId: null, tasks: [], comments: [], me: actor.membershipId });
+        await requireTablePermission(tx, actor, tableId, 'table.row.read');
+        const tasks = (
+          await tx.client.query(
+            `SELECT a.row_id,a.agent_id,a.sponsor_membership_id,a.run_state,a.reason,a.wake_at,a.updated_at,
+               r.task_id,r.started_at,r.ended_at,r.outcome,n.body AS note,n.created_at AS note_at,
+               CASE WHEN r.task_id IS NULL THEN 0 ELSE (
+                 SELECT count(*)::int FROM ${relation(tx, 'tf_agent_tool_calls')} c
+                 JOIN ${relation(tx, 'tf_agent_task_runs')} b ON b.run_id=c.run_id WHERE b.task_id=r.task_id
+               ) END AS steps
+             FROM ${relation(tx, 'tf_row_assignments')} a
+             LEFT JOIN LATERAL (
+               SELECT * FROM ${relation(tx, 'tf_row_assignment_runs')} x
+               WHERE x.table_id=a.table_id AND x.row_id=a.row_id ORDER BY x.started_at DESC LIMIT 1
+             ) r ON true
+             LEFT JOIN LATERAL (
+               SELECT body,created_at FROM ${relation(tx, 'tf_row_thread_items')} t
+               WHERE t.table_id=a.table_id AND t.row_id=a.row_id AND t.kind='progress' AND t.deleted_at IS NULL
+               ORDER BY t.created_at DESC,t.id DESC LIMIT 1
+             ) n ON true
+             WHERE a.table_id=$1 AND a.run_state<>'stopped'
+             ORDER BY a.updated_at DESC LIMIT 500`,
+            [tableId],
+          )
+        ).rows.map(row => ({
+          rowId: row.row_id,
+          agentId: row.agent_id,
+          sponsorMembershipId: row.sponsor_membership_id,
+          runState: row.run_state,
+          reason: row.reason,
+          wakeAt: row.wake_at ? iso(row.wake_at) : null,
+          updatedAt: iso(row.updated_at),
+          run: row.task_id
+            ? {
+                taskId: row.task_id,
+                startedAt: iso(row.started_at),
+                endedAt: row.ended_at ? iso(row.ended_at) : null,
+                outcome: row.outcome,
+                steps: row.steps,
+              }
+            : null,
+          note: row.note ? { body: row.note, createdAt: iso(row.note_at) } : null,
+        }));
+        const comments = (
+          await tx.client.query(
+            `SELECT row_id,count(*)::int AS count FROM ${relation(tx, 'tf_row_thread_items')}
+             WHERE table_id=$1 AND kind='comment' AND deleted_at IS NULL GROUP BY row_id LIMIT 2000`,
+            [tableId],
+          )
+        ).rows.map(row => ({ rowId: row.row_id, count: row.count }));
+        return taskActivitySchema.parse({ tableId, tasks, comments, me: actor.membershipId });
+      }),
+
     thread: (workspaceId: string, userId: string, tableId: string, rowId: string) =>
       as(workspaceId, userId, async (tx, actor) => {
         await requireRow(tx, actor, tableId, rowId);
@@ -348,6 +460,47 @@ export function createRowWork(runtime: Runtime, compatibility: unknown) {
           `UPDATE ${relation(tx, 'tf_row_assignments')} SET wake_at=NULL,updated_at=clock_timestamp() WHERE table_id=$1 AND row_id=$2`,
           [tableId, rowId],
         );
+        return readThread(tx, actor, tableId, rowId);
+      }),
+
+    /** Marks a task done by hand. A queued or waiting agent stops waiting for a turn; a working run must end first. */
+    completeTask: (workspaceId: string, userId: string, tableId: string, rowId: string) =>
+      as(workspaceId, userId, async (tx, actor) => {
+        await requireRow(tx, actor, tableId, rowId);
+        await requireTablePermission(tx, actor, tableId, 'table.row.update');
+        const assignment = (
+          await tx.client.query<{ current_task_id: string | null }>(
+            `SELECT current_task_id FROM ${relation(tx, 'tf_row_assignments')} WHERE table_id=$1 AND row_id=$2 AND run_state<>'stopped' FOR UPDATE`,
+            [tableId, rowId],
+          )
+        ).rows[0];
+        if (assignment?.current_task_id) throw new TaskTableError('run-state-protected');
+        if (assignment)
+          await tx.client.query(
+            `UPDATE ${relation(tx, 'tf_row_assignments')} SET run_state='done',reason=NULL,wake_at=NULL,pending_wakes=0,updated_at=clock_timestamp() WHERE table_id=$1 AND row_id=$2`,
+            [tableId, rowId],
+          );
+        await writeRunState(tx, { tableId, recordId: rowId, state: 'done' });
+        await tx.client.query(
+          `UPDATE ${relation(tx, 'tf_inbox_items')} SET resolved_at=clock_timestamp() WHERE kind='waiting' AND table_id=$1 AND row_id=$2 AND resolved_at IS NULL`,
+          [tableId, rowId],
+        );
+        await threadEvent(tx, actor, tableId, rowId, 'marked-done');
+        return readThread(tx, actor, tableId, rowId);
+      }),
+
+    /** Moves a finished task without an agent back to To do. An agent's task reopens by running it again. */
+    reopenTask: (workspaceId: string, userId: string, tableId: string, rowId: string) =>
+      as(workspaceId, userId, async (tx, actor) => {
+        await requireRow(tx, actor, tableId, rowId);
+        await requireTablePermission(tx, actor, tableId, 'table.row.update');
+        const assigned = await tx.client.query(
+          `SELECT 1 FROM ${relation(tx, 'tf_row_assignments')} WHERE table_id=$1 AND row_id=$2 AND run_state<>'stopped' FOR UPDATE`,
+          [tableId, rowId],
+        );
+        if (assigned.rowCount) throw new TaskTableError('run-state-protected');
+        await writeRunState(tx, { tableId, recordId: rowId, state: null });
+        await threadEvent(tx, actor, tableId, rowId, 'reopened');
         return readThread(tx, actor, tableId, rowId);
       }),
 
@@ -499,8 +652,10 @@ async function readSlackPreferences(tx: AgentTransaction, membershipId: string):
 }
 
 export class AssignmentLimitsError extends Error {
-  constructor(readonly code: 'unknown-time-zone') {
+  readonly code: 'unknown-time-zone';
+  constructor(code: 'unknown-time-zone') {
     super(code);
+    this.code = code;
     this.name = 'AssignmentLimitsError';
   }
 }

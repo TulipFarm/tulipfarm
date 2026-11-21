@@ -70,6 +70,8 @@ export function rowThreadApi(workspaceId: string, tableId: string, rowId: string
     remove: (itemId: string) => send(`/thread/comments/${encodeURIComponent(itemId)}`, 'DELETE'),
     runNow: () => send('/run-now', 'POST'),
     clearWake: () => send('/wake', 'DELETE'),
+    markDone: () => send('/done', 'POST'),
+    reopen: () => send('/done', 'DELETE'),
   };
 }
 
@@ -96,21 +98,17 @@ function eventText(event: Record<string, unknown> | null) {
       return 'run stopped';
     case 'approval-requested':
       return 'asked for approval';
+    case 'marked-done':
+      return 'marked this done';
+    case 'reopened':
+      return 'reopened this';
     default:
       return typeof event?.type === 'string' ? event.type.replaceAll('-', ' ') : 'updated this row';
   }
 }
 
-/** A row's conversation with people and its assigned agent: Run state, progress notes, events and comments. */
-export function RowThreadPanel({
-  workspaceId,
-  tableId,
-  rowId,
-}: {
-  workspaceId: string;
-  tableId: string;
-  rowId: string;
-}) {
+/** Reads a row's thread; every reader of the same row shares one request and its polling. */
+export function useRowThread(workspaceId: string, tableId: string, rowId: string) {
   const api = rowThreadApi(workspaceId, tableId, rowId);
   const read = useFeatureRead({
     key: ['tables', 'row-thread', workspaceId, tableId, rowId] as const,
@@ -119,6 +117,46 @@ export function RowThreadPanel({
     interval: 3000,
     maxChecks: 200,
   });
+  return { api, read };
+}
+
+type ThreadItem = RowThread['items'][number];
+
+/** Folds an agent's identical progress notes in a row into one, counting the repeats. */
+export function foldRepeats(items: ThreadItem[]) {
+  const folded: { item: ThreadItem; repeats: number }[] = [];
+  for (const item of items) {
+    const last = folded.at(-1);
+    if (
+      last &&
+      item.kind === 'progress' &&
+      last.item.kind === 'progress' &&
+      item.body === last.item.body &&
+      item.author?.id === last.item.author?.id
+    )
+      folded[folded.length - 1] = { item, repeats: last.repeats + 1 };
+    else folded.push({ item, repeats: 1 });
+  }
+  return folded;
+}
+
+/** A row's conversation with people and its assigned agent: Run state, progress notes, events and comments. */
+export function RowThreadPanel({
+  workspaceId,
+  tableId,
+  rowId,
+  changed,
+  conversationOnly = false,
+}: {
+  workspaceId: string;
+  tableId: string;
+  rowId: string;
+  /** Called after this panel changes the thread, such as a comment or Run now. */
+  changed?: () => void;
+  /** Leaves out the agent's state, wake-up, Run now and run history for a page that shows them itself. */
+  conversationOnly?: boolean;
+}) {
+  const { api, read } = useRowThread(workspaceId, tableId, rowId);
   const [latest, setLatest] = useState<RowThread | null>(null);
   const [draft, setDraft] = useState('');
   const [editing, setEditing] = useState<{ id: string; body: string } | null>(null);
@@ -132,6 +170,7 @@ export function RowThreadPanel({
     try {
       setLatest(await operation());
       await read.refresh();
+      changed?.();
       return true;
     } catch (failure) {
       setError(failure instanceof TableRequestError ? failure.message : 'The row thread could not be updated.');
@@ -140,9 +179,13 @@ export function RowThreadPanel({
       setBusy(false);
     }
   };
-  const assignment = thread?.assignment;
+  const assignment = conversationOnly ? null : thread?.assignment;
   return (
-    <section aria-label="Row thread" className="space-y-4 border-t pt-4">
+    <section
+      aria-label="Row thread"
+      className="space-y-4 border-t pt-4"
+      data-compact-text={conversationOnly || undefined}
+    >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-medium">Thread</h3>
         {assignment && (
@@ -181,7 +224,7 @@ export function RowThreadPanel({
       {!thread && read.state.kind !== 'ready' && <p className="text-sm text-muted-foreground">Loading thread…</p>}
       {thread && thread.items.length === 0 && <p className="text-sm text-muted-foreground">No comments yet.</p>}
       <ol className="space-y-3">
-        {thread?.items.map(item => (
+        {foldRepeats(thread?.items ?? []).map(({ item, repeats }) => (
           <li
             key={item.id}
             className={item.kind === 'event' ? 'text-sm text-muted-foreground' : 'rounded-md border p-3'}
@@ -191,6 +234,7 @@ export function RowThreadPanel({
               {item.kind === 'event' && <span>{eventText(item.event)}</span>}
               {item.kind === 'progress' && <Badge variant="secondary">Progress note</Badge>}
               <span className="text-muted-foreground">{time(item.createdAt)}</span>
+              {repeats > 1 && <span className="text-muted-foreground">{repeats} times</span>}
               {item.editedAt && !item.deleted && <span className="text-muted-foreground">edited</span>}
             </div>
             {item.deleted ? (
@@ -243,7 +287,9 @@ export function RowThreadPanel({
         <Textarea
           aria-label="Comment"
           placeholder={
-            assignment ? 'Comment, or give the agent more direction. Markdown works.' : 'Add a comment. Markdown works.'
+            thread?.assignment
+              ? 'Comment, or give the agent more direction. Markdown works.'
+              : 'Add a comment. Markdown works.'
           }
           value={draft}
           maxLength={20000}
@@ -263,7 +309,7 @@ export function RowThreadPanel({
           Comment
         </Button>
       </div>
-      {thread && thread.runs.length > 0 && (
+      {!conversationOnly && thread && thread.runs.length > 0 && (
         <Collapsible>
           <CollapsibleTrigger render={<Button variant="link" size="sm" />}>
             Run history ({thread.runs.length})

@@ -1212,3 +1212,26 @@
 .analytics-consent {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
+
+/* Comments in a task's side panel read at the panel's compact size. */
+@layer components {
+  [data-compact-text] .sprout-message-response {
+    font-size: var(--sprout-text-sm);
+    line-height: 1.5;
+  }
+  [data-compact-text] .sprout-message-response > * + * {
+    margin-top: 0.5rem;
+  }
+}
+
+/* The Tasks page board fills the space under its toolbar. */
+.sprout-page-content[data-task-page] {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+[data-task-board] .sprout-board {
+  --sprout-board-height: 100%;
+  --sprout-board-cell-height: none;
+}

@@ -165,6 +165,7 @@
   "test/table-search-drafts.browser.mjs": 13,
   "test/tables-e2e.browser.mjs": 1,
   "test/tables.browser.mjs": 227,
+  "test/task-board.browser.mjs": 20,
   "test/task-composer.browser.mjs": 72,
   "test/task-history.browser.mjs": 30,
   "test/task-latest-activation.browser.mjs": 1,
