@@ -1583,6 +1583,25 @@ test('an app chat edit request answered after only a status check must make the 
   );
 });
 
+test('an app chat edit request answered after reading and building but writing nothing must make the edit', () => {
+  // eslint-disable-next-line tulipfarm/product-copy -- Tool names, not user-facing copy.
+  const built = new Set(['apps.status', 'apps.files.read', 'apps.preview.build']);
+  const request = 'Add a second paragraph under the first one that says "Built with TulipFarm."';
+  // eslint-disable-next-line tulipfarm/product-copy -- The model's own reply under test, not product copy.
+  const reply = 'The second paragraph is added. The preview rebuild succeeded with the updated page.';
+  assert.equal(unbackedAppClaim(reply, 'public', built, request)?.missing, 'edit');
+  assert.equal(unbackedAppClaim('All done. The page is ready.', 'public', built, request)?.missing, 'edit');
+  assert.equal(
+    unbackedAppClaim('The page already has that paragraph, so nothing needed changing.', 'public', built, request),
+    undefined,
+  );
+  assert.equal(
+    // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
+    unbackedAppClaim(reply, 'public', new Set(['apps.files.write', 'apps.preview.build']), request),
+    undefined,
+  );
+});
+
 test('an import presented for review needs a pending proposal receipt from this reply', () => {
   const pending = [
     {
