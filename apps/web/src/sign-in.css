@@ -10,6 +10,7 @@
 @import '@tulipfarm/sprout/styles/avatar.css';
 @import '@tulipfarm/sprout/styles/badge.css';
 @import '@tulipfarm/sprout/styles/button.css';
+@import '@tulipfarm/sprout/styles/canvas.css';
 @import '@tulipfarm/sprout/styles/field.css';
 @import '@tulipfarm/sprout/styles/form.css';
 @import '@tulipfarm/sprout/styles/input.css';
@@ -18,8 +19,10 @@
 @import '@tulipfarm/sprout/styles/radio-group.css';
 @import '@tulipfarm/sprout/styles/rich-text-editor.css';
 @import '@tulipfarm/sprout/styles/separator.css';
+@import '@tulipfarm/sprout/styles/sidebar.css';
 @import '@tulipfarm/sprout/styles/spinner.css';
 @import '@tulipfarm/sprout/styles/state-panel.css';
+@import '@tulipfarm/sprout/styles/tooltip.css';
 @import '@tulipfarm/sprout/styles/base.css';
 @import '@tulipfarm/sprout/themes/tulipfarm.css';
 @import './app.css';
