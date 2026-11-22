@@ -196,7 +196,7 @@ const compatibilitySchema = z
     deadlineAt: z.number().int().optional(),
   })
   .refine(({ minimum, maximum }) => maximum >= minimum);
-const identitySchema = z.object({ session_user: z.string(), current_user: z.string() });
+const identitySchema = z.object({ session_user: z.string(), current_user: z.string(), fenced: z.boolean() });
 const versionSchema = z.object({ version: z.number().int() });
 const missingSchemaObject = (error: unknown): error is Error & { code: string } =>
   error instanceof Error && 'code' in error && typeof error.code === 'string' && missingSchemaCodes.has(error.code);
@@ -208,11 +208,24 @@ function missingTableName(error: Error) {
   return /^tf_[a-z0-9_]{1,60}$/.test(table) ? table : /^g_[0-9a-f]{32}$/.test(table) ? 'custom' : 'other';
 }
 
-export async function fenceWorkspaceAccess(client: SqlClient, workspaceId: string, exclusive = false) {
-  const installed = await client.query(
-    "SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'app' AND p.proname = 'workspace_access'",
+const fenceInstalled =
+  "EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'app' AND p.proname = 'workspace_access')";
+
+/** `installed` skips the lookup of `app.workspace_access` when the caller already read it in the same transaction. */
+export async function fenceWorkspaceAccess(
+  client: SqlClient,
+  workspaceId: string,
+  exclusive = false,
+  installed?: boolean,
+) {
+  installed ??= Boolean(
+    (
+      await client.query(
+        "SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'app' AND p.proname = 'workspace_access'",
+      )
+    ).rowCount,
   );
-  if (!installed.rowCount) return;
+  if (!installed) return;
   const result = await client.query('SELECT app.workspace_access($1::uuid, $2::boolean) AS allowed', [
     workspaceId,
     exclusive,
@@ -600,7 +613,7 @@ export function createWorkspaceRuntime(
                 const identity = identitySchema.parse(
                   (
                     await observeChatDetail('storage-identity', () =>
-                      connection.query('SELECT session_user, current_user'),
+                      connection.query(`SELECT session_user, current_user, ${fenceInstalled} AS fenced`),
                     )
                   ).rows[0],
                 );
@@ -608,7 +621,7 @@ export function createWorkspaceRuntime(
                 if (identity.session_user !== names.runtime || identity.current_user !== names.runtime)
                   throw new Error('Runtime login identity mismatch');
                 await observeChatDetail('storage-fence', () =>
-                  fenceWorkspaceAccess(connection, workspaceId, compatibility.access === 'exclusive'),
+                  fenceWorkspaceAccess(connection, workspaceId, compatibility.access === 'exclusive', identity.fenced),
                 );
                 const version = versionSchema.parse(
                   (

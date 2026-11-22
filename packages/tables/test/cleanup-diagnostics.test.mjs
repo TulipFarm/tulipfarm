@@ -42,8 +42,8 @@ function database(t, fail = () => undefined, candidates = () => true) {
   t.mock.method(Client.prototype, 'query', async sql => {
     statements.push(sql);
     await fail(sql);
-    if (sql === 'SELECT session_user, current_user')
-      return { rows: [{ session_user: login, current_user: login }], rowCount: 1 };
+    if (sql.startsWith('SELECT session_user, current_user'))
+      return { rows: [{ session_user: login, current_user: login, fenced: true }], rowCount: 1 };
     if (sql.startsWith('SELECT 1 FROM pg_proc')) return { rows: [{}], rowCount: 1 };
     if (sql.startsWith('SELECT app.workspace_access')) return { rows: [{ allowed: true }], rowCount: 1 };
     if (sql.endsWith(' AS needed')) return { rows: [{ needed: candidates(sql) }], rowCount: 1 };

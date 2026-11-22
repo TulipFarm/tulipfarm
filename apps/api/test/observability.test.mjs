@@ -57,8 +57,8 @@ test('a sender that leaves frees its queued workspace storage place', async t =>
   const names = workspaceNames(workspaceId);
   const client = Object.assign(new EventEmitter(), {
     async query(sql) {
-      if (sql === 'SELECT session_user, current_user')
-        return { rows: [{ session_user: names.runtime, current_user: names.runtime }] };
+      if (sql.startsWith('SELECT session_user, current_user'))
+        return { rows: [{ session_user: names.runtime, current_user: names.runtime, fenced: true }] };
       if (sql.includes('FROM pg_proc')) return { rows: [], rowCount: 1 };
       if (sql.includes('app.workspace_access')) return { rows: [{ allowed: true }] };
       if (sql.includes('count(*)')) return { rows: [{ version: commonCompatibility.maximum }] };

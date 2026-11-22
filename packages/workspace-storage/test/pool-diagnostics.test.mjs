@@ -43,8 +43,8 @@ function setup(t, { failQuery, failConnect, rollbackFailure, denied = false } = 
       clock += 100;
       if (sql === failQuery?.sql) throw failQuery.error;
       if (sql === 'ROLLBACK' && rollbackFailure) throw rollbackFailure;
-      if (sql === 'SELECT session_user, current_user')
-        return { rows: [{ session_user: names.runtime, current_user: names.runtime }] };
+      if (sql.startsWith('SELECT session_user, current_user'))
+        return { rows: [{ session_user: names.runtime, current_user: names.runtime, fenced: true }] };
       if (sql.includes('FROM pg_proc')) return { rows: [], rowCount: 1 };
       if (sql.includes('app.workspace_access')) return { rows: [{ allowed: !denied }] };
       if (sql.includes('count(*)')) return { rows: [{ version: compatibility.maximum }] };
@@ -100,7 +100,7 @@ test('non-chat transactions measure checkout and the whole hold through reset an
   );
   assert.deepEqual(fixture.timings(), [
     ['workspace.connection.wait', 'success', 250, 1],
-    ['workspace.connection.hold', 'success', 1350, 1],
+    ['workspace.connection.hold', 'success', 1250, 1],
   ]);
   assert.deepEqual(fixture.queries.slice(-2), ['COMMIT', 'DISCARD ALL']);
   assert.deepEqual(fixture.releases, [false]);
@@ -144,7 +144,7 @@ for (const stage of ['callback', 'COMMIT', 'ROLLBACK', 'DISCARD ALL']) {
     );
     assert.deepEqual(fixture.timings(), [
       ['workspace.connection.wait', 'success', 250, 1],
-      ['workspace.connection.hold', 'error', stage === 'callback' || stage === 'ROLLBACK' ? 1250 : 1350, 1],
+      ['workspace.connection.hold', 'error', stage === 'callback' || stage === 'ROLLBACK' ? 1150 : 1250, 1],
     ]);
     assert.deepEqual(fixture.releases, [true]);
     assert.equal(fixture.client.listenerCount('error'), 0);
@@ -162,7 +162,7 @@ test('denied access still prevents the callback and records the failed hold', as
   );
   assert.deepEqual(fixture.timings(), [
     ['workspace.connection.wait', 'success', 250, 1],
-    ['workspace.connection.hold', 'error', 650, 1],
+    ['workspace.connection.hold', 'error', 550, 1],
   ]);
   assert.deepEqual(fixture.releases, [true]);
   assert.equal(fixture.queries.at(-1), 'ROLLBACK');

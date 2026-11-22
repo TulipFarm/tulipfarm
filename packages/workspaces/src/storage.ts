@@ -24,6 +24,9 @@ export function isolatedStorageEnabled() {
 export function workspaceRuntime(pool: Pool) {
   const key = credentialKeyring('runtime');
   const rowSchema = z.object({ generation: z.number().int(), runtime_credential: z.unknown() });
+  // Each transaction rereads the row, so a disabled workspace or a new generation still applies at once; only the
+  // decryption of an unchanged envelope is reused. Connection pools already hold these connection strings.
+  const decrypted = new Map<string, { generation: number; envelope: string; connectionString: string }>();
   const databaseConnectionBudget = Number(process.env.WORKSPACE_DATABASE_CONNECTION_BUDGET ?? 120);
   const fleet = databaseConnectionFleet();
   const needed = fleet && fleetConnections(fleet);
@@ -52,14 +55,26 @@ export function workspaceRuntime(pool: Pool) {
       );
       if (result.rows[0]?.stage !== 'ready') throw new StorageUnavailableError('disabled');
       const row = rowSchema.parse(result.rows[0]);
+      const envelope = JSON.stringify(row.runtime_credential);
+      let credential = decrypted.get(workspaceId);
+      if (credential?.generation !== row.generation || credential.envelope !== envelope) {
+        credential = {
+          generation: row.generation,
+          envelope,
+          connectionString: decryptCredential(
+            row.runtime_credential,
+            { workspaceId, generation: row.generation, capability: 'runtime' },
+            key,
+          ),
+        };
+        decrypted.delete(workspaceId);
+        decrypted.set(workspaceId, credential);
+        if (decrypted.size > 1000) decrypted.delete(decrypted.keys().next().value!);
+      }
       return runtimeCredentialSchema.parse({
         workspaceId,
         generation: row.generation,
-        connectionString: decryptCredential(
-          row.runtime_credential,
-          { workspaceId, generation: row.generation, capability: 'runtime' },
-          key,
-        ),
+        connectionString: credential.connectionString,
       });
     },
   });
