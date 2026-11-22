@@ -25,6 +25,7 @@ export {
   registerExtension,
   reportError,
   resetExtensions,
+  resourceMeter,
   shutdownExtensions,
   socialPlatformApps,
   unavailableAppHost,

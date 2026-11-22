@@ -19,7 +19,7 @@ export type ChatExecutionResult = {
 };
 /** Runs one snippet of model-written code in a fresh, isolated machine for a chat turn. */
 export type ChatExecution = (
-  input: { conversationId: string; language: ChatExecutionLanguage; code: string },
+  input: { workspaceId: string; conversationId: string; language: ChatExecutionLanguage; code: string },
   signal?: AbortSignal,
 ) => Promise<ChatExecutionResult>;
 
@@ -48,6 +48,7 @@ export async function runIsolated(
   backend: ExecutionBackend,
   configuration: RunnableConfiguration,
   input: {
+    workspaceId: string;
     areaId: string;
     command: ExecutionCommand;
     timeoutMs?: number;
@@ -77,6 +78,7 @@ export async function runIsolated(
         baseRevision: policy.baseRevision,
         policyRevision,
         deadline: allocationDeadline,
+        workspaceId: input.workspaceId,
         ...(input.secrets?.length ? { secrets: input.secrets } : {}),
       },
       { signal },
@@ -135,6 +137,11 @@ export async function runIsolated(
 export function createChatExecution(backend: ExecutionBackend, configuration: RunnableConfiguration): ChatExecution {
   if (!configuration.policy.profiles.some(item => item.id === configuration.policy.defaultProfile))
     throw new Error('execution-profile-missing');
-  return ({ conversationId, language, code }, signal) =>
-    runIsolated(backend, configuration, { areaId: conversationId, command: commands[language](code) }, signal);
+  return ({ workspaceId, conversationId, language, code }, signal) =>
+    runIsolated(
+      backend,
+      configuration,
+      { workspaceId, areaId: conversationId, command: commands[language](code) },
+      signal,
+    );
 }

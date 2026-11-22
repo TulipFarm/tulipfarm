@@ -282,6 +282,7 @@ const failureReasons: Partial<Record<string, string>> = {
   'discovery-failed': 'The server did not return a usable tool list.',
   'install-failed': 'The package could not be installed or did not start. Check its name, version and settings.',
   limit: 'This workspace started too many package installs today. Try again tomorrow.',
+  'credits-exhausted': 'This workspace is out of credits. Add credits, then start the server again.',
   disabled: 'Hosted packages are not available in this workspace.',
   'secret-denied':
     'A saved secret is not shared with everyone who uses this integration, or does not name its endpoint.',

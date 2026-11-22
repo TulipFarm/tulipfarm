@@ -10,6 +10,8 @@ export const creditActivitySchema = z.enum([
   'knowledge-reindex',
   'app-build',
   'app-hosting',
+  'storage',
+  'compute',
   // Only under the workspace `images` flag; otherwise they are counted as the activity that charged them.
   'image-generation',
   'image-recognition',
@@ -22,7 +24,8 @@ export const creditUsageScopeSchema = z.enum(['workspace', 'personal']);
 export const creditSummarySchema = z.object({
   scope: creditUsageScopeSchema.optional(),
   // Null when no billing extension keeps a balance: credits are unlimited.
-  available: z.number().nonnegative().nullable(),
+  // Negative when storage or compute charged after the work overdrew the account.
+  available: z.number().nullable(),
   granted: z.number().nonnegative().nullable(),
   used: z.number().nonnegative(),
   held: z.number().nonnegative(),

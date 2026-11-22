@@ -43,6 +43,7 @@ export default defineExtension({
 | -------------------- | --------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
 | `creditGate`         | one per process | `unlimitedCredits`: funds all work, stores no balance                                | the credit meter in `@tulipfarm/workspace-storage/credits`                                               |
 | `creditPricing`      | one per process | `providerCostPricing`: one credit per $0.01 of provider cost, no markup, no rounding | `creditUnitsForProviderCost`, the credit meter, knowledge credits, the model catalog's credit rates      |
+| `resourceMeter`      | one per process | none: storage and compute are not charged                                            | the worker's hourly `resource-storage` and `resource-compute` jobs                                       |
 | `flagProvider`       | one per process | none: each flag's env override, then its declared default (see below)                | `isFeatureEnabled`, `featureFlagSnapshot` in `@tulipfarm/observability`                                  |
 | `socialPlatformApps` | one per process | none: operator `SOCIAL_<PLATFORM>_*` settings supply platform apps                   | social platform-app resolution in `@tulipfarm/social`; when set, X and Reddit need a workspace's own app |
 | `executionBackend`   | one per process | none: execution is unavailable                                                       | API/core-worker startup preflight when `TULIPFARM_EXECUTION_BACKEND=extension`                           |
@@ -171,6 +172,46 @@ slots.creditPricing({
 
 `creditUnitsForProviderCost(picoUsd)` returns `round(picoUsd × unitsPerPicoUsd)`.
 Task budgets (`limits.credits`) and the credit gate count the same units.
+
+### Resource metering
+
+`slots.resourceMeter(meter)` turns on storage and compute charges in the same
+credits as model calls. Without a meter, nothing is measured or charged.
+
+```ts
+interface ResourceMeter {
+  pricing: {
+    databasePicoUsdPerGibMonth: bigint; // a workspace's Postgres schema
+    objectPicoUsdPerGibMonth: bigint; // its files, soul and app source in object storage
+    runPicoUsdPerHour: bigint; // one agent-task or workflow step on a shared worker
+  };
+  computeUsage?(
+    window: { start: Date; end: Date },
+    signal: AbortSignal,
+  ): AsyncIterable<{ workspaceId: string; units: bigint }>;
+  releaseStorage?(signal: AbortSignal): AsyncIterable<{ releaseId: string; bytes: bigint }>;
+}
+```
+
+Prices are provider cost in pico-USD; the `creditPricing` rate converts them,
+without `round`, so a small daily charge is not rounded up to a whole credit.
+
+- **Storage**, once per UTC day for each workspace: database bytes (its tables,
+  indexes and TOAST), object bytes under its key prefix in the files, soul and
+  apps buckets, and the `releaseStorage` bytes of each published app release
+  the extension's publisher holds, charged to the release's workspace. Each source is charged a day's share of its monthly price.
+- **Run steps**: the worker records when each agent-task and workflow step
+  starts and ends and charges the elapsed time at `runPicoUsdPerHour`. A step
+  whose end was never recorded is charged up to its timeout.
+- **Sandboxes**: `computeUsage` reports each workspace's sandbox compute for a
+  closed hour, already priced in credit units. The worker asks for each hour
+  once it is two hours old, and retries missed hours for up to a day.
+
+Every charge has a fixed id, so a retry or a second worker charges it once.
+Charges are `storage` and `compute` activities with their own flows, and are
+never refused: the work already happened, so a gate's balance may go below
+zero. While `available()` is zero or less, new model calls, workflow steps and
+hosted MCP servers wait or fail until the workspace adds credits.
 
 Feature flags are declared once in `@tulipfarm/config/feature-flags` with a
 description, a default (`true`, `false`, or `development`: on unless

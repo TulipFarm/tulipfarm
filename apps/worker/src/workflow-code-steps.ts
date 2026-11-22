@@ -83,6 +83,7 @@ export function createExecutionSnippetClient(
   return {
     async submit(job) {
       const run = await runIsolated(backend, configuration, {
+        workspaceId: job.workspaceId,
         areaId: job.runId,
         command: stepCommand(job.language, job.source, JSON.stringify(job.input)),
         timeoutMs: stepTimeoutMs,

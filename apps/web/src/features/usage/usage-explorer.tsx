@@ -309,7 +309,7 @@ function SourceSummary({ context }: { context: Context }) {
         icon={<WalletIcon size="sm" aria-hidden />}
         title="TulipFarm credits"
         value={balance.available === null ? 'Unlimited' : formatNumber(balance.available)}
-        caption={`${balance.available !== null && balance.granted !== null ? `left of ${formatNumber(balance.granted)} · ` : ''}${measureInfo.credits.format(credits.credits).replace('—', '0')} used in ${days} days`}
+        caption={`${balance.available !== null && balance.available < 0 ? 'Overdrawn · ' : balance.available !== null && balance.granted !== null ? `left of ${formatNumber(balance.granted)} · ` : ''}${measureInfo.credits.format(credits.credits).replace('—', '0')} used in ${days} days`}
         onOpen={() => open('credits')}
         openLabel="See credit usage"
       />
@@ -821,7 +821,11 @@ function ConnectionStatus({ value, context }: { value: string; context: Context 
   if (value === 'credits')
     return (
       <span className="text-xs text-muted-foreground">
-        {report.balance.available === null ? 'Unlimited' : `${formatNumber(report.balance.available)} credits left`}
+        {report.balance.available === null
+          ? 'Unlimited'
+          : report.balance.available < 0
+            ? `${formatNumber(-report.balance.available)} credits overdrawn`
+            : `${formatNumber(report.balance.available)} credits left`}
       </span>
     );
   const connection = report.labels.connections[value];

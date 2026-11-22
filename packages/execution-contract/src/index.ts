@@ -233,6 +233,8 @@ export interface ExecutionBackend {
       readonly deadline: string;
       /** Only for a backend with `capabilities.secrets`; it deletes them when the allocation is destroyed. */
       readonly secrets?: readonly ExecutionSecret[];
+      /** The workspace that pays for the machine, so a backend can report its compute per workspace. */
+      readonly workspaceId?: string;
     },
     operation: Operation,
   ): Promise<ExecutionAllocationState>;

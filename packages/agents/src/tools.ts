@@ -1962,7 +1962,7 @@ export function createChatTools(
       case 'execution.run':
         if (!chatExecution || !context.origin) throw new AccessDenied();
         return chatExecution(
-          { conversationId: context.origin.conversationId, language: call.language, code: call.code },
+          { workspaceId, conversationId: context.origin.conversationId, language: call.language, code: call.code },
           context.signal,
         );
       case 'apps.status':

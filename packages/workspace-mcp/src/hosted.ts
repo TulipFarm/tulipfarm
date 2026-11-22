@@ -12,6 +12,7 @@ import {
   type McpSecretVersion,
   type WorkspaceMcpOptions,
 } from './contracts.ts';
+import { CreditsExhausted, requireCredits } from '@tulipfarm/workspace-storage/credits';
 import { table, type McpStore } from './store.ts';
 import { hostedEgress, hostedFingerprint } from './validation.ts';
 
@@ -278,7 +279,11 @@ export function hostedMethods(options: WorkspaceMcpOptions, store: McpStore) {
       return true;
     });
   }
-  async function fail(workspaceId: string, prepared: Extract<Prepared, { kind: 'provision' }>) {
+  async function fail(
+    workspaceId: string,
+    prepared: Extract<Prepared, { kind: 'provision' }>,
+    reason: string | null = installFailedReason,
+  ) {
     await store.transaction(workspaceId, async tx => {
       if (prepared.buildId)
         await tx.client.query(`UPDATE ${table(tx, 'builds')} SET outcome='failed' WHERE id=$1 AND outcome='started'`, [
@@ -288,10 +293,10 @@ export function hostedMethods(options: WorkspaceMcpOptions, store: McpStore) {
         `UPDATE ${table(tx, 'hosts')} SET claimed_at=NULL WHERE integration_id=$1 AND generation=$2 AND ready_at IS NULL`,
         [prepared.row.id, prepared.launch.generation],
       );
-      if (claimed.rowCount)
+      if (claimed.rowCount && reason)
         await tx.client.query(`UPDATE ${table(tx, 'integrations')} SET status_reason=$2 WHERE id=$1`, [
           prepared.row.id,
-          installFailedReason,
+          reason,
         ]);
     });
   }
@@ -321,6 +326,18 @@ export function hostedMethods(options: WorkspaceMcpOptions, store: McpStore) {
       let sandboxId: string;
       if (prepared.kind === 'ready') sandboxId = prepared.sandboxId;
       else {
+        // A sandbox is charged while it runs, so none starts while the workspace is out of credits.
+        const exhausted = await store
+          .transaction(workspaceId, tx => requireCredits(tx))
+          .then(() => false)
+          .catch(error => {
+            if (error instanceof CreditsExhausted) return true;
+            throw error;
+          });
+        if (exhausted) {
+          await fail(workspaceId, prepared, null);
+          throw new McpError('credits-exhausted');
+        }
         if (prepared.previous) await remove({ workspaceId, integrationId: id, ...prepared.previous });
         try {
           sandboxId = (

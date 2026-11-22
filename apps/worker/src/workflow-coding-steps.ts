@@ -145,6 +145,7 @@ export function createWorkflowCodingActivities(
       backend,
       configuration,
       {
+        workspaceId,
         areaId: runId,
         repository: job.repository,
         task: job.prompt,

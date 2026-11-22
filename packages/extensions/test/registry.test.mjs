@@ -25,6 +25,7 @@ import {
   unavailableAppHost,
   unlimitedCredits,
   providerCostPricing,
+  resourceMeter,
 } from '../src/index.ts';
 
 const context = { app: 'api', env: {} };
@@ -645,4 +646,30 @@ test('group and person profiles reach analytics that support them, and a failure
     ['group', group],
     ['person', person],
   ]);
+});
+
+test('resource metering is off until one extension sets a meter with valid prices', async () => {
+  assert.equal(resourceMeter(), undefined);
+  const pricing = { databasePicoUsdPerGibMonth: 1n, objectPicoUsdPerGibMonth: 0n, runPicoUsdPerHour: 2n };
+  const register = (name, meter) =>
+    registerExtension(
+      {
+        name,
+        register(slots) {
+          slots.resourceMeter(meter);
+        },
+      },
+      context,
+    );
+  await register('meter', { pricing });
+  assert.deepEqual(resourceMeter()?.pricing, pricing);
+  await assert.rejects(register('other', { pricing }), /"other" cannot set the resource meter: "meter" already set it/);
+  resetExtensions();
+  for (const bad of [
+    {},
+    { pricing: { ...pricing, runPicoUsdPerHour: -1n } },
+    { pricing: { ...pricing, objectPicoUsdPerGibMonth: 1 } },
+  ])
+    await assert.rejects(register('bad', bad), /resource meter needs non-negative bigint prices/);
+  assert.equal(resourceMeter(), undefined);
 });
