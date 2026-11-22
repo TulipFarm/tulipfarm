@@ -8,11 +8,10 @@ import { workspaceTableMigrations } from '../../workspaces/dist/table-migrations
 import {
   createGitHubKnowledge,
   createKnowledgeAgentTools,
-  createKnowledgeEmbeddings,
-  createKnowledgeSearch,
   createKnowledgeSourceFailures,
   GitHubCorpusError,
 } from '../dist/index.js';
+import { keepBackedSearch } from './fake-keep.mjs';
 
 const allKinds = ['code', 'discussions', 'docs', 'issues', 'pulls'];
 const itemKinds = { doc: 'docs', issue: 'issues' };
@@ -137,11 +136,10 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       fake.repos.get('7003').scoped = false;
 
       const github = createGitHubKnowledge({ runtime, provider: fake.provider });
-      const search = createKnowledgeSearch({
+      const search = keepBackedSearch({
         runtime,
-        embeddings: createKnowledgeEmbeddings({ runtime, github, config: { kind: 'disabled' } }),
         github,
-      });
+      }).search;
       const tools = createKnowledgeAgentTools({ runtime, search });
       const actor = { kind: 'human', userId: ws.userId, membershipId: ws.membershipId };
       const { sourceId } = await github.configure(ws.id, ws.userId, {

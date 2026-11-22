@@ -6,11 +6,10 @@ import { reserveCredits, settleCredits } from '@tulipfarm/workspace-storage/cred
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import {
   createKnowledgeAgentTools,
-  createKnowledgeEmbeddings,
-  createKnowledgeSearch,
   createLocalKnowledge,
   withKnowledgeSourceAuthorization,
 } from '../../knowledge/dist/index.js';
+import { keepBackedSearch } from '../../knowledge/test/fake-keep.mjs';
 import { createAgentExecutor } from '../src/executor.ts';
 import { createAgentTasks } from '../src/tasks.ts';
 import { createTaskApprovals } from '../src/task-approvals.ts';
@@ -119,11 +118,10 @@ async function knowledgeFixture(t) {
     ])
   ).rows[0].lexical_publication_id;
   let calls = 0;
-  const embeddings = createKnowledgeEmbeddings({ runtime: f.runtime, config: { kind: 'disabled' } });
   const knowledge = guarded => {
     const domain = createKnowledgeAgentTools({
       runtime: guarded,
-      search: createKnowledgeSearch({ runtime: guarded, embeddings }),
+      search: keepBackedSearch({ runtime: guarded }).search,
     });
     return {
       ...domain,

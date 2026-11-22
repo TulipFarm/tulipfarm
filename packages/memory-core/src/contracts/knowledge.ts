@@ -42,7 +42,6 @@ export const knowledgeSearchRequestSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('submitted'),
     commandId: uuid,
-    retrySemantic: z.boolean().default(false),
     ...searchFields,
   }),
   z.strictObject({
@@ -132,24 +131,13 @@ export const knowledgeHitSchema = z.object({
   /** True when the cited revision has parts Knowledge could not read. */
   coverageGaps: z.boolean().optional(),
 });
-export const knowledgeSearchReasonSchema = z.enum([
-  'semantic-not-enabled',
-  'typing',
-  'no-semantic-content',
-  'embedding-pending',
-  'credits-blocked',
-  'capacity-blocked',
-  'provider-unavailable',
-  'deadline',
-]);
 export const knowledgeSearchResultSchema = z.object({
-  mode: z.enum(['keyword-only', 'hybrid']),
-  reason: knowledgeSearchReasonSchema.nullable(),
-  queryBroadened: z.boolean().optional(),
+  mode: z.literal('hybrid'),
+  reason: z.null(),
   hits: z.array(knowledgeHitSchema),
   validUntil: z.iso.datetime(),
   continuation: z.string().nullable().default(null),
-  coverage: z.enum(['complete', 'partial', 'keyword-only']).default('keyword-only'),
+  coverage: z.enum(['complete', 'partial']),
   bounded: z.boolean().default(true),
 });
 export type KnowledgeFreshness = z.infer<typeof knowledgeFreshnessSchema>;

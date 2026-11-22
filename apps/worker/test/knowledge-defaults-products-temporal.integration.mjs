@@ -5,7 +5,6 @@ import { test } from 'node:test';
 import { NativeConnection } from '@temporalio/worker';
 import { Client, Connection } from '@temporalio/client';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
-import { knowledgeEmbeddingProfile as profile } from '@tulipfarm/config';
 import { createGoogleWorkspaceService } from '@tulipfarm/google-workspace';
 import {
   createDefaultKnowledgeGate,
@@ -16,7 +15,6 @@ import { createGoogleKnowledgeWorker } from '../dist/knowledge-google-compositio
 import { createSlackKnowledgeWorker } from '../dist/knowledge-slack-composition.js';
 import { createAtlassianKnowledgeWorker } from '../dist/knowledge-atlassian-composition.js';
 import { createGitHubKnowledgeWorker } from '../dist/knowledge-github-composition.js';
-import { createKnowledgeEmbeddingWorker } from '../dist/knowledge-embedding-composition.js';
 import { createDefaultKnowledgeWorker } from '../dist/knowledge-defaults-composition.js';
 import { knowledgeFixture } from '../../api/test/knowledge-fixture.mjs';
 import { googleProviderFixture, connectGoogle } from '../../api/test/knowledge-google-provider-fixture.mjs';
@@ -37,7 +35,7 @@ const automatic = { enabled: defaultKnowledgeFlagEnabled, record: recordDefaultK
 
 /**
  * Runs one product family through real Temporal: the API sweep dispatches the intent, the defaults worker
- * configures sources, provider workers publish and the embedding worker settles credits. No HTTP read opens Knowledge.
+ * configures sources and provider workers publish. No HTTP read opens Knowledge.
  */
 async function journey(name, setup, body) {
   const priorQueue = process.env.TEMPORAL_TASK_QUEUE;
@@ -45,24 +43,6 @@ async function journey(name, setup, body) {
   process.env.TEMPORAL_TASK_QUEUE = queue;
   const env = {
     TEMPORAL_TASK_QUEUE: queue,
-    KNOWLEDGE_EMBEDDINGS_ENABLED: 'true',
-    AZURE_FOUNDRY_ENDPOINT: 'https://example.services.ai.azure.com/',
-    AZURE_FOUNDRY_API_KEY: 'fixture-only',
-  };
-  const embeddingCalls = [];
-  const embed = async input => {
-    embeddingCalls.push(input);
-    return {
-      dispatch: 'dispatched',
-      requestId: randomUUID(),
-      inputTokensUpperBound: 1,
-      usage: { kind: 'known', inputTokens: 1, totalTokens: 1, exceedsUpperBound: false },
-      result: {
-        kind: 'success',
-        model: profile.model,
-        vectors: [Array.from({ length: 1536 }, (_, i) => (i === 0 ? 1 : 0))],
-      },
-    };
   };
   const workers = [];
   let f, connection, clientConnection;
@@ -72,7 +52,7 @@ async function journey(name, setup, body) {
     clientConnection = await Connection.connect({ address });
     const client = new Client({ connection: clientConnection });
     const temporal = { connection: clientConnection, client };
-    const options = await setup.fixture({ temporal, embeddings: { env, provider: embed } });
+    const options = await setup.fixture({ temporal });
     f = await knowledgeFixture(options);
     await f.db.platform.query(
       `UPDATE ${f.table('tf_credit_account')} SET available=10000000000000,granted=10000000000000`,
@@ -89,17 +69,6 @@ async function journey(name, setup, body) {
       await item.running;
     };
     const engine = await start(await setup.engine({ f, connection, env, gate }));
-    await start(
-      await createKnowledgeEmbeddingWorker({
-        runtime: f.runtime,
-        connection,
-        env,
-        pool: f.signed.identity,
-        gate,
-        [setup.kind]: engine.service,
-        provider: embed,
-      }),
-    );
     const defaults = (engines = { [setup.kind]: engine.service }) =>
       createDefaultKnowledgeWorker({ runtime: f.runtime, connection, env, engines });
     const q = async (sql, values = []) =>
@@ -109,7 +78,7 @@ async function journey(name, setup, body) {
           values,
         )
       ).rows;
-    await body({ f, q, env, engine, defaults, start, stop, embeddingCalls, client });
+    await body({ f, q, env, engine, defaults, start, stop, client });
   } finally {
     await f?.app.close();
     for (const item of workers.reverse()) {
@@ -125,7 +94,7 @@ async function journey(name, setup, body) {
   }
 }
 
-/** Every automatic source is owner-only, every document is lexically and vector published, and every ingestion credit attempt is settled against its source. */
+/** Every automatic source is owner-only, and every document is published. */
 async function published(q, kind, product) {
   const sources = await q(
     `SELECT s.source_id,ks.owner_membership_id FROM tf_knowledge_default_sources s JOIN tf_knowledge_default_intents i ON i.id=s.intent_id
@@ -135,10 +104,10 @@ async function published(q, kind, product) {
   if (!sources.length) return false;
   for (const source of sources) {
     const documents = await q(
-      `SELECT lexical_publication_id,vector_publication_id FROM tf_knowledge_documents WHERE source_id=$1 AND tombstoned_at IS NULL`,
+      `SELECT lexical_publication_id FROM tf_knowledge_documents WHERE source_id=$1 AND tombstoned_at IS NULL`,
       [source.source_id],
     );
-    if (!documents.length || documents.some(d => !d.lexical_publication_id || !d.vector_publication_id)) return false;
+    if (!documents.length || documents.some(d => !d.lexical_publication_id)) return false;
     const members = await q(`SELECT membership_id FROM tf_knowledge_${kind}_members WHERE source_id=$1`, [
       source.source_id,
     ]);
@@ -148,26 +117,14 @@ async function published(q, kind, product) {
       `${product} defaults to the connecting member only`,
     );
   }
-  const ledger = await q(
-    `SELECT attribution_id,state FROM tf_knowledge_credit_attempts WHERE purpose='ingestion' AND attribution_id=ANY($1::text[])`,
-    [sources.map(s => s.source_id)],
-  );
-  return (
-    ledger.length > 0 &&
-    ledger.every(entry => entry.state === 'known') &&
-    sources.every(s => ledger.some(entry => entry.attribution_id === s.source_id))
-  );
+  return true;
 }
 
 /**
  * The account behind published automatic sources is reauthorized, so their old bindings fail. Automatic Retry through the API
- * must rebind the same sources to the current authorization; they publish again with no new source, credit attempt or paid call.
+ * must rebind the same sources to the current authorization; they publish again with no new source.
  */
-async function recoversAfterReauthorization(
-  { f, q, kind, products, embeddingCalls, fenced = true },
-  reauthorize,
-  current,
-) {
+async function recoversAfterReauthorization({ f, q, kind, products, fenced = true }, reauthorize, current) {
   const ids = async () =>
     (
       await q(
@@ -182,11 +139,7 @@ async function recoversAfterReauthorization(
       `SELECT source_id,sync_state,failure,binding FROM tf_knowledge_${kind}_sources WHERE source_id=ANY($1::uuid[]) ORDER BY source_id`,
       [sources],
     );
-  const receipts = async () =>
-    q(`SELECT id,state FROM tf_knowledge_credit_attempts WHERE purpose='ingestion' ORDER BY id`);
   const before = {
-    receipts: await receipts(),
-    calls: embeddingCalls.length,
     sources: (await q(`SELECT id FROM tf_knowledge_sources ORDER BY id`)).map(r => r.id),
   };
   await reauthorize();
@@ -232,8 +185,6 @@ async function recoversAfterReauthorization(
     before.sources,
     'Retry creates no source',
   );
-  assert.deepEqual(await receipts(), before.receipts, 'unchanged content is not billed again');
-  assert.equal(embeddingCalls.length, before.calls, 'no paid request for unchanged content');
 }
 
 test(
@@ -258,7 +209,7 @@ test(
           }),
         close: google.close,
       },
-      async ({ f, q, defaults, start, embeddingCalls }) => {
+      async ({ f, q, defaults, start }) => {
         await start(await defaults());
         await connectGoogle(f);
         assert.deepEqual(
@@ -274,7 +225,7 @@ test(
         );
         await eventually(
           async () => (await published(q, 'google', 'google-drive')) && (await published(q, 'google', 'gmail')),
-          'Drive and Gmail defaults publish, embed and settle credits without opening Knowledge',
+          'Drive and Gmail defaults publish without opening Knowledge',
         );
         const selections = await q(
           `SELECT s.selection FROM tf_knowledge_google_sources s JOIN tf_knowledge_default_sources d ON d.source_id=s.source_id ORDER BY s.selection->>'kind'`,
@@ -288,7 +239,6 @@ test(
           ['rolling-90d', null, true],
           'whole mailbox, rolling 90 days, without Spam or Trash',
         );
-        assert.ok(embeddingCalls.length > 0);
       },
     );
   },
@@ -327,7 +277,7 @@ test(
         );
         await eventually(
           async () => await published(q, 'slack', 'slack'),
-          'Slack defaults publish, embed and settle credits without opening Knowledge',
+          'Slack defaults publish without opening Knowledge',
         );
         const [source] = await q(
           `SELECT s.selection FROM tf_knowledge_slack_sources s JOIN tf_knowledge_default_sources d ON d.source_id=s.source_id`,
@@ -377,7 +327,7 @@ test(
           );
         await eventually(
           async () => (await published(q, 'atlassian', 'jira')) && (await published(q, 'atlassian', 'confluence')),
-          'Jira and Confluence defaults publish, embed and settle credits without opening Knowledge',
+          'Jira and Confluence defaults publish without opening Knowledge',
         );
         const selections = await q(
           `SELECT s.selection FROM tf_knowledge_atlassian_sources s JOIN tf_knowledge_default_sources d ON d.source_id=s.source_id ORDER BY s.selection->>'product'`,
@@ -451,11 +401,10 @@ test(
         refused = false;
         // Skip the hourly rediscovery wait.
         await q(`UPDATE tf_knowledge_default_intents SET next_attempt_at=clock_timestamp()`);
-        // Both sites hold the same fixture content, so the second site may reuse embeddings instead of opening a new credit attempt; publication is the recovery proof.
         const searchable = async () =>
           (
             await q(`SELECT d.source_id FROM tf_knowledge_documents d JOIN tf_knowledge_default_sources s ON s.source_id=d.source_id
-      WHERE s.state='created' AND d.tombstoned_at IS NULL AND d.lexical_publication_id IS NOT NULL AND d.vector_publication_id IS NOT NULL GROUP BY d.source_id`)
+      WHERE s.state='created' AND d.tombstoned_at IS NULL AND d.lexical_publication_id IS NOT NULL GROUP BY d.source_id`)
           ).length;
         await eventually(
           async () => (await sites()).length === 2 && (await searchable()) === 2,
@@ -470,7 +419,7 @@ test(
 );
 
 test(
-  'a configure that commits but loses its acknowledgement converges after a worker restart on one source, one publication and unchanged billing',
+  'a configure that commits but loses its acknowledgement converges after a worker restart on one source and one publication',
   { timeout: 240000 },
   async () => {
     const slack = slackProviderFixture();
@@ -488,7 +437,7 @@ test(
             slackCorpus: slack.provider(f.runtime),
           }),
       },
-      async ({ f, q, engine, defaults, start, stop, embeddingCalls }) => {
+      async ({ f, q, engine, defaults, start, stop }) => {
         let lost = 0;
         // The source commit succeeds, then the worker dies before the defaults service learns the result.
         const crashing = await start(
@@ -537,18 +486,22 @@ test(
           'replay used the same deterministic command, so one source exists',
         );
         const documents = async () =>
-          await q(
-            `SELECT id,lexical_publication_id,vector_publication_id FROM tf_knowledge_documents WHERE source_id=$1 ORDER BY id`,
-            [planned.source_id],
-          );
-        const receipts = async () =>
-          await q(`SELECT id,state FROM tf_knowledge_credit_attempts WHERE purpose='ingestion' ORDER BY id`);
-        const before = { documents: await documents(), receipts: await receipts(), calls: embeddingCalls.length };
-        assert.ok(
-          before.documents.every(d => d.lexical_publication_id && d.vector_publication_id),
-          'each document has one lexical and one vector publication',
+          await q(`SELECT id,lexical_publication_id FROM tf_knowledge_documents WHERE source_id=$1 ORDER BY id`, [
+            planned.source_id,
+          ]);
+        // Discovery may still be adding documents; wait until the source finishes syncing.
+        await eventually(
+          async () =>
+            (await q(`SELECT sync_state FROM tf_knowledge_slack_sources WHERE source_id=$1`, [planned.source_id]))[0]
+              ?.sync_state === 'ready',
+          'the source finishes syncing',
         );
-        // A second replay of the same configuration changes nothing and bills nothing.
+        const before = { documents: await documents() };
+        assert.ok(
+          before.documents.every(d => d.lexical_publication_id),
+          'each document has one publication',
+        );
+        // A second replay of the same configuration changes nothing.
         await q(`UPDATE tf_knowledge_default_intents SET next_attempt_at=clock_timestamp()`);
         await q(`UPDATE tf_knowledge_default_sources SET state='planned'`);
         await eventually(
@@ -557,8 +510,6 @@ test(
         );
         await delay(3000);
         assert.deepEqual(await documents(), before.documents);
-        assert.deepEqual(await receipts(), before.receipts, 'billing is unchanged on replay');
-        assert.equal(embeddingCalls.length, before.calls, 'no paid request on replay');
         assert.equal(lost, 1);
       },
     );
@@ -584,7 +535,7 @@ test(
             githubCorpus: gh.provider(f.runtime),
           }),
       },
-      async ({ f, q, defaults, start, embeddingCalls }) => {
+      async ({ f, q, defaults, start }) => {
         await start(await defaults());
         const owner = await gh.connect(f, f.signed.owner, 101, 'owner', undefined, automatic);
         await eventually(async () => await published(q, 'github', 'github'), 'GitHub defaults publish');
@@ -592,7 +543,7 @@ test(
           (await q(`SELECT generation FROM tf_github_accounts WHERE id=$1`, [owner.accountId]))[0].generation;
         const first = await account();
         await recoversAfterReauthorization(
-          { f, q, kind: 'github', products: ['github'], embeddingCalls },
+          { f, q, kind: 'github', products: ['github'] },
           () => gh.connect(f, f.signed.owner, 101, 'owner', owner.accountId, automatic),
           async binding =>
             binding.accountId === owner.accountId &&
@@ -626,7 +577,7 @@ test(
           }),
         close: google.close,
       },
-      async ({ f, q, defaults, start, embeddingCalls }) => {
+      async ({ f, q, defaults, start }) => {
         await start(await defaults());
         await connectGoogle(f);
         await eventually(
@@ -641,7 +592,7 @@ test(
           )[0];
         const first = await integration();
         await recoversAfterReauthorization(
-          { f, q, kind: 'google', products: ['google-drive', 'gmail'], embeddingCalls },
+          { f, q, kind: 'google', products: ['google-drive', 'gmail'] },
           async () => {
             // The stored grant expires, as the service records it, and the owner consents again with the same Google account.
             await q(
@@ -683,7 +634,7 @@ test(
             slackCorpus: slack.provider(f.runtime),
           }),
       },
-      async ({ f, q, defaults, start, embeddingCalls }) => {
+      async ({ f, q, defaults, start }) => {
         await start(await defaults());
         await slack.link(f, f.signed.owner, f.workspace.membershipId, 'UOWNER');
         await f.runtime.transaction(f.workspace.id, commonCompatibility, tx =>
@@ -697,7 +648,7 @@ test(
         await eventually(async () => await published(q, 'slack', 'slack'), 'Slack defaults publish');
         let relinked;
         await recoversAfterReauthorization(
-          { f, q, kind: 'slack', products: ['slack'], embeddingCalls },
+          { f, q, kind: 'slack', products: ['slack'] },
           async () => {
             await q(`UPDATE tf_slack_installations SET generation=2 WHERE id=$1`, [slack.installationId]);
             relinked = await slack.link(f, f.signed.owner, f.workspace.membershipId, 'UOWNER', { generation: 2 });
@@ -731,7 +682,7 @@ test(
             atlassianCorpus: atlassian.provider(f.runtime),
           }),
       },
-      async ({ f, q, defaults, start, embeddingCalls }) => {
+      async ({ f, q, defaults, start }) => {
         await start(await defaults());
         const owner = await atlassian.link(f, f.workspace.membershipId, 'owner-aaid');
         await f.runtime.transaction(f.workspace.id, commonCompatibility, tx =>
@@ -745,7 +696,7 @@ test(
         await eventually(async () => await published(q, 'atlassian', 'jira'), 'Jira defaults publish');
         // An Atlassian binding names the account, not its generation, so the failure comes from the revoked token before the reconnect.
         await recoversAfterReauthorization(
-          { f, q, kind: 'atlassian', products: ['jira'], embeddingCalls, fenced: false },
+          { f, q, kind: 'atlassian', products: ['jira'], fenced: false },
           async () => {
             atlassian.revoke(owner.token);
             await q(`UPDATE tf_knowledge_atlassian_sources SET next_attempt_at=clock_timestamp()`);

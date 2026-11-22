@@ -8,7 +8,6 @@ import { createFiles } from '@tulipfarm/files';
 import { workspaceTableMigrations } from '../../workspaces/dist/table-migrations.js';
 import {
   createKnowledgeAgentTools,
-  createKnowledgeEmbeddings,
   createKnowledgeKeepFeed,
   createKnowledgeKeepIndex,
   createKnowledgeSearch,
@@ -58,10 +57,8 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       const connected = { on: true };
       const endpoint = () => (connected.on ? keep.client : undefined);
       const feed = createKnowledgeKeepFeed({ runtime, client: endpoint });
-      const embeddings = createKnowledgeEmbeddings({ runtime, config: { kind: 'disabled' } });
       const search = createKnowledgeSearch({
         runtime,
-        embeddings,
         index: customIndex?.(ws) ?? createKnowledgeKeepIndex({ client: endpoint }),
       });
       searches.push(search);
@@ -108,10 +105,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           .rows[0].lexical_publication_id;
       // The statement connectors run when a document loses read access or its content is no longer supported.
       const unpublish = documentId =>
-        db.platform.query(
-          `UPDATE ${table('documents')} SET lexical_publication_id=NULL,vector_publication_id=NULL WHERE id=$1`,
-          [documentId],
-        );
+        db.platform.query(`UPDATE ${table('documents')} SET lexical_publication_id=NULL WHERE id=$1`, [documentId]);
       const republish = (documentId, publicationId) =>
         db.platform.query(`UPDATE ${table('documents')} SET lexical_publication_id=$2 WHERE id=$1`, [
           documentId,
@@ -142,17 +136,18 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     }
     const ask = (w, query, actor = w.actor) => w.tools.search(w.ws.id, actor, { query }, { commandId: randomUUID() });
 
-    await t.test('without a Keep endpoint, Keep is never called and keyword search answers', async () => {
+    await t.test('without a Keep endpoint, Keep is never called and search is unavailable', async () => {
       const w = await setup();
       w.connected.on = false;
-      const doc = await w.note('supplier payment deadline', 'Supplier policy');
+      await w.note('supplier payment deadline', 'Supplier policy');
       assert.deepEqual(await w.feed.due(w.ws.id, null, 100), []);
-      const found = await ask(w, 'supplier');
-      assert.equal(found.result.mode, 'keyword-only');
-      assert.deepEqual(
-        found.sources.map(source => source.documentId),
-        [doc.documentId],
+      await assert.rejects(
+        w.search.search(w.ws.id, w.ws.userId, { kind: 'submitted', commandId: randomUUID(), query: 'supplier' }),
+        KnowledgeSearchUnavailable,
       );
+      const found = await ask(w, 'supplier');
+      assert.equal(found.result.error, 'knowledge-unavailable');
+      assert.deepEqual(found.sources, []);
       assert.deepEqual(w.keep.calls, []);
     });
 
@@ -439,7 +434,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.ok(!returned.includes(revoked.documentId));
     });
 
-    await t.test('documents Keep does not hold at their current publication are matched locally', async () => {
+    await t.test('documents Keep does not hold at their current publication are left out', async () => {
       const w = await setup();
       const delivered = await w.note('supplier payment deadline', 'Supplier policy');
       const edited = await w.note('supplier onboarding checklist', 'Onboarding');
@@ -460,11 +455,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       const search = w.keep.calls.findLast(call => call.op === 'search');
       assert.deepEqual(search.sourceIds, [delivered.documentId], 'Keep is asked only about what it holds');
       assert.deepEqual(
-        new Set(found.sources.map(source => source.documentId)),
-        new Set([delivered.documentId, edited.documentId, refused.documentId, waiting.documentId]),
+        found.sources.map(source => source.documentId),
+        [delivered.documentId],
       );
-      const revised = found.sources.find(source => source.documentId === edited.documentId);
-      assert.notEqual(revised.revisionId, edited.revisionId, 'the edited document is found at its new revision');
+      assert.equal(found.result.coverage, 'partial');
+      assert.ok(!found.sources.some(source => source.documentId === waiting.documentId));
     });
 
     await t.test('Keep unavailable is a typed failure, never an empty result', async () => {

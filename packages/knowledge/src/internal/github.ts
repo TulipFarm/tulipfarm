@@ -703,7 +703,7 @@ export function createGitHubKnowledge({
       .map(row => row.repository_id);
     if (pending.length) {
       await tx.client.query(
-        `UPDATE ${table(tx, 'documents')} d SET tombstoned_at=COALESCE(d.tombstoned_at,clock_timestamp()),retain_until=COALESCE(d.retain_until,clock_timestamp()+interval '30 days'),lexical_publication_id=NULL,vector_publication_id=NULL
+        `UPDATE ${table(tx, 'documents')} d SET tombstoned_at=COALESCE(d.tombstoned_at,clock_timestamp()),retain_until=COALESCE(d.retain_until,clock_timestamp()+interval '30 days'),lexical_publication_id=NULL
         FROM ${table(tx, 'github_items')} i WHERE i.source_id=$1 AND d.id=i.document_id AND i.repository_id=ANY($2::text[])`,
         [sourceId, pending],
       );
@@ -813,7 +813,7 @@ export function createGitHubKnowledge({
       );
       if (state === 'removed')
         await tx.client.query(
-          `UPDATE ${table(tx, 'documents')} SET tombstoned_at=clock_timestamp(),retain_until=clock_timestamp()+interval '30 days',lexical_publication_id=NULL,vector_publication_id=NULL WHERE source_id=$1`,
+          `UPDATE ${table(tx, 'documents')} SET tombstoned_at=clock_timestamp(),retain_until=clock_timestamp()+interval '30 days',lexical_publication_id=NULL WHERE source_id=$1`,
           [sourceId],
         );
       await invalidate(tx, sourceId, null);
@@ -934,7 +934,7 @@ export function createGitHubKnowledge({
       if (s.selection.scope !== 'all') await handOver(tx, s.owner_membership_id, [...newlyExcluded, ...included]);
       const kinds = selection.kinds.map(kind => itemKinds[kind]);
       await tx.client.query(
-        `UPDATE ${table(tx, 'documents')} d SET tombstoned_at=COALESCE(d.tombstoned_at,clock_timestamp()),retain_until=COALESCE(d.retain_until,clock_timestamp()+interval '30 days'),lexical_publication_id=NULL,vector_publication_id=NULL
+        `UPDATE ${table(tx, 'documents')} d SET tombstoned_at=COALESCE(d.tombstoned_at,clock_timestamp()),retain_until=COALESCE(d.retain_until,clock_timestamp()+interval '30 days'),lexical_publication_id=NULL
         FROM ${table(tx, 'github_items')} i WHERE i.source_id=$1 AND d.id=i.document_id AND (i.repository_id=ANY($2::text[]) OR NOT i.kind=ANY($3::text[]))`,
         [sourceId, newlyExcluded, kinds],
       );
@@ -1232,7 +1232,7 @@ export function createGitHubKnowledge({
   }
   async function clear(tx: Tx, documentId: string, tombstone = false) {
     await tx.client.query(
-      `UPDATE ${table(tx, 'documents')} SET lexical_publication_id=NULL,vector_publication_id=NULL${tombstone ? ",tombstoned_at=COALESCE(tombstoned_at,clock_timestamp()),retain_until=COALESCE(retain_until,tombstoned_at+interval '30 days',clock_timestamp()+interval '30 days')" : ''} WHERE id=$1`,
+      `UPDATE ${table(tx, 'documents')} SET lexical_publication_id=NULL${tombstone ? ",tombstoned_at=COALESCE(tombstoned_at,clock_timestamp()),retain_until=COALESCE(retain_until,tombstoned_at+interval '30 days',clock_timestamp()+interval '30 days')" : ''} WHERE id=$1`,
       [documentId],
     );
     await tx.client.query(`DELETE FROM ${table(tx, 'access_proofs')} WHERE document_id=$1`, [documentId]);
@@ -1509,7 +1509,7 @@ export function createGitHubKnowledge({
           ]);
         } else
           await tx.client.query(
-            `UPDATE ${table(tx, 'documents')} SET observed_revision_id=$2,lexical_publication_id=NULL,vector_publication_id=NULL WHERE id=$1`,
+            `UPDATE ${table(tx, 'documents')} SET observed_revision_id=$2,lexical_publication_id=NULL WHERE id=$1`,
             [documentId, revisionId],
           );
         await tx.client.query(

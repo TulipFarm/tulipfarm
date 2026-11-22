@@ -284,7 +284,7 @@ export async function recordKnowledgeCreditOutcome(tx: Transaction, input: Knowl
   return { state: 'released' as const, reconciliation: BigInt(group.unfunded) > 0n, group };
 }
 
-// Credit units of knowledge embedding attempts made inside one agent task.
+// Credit units of knowledge credit attempts attributed to one agent task.
 // The wallet is charged only through the knowledge aggregate; this is a budget observation.
 export async function knowledgeTaskUsage(tx: Transaction, taskFlowId: string) {
   const installed = z

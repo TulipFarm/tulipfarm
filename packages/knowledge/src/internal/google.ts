@@ -367,7 +367,7 @@ export function createGoogleKnowledge({
       );
       if (state === 'removed')
         await tx.client.query(
-          `UPDATE ${table(tx, 'documents')} SET tombstoned_at=clock_timestamp(),retain_until=clock_timestamp()+interval '30 days',lexical_publication_id=NULL,vector_publication_id=NULL WHERE source_id=$1`,
+          `UPDATE ${table(tx, 'documents')} SET tombstoned_at=clock_timestamp(),retain_until=clock_timestamp()+interval '30 days',lexical_publication_id=NULL WHERE source_id=$1`,
           [sourceId],
         );
       await tx.client.query(
@@ -404,7 +404,7 @@ export function createGoogleKnowledge({
   }
   async function clear(tx: Tx, documentId: string, tombstone = false) {
     await tx.client.query(
-      `UPDATE ${table(tx, 'documents')} SET lexical_publication_id=NULL,vector_publication_id=NULL${tombstone ? ",tombstoned_at=clock_timestamp(),retain_until=clock_timestamp()+interval '30 days'" : ''} WHERE id=$1`,
+      `UPDATE ${table(tx, 'documents')} SET lexical_publication_id=NULL${tombstone ? ",tombstoned_at=clock_timestamp(),retain_until=clock_timestamp()+interval '30 days'" : ''} WHERE id=$1`,
       [documentId],
     );
     await invalidate(tx, documentId);
@@ -790,7 +790,7 @@ export function createGoogleKnowledge({
           ]);
         } else if (prior?.observed_revision_id !== revisionId)
           await tx.client.query(
-            `UPDATE ${table(tx, 'documents')} SET observed_revision_id=$2,lexical_publication_id=NULL,vector_publication_id=NULL WHERE id=$1`,
+            `UPDATE ${table(tx, 'documents')} SET observed_revision_id=$2,lexical_publication_id=NULL WHERE id=$1`,
             [documentId, revisionId],
           );
         await tx.client.query(
@@ -1170,7 +1170,7 @@ export function createGoogleKnowledge({
       );
       await store.dependencies(tx, actor, revision);
       const work = z
-        .object({ parsing: z.string(), embedding: z.string(), failure: z.string().nullable() })
+        .object({ parsing: z.string(), failure: z.string().nullable() })
         .parse(
           (await tx.client.query(`SELECT * FROM ${table(tx, 'work')} WHERE revision_id=$1`, [revision.id])).rows[0],
         );
@@ -1209,7 +1209,7 @@ export function createGoogleKnowledge({
         );
         await store.dependencies(tx, actor, revision);
         const work = z
-          .object({ parsing: z.string(), embedding: z.string(), failure: z.string().nullable() })
+          .object({ parsing: z.string(), failure: z.string().nullable() })
           .parse(
             (await tx.client.query(`SELECT * FROM ${table(tx, 'work')} WHERE revision_id=$1`, [revision.id])).rows[0],
           );

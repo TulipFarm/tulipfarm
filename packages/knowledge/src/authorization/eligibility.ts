@@ -36,7 +36,7 @@ export function searchEligibility(
 ) {
   const table = (name: string) => qualified(schema, `tf_knowledge_${name}`);
   return `SELECT d.id AS document_id,d.source_id,d.observed_revision_id AS revision_id,
-    d.lexical_publication_id AS publication_id,d.vector_publication_id,s.access_epoch,NULL::timestamptz AS expires_at
+    d.lexical_publication_id AS publication_id,s.access_epoch,NULL::timestamptz AS expires_at
     FROM ${table('documents')} d
     JOIN ${table('sources')} s ON s.id=d.source_id
     JOIN ${table('revisions')} r ON r.id=d.observed_revision_id AND r.document_id=d.id
@@ -51,7 +51,7 @@ export function searchEligibility(
         OR (s.provider='file' AND r.original->>'kind'='file' AND ${readableFileSql(schema)}))${
           google
             ? `
-    UNION ALL SELECT d.id,d.source_id,d.observed_revision_id,d.lexical_publication_id,d.vector_publication_id,s.access_epoch,e.expires_at
+    UNION ALL SELECT d.id,d.source_id,d.observed_revision_id,d.lexical_publication_id,s.access_epoch,e.expires_at
     FROM ${table('google_eligible')} e JOIN ${table('documents')} d ON d.id=e.document_id
     JOIN ${table('sources')} s ON s.id=d.source_id
     JOIN ${table('revisions')} r ON r.id=d.observed_revision_id AND r.document_id=d.id
@@ -66,7 +66,7 @@ export function searchEligibility(
         }${
           slack
             ? `
-    UNION ALL SELECT e.document_id,e.source_id,e.revision_id,e.publication_id,e.vector_publication_id,e.access_epoch,e.expires_at
+    UNION ALL SELECT e.document_id,e.source_id,e.revision_id,e.publication_id,e.access_epoch,e.expires_at
     FROM ${table('slack_eligible_for')}($1::uuid,$2::text) e
     JOIN ${table('publications')} p ON p.id=e.publication_id AND p.revision_id=e.revision_id
     WHERE true
@@ -77,7 +77,7 @@ export function searchEligibility(
         }${
           github
             ? `
-    UNION ALL SELECT e.document_id,e.source_id,e.revision_id,e.publication_id,e.vector_publication_id,e.access_epoch,e.expires_at
+    UNION ALL SELECT e.document_id,e.source_id,e.revision_id,e.publication_id,e.access_epoch,e.expires_at
     FROM ${table('github_eligible_for')}($1::uuid,$2::text) e
     JOIN ${table('publications')} p ON p.id=e.publication_id AND p.revision_id=e.revision_id
     WHERE true
@@ -88,7 +88,7 @@ export function searchEligibility(
         }${
           atlassian
             ? `
-    UNION ALL SELECT e.document_id,e.source_id,e.revision_id,e.publication_id,e.vector_publication_id,e.access_epoch,e.expires_at
+    UNION ALL SELECT e.document_id,e.source_id,e.revision_id,e.publication_id,e.access_epoch,e.expires_at
     FROM ${table('atlassian_eligible_for')}($1::uuid,$2::text) e
     JOIN ${table('publications')} p ON p.id=e.publication_id AND p.revision_id=e.revision_id
     WHERE true
@@ -99,7 +99,7 @@ export function searchEligibility(
         }${
           conversation
             ? `
-    UNION ALL SELECT d.id,d.source_id,d.observed_revision_id,d.lexical_publication_id,d.vector_publication_id,s.access_epoch,NULL::timestamptz
+    UNION ALL SELECT d.id,d.source_id,d.observed_revision_id,d.lexical_publication_id,s.access_epoch,NULL::timestamptz
     FROM ${table('conversation_readers')} e
     JOIN ${table('sources')} s ON s.id=e.source_id
     JOIN ${table('documents')} d ON d.source_id=s.id AND d.native_id=e.conversation_id::text AND d.tombstoned_at IS NULL

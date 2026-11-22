@@ -15,10 +15,10 @@ const hosted = {
 };
 
 test('every task of a service adds its declared pools and its workspace pools', () => {
-  // api 34 + 8 x 3, api-jobs 15 + 16, worker 18 + 16, knowledge-worker 4 + 16, storage-worker 7, gateway 10 + 16.
-  assert.equal(fleetConnections(hosted), 176);
-  assert.equal(fleetConnections({ ...hosted, api: { tasks: 2, connectionsPerPool: 3 } }), 176 + 34 + 24);
-  assert.equal(fleetConnections({ ...hosted, worker: { tasks: 3 } }), 176 + 2 * (18 + 16));
+  // api 34 + 8 x 3, api-jobs 15 + 16, worker 14 + 16, knowledge-worker 2 + 16, storage-worker 7, gateway 10 + 16.
+  assert.equal(fleetConnections(hosted), 170);
+  assert.equal(fleetConnections({ ...hosted, api: { tasks: 2, connectionsPerPool: 3 } }), 170 + 34 + 24);
+  assert.equal(fleetConnections({ ...hosted, worker: { tasks: 3 } }), 170 + 2 * (14 + 16));
   assert.equal(fleetConnections({ 'storage-worker': { tasks: 2 } }), 14);
   assert.equal(fleetConnections({ gateway: { tasks: 0 } }), 0);
   assert.equal(fleetConnections({ 'api-jobs': { tasks: 1, maxPools: 4, connectionsPerPool: 1 } }), 15 + 4);

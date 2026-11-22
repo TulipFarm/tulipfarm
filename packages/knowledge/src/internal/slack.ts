@@ -455,7 +455,7 @@ export function createSlackKnowledge({
       );
       if (state === 'removed')
         await tx.client.query(
-          `UPDATE ${table(tx, 'documents')} SET tombstoned_at=clock_timestamp(),retain_until=clock_timestamp()+interval '30 days',lexical_publication_id=NULL,vector_publication_id=NULL WHERE source_id=$1`,
+          `UPDATE ${table(tx, 'documents')} SET tombstoned_at=clock_timestamp(),retain_until=clock_timestamp()+interval '30 days',lexical_publication_id=NULL WHERE source_id=$1`,
           [sourceId],
         );
       await invalidate(tx, sourceId, null);
@@ -692,7 +692,7 @@ export function createSlackKnowledge({
   }
   async function clear(tx: Tx, documentId: string, tombstone = false) {
     await tx.client.query(
-      `UPDATE ${table(tx, 'documents')} SET lexical_publication_id=NULL,vector_publication_id=NULL${tombstone ? ",tombstoned_at=clock_timestamp(),retain_until=clock_timestamp()+interval '30 days'" : ''} WHERE id=$1`,
+      `UPDATE ${table(tx, 'documents')} SET lexical_publication_id=NULL${tombstone ? ",tombstoned_at=clock_timestamp(),retain_until=clock_timestamp()+interval '30 days'" : ''} WHERE id=$1`,
       [documentId],
     );
     await tx.client.query(`DELETE FROM ${table(tx, 'access_proofs')} WHERE document_id=$1`, [documentId]);
@@ -824,7 +824,7 @@ export function createSlackKnowledge({
           ]);
         } else
           await tx.client.query(
-            `UPDATE ${table(tx, 'documents')} SET observed_revision_id=$2,lexical_publication_id=NULL,vector_publication_id=NULL WHERE id=$1`,
+            `UPDATE ${table(tx, 'documents')} SET observed_revision_id=$2,lexical_publication_id=NULL WHERE id=$1`,
             [documentId, revisionId],
           );
         await tx.client.query(

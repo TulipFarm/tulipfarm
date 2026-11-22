@@ -12,7 +12,6 @@ import { parseKnowledgeDocument } from '../parser.ts';
 import { KnowledgeError, citationSchema, knowledgeLimits, lexicalInput, revisionInput } from './contracts.ts';
 import { createKnowledgeStore, type KnowledgeOptions } from './store.ts';
 import { sqlExternalAuthority } from './external-authority.ts';
-import type { createKnowledgeEmbeddings } from './embeddings.ts';
 import { requireConversationReader } from './conversation-authority.ts';
 import type { Clock } from '@tulipfarm/memory-core/ports/runtime';
 import { systemClock } from '../host-ports.ts';
@@ -46,10 +45,8 @@ const identity = (text: string) => {
 
 export function createConversationKnowledge({
   runtime,
-  embeddings,
   clock = systemClock,
 }: Pick<KnowledgeOptions, 'runtime'> & {
-  embeddings?: Pick<ReturnType<typeof createKnowledgeEmbeddings>, 'due' | 'resumeDocument'>;
   clock?: Clock;
 }) {
   const store = createKnowledgeStore({ runtime, ...sqlExternalAuthority() });
@@ -92,7 +89,7 @@ export function createConversationKnowledge({
     await store.transaction(input.workspaceId, input.requester, false, tx => fence(tx, input));
     const bytes = Buffer.from(input.text, 'utf8');
     const parsed = await parseKnowledgeDocument({ bytes, filename: 'conversation.md', mediaType: 'text/markdown' });
-    const published = await store.transaction(input.workspaceId, input.requester, true, async (tx, actor) => {
+    return store.transaction(input.workspaceId, input.requester, true, async (tx, actor) => {
       await fence(tx, input);
       await tx.client.query(
         `INSERT INTO ${table(tx, 'tf_knowledge_sources')} (id,provider,account_namespace,selection,owner_membership_id)
@@ -170,25 +167,8 @@ export function createConversationKnowledge({
         }),
         { filename: 'conversation.md' },
       );
-      const work = (
-        await tx.client.query(`SELECT embedding FROM ${table(tx, 'tf_knowledge_work')} WHERE revision_id=$1`, [
-          revisionId,
-        ])
-      ).rows[0];
-      return { documentId, revisionId, embeddingStatus: z.string().parse(work?.embedding) };
+      return { documentId, revisionId };
     });
-    if (input.resumeCommandId) {
-      if (!embeddings) throw new KnowledgeError('adapter-required');
-      await embeddings.due(input.workspaceId);
-      const status = await embeddings.resumeDocument(
-        input.workspaceId,
-        input.requester.userId,
-        documentId,
-        input.resumeCommandId,
-      );
-      return { ...published, embeddingStatus: status.state };
-    }
-    return published;
   }
   async function evidence(workspaceId: string, userId: string, value: unknown) {
     const citation = citationSchema.parse(value);

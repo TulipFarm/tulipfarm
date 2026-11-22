@@ -7,6 +7,7 @@ import { createWorkspaceRuntime, qualified } from '@tulipfarm/workspace-storage/
 import { workspaceTableMigrations } from '../../workspaces/dist/table-migrations.js';
 import { createFiles } from '@tulipfarm/files';
 import { createLocalKnowledge, KnowledgeAdminRequired } from '../dist/index.js';
+import { keepBackedSearch } from './fake-keep.mjs';
 import { pdf } from './fixtures/parser-documents.mjs';
 import { png } from '../../memory-core/test/fixtures/parser-media.mjs';
 import { MediaRecognitionUnavailable } from '../../memory-core/dist/parser.js';
@@ -71,6 +72,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       },
       recognitionAvailable: async () => available,
     });
+    const indexed = keepBackedSearch({ runtime });
     const upload = async (title, bytes, name = `${title}.pdf`, mediaType = 'application/pdf') => {
       const fileId = randomUUID();
       await files.upload(one.id, member.userId, fileId, { name, parentId: null, mediaType }, bytes);
@@ -125,7 +127,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       ).rows[0].profile;
       assert.equal(profile.ocr, 'vision');
       assert.equal(profile.ocrModel, 'vision-test');
-      const hit = (await api.search(one.id, member.userId, { query: 'tulips October' })).hits.find(
+      const hit = (await indexed.query(one.id, member.userId, 'tulips October')).hits.find(
         item => item.citation.documentId === scan.documentId,
       );
       assert.ok(hit);
@@ -181,7 +183,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       answer = () => ({ kind: 'recognized', text: 'Greenhouse vents open at 28 degrees.', description: '' });
       const photo = await upload('Greenhouse sign', await png(120, 80, '#4a6'), 'sign.png', 'image/png');
       assert.equal(await process(photo.commandId), 'ready');
-      const hit = (await api.search(one.id, member.userId, { query: 'greenhouse vents degrees' })).hits.find(
+      const hit = (await indexed.query(one.id, member.userId, 'greenhouse vents degrees')).hits.find(
         item => item.citation.documentId === photo.documentId,
       );
       assert.ok(hit, 'the recognised text is indexed for Files search');
@@ -192,7 +194,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       ).rows[0].profile;
       assert.equal(profile.engine, 'image');
       assert.equal(profile.ocrModel, 'vision-test');
-      const outsider = (await api.search(one.id, admin.userId, { query: 'greenhouse vents degrees' })).hits;
+      const outsider = (await indexed.query(one.id, admin.userId, 'greenhouse vents degrees')).hits;
       assert.ok(
         !outsider.some(item => item.citation.documentId === photo.documentId),
         'recognised text never reaches someone who cannot open the file',

@@ -2,13 +2,9 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-import { knowledgeEmbeddingProfile } from '@tulipfarm/config';
 import { createFiles } from '@tulipfarm/files';
-import {
-  createKnowledgeEmbeddings,
-  createLocalKnowledge,
-  withKnowledgeSourceAuthorization,
-} from '@tulipfarm/knowledge';
+import { createKnowledgeKeepFeed, createLocalKnowledge, withKnowledgeSourceAuthorization } from '@tulipfarm/knowledge';
+import { fakeKnowledgeKeep } from '../../../packages/knowledge/test/fake-keep.mjs';
 import { createAgentPlans } from '../../../packages/agents/src/plans.ts';
 import { createPlanRuntime } from '../../../packages/agents/src/plan-runtime.ts';
 import { conversationFixture } from '../../../packages/conversations/test/fixture.mjs';
@@ -16,7 +12,7 @@ import { createPlanComposition } from '../src/plan-composition.ts';
 import { createKnowledgeTools } from '../src/knowledge-tools-composition.ts';
 import { anthropicTools, anthropicText, toolResults } from './native-chat-fixture.mjs';
 
-async function setup(t, knowledgeOptions = {}) {
+async function setup(t, keep = fakeKnowledgeKeep()) {
   const f = await conversationFixture();
   t.after(() => f.close());
   const w = f.workspace,
@@ -42,6 +38,8 @@ async function setup(t, knowledgeOptions = {}) {
     input: { kind: 'note', text: 'Specialist suppliers are paid within 37 days.' },
   });
   for (const work of await local.due(w.id)) await local.process(work);
+  const feed = createKnowledgeKeepFeed({ runtime: f.runtime, client: () => keep.client });
+  for (const work of await feed.due(w.id, null, 50)) await feed.sync(w.id, work.document_id);
   const chatId = randomUUID();
   await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
   const sent = await f.store.send(w.id, w.userId, chatId, {
@@ -77,7 +75,7 @@ async function setup(t, knowledgeOptions = {}) {
   const [attemptId] = (await scheduler.step(w.id, plan.id)).specialists;
   assert.ok(attemptId);
   let retrievalCalls = 0;
-  const domain = createKnowledgeTools({ runtime: f.runtime, env: {}, ...knowledgeOptions });
+  const domain = createKnowledgeTools({ runtime: f.runtime, env: {}, keepClient: () => keep.client });
   const knowledge = guarded => {
     const tools = domain(guarded);
     return {
@@ -338,61 +336,31 @@ test('specialist publication rechecks its lease at the atomic result write', { t
 });
 
 test(
-  'composed specialist grouped expansion starts all three providers before any branch returns',
+  'composed specialist grouped expansion starts all three Keep searches before any branch returns',
   { timeout: 60000 },
   async t => {
-    const response = {
-      dispatch: 'dispatched',
-      inputTokensUpperBound: 1,
-      requestId: 'composed-branch-fixture',
-      usage: { kind: 'known', inputTokens: 1, totalTokens: 1, exceedsUpperBound: false },
-      result: {
-        kind: 'success',
-        model: knowledgeEmbeddingProfile.model,
-        vectors: [Array.from({ length: 1536 }, (_, index) => (index === 0 ? 1 : 0))],
-      },
-    };
     let expanding = false,
       starts = 0,
       release;
     const allStarted = new Promise(resolve => {
       release = resolve;
     });
-    const provider = async () => {
+    const keep = fakeKnowledgeKeep();
+    const searchKnowledge = keep.client.searchKnowledge;
+    keep.client.searchKnowledge = async input => {
       if (expanding) {
         starts++;
         if (starts === 3) release();
         await Promise.race([
           allStarted,
           delay(5000, undefined, { ref: false }).then(() => {
-            throw new Error('provider-branches-did-not-overlap');
+            throw new Error('keep-branches-did-not-overlap');
           }),
         ]);
       }
-      return response;
+      return searchKnowledge(input);
     };
-    const f = await setup(t, {
-      env: {
-        KNOWLEDGE_EMBEDDINGS_ENABLED: 'true',
-        AZURE_FOUNDRY_ENDPOINT: 'https://example.services.ai.azure.com/',
-        AZURE_FOUNDRY_API_KEY: 'synthetic-only',
-      },
-      provider,
-      capacity: async () => true,
-    });
-    const embeddings = createKnowledgeEmbeddings({
-      runtime: f.f.runtime,
-      config: {
-        kind: 'enabled',
-        endpoint: 'https://example.services.ai.azure.com/',
-        apiKey: 'synthetic-only',
-        profile: knowledgeEmbeddingProfile,
-      },
-      provider: async () => response,
-      capacity: async () => true,
-    });
-    for (let round = 0; round < 10; round++)
-      for (const work of await embeddings.due(f.w.id)) await embeddings.process(work);
+    const f = await setup(t, keep);
     let modelCalls = 0;
     t.mock.method(globalThis, 'fetch', async (_url, options) => {
       modelCalls++;

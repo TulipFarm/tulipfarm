@@ -1,17 +1,9 @@
 import type { z } from 'zod';
 import type { AccessDecision, Authorizer } from './authorizer.ts';
-import type { Clock } from './runtime.ts';
 import type { ExternalSource, KnowledgeDocument, Principal, Actor } from '../documents/records.ts';
 import type { originalSchema, KnowledgeCitation } from '../documents/contracts.ts';
 
 export type KnowledgeDependency = Omit<KnowledgeCitation, 'ordinal'>;
-export type EligibilitySelection = {
-  google: boolean;
-  slack: boolean;
-  github: boolean;
-  atlassian: boolean;
-  conversation: boolean;
-};
 export type KnowledgeChecks<Dependency extends { kind: string }> = {
   source: { input: { value: ExternalSource | undefined; writing: boolean }; value: ExternalSource };
   dependencies: {
@@ -28,12 +20,6 @@ export type KnowledgeChecks<Dependency extends { kind: string }> = {
   binding: {
     input: { document: KnowledgeDocument; source: ExternalSource; dependency: KnowledgeDependency };
     value: void;
-  };
-  embeddingOwner: { input: { owner_membership_id: string; owner_user_id: string }; value: void };
-  embeddingProvider: { input: { source: ExternalSource; providers: string[] }; value: void };
-  queryDispatch: {
-    input: { jobId: string; selection: EligibilitySelection; clock: Clock };
-    value: number | undefined;
   };
 };
 export interface KnowledgeAuthorization<Context, Dependency extends { kind: string }> {

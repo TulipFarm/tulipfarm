@@ -109,19 +109,17 @@ function fixture() {
       },
     },
     search: {
-      async search(id, userId, input, deadlineAt, signal, options) {
+      async search(id, userId, input, deadlineAt, signal) {
         assert.equal(id, tenant);
         assert.equal(userId, actor.userId);
         assert.equal(deadlineAt, 5500);
         assert.equal(signal, undefined);
-        assert.equal(options.allowKeywordFallback, true);
         assert.equal(input.query, 'evidence');
         trace.push('search');
         return {
-          mode: 'keyword-only',
-          reason: 'embedding-disabled',
-          coverage: 'keyword-only',
-          queryBroadened: true,
+          mode: 'hybrid',
+          reason: null,
+          coverage: 'partial',
           hits: [{ citation: { publicationId, ordinal: 0 } }],
         };
       },
@@ -181,14 +179,13 @@ test('a revocation after passage lookup withholds all evidence and provenance', 
   assert.deepEqual(output.sources, []);
 });
 
-test('query retrieval preserves egress admission, keyword fallback, and visible broadening', async () => {
+test('query retrieval preserves egress admission and reports search coverage', async () => {
   const f = fixture();
   const output = await f.call({ action: 'search', query: 'evidence' });
   assert.equal(f.trace[0], 'egress');
   assert.ok(f.trace.includes('search'));
-  assert.equal(output.result.branches[0].mode, 'keyword-only');
-  assert.equal(output.result.branches[0].queryBroadened, true);
-  assert.equal(output.result.branches[0].coverage, 'keyword-only');
+  assert.equal(output.result.branches[0].mode, 'hybrid');
+  assert.equal(output.result.branches[0].coverage, 'partial');
   const denied = new Error('protected egress');
   f.state.egressDenied = denied;
   f.trace.length = 0;

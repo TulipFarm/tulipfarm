@@ -9,8 +9,6 @@ export type KnowledgeChunkRow = {
   hash: string;
 };
 
-export type KnowledgeSearchChunkRow = KnowledgeChunkRow & { title: string; identifiers: string[] };
-
 export interface KnowledgeRepository {
   readSource(values: [id: string]): Promise<RepositoryResult>;
   readDocument(values: [id: string]): Promise<RepositoryResult>;
@@ -54,10 +52,6 @@ export interface KnowledgeRepository {
   ): Promise<RepositoryResult>;
   /** Inserts every chunk of a publication in one statement. */
   insertChunks(values: [publicationId: string, chunks: readonly KnowledgeChunkRow[]]): Promise<RepositoryResult>;
-  /** Like `insertChunks`, with the search title and exact identifiers local files index. */
-  insertSearchChunks(
-    values: [publicationId: string, chunks: readonly KnowledgeSearchChunkRow[]],
-  ): Promise<RepositoryResult>;
   publishDocument(values: [documentId: string, publicationId: string]): Promise<RepositoryResult>;
   completeParsing(values: [revisionId: string]): Promise<RepositoryResult>;
   invalidateAccessEpoch(values: [sourceId: string, epoch: number]): Promise<RepositoryResult>;
@@ -78,10 +72,7 @@ export interface KnowledgeRepository {
   ): Promise<RepositoryResult>;
   readChunk(values: [publicationId: string, ordinal: number]): Promise<RepositoryResult>;
   readWork(values: [revisionId: string]): Promise<RepositoryResult>;
-  recordFailure(
-    values: [revisionId: string, state: string, failure: string],
-    axis: 'parsing' | 'embedding',
-  ): Promise<RepositoryResult>;
+  recordFailure(values: [revisionId: string, state: string, failure: string]): Promise<RepositoryResult>;
   removeSource(values: [sourceId: string]): Promise<RepositoryResult>;
   tombstoneSourceDocuments(values: [sourceId: string]): Promise<RepositoryResult>;
   invalidateSource(values: [sourceId: string, action: string]): Promise<RepositoryResult>;

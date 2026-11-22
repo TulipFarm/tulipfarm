@@ -74,7 +74,7 @@ export function createPostgresKnowledgeRepository(
     },
     observeDocument(values: [documentId: string, revisionId: string]) {
       return client.query(
-        `UPDATE ${table('documents')} SET observed_revision_id=$2,lexical_publication_id=NULL,vector_publication_id=NULL WHERE id=$1`,
+        `UPDATE ${table('documents')} SET observed_revision_id=$2,lexical_publication_id=NULL WHERE id=$1`,
         values,
       );
     },
@@ -118,19 +118,8 @@ export function createPostgresKnowledgeRepository(
         values,
       );
     },
-    insertSearchChunks(values) {
-      return client.query(
-        `INSERT INTO ${table('chunks')} (publication_id,ordinal,heading,passage,tokens,source_offset,input_hash,search_title,identifiers)
-        SELECT $1,c.ordinal,c.heading,c.passage,c.tokens,c."offset",c.hash,c.title,c.identifiers
-        FROM unnest($2::jsonb[]) AS chunk, jsonb_to_record(chunk) AS c(ordinal integer,heading text,passage text,tokens integer,"offset" jsonb,hash text,title text,identifiers text[])`,
-        values,
-      );
-    },
     publishDocument(values: [documentId: string, publicationId: string]) {
-      return client.query(
-        `UPDATE ${table('documents')} SET lexical_publication_id=$2,vector_publication_id=CASE WHEN lexical_publication_id=$2 THEN vector_publication_id ELSE NULL END WHERE id=$1`,
-        values,
-      );
+      return client.query(`UPDATE ${table('documents')} SET lexical_publication_id=$2 WHERE id=$1`, values);
     },
     completeParsing(values: [revisionId: string]) {
       return client.query(`UPDATE ${table('work')} SET parsing='ready',failure=NULL WHERE revision_id=$1`, values);
@@ -175,11 +164,9 @@ export function createPostgresKnowledgeRepository(
     readWork(values: [revisionId: string]) {
       return client.query(`SELECT * FROM ${table('work')} WHERE revision_id=$1`, values);
     },
-    recordFailure(values: [revisionId: string, state: string, failure: string], axis: 'parsing' | 'embedding') {
+    recordFailure(values: [revisionId: string, state: string, failure: string]) {
       return client.query(
-        axis === 'embedding'
-          ? `UPDATE ${table('work')} SET embedding=$2,failure=$3,attempts=attempts+1 WHERE revision_id=$1 AND attempts<8`
-          : `UPDATE ${table('work')} SET parsing=CASE WHEN parsing='ocr-unavailable' THEN parsing ELSE $2 END,failure=CASE WHEN parsing='ocr-unavailable' THEN failure ELSE $3 END,attempts=attempts+1 WHERE revision_id=$1 AND attempts<8`,
+        `UPDATE ${table('work')} SET parsing=CASE WHEN parsing='ocr-unavailable' THEN parsing ELSE $2 END,failure=CASE WHEN parsing='ocr-unavailable' THEN failure ELSE $3 END,attempts=attempts+1 WHERE revision_id=$1 AND attempts<8`,
         values,
       );
     },
@@ -191,7 +178,7 @@ export function createPostgresKnowledgeRepository(
     },
     tombstoneSourceDocuments(values: [sourceId: string]) {
       return client.query(
-        `UPDATE ${table('documents')} SET tombstoned_at=COALESCE(tombstoned_at,clock_timestamp()),retain_until=COALESCE(retain_until,clock_timestamp()+interval '30 days'),lexical_publication_id=NULL,vector_publication_id=NULL WHERE source_id=$1`,
+        `UPDATE ${table('documents')} SET tombstoned_at=COALESCE(tombstoned_at,clock_timestamp()),retain_until=COALESCE(retain_until,clock_timestamp()+interval '30 days'),lexical_publication_id=NULL WHERE source_id=$1`,
         values,
       );
     },

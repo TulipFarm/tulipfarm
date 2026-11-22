@@ -12,7 +12,7 @@ import { createKeepClient } from '@tulipfarm/memory-keep';
 
 await registerExtension(creditAccountExtension, { app: 'worker', env: {} });
 
-const published = () => ({ documentId: randomUUID(), revisionId: randomUUID(), embeddingStatus: 'disabled' });
+const published = () => ({ documentId: randomUUID(), revisionId: randomUUID() });
 
 /** A model that summarizes chats, and returns the given memory edits citing the member's latest message. */
 function model(edits = () => []) {

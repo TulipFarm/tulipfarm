@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { createSearchEngine } from '../dist/search/search.js';
+import { KnowledgeSearchUnavailable } from '../dist/documents/contracts.js';
 
 const result = (...rows) => ({ rows, rowCount: rows.length });
 const allow = value => ({ kind: 'allowed', value });
 class Denied extends Error {}
 
-function fixture({ count = 2048, duplicateAnn = false, semantic = false } = {}) {
+function fixture({ index = true, held = true } = {}) {
   const tenant = randomUUID();
   const actor = { kind: 'human', userId: 'reader', membershipId: randomUUID() };
   const owner = {
@@ -16,7 +17,6 @@ function fixture({ count = 2048, duplicateAnn = false, semantic = false } = {}) 
     revision_id: randomUUID(),
     publication_id: randomUUID(),
     access_epoch: 1,
-    vector_publication_id: randomUUID(),
   };
   const trace = [];
   const context = Symbol('search transaction');
@@ -55,50 +55,14 @@ function fixture({ count = 2048, duplicateAnn = false, semantic = false } = {}) 
         },
       }),
     },
-    lexical: value => {
+    sessions: value => {
       assert.equal(value, context);
       return {
         eligiblePublications: async values => {
           assert.deepEqual(values.slice(0, 2), [actor.membershipId, actor.userId]);
-          trace.push('lexical-eligible');
-          return result({ ...owner, semantic });
-        },
-        match: async (values, options) => {
-          trace.push(['lexical-match', values[1], options]);
-          return result({ publication_id: owner.publication_id, ordinal: 0, exact: true, rank: 1 });
-        },
-      };
-    },
-    vector: value => {
-      assert.equal(value, context);
-      return {
-        eligiblePublications: async () => {
-          trace.push('vector-eligible');
+          trace.push('eligible');
           return result(owner);
         },
-        boundedCount: async () => {
-          trace.push('vector-count');
-          return result({ count });
-        },
-        configureNearest: async () => {
-          trace.push('ann-configure');
-          return result();
-        },
-        nearest: async (values, exact) => {
-          trace.push(['nearest', exact, values[3]]);
-          const row = {
-            vector_publication_id: owner.vector_publication_id,
-            lexical_publication_id: owner.publication_id,
-            ordinal: 0,
-            distance: 0,
-          };
-          return duplicateAnn ? result(...Array.from({ length: 2000 }, () => row)) : result(row);
-        },
-      };
-    },
-    sessions: value => {
-      assert.equal(value, context);
-      return {
         readLive: async ([id]) => (sessions.has(id) ? result(sessions.get(id)) : result()),
         lockOwner: async () => {
           trace.push('lock-owner');
@@ -127,6 +91,7 @@ function fixture({ count = 2048, duplicateAnn = false, semantic = false } = {}) 
         readPage: async values => {
           const candidate = JSON.parse(values[5])[0];
           trace.push('page');
+          if (!candidate) return result();
           return result({
             ...candidate,
             position: 0,
@@ -151,25 +116,34 @@ function fixture({ count = 2048, duplicateAnn = false, semantic = false } = {}) 
       return false;
     },
     errors: { AccessDenied: Denied, SourceAuthorizationUnavailable: Denied },
-    storageErrors: { timeout: () => new Error('deadline'), deadline: () => false, transient: () => false },
     clock: { now: () => 1000, sleep: async () => assert.fail('unexpected sleep') },
     callTimeoutMs: 20000,
-    profile: { id: 'profile' },
-    embeddings: {
-      prepareSearchQuery: async () => {
-        trace.push('embed');
-        return { state: 'ready', vector: [1] };
-      },
-    },
+    ...(index
+      ? {
+          index: {
+            configured: () => true,
+            held: async (value, publications) => {
+              assert.equal(value, context);
+              assert.deepEqual(publications, [{ documentId: owner.document_id, publicationId: owner.publication_id }]);
+              return new Set(held ? [owner.document_id] : []);
+            },
+            search: async (workspaceId, query, documentIds) => {
+              trace.push(['index-search', query, documentIds]);
+              return [{ documentId: owner.document_id, publicationId: owner.publication_id, ordinal: 0, score: 1 }];
+            },
+          },
+        }
+      : {}),
   });
   return { engine, tenant, actor, owner, trace, sessions };
 }
 
-test('typing search returns rechecked lexical evidence without paid work', async () => {
+test('typing search returns rechecked evidence from the index without saving a session', async () => {
   const f = fixture();
   const value = await f.engine.search(f.tenant, f.actor.userId, { kind: 'typing', query: 'Needle 42' });
-  assert.equal(value.mode, 'keyword-only');
-  assert.equal(value.reason, 'typing');
+  assert.equal(value.mode, 'hybrid');
+  assert.equal(value.reason, null);
+  assert.equal(value.coverage, 'complete');
   assert.equal(value.hits[0].text, 'evidence');
   assert.deepEqual(value.hits[0].freshness, {
     indexedAt: new Date(500).toISOString(),
@@ -179,47 +153,40 @@ test('typing search returns rechecked lexical evidence without paid work', async
   });
   assert.equal(value.continuation, null);
   assert.equal(value.validUntil, new Date(301000).toISOString());
-  assert.ok(!f.trace.includes('embed'));
   assert.ok(!f.trace.includes('persist'));
   assert.ok(f.trace.indexOf('member-check') < f.trace.indexOf('evidence-check'));
   assert.deepEqual(
-    f.trace.find(value => Array.isArray(value) && value[0] === 'lexical-match'),
-    ['lexical-match', 'Needle:* & 42:*', { broaden: false, publicationCount: 1 }],
+    f.trace.find(value => Array.isArray(value) && value[0] === 'index-search'),
+    ['index-search', 'Needle 42', [f.owner.document_id]],
   );
   await f.engine.close();
 });
 
-for (const count of [2048, 2049]) {
-  test(`semantic count ${count} preserves the exact/ANN threshold and session replay`, async () => {
-    const f = fixture({ count, semantic: true });
-    const input = { kind: 'submitted', commandId: randomUUID(), query: 'topic' };
-    const value = await f.engine.search(f.tenant, f.actor.userId, input);
-    assert.equal(value.mode, 'hybrid');
-    assert.equal(value.reason, null);
-    assert.equal(value.hits.length, 1);
-    assert.equal(f.trace.includes('ann-configure'), count > 2048);
-    assert.equal(f.trace.find(value => Array.isArray(value) && value[0] === 'nearest')[1], count <= 2048);
-    const nearestCalls = f.trace.filter(value => Array.isArray(value) && value[0] === 'nearest').length;
-    const again = await f.engine.search(f.tenant, f.actor.userId, input);
-    assert.deepEqual(again, value);
-    assert.equal(f.trace.filter(value => Array.isArray(value) && value[0] === 'nearest').length, nearestCalls);
-    await f.engine.close();
-  });
-}
-
-test('ANN backfill stays at three attempts and excludes previously found publications', async () => {
-  const f = fixture({ count: 2049, semantic: true, duplicateAnn: true });
-  const value = await f.engine.search(f.tenant, f.actor.userId, {
-    kind: 'submitted',
-    commandId: randomUUID(),
-    query: 'topic',
-  });
-  const calls = f.trace.filter(value => Array.isArray(value) && value[0] === 'nearest');
-  assert.equal(calls.length, 3);
-  assert.deepEqual(
-    calls.map(value => value[2]),
-    [[], [f.owner.publication_id], [f.owner.publication_id]],
-  );
+test('a submitted search replays its saved session without asking the index again', async () => {
+  const f = fixture();
+  const input = { kind: 'submitted', commandId: randomUUID(), query: 'topic' };
+  const value = await f.engine.search(f.tenant, f.actor.userId, input);
   assert.equal(value.hits.length, 1);
+  assert.ok(f.trace.includes('persist'));
+  const searches = f.trace.filter(value => Array.isArray(value) && value[0] === 'index-search').length;
+  assert.deepEqual(await f.engine.search(f.tenant, f.actor.userId, input), value);
+  assert.equal(f.trace.filter(value => Array.isArray(value) && value[0] === 'index-search').length, searches);
   await f.engine.close();
+});
+
+test('a readable document the index does not hold yet is left out and makes the result partial', async () => {
+  const f = fixture({ held: false });
+  const value = await f.engine.search(f.tenant, f.actor.userId, { kind: 'typing', query: 'topic' });
+  assert.deepEqual(value.hits, []);
+  assert.equal(value.coverage, 'partial');
+  assert.ok(!f.trace.some(value => Array.isArray(value) && value[0] === 'index-search'));
+});
+
+test('search without a configured index reports Knowledge search unavailable', async () => {
+  const f = fixture({ index: false });
+  await assert.rejects(
+    f.engine.search(f.tenant, f.actor.userId, { kind: 'typing', query: 'topic' }),
+    error => error instanceof KnowledgeSearchUnavailable,
+  );
+  assert.ok(!f.trace.includes('eligible'));
 });

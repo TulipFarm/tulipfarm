@@ -180,7 +180,7 @@ for (const file of blockedFiles) {
       assert.equal(detail.json().canRetry, false);
       const stored = await f.db.platform.query(
         `SELECT w.parsing, w.failure, w.attempts,
-        d.lexical_publication_id, d.vector_publication_id,
+        d.lexical_publication_id,
         (SELECT count(*)::int FROM ${f.table('tf_knowledge_publications')} p WHERE p.revision_id = w.revision_id) AS publications,
         (SELECT count(*)::int FROM ${f.table('tf_knowledge_chunks')} c
           JOIN ${f.table('tf_knowledge_publications')} p ON p.id = c.publication_id WHERE p.revision_id = w.revision_id) AS chunks
@@ -195,7 +195,6 @@ for (const file of blockedFiles) {
           failure: file.failure,
           attempts: 1,
           lexical_publication_id: null,
-          vector_publication_id: null,
           publications: 0,
           chunks: 0,
         },

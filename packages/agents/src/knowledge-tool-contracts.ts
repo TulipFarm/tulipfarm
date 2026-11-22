@@ -207,7 +207,7 @@ export type KnowledgeTools = {
     workspaceId: string,
     actor: { kind: 'human'; userId: string; membershipId: string },
     input: Omit<Extract<KnowledgeToolCall, { tool: 'knowledge.search' }>, 'tool'>,
-    context: { commandId: string; runId?: string; taskFlowId?: string; deadlineAt?: number; signal?: AbortSignal },
+    context: { commandId: string; runId?: string; deadlineAt?: number; signal?: AbortSignal },
   ) => Promise<KnowledgeToolOutput>;
   read: (
     workspaceId: string,
@@ -219,7 +219,6 @@ export type KnowledgeTools = {
 export type KnowledgeCallContext = {
   commandId: string;
   runId?: string;
-  taskFlowId?: string;
   deadlineAt?: number;
   signal?: AbortSignal;
   excludeCitationIds?: string[];

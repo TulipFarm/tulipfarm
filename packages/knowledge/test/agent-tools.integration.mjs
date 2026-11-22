@@ -4,33 +4,18 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { fixture } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createWorkspaceRuntime, qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
-import { knowledgeTaskSpend } from '@tulipfarm/workspace-storage/knowledge-credits';
 import { AccessDenied, requireProtectedSource, withMcpSourceContext } from '@tulipfarm/access';
-import { knowledgeEmbeddingProfile } from '@tulipfarm/config';
 import { createFiles } from '@tulipfarm/files';
 import { requireDraftSources } from '../../agents/dist/draft-sources.js';
 import { workspaceTableMigrations } from '../../workspaces/dist/table-migrations.js';
 import {
   createKnowledgeAgentTools,
-  createKnowledgeEmbeddings,
+  createKnowledgeKeepIndex,
   createKnowledgeSearch,
   createLocalKnowledge,
   withKnowledgeSourceAuthorization,
 } from '../dist/index.js';
-import { creditPricing, registerExtension } from '@tulipfarm/extensions';
-import { creditAccountExtension } from '@tulipfarm/workspace-storage/credit-account';
-
-// The wallet assertions below need a real credit account; without one the gate's debit is a no-op.
-await registerExtension(creditAccountExtension, { app: 'worker', env: {} });
-
-const vector = axis => Array.from({ length: 1536 }, (_, index) => (index === axis ? 1 : 0));
-const embedding = {
-  dispatch: 'dispatched',
-  inputTokensUpperBound: 1,
-  requestId: 'agent-tools-fixture',
-  usage: { kind: 'known', inputTokens: 1, totalTokens: 1, exceedsUpperBound: false },
-  result: { kind: 'success', model: knowledgeEmbeddingProfile.model, vectors: [vector(0)] },
-};
+import { keepBackedSearch } from './fake-keep.mjs';
 
 test('knowledge agent tools', async t => {
   const db = await fixture();
@@ -51,10 +36,9 @@ test('knowledge agent tools', async t => {
     await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
 ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', import.meta.url), 'utf8')}`);
     const stream = await workspaceTableMigrations();
-    async function setup({ semantic = false } = {}) {
+    async function setup() {
       const ws = await db.create(stream);
       const table = name => qualified(ws.names.schema, name.startsWith('tf_') ? name : `tf_knowledge_${name}`);
-      await db.platform.query(`UPDATE ${table('tf_credit_account')} SET available=$1,granted=$1`, ['10000000000000']);
       const bytes = new Map();
       const files = createFiles(runtime, {
         putIfAbsent: async (key, value) => {
@@ -63,24 +47,8 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         read: async key => bytes.get(key),
       });
       const local = createLocalKnowledge({ runtime, files });
-      let calls = 0;
-      const embeddings = createKnowledgeEmbeddings({
-        runtime,
-        config: semantic
-          ? {
-              kind: 'enabled',
-              endpoint: 'https://example.services.ai.azure.com/',
-              apiKey: 'fixture-only',
-              profile: knowledgeEmbeddingProfile,
-            }
-          : { kind: 'disabled' },
-        capacity: async () => true,
-        provider: async () => {
-          calls++;
-          return embedding;
-        },
-      });
-      const search = createKnowledgeSearch({ runtime, embeddings });
+      const indexed = keepBackedSearch({ runtime });
+      const search = indexed.search;
       searches.push(search);
       const tools = createKnowledgeAgentTools({ runtime, search });
       const membership = (
@@ -96,21 +64,8 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           input: { kind: 'note', text },
         });
         for (const work of await local.due(ws.id)) await local.process(work);
+        await indexed.deliver(ws.id);
         return saved;
-      }
-      async function index() {
-        for (let step = 0; step < 50; step++) {
-          for (const work of await embeddings.due(ws.id)) await embeddings.process(work);
-          if (
-            !(
-              await db.platform.query(
-                `SELECT 1 FROM ${table('documents')} WHERE lexical_publication_id IS NOT NULL AND vector_publication_id IS NULL LIMIT 1`,
-              )
-            ).rowCount
-          )
-            return;
-        }
-        assert.fail('Vector publications did not become ready');
       }
       async function member() {
         const userId = randomUUID(),
@@ -121,7 +76,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         ]);
         return { kind: 'human', userId, membershipId };
       }
-      return { ws, table, local, embeddings, tools, actor, note, index, member, calls: () => calls };
+      return { ws, table, local, tools, actor, note, member, keep: indexed.keep };
     }
 
     await t.test('admission, search and source metadata share one deadline; read deadlines remain errors', async () => {
@@ -135,7 +90,10 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           return runtime.transaction(workspace, compatibility, operation);
         },
       };
-      const search = createKnowledgeSearch({ runtime: tracked, embeddings: w.embeddings });
+      const search = createKnowledgeSearch({
+        runtime: tracked,
+        index: createKnowledgeKeepIndex({ client: () => w.keep.client }),
+      });
       searches.push(search);
       const tools = createKnowledgeAgentTools({ runtime: tracked, search });
       const deadlineAt = Date.now() + 30_000;
@@ -185,8 +143,12 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         const w = await setup();
         const supplier = await w.note('supplier advance settlement required before delivery', 'Supplier policy');
         for (let index = 0; index < 12; index++) await w.note(`supplier appendix ${index}`, `Appendix ${index}`);
-        const found = await w.tools.search(w.ws.id, w.actor, { query: 'supplier' }, { commandId: randomUUID() });
-        assert.equal(found.result.mode, 'keyword-only');
+        const found = await w.tools.search(
+          w.ws.id,
+          w.actor,
+          { query: 'supplier settlement' },
+          { commandId: randomUUID() },
+        );
         assert.equal(found.result.hits.length, 8);
         assert.ok(
           found.result.hits.every(
@@ -285,7 +247,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       },
     );
 
-    await t.test('MCP-derived context cannot send a knowledge query to the embedding provider', async () => {
+    await t.test('MCP-derived context cannot run a knowledge search', async () => {
       const w = await setup();
       const doc = await w.note('vendor onboarding checklist', 'Onboarding');
       const mcp = { kind: 'mcp-integration', integrationId: randomUUID(), authorizationEpoch: 1 };
@@ -321,119 +283,6 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         await requireDraftSources(tx, w.actor, found.sources, new Set(), undefined, true);
         await assert.rejects(requireDraftSources(tx, other, found.sources, new Set(), undefined, true), AccessDenied);
       });
-    });
-
-    await t.test(
-      'task-triggered query embeddings are attributed to the task without a second wallet charge',
-      async () => {
-        const w = await setup({ semantic: true });
-        await w.note('supplier advance settlement required', 'Vendor policy');
-        await w.index();
-        const before = BigInt(
-          (await db.platform.query(`SELECT available FROM ${w.table('tf_credit_account')}`)).rows[0].available,
-        );
-        const groupBefore = (await db.platform.query(`SELECT known FROM ${w.table('tf_knowledge_credit_group')}`))
-          .rows[0];
-        const flowId = randomUUID();
-        const calls = w.calls();
-        const found = await w.tools.search(
-          w.ws.id,
-          w.actor,
-          { query: 'payments before delivery' },
-          { commandId: randomUUID(), taskFlowId: flowId },
-        );
-        assert.equal(found.result.mode, 'hybrid');
-        assert.equal(w.calls(), calls + 1);
-        const attempts = (
-          await db.platform.query(
-            `SELECT purpose,attribution_kind,attribution_id,task_flow_id,state FROM ${w.table('tf_knowledge_credit_attempts')} WHERE purpose='query'`,
-          )
-        ).rows;
-        assert.deepEqual(attempts, [
-          {
-            purpose: 'query',
-            attribution_kind: 'member',
-            attribution_id: w.actor.membershipId,
-            task_flow_id: flowId,
-            state: 'known',
-          },
-        ]);
-        const observed = (
-          await db.platform.query(
-            `SELECT o.provider_pico_usd FROM ${w.table('tf_knowledge_credit_observations')} o JOIN ${w.table('tf_knowledge_credit_attempts')} a ON a.id=o.attempt_id WHERE a.task_flow_id=$1`,
-            [flowId],
-          )
-        ).rows[0].provider_pico_usd;
-        const spend = await runtime.transaction(w.ws.id, commonCompatibility, tx => knowledgeTaskSpend(tx, flowId));
-        assert.equal(spend, BigInt(observed) * creditPricing().unitsPerPicoUsd);
-        assert.ok(spend > 0n);
-        assert.equal(
-          (
-            await db.platform.query(
-              `SELECT count(*)::int AS count FROM ${w.table('tf_credit_usage')} WHERE flow_id=$1`,
-              [flowId],
-            )
-          ).rows[0].count,
-          0,
-        );
-        const after = BigInt(
-          (await db.platform.query(`SELECT available FROM ${w.table('tf_credit_account')}`)).rows[0].available,
-        );
-        const groupAfter = (await db.platform.query(`SELECT known FROM ${w.table('tf_knowledge_credit_group')}`))
-          .rows[0];
-        const rounded = value => creditPricing().round(BigInt(value));
-        assert.equal(
-          before - after,
-          rounded(groupAfter.known) - rounded(groupBefore.known),
-          'wallet debited once, through the knowledge aggregate',
-        );
-        await w.tools.search(
-          w.ws.id,
-          w.actor,
-          { query: 'advance payment terms for vendors' },
-          { commandId: randomUUID() },
-        );
-        const chat = (
-          await db.platform.query(
-            `SELECT task_flow_id FROM ${w.table('tf_knowledge_credit_attempts')} WHERE purpose='query' AND task_flow_id IS NULL`,
-          )
-        ).rows;
-        assert.equal(chat.length, 1, 'ordinary chat search is attributed to the member without a task flow');
-        assert.equal(
-          await runtime.transaction(w.ws.id, commonCompatibility, tx => knowledgeTaskSpend(tx, randomUUID())),
-          0n,
-        );
-      },
-    );
-
-    await t.test('a worker-claimed task query embedding keeps the persisted task flow', async () => {
-      const w = await setup({ semantic: true });
-      await w.note('supplier advance settlement required', 'Vendor policy');
-      await w.index();
-      const flowId = randomUUID(),
-        commandId = randomUUID();
-      const query = {
-        commandId,
-        query: 'worker claimed task query',
-        filters: { kinds: ['note', 'file'], sourceIds: [], documentIds: [] },
-        deadlineAt: Date.now() + 10_000,
-        retrySemantic: false,
-      };
-      const prepared = await w.embeddings.prepareSearchQuery(w.ws.id, w.ws.userId, { ...query, taskFlowId: flowId });
-      const [work] = (await w.embeddings.due(w.ws.id)).filter(item => item.jobId === prepared.jobId);
-      assert.deepEqual(Object.keys(work).sort(), ['generation', 'jobId', 'workspaceId']);
-      assert.equal((await w.embeddings.process(work)).disposition, 'ready');
-      const attempts = (
-        await db.platform.query(
-          `SELECT task_flow_id FROM ${w.table('tf_knowledge_credit_attempts')} WHERE purpose='query'`,
-        )
-      ).rows;
-      assert.deepEqual(attempts, [{ task_flow_id: flowId }]);
-      assert.ok((await runtime.transaction(w.ws.id, commonCompatibility, tx => knowledgeTaskSpend(tx, flowId))) > 0n);
-      await assert.rejects(
-        w.embeddings.prepareSearchQuery(w.ws.id, w.ws.userId, { ...query, taskFlowId: randomUUID() }),
-        error => error.code === 'conflict',
-      );
     });
   } finally {
     for (const search of searches) await search.close();

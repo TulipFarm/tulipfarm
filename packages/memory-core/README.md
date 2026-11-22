@@ -13,8 +13,8 @@ core algorithm -- explicit ports --> host / Postgres / provider
 ```
 
 The package owns browser-safe contracts, isolated parsing and chunking,
-document lifecycle, search fusion and sessions, bounded retrieval,
-embedding work, and the transcript chunking that background learning reads.
+document lifecycle, search sessions over the external Knowledge index, bounded
+retrieval, and the transcript chunking that background learning reads.
 Existing Knowledge and Conversations import paths forward
 their moved exports.
 
@@ -23,7 +23,7 @@ their moved exports.
 The root export and the `contracts`, `personal-memory-contracts`,
 `compaction-contracts`, and `retrieval-contracts` exports are browser-safe.
 Node domain entry points are `parser`, `documents/*`, `search`, `retrieval`,
-`embedding-provider`, `embeddings`, and `memory/*`. Import a specific
+and `memory/*`. Import a specific
 `ports/*` module for its interface rather than depending on host types.
 
 Core must not import another `@tulipfarm/*` package, Postgres, Temporal,
@@ -61,19 +61,14 @@ apply:
 | [TenantRuntime](src/ports/tenant-runtime.ts)                                    | One tenant transaction with an opaque context and optional deadline. Preserve callback errors and roll back failed work. |
 | [KnowledgeRepository](src/ports/knowledge-repository.ts)                        | Named source, document, revision, publication, chunk, proof, and work transitions.                                       |
 | [RetrievalRepository](src/ports/retrieval-repository.ts)                        | Ordered citation anchors and budgeted nearby passages; it does not authorize them.                                       |
-| [LexicalIndex](src/ports/lexical-index.ts)                                      | Eligible publications and ranked keyword candidates.                                                                     |
-| [VectorIndex](src/ports/vector-index.ts)                                        | Eligible vector publications, bounded counts, and nearest candidates.                                                    |
-| [SearchSessions](src/ports/search-sessions.ts)                                  | Actor-owned live sessions, expiry, candidate persistence, and eligibility-filtered pages.                                |
-| [EmbeddingRepository](src/ports/embedding-repository.ts)                        | Profiles, jobs, cache entries, attempts, claims, retries, and vector publication.                                        |
+| [SearchSessions](src/ports/search-sessions.ts)                                  | Eligible publications, actor-owned live sessions, expiry, candidate persistence, and eligibility-filtered pages.         |
 | [MemoryReconciliationRepository](src/ports/memory-reconciliation-repository.ts) | Maintenance progress, ownership, and per-step progress of background learning.                                           |
 | [TranscriptSource](src/ports/transcript-source.ts)                              | Only eligible direct requester text after the applicable coverage and manual-edit cutoffs.                               |
 | [Authorizer](src/ports/authorizer.ts)                                           | Typed allow/deny decisions. Missing or malformed decisions fail closed; a denial retains its error identity.             |
 | [KnowledgeAuthorization](src/ports/knowledge-authorization.ts)                  | Bind admission and source/document/file/conversation/task proof checks to the host transaction.                          |
 | [EligibilityFilter](src/ports/eligibility-filter.ts)                            | Produce a storage-specific eligibility predicate from host selection. Core does not render SQL.                          |
 | [CorpusProvider](src/ports/corpus-provider.ts)                                  | Discover items, fetch content, and report permission evidence. Evidence is not an access grant.                          |
-| [EmbeddingProvider](src/ports/embedding-provider.ts)                            | Return explicit dispatch, usage, model/vector, and error outcomes for a batch.                                           |
 | [Summarizer](src/ports/summarizer.ts)                                           | Policy, measurement, window, and purpose-scoped summarization with a host fence.                                         |
-| [UsageMeter](src/ports/runtime.ts)                                              | Cost calculation, reservation, dispatch/outcome settlement, and usage recording.                                         |
 | [Clock, Telemetry, FeatureFlags, EgressPolicy](src/ports/runtime.ts)            | Explicit domain time, import diagnostics, actor/tenant feature selection, and protected-operation egress guards.         |
 
 Repository operations accept named positional tuples to retain the existing
@@ -88,10 +83,12 @@ open another transaction or commit individual steps.
 
 ## Searchability, freshness and parse failures
 
-A document becomes keyword-searchable as soon as its lexical publication
-exists. Search eligibility requires only `lexical_publication_id`; vector
-results join the same ranking once the embedding publication is ready, so
-embeddings never delay keyword search.
+Keep, the external Knowledge index, answers every search. A document is
+eligible once its current publication (`lexical_publication_id`) exists, and
+it appears in results once Keep holds that publication. A readable document
+Keep has not indexed yet is left out and makes the result `partial`. When
+Keep is not configured or cannot answer, search fails with
+`KnowledgeSearchUnavailable`; there is no local fallback.
 
 Search hits carry `freshness`: `indexedAt` (when the current publication was
 built), `observedAt` (when the indexed revision was observed),
@@ -127,14 +124,13 @@ The host resolves the current principal, locks authority, binds tenant/schema
 identity, supplies membership/source/file/conversation/task decisions, and
 owns provider ACL tables. Core retains proof freshness, expiry/binding checks,
 final evidence rechecks, and fail-closed handling. Supplying a repository,
-content, vector, or provider permission report never grants authority.
+content, index, or provider permission report never grants authority.
 
 Google, Slack, GitHub, and Atlassian transports, default source selection,
 recap push publication, file/original access, credits, Bud cleanup,
 recommendation invalidation, and Temporal composition remain host-owned.
 Content access and scheduling use existing host callbacks and engine entry
-points, not invented remote-fetch or job-runner behavior. Phase 1 preserves
-the host embedding model/profile and its 1,536 dimensions.
+points, not invented remote-fetch or job-runner behavior.
 
 ## Conformance
 

@@ -70,7 +70,6 @@ export async function grantApplicationAccess(
   );
   const capability = installed.rowCount ? 'isolated-v1' : 'disabled';
   const applicationRoutines = [
-    'app.acquire_knowledge_embedding_capacity(uuid,text,integer,uuid)',
     'app.prune_github_event_deliveries(integer,integer)',
     'app.prune_github_event_bodies(integer)',
     ...modelBundleRoutines,

@@ -36,7 +36,7 @@ const claudeCatalog = roles =>
 
 function environment(t, values) {
   const previous = process.env;
-  process.env = { ...planOff, SLACK_OUTBOUND_ENABLED: 'false', KNOWLEDGE_EMBEDDINGS_ENABLED: 'false', ...values };
+  process.env = { ...planOff, SLACK_OUTBOUND_ENABLED: 'false', ...values };
   t.after(() => {
     process.env = previous;
   });

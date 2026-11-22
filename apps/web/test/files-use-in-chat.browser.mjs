@@ -363,7 +363,8 @@ test(
         const composerChip = name =>
           page.getByRole('form', { name: 'Message composer' }).getByText(name, { exact: true });
         try {
-          await page.goto(`${origin}${workspace.slug}/files`);
+          // The first load of a cold dev server waits for dependency optimization, which can exceed the step timeout.
+          await page.goto(`${origin}${workspace.slug}/files`, { timeout: 60000 });
           const menu = page.getByRole('button', { name: `More actions for ${notes.name}` });
           await menu.click();
           await page.getByRole('menuitem', { name: 'Use in chat' }).click();

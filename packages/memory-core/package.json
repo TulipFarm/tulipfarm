@@ -39,14 +39,6 @@
       "types": "./dist/ports/*.d.ts",
       "default": "./dist/ports/*.js"
     },
-    "./embedding-provider": {
-      "types": "./dist/embeddings/provider.d.ts",
-      "default": "./dist/embeddings/provider.js"
-    },
-    "./embedding-contracts": {
-      "types": "./dist/contracts/embeddings.d.ts",
-      "default": "./dist/contracts/embeddings.js"
-    },
     "./documents/*": {
       "types": "./dist/documents/*.d.ts",
       "default": "./dist/documents/*.js"
@@ -62,10 +54,6 @@
     "./retrieval-contracts": {
       "types": "./dist/contracts/retrieval.d.ts",
       "default": "./dist/contracts/retrieval.js"
-    },
-    "./embeddings": {
-      "types": "./dist/embeddings/engine.d.ts",
-      "default": "./dist/embeddings/engine.js"
     },
     "./testing/memory-conformance": "./testing/memory-conformance.mjs",
     "./memory/*": {

@@ -4,9 +4,8 @@ import { test } from 'node:test';
 import { fixture, loadPlatformBaseline } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createWorkspaceRuntime, qualified } from '@tulipfarm/workspace-storage/runtime';
 import { workspaceTableMigrations } from '../../workspaces/dist/table-migrations.js';
-import { createGoogleKnowledge, createKnowledgeEmbeddings } from '../dist/index.js';
+import { createGoogleKnowledge } from '../dist/index.js';
 import { GoogleCorpusError } from '@tulipfarm/google-workspace/corpus';
-import { knowledgeEmbeddingProfile as profile } from '@tulipfarm/config';
 
 const deferred = () => {
   let resolve;
@@ -15,13 +14,6 @@ const deferred = () => {
   });
   return { promise, resolve };
 };
-const success = () => ({
-  dispatch: 'dispatched',
-  requestId: 'repair-fixture',
-  inputTokensUpperBound: 1,
-  usage: { kind: 'known', inputTokens: 1, totalTokens: 1, exceedsUpperBound: false },
-  result: { kind: 'success', model: profile.model, vectors: [Array(1536).fill(0.25)] },
-});
 
 test('Google review repairs with restricted PostgreSQL', async t => {
   const db = await fixture();
@@ -266,124 +258,6 @@ test('Google review repairs with restricted PostgreSQL', async t => {
         1,
       );
     });
-    for (const phase of ['queued', 'before-dispatch', 'during-provider', 'after-paid', 'reconnect'])
-      await t.test(`embedding recovery at ${phase} preserves paid results and fences old work`, async () => {
-        const w = await setup();
-        const entered = deferred(),
-          release = deferred();
-        let calls = 0;
-        const embeddings = createKnowledgeEmbeddings({
-          runtime: w.runtime,
-          google: w.google,
-          config: { kind: 'enabled', endpoint: 'https://example.services.ai.azure.com/', apiKey: 'fixture', profile },
-          capacity: async () => {
-            if (phase === 'before-dispatch') {
-              entered.resolve();
-              await release.promise;
-            }
-            return true;
-          },
-          provider: async () => {
-            calls++;
-            if (['during-provider', 'after-paid'].includes(phase)) {
-              entered.resolve();
-              await release.promise;
-            }
-            return success();
-          },
-        });
-        const old = (await embeddings.due(w.ws.id))[0];
-        assert.ok(old);
-        let pending;
-        if (['before-dispatch', 'during-provider', 'after-paid'].includes(phase)) {
-          pending = embeddings.process(old);
-          await entered.promise;
-        }
-        await w.manage('pause');
-        if (phase === 'after-paid') {
-          release.resolve();
-          assert.equal((await pending).disposition, 'stale');
-          pending = null;
-        }
-        if (phase === 'reconnect') {
-          w.binding.generation++;
-          await db.platform.query(`UPDATE ${w.table('tf_google_integrations')} SET generation=$2 WHERE id=$1`, [
-            w.binding.integrationId,
-            w.binding.generation,
-          ]);
-          await w.manage('retry');
-        } else await w.manage('resume');
-        await assert.rejects(embeddings.documentStatus(w.ws.id, w.ws.userId, w.doc.id));
-        await w.renew();
-        if (pending) {
-          release.resolve();
-          assert.equal((await pending).disposition, 'stale');
-        }
-        for (let i = 0; i < 3; i++) for (const work of await embeddings.due(w.ws.id)) await embeddings.process(work);
-        const current = await embeddings.documentStatus(w.ws.id, w.ws.userId, w.doc.id);
-        assert.equal(current.state, 'ready');
-        assert.ok(current.generation > old.generation);
-        assert.equal((await embeddings.process(old)).disposition, 'stale');
-        assert.equal(calls, 1);
-        const row = (
-          await db.platform.query(
-            `SELECT d.vector_publication_id,j.access_epoch,s.access_epoch AS source_epoch FROM ${w.table('documents')} d JOIN ${w.table('sources')} s ON s.id=d.source_id JOIN ${w.table('embedding_jobs')} j ON j.document_id=d.id WHERE d.id=$1`,
-            [w.doc.id],
-          )
-        ).rows[0];
-        assert.ok(row.vector_publication_id);
-        assert.equal(row.access_epoch, row.source_epoch);
-        const ledger = (
-          await db.platform.query(`SELECT state,attribution_kind,attribution_id FROM ${w.table('credit_attempts')}`)
-        ).rows;
-        assert.deepEqual(ledger, [{ state: 'known', attribution_kind: 'source', attribution_id: w.source.sourceId }]);
-      });
-    for (const outcome of ['failed', 'unknown'])
-      await t.test(`${outcome} paid outcome needs explicit retry after reconnect`, async () => {
-        const w = await setup();
-        let calls = 0;
-        const embeddings = createKnowledgeEmbeddings({
-          runtime: w.runtime,
-          google: w.google,
-          config: { kind: 'enabled', endpoint: 'https://example.services.ai.azure.com/', apiKey: 'fixture', profile },
-          capacity: async () => true,
-          provider: async () => {
-            calls++;
-            return calls > 1
-              ? success()
-              : outcome === 'unknown'
-                ? {
-                    ...success(),
-                    usage: { kind: 'unknown', reason: 'timeout' },
-                    result: { kind: 'error', code: 'timeout' },
-                  }
-                : { ...success(), result: { kind: 'error', code: 'provider' } };
-          },
-        });
-        const old = (await embeddings.due(w.ws.id))[0];
-        assert.equal((await embeddings.process(old)).disposition, outcome);
-        w.binding.generation++;
-        await db.platform.query(`UPDATE ${w.table('tf_google_integrations')} SET generation=$2 WHERE id=$1`, [
-          w.binding.integrationId,
-          w.binding.generation,
-        ]);
-        await w.manage('retry');
-        await w.renew();
-        assert.deepEqual(await embeddings.due(w.ws.id), []);
-        assert.equal(calls, 1);
-        const status = await embeddings.documentStatus(w.ws.id, w.ws.userId, w.doc.id);
-        assert.equal(status.state, outcome);
-        assert.equal(status.canRetry, true);
-        const command = { commandId: randomUUID(), expectedJobId: status.jobId, expectedGeneration: status.generation };
-        const retried = await embeddings.retryDocument(w.ws.id, w.ws.userId, w.doc.id, command);
-        await embeddings.retryDocument(w.ws.id, w.ws.userId, w.doc.id, command);
-        assert.equal(
-          (await embeddings.process({ workspaceId: w.ws.id, jobId: retried.jobId, generation: retried.generation }))
-            .disposition,
-          'ready',
-        );
-        assert.equal(calls, 2);
-      });
     await t.test('failed parser documents retain authorized status and original journey', async () => {
       const w = await setup({ malformed: true });
       const result = await w.google.listDocuments(w.ws.id, w.ws.userId, w.source.sourceId);

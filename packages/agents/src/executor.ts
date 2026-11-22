@@ -1476,7 +1476,6 @@ export function createAgentExecutor(options: Options) {
                   {
                     commandId: ids.callId,
                     runId: ids.runId,
-                    taskFlowId: knowledge.flowId,
                     deadlineAt: Math.min(Date.now() + 90_000, work.deadlineAt ?? Infinity),
                   },
                   runtime,

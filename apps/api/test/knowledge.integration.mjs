@@ -48,7 +48,7 @@ test('file Knowledge stays listed in Trash, restores its index, and retires befo
     f.object.faults.beforeRemove = async () => {
       beforeRemove = (
         await f.db.platform.query(
-          `SELECT d.tombstoned_at,d.lexical_publication_id,d.vector_publication_id,f.deleting_at
+          `SELECT d.tombstoned_at,d.lexical_publication_id,f.deleting_at
         FROM ${f.table('tf_knowledge_documents')} d CROSS JOIN ${f.table('tf_files')} f
         WHERE d.id=$1 AND f.id=$2`,
           [documentId, fileId],
@@ -59,16 +59,14 @@ test('file Knowledge stays listed in Trash, restores its index, and retires befo
     assert.equal((await f.call(`${base}/delete-forever`, { method: 'POST' })).json().state, 'failed');
     assert.ok(beforeRemove.deleting_at && beforeRemove.tombstoned_at, 'both lifecycles commit before byte removal');
     assert.equal(beforeRemove.lexical_publication_id, null);
-    assert.equal(beforeRemove.vector_publication_id, null);
     const retired = (
       await f.db.platform.query(
-        `SELECT tombstoned_at,lexical_publication_id,vector_publication_id FROM ${f.table('tf_knowledge_documents')} WHERE id=$1`,
+        `SELECT tombstoned_at,lexical_publication_id FROM ${f.table('tf_knowledge_documents')} WHERE id=$1`,
         [documentId],
       )
     ).rows[0];
     assert.ok(retired.tombstoned_at, 'the entry is retired even when byte deletion fails');
     assert.equal(retired.lexical_publication_id, null);
-    assert.equal(retired.vector_publication_id, null);
     assert.deepEqual(await listIds(), [noteId]);
     assert.deepEqual(await search(), []);
     assert.equal((await f.call(citation)).status, 404, 'old citations return removed, not a server error');
@@ -272,8 +270,6 @@ test('authenticated HTTP notes save, parse, search, cite, edit and remove withou
     assert.equal(read.json().parsing, 'ready');
     assert.equal((await f.call()).json().items[0].documentId, id);
     const search = (await f.call('/search?query=OPS-123')).json();
-    assert.equal(search.mode, 'keyword-only');
-    assert.equal(search.reason, 'semantic-not-enabled');
     assert.equal(search.hits[0].title, 'Returns handbook');
     assert.match(search.hits[0].text, /thirty days/);
     assert.ok(Date.parse(search.validUntil) > Date.now());

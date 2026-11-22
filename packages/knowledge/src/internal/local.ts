@@ -20,16 +20,13 @@ import {
   knowledgeDocumentSchema,
   knowledgeListSchema,
   knowledgeSaveSchema,
-  knowledgeSearchSchema,
   knowledgeWorkSchema,
   knowledgeLocationOf,
   type KnowledgeDocument,
-  type KnowledgeLocation,
   type KnowledgeWork,
 } from '../contracts.ts';
 import { citationSchema, knowledgeLimits, KnowledgeError, lexicalInput, revisionInput } from './contracts.ts';
 import { createKnowledgeStore, type KnowledgeOptions } from './store.ts';
-import { normalizeIdentifier } from './identifiers.ts';
 import {
   gappedPublications,
   mediaLimitsForStorage,
@@ -461,98 +458,6 @@ export function createLocalKnowledge({ runtime, files, recognition, recognitionA
       return { items, nextCursor: rows.length > 100 ? (rows[99]?.id ?? null) : null };
     });
   }
-  async function search(workspaceId: string, userId: string, value: unknown) {
-    const input = knowledgeSearchSchema.parse(value);
-    return transaction(workspaceId, userId, false, async (tx, actor) => {
-      const hits: {
-        title: string;
-        text: string;
-        heading: string;
-        citation: z.infer<typeof citationSchema>;
-        location?: KnowledgeLocation;
-        coverageGaps?: boolean;
-      }[] = [];
-      for (let offset = 0; offset < knowledgeLimits.documents && hits.length < 20; offset += 100) {
-        const rows = z
-          .array(
-            z.object({
-              title: z.string(),
-              heading: z.string(),
-              passage: z.string(),
-              ordinal: z.number().int(),
-              source_id: uuidSchema,
-              document_id: uuidSchema,
-              revision_id: uuidSchema,
-              publication_id: uuidSchema,
-              access_epoch: z.number().int(),
-              source_offset: z.unknown(),
-            }),
-          )
-          .parse(
-            (
-              await tx.client.query(
-                `WITH matches AS (
-        SELECT k.search_title AS title,k.heading,k.passage,k.ordinal,k.source_offset,d.source_id,d.id AS document_id,d.observed_revision_id AS revision_id,k.publication_id,s.access_epoch,
-          (k.identifiers @> ARRAY[$4]::text[]) AS exact_match,ts_rank_cd(k.search_vector,websearch_to_tsquery('english',$3)) AS rank
-        FROM ${table(tx, 'chunks')} k JOIN ${table(tx, 'documents')} d ON d.lexical_publication_id=k.publication_id
-        JOIN ${table(tx, 'local_revisions')} l ON l.revision_id=d.observed_revision_id
-        JOIN ${table(tx, 'sources')} s ON s.id=d.source_id
-        WHERE l.owner_membership_id=$1 AND l.owner_user_id=$2 AND s.owner_membership_id=$1 AND s.state IN ('active','paused') AND d.tombstoned_at IS NULL
-          AND (k.search_vector @@ websearch_to_tsquery('english',$3) OR k.identifiers @> ARRAY[$4]::text[])
-      ), documents AS (
-        SELECT DISTINCT ON (document_id) * FROM matches ORDER BY document_id,exact_match DESC,rank DESC,ordinal
-      ) SELECT * FROM documents ORDER BY exact_match DESC,rank DESC,document_id,ordinal LIMIT 100 OFFSET $5`,
-                [actor.membershipId, actor.userId, input.query, normalizeIdentifier(input.query), offset],
-              )
-            ).rows,
-          );
-        for (const row of rows) {
-          const citation = citationSchema.parse({
-            kind: 'knowledge-document',
-            workspaceId,
-            sourceId: row.source_id,
-            documentId: row.document_id,
-            revisionId: row.revision_id,
-            publicationId: row.publication_id,
-            accessEpoch: row.access_epoch,
-            ordinal: row.ordinal,
-          });
-          try {
-            await store.eligible(tx, actor, citation);
-            const location = knowledgeLocationOf(row.source_offset);
-            hits.push({
-              title: row.title,
-              text: row.passage,
-              heading: row.heading,
-              citation,
-              ...(location ? { location } : {}),
-            });
-            if (hits.length === 20) break;
-          } catch (error) {
-            if (!hidden(error)) throw error;
-          }
-        }
-        if (rows.length < 100) break;
-      }
-      await finalDocuments(
-        tx,
-        actor,
-        hits.map(hit => hit.citation.documentId),
-      );
-      for (const hit of hits) await store.eligible(tx, actor, hit.citation);
-      const gapped = await gappedPublications(
-        tx,
-        hits.map(hit => hit.citation.publicationId),
-      );
-      for (const hit of hits) if (gapped.has(hit.citation.publicationId)) hit.coverageGaps = true;
-      return {
-        mode: 'keyword-only',
-        reason: 'semantic-not-enabled',
-        hits,
-        validUntil: new Date((await clock(tx)).getTime() + knowledgeLimits.permissionAgeMs).toISOString(),
-      } satisfies { mode: 'keyword-only'; reason: 'semantic-not-enabled'; hits: typeof hits; validUntil: string };
-    });
-  }
   async function evidence(workspaceId: string, userId: string, value: unknown) {
     const citation = citationSchema.parse(value);
     return transaction(workspaceId, userId, false, async (tx, actor) => {
@@ -642,7 +547,7 @@ export function createLocalKnowledge({ runtime, files, recognition, recognitionA
       if (ctx.revision.id !== input.expectedRevisionId) throw new KnowledgeError('conflict');
       if (action === 'remove') {
         await tx.client.query(
-          `UPDATE ${table(tx, 'documents')} SET tombstoned_at=clock_timestamp(),retain_until=clock_timestamp()+interval '30 days',lexical_publication_id=NULL,vector_publication_id=NULL WHERE id=$1`,
+          `UPDATE ${table(tx, 'documents')} SET tombstoned_at=clock_timestamp(),retain_until=clock_timestamp()+interval '30 days',lexical_publication_id=NULL WHERE id=$1`,
           [input.documentId],
         );
         if (ctx.doc.tombstoned_at === null)
@@ -901,7 +806,6 @@ export function createLocalKnowledge({ runtime, files, recognition, recognitionA
     save,
     list,
     get,
-    search,
     evidence,
     original,
     retry,

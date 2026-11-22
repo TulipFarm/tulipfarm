@@ -41,11 +41,11 @@ test('a declared fleet is charged per task from each service pool sizes', async 
   const twoApis = { ...fleet, api: { tasks: 2, connectionsPerPool: 3 } };
   assert.throws(
     () => runtime({ ...budget, DATABASE_CONNECTION_FLEET: JSON.stringify(twoApis) }, '3'),
-    /234 database connections exceed its connection budget of 180/,
+    /228 database connections exceed its connection budget of 180/,
   );
   const twoGateways = { ...fleet, gateway: { tasks: 2 } };
   assert.throws(
     () => runtime({ ...budget, DATABASE_CONNECTION_FLEET: JSON.stringify(twoGateways) }, '2'),
-    /202 database connections exceed/,
+    /196 database connections exceed/,
   );
 });

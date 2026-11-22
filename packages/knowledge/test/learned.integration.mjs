@@ -8,6 +8,7 @@ import { workspaceTableMigrations } from '../../workspaces/dist/table-migrations
 import { createFiles } from '@tulipfarm/files';
 import { AccessDenied } from '@tulipfarm/access';
 import { createLearnedKnowledge, createLocalKnowledge } from '../dist/index.js';
+import { keepBackedSearch } from './fake-keep.mjs';
 
 test('learned entries stay with the member who stated them and update in place', async t => {
   const db = await fixture();
@@ -44,6 +45,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     };
     const files = createFiles(runtime, { read: unavailable, putIfAbsent: unavailable, remove: unavailable });
     const api = createLocalKnowledge({ runtime, files });
+    const indexed = keepBackedSearch({ runtime });
     const learned = createLearnedKnowledge({ runtime, files, enabled: async () => true });
     const chat = { kind: 'chat', id: randomUUID(), runId: null };
     const task = { kind: 'task', id: randomUUID(), runId: randomUUID() };
@@ -77,12 +79,12 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.ok(Date.parse(listed.learned.learnedAt));
       entry = listed;
       await index();
-      const hits = (await api.search(one.id, owner.userId, { query: 'Pro plan seat' })).hits;
+      const hits = (await indexed.query(one.id, owner.userId, 'Pro plan seat')).hits;
       assert.equal(hits[0]?.title, 'Pro plan pricing');
 
       assert.deepEqual((await api.list(one.id, other.userId, {})).items, []);
       assert.deepEqual((await api.list(one.id, other.userId, { filter: 'learned' })).items, []);
-      assert.deepEqual((await api.search(one.id, other.userId, { query: 'Pro plan seat' })).hits, []);
+      assert.deepEqual((await indexed.query(one.id, other.userId, 'Pro plan seat')).hits, []);
       await assert.rejects(api.get(one.id, other.userId, entry.documentId));
       assert.deepEqual(await learned.entries(one.id, other.userId), []);
       await assert.rejects(api.evidence(one.id, other.userId, hits[0].citation));

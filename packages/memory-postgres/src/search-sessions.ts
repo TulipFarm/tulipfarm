@@ -10,6 +10,14 @@ export function createPostgresSearchSessions(
 ): SearchSessions {
   const table = (name: string) => memoryTable(names, name);
   return {
+    eligiblePublications(
+      values: [membershipId: string, userId: string, kinds: string[], sources: string[], documents: string[]],
+    ) {
+      return client.query(
+        `SELECT e.document_id,e.source_id,e.revision_id,e.publication_id,e.access_epoch FROM (${eligibility()}) e`,
+        values,
+      );
+    },
     readLive(values: [id: string, membershipId: string, userId: string]) {
       return client.query(
         `SELECT * FROM ${table('search_sessions')} WHERE id=$1 AND owner_membership_id=$2 AND owner_user_id=$3 AND expires_at>clock_timestamp()`,
@@ -75,16 +83,15 @@ export function createPostgresSearchSessions(
         documents: string[],
         candidates: string,
         offset: number,
-        profileId: string,
         remainingDocuments: string[],
       ],
     ) {
       return client.query(
         `WITH eligible AS MATERIALIZED (
-          SELECT e.* FROM (${eligibility()}) e WHERE e.document_id=ANY($9::uuid[])),
+          SELECT e.* FROM (${eligibility()}) e WHERE e.document_id=ANY($8::uuid[])),
         candidates AS (SELECT c.*, (a.ordinality-1)::int AS position FROM jsonb_array_elements($6::jsonb) WITH ORDINALITY a(value,ordinality)
-          CROSS JOIN LATERAL jsonb_to_record(a.value) AS c(document_id uuid,source_id uuid,revision_id uuid,publication_id uuid,access_epoch int,ordinal int,vector_publication_id uuid,exact boolean))
-        SELECT c.*,e.expires_at,k.search_title AS title,k.heading,left(k.passage,2400) AS passage,k.source_offset,
+          CROSS JOIN LATERAL jsonb_to_record(a.value) AS c(document_id uuid,source_id uuid,revision_id uuid,publication_id uuid,access_epoch int,ordinal int))
+        SELECT c.*,e.expires_at,r.title,k.heading,left(k.passage,2400) AS passage,k.source_offset,
           CASE WHEN r.original->>'kind'='file' THEN (r.original->>'fileId')::uuid END AS file_id,
           p.created_at AS indexed_at,r.created_at AS observed_at,s.synced_at,
           CASE WHEN s.provider IN ('google','slack','github','confluence','jira') THEN left(r.source_revision,200) END AS source_revision
@@ -95,9 +102,7 @@ export function createPostgresSearchSessions(
           JOIN ${table('publications')} p ON p.id=c.publication_id
           JOIN ${table('sources')} s ON s.id=c.source_id
           JOIN ${table('chunks')} k ON k.publication_id=c.publication_id AND k.ordinal=c.ordinal
-          WHERE c.position >= $7 AND (c.vector_publication_id IS NULL OR (e.vector_publication_id=c.vector_publication_id AND EXISTS (
-            SELECT 1 FROM ${table('vector_publications')} p WHERE p.id=c.vector_publication_id AND p.lexical_publication_id=c.publication_id
-              AND p.revision_id=c.revision_id AND p.profile_id=$8))) ORDER BY c.position LIMIT 20`,
+          WHERE c.position >= $7 ORDER BY c.position LIMIT 20`,
         values,
       );
     },

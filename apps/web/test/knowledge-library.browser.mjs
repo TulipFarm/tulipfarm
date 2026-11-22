@@ -116,9 +116,9 @@ async function environment(t, { entries = [], enabled = true, otherMember = fals
         ? []
         : entries.filter(item => item.noteText?.toLowerCase().includes(url.searchParams.get('query').toLowerCase()));
       response = answer({
-        mode: 'keyword-only',
-        reason: 'typing',
-        coverage: 'keyword-only',
+        mode: 'hybrid',
+        reason: null,
+        coverage: 'complete',
         bounded: true,
         continuation: null,
         validUntil: new Date(Date.now() + 240000).toISOString(),
@@ -308,7 +308,7 @@ test(
   },
 );
 
-test('keyword search shows source passages and empty results without model requests', { timeout: 60000 }, async t => {
+test('search shows source passages and empty results without model requests', { timeout: 60000 }, async t => {
   const { page, library, requests } = await environment(t, { entries: [entry('Team handbook')] });
   await library.getByRole('searchbox', { name: 'Search Knowledge' }).fill('manager');
   await library.getByRole('button', { name: 'Search', exact: true }).click();

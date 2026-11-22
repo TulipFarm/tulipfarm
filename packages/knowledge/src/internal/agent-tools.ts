@@ -41,7 +41,6 @@ export const knowledgeToolSearchSchema = z.strictObject({
 export type KnowledgeToolContext = {
   commandId: string;
   runId?: string | undefined;
-  taskFlowId?: string | undefined;
   deadlineAt?: number | undefined;
   signal?: AbortSignal | undefined;
   excludeCitationIds?: string[] | undefined;
@@ -147,7 +146,7 @@ export function createKnowledgeAgentTools({
     const deadlineAt = Math.min(context.deadlineAt ?? Infinity, clock.now() + callTimeoutMs);
     const actor = humanActorSchema.parse(actorInput);
     const input = knowledgeToolSearchSchema.parse(value);
-    // Query text may be sent to the embedding provider; MCP-derived context cannot leave.
+    // Query text is sent to Keep; MCP-derived context cannot leave.
     knowledgeEgressPolicy.deny();
     await admit(workspaceId, actor, context, deadlineAt);
     const filters = knowledgeSearchFiltersSchema.parse(input.kind ? { kinds: [input.kind] } : {});
@@ -159,7 +158,6 @@ export function createKnowledgeAgentTools({
         { kind: 'submitted', commandId: context.commandId, query: input.query, filters },
         deadlineAt,
         context.signal,
-        context.taskFlowId ? { taskFlowId: context.taskFlowId } : undefined,
       );
     } catch (error) {
       if (!(error instanceof KnowledgeSearchUnavailable)) throw error;
@@ -244,7 +242,7 @@ export function createKnowledgeAgentTools({
     workspaceId: string,
     actorInput: HumanActor | string,
     value: unknown,
-    context: Omit<KnowledgeToolContext, 'commandId' | 'taskFlowId'> = {},
+    context: Omit<KnowledgeToolContext, 'commandId'> = {},
   ) {
     const deadlineAt = Math.min(context.deadlineAt ?? Infinity, clock.now() + callTimeoutMs);
     const actor = typeof actorInput === 'string' ? actorInput : humanActorSchema.parse(actorInput);

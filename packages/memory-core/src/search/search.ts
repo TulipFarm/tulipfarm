@@ -2,10 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { uuidSchema, type Principal as HumanActor } from '../documents/records.ts';
 import { requireAccess } from '../ports/authorizer.ts';
-import type { TenantRuntime, StorageErrorPolicy } from '../ports/tenant-runtime.ts';
+import type { TenantRuntime } from '../ports/tenant-runtime.ts';
 import type { KnowledgeAuthorization, AccessErrors } from '../ports/knowledge-authorization.ts';
-import type { LexicalIndex } from '../ports/lexical-index.ts';
-import type { VectorIndex } from '../ports/vector-index.ts';
 import type { SearchSessions } from '../ports/search-sessions.ts';
 import type { Clock } from '../ports/runtime.ts';
 import {
@@ -13,14 +11,11 @@ import {
   knowledgeLocationOf,
   knowledgeSearchFiltersSchema,
   knowledgeSearchRequestSchema,
-  knowledgeSearchReasonSchema,
   type KnowledgeSearchFilters,
   type KnowledgeSearchResult,
 } from '../contracts/knowledge.ts';
-import type { createEmbeddingEngine } from '../embeddings/engine.ts';
-import { KnowledgeError } from '../documents/contracts.ts';
+import { KnowledgeError, KnowledgeSearchUnavailable } from '../documents/contracts.ts';
 import type { createDocumentStore } from '../documents/store.ts';
-import { normalizeIdentifier } from '../documents/identifiers.ts';
 
 const withLocation = (offset: unknown) => {
   const location = knowledgeLocationOf(offset);
@@ -34,47 +29,23 @@ const candidateSchema = z.object({
   publication_id: uuidSchema,
   access_epoch: z.number().int(),
   ordinal: z.number().int(),
-  vector_publication_id: uuidSchema.nullable(),
-  exact: z.boolean().default(false),
-  broadened: z.boolean().optional(),
 });
 type Candidate = z.infer<typeof candidateSchema>;
-const eligibleVectorSchema = z.object({
+const eligibleSchema = z.object({
   document_id: uuidSchema,
   source_id: uuidSchema,
   revision_id: uuidSchema,
   publication_id: uuidSchema,
   access_epoch: z.number().int(),
-  vector_publication_id: uuidSchema,
-});
-const eligibleLexicalSchema = z.object({
-  document_id: uuidSchema,
-  source_id: uuidSchema,
-  revision_id: uuidSchema,
-  publication_id: uuidSchema,
-  access_epoch: z.number().int(),
-  semantic: z.boolean(),
-});
-const lexicalMatchSchema = z.object({
-  publication_id: uuidSchema,
-  ordinal: z.number().int(),
-  exact: z.boolean(),
-  rank: z.number(),
-});
-const nearestSchema = z.object({
-  vector_publication_id: uuidSchema,
-  lexical_publication_id: uuidSchema,
-  ordinal: z.number().int(),
-  distance: z.number(),
 });
 const sessionSchema = z.object({
   id: uuidSchema,
   fingerprint: z.string(),
   filters: knowledgeSearchFiltersSchema,
   candidates: z.array(candidateSchema).max(100),
-  mode: z.enum(['keyword-only', 'hybrid']),
-  reason: knowledgeSearchReasonSchema.nullable(),
-  coverage: z.enum(['complete', 'partial', 'keyword-only']),
+  mode: z.string(),
+  reason: z.string().nullable(),
+  coverage: z.string(),
   expires_at: z.date(),
 });
 type Session = z.infer<typeof sessionSchema>;
@@ -88,46 +59,11 @@ const values = (actor: HumanActor, filters: KnowledgeSearchFilters): [string, st
 ];
 const fingerprint = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
-export function fuseKnowledgeCandidates(lexical: Candidate[], semantic: Candidate[]) {
-  const ranked = new Map<string, { candidate: Candidate; score: number }>();
-  for (const list of [lexical, semantic])
-    list.forEach((candidate, index) => {
-      const key = `${candidate.publication_id}:${candidate.ordinal}`;
-      const existing = ranked.get(key);
-      ranked.set(key, {
-        candidate: {
-          ...candidate,
-          exact: candidate.exact || existing?.candidate.exact === true,
-          vector_publication_id: candidate.vector_publication_id ?? existing?.candidate.vector_publication_id ?? null,
-          ...(candidate.broadened || existing?.candidate.broadened ? { broadened: true } : {}),
-        },
-        score: (existing?.score ?? 0) + 1 / (60 + index + 1),
-      });
-    });
-  const documents = new Set<string>();
-  return [...ranked.values()]
-    .sort(
-      (a, b) =>
-        Number(b.candidate.exact) - Number(a.candidate.exact) ||
-        b.score - a.score ||
-        a.candidate.document_id.localeCompare(b.candidate.document_id) ||
-        a.candidate.ordinal - b.candidate.ordinal,
-    )
-    .filter(({ candidate }) => {
-      if (documents.has(candidate.document_id)) return false;
-      documents.add(candidate.document_id);
-      return true;
-    })
-    .slice(0, 100)
-    .map(({ candidate }) => candidate);
-}
-
-/** A ranked passage from an external Knowledge index, already mapped to TulipFarm ids. */
+/** A ranked passage from the external Knowledge index, already mapped to TulipFarm ids. */
 export type KnowledgeIndexHit = { documentId: string; publicationId: string; ordinal: number; score: number };
 /**
- * An external Knowledge index. When configured, it answers for the documents whose current publication it holds; every
- * other eligible document, such as one still waiting to be sent or one the index refused, is matched by the local
- * keyword and vector index, and the two result lists are merged.
+ * The external Knowledge index, the only search engine. It answers for the documents whose current publication it
+ * holds; a readable document it does not hold yet makes the result partial.
  * `search` receives only document ids the actor may read now and throws `KnowledgeSearchUnavailable` when it cannot answer.
  */
 export type KnowledgeIndexSearch<Context = unknown> = {
@@ -143,239 +79,72 @@ export type KnowledgeIndexSearch<Context = unknown> = {
 export type SearchEngineOptions<Context, Source extends { kind: string }> = {
   runtime: TenantRuntime<Context>;
   store: ReturnType<typeof createDocumentStore<Context, Source>>;
-  embeddings: ReturnType<typeof createEmbeddingEngine<Context, Source>>;
   authorization: Pick<KnowledgeAuthorization<Context, Source>, 'authority' | 'admit'>;
-  lexical(context: Context): LexicalIndex;
-  vector(context: Context): VectorIndex;
   sessions(context: Context): SearchSessions;
   selectReaders(context: Context, actor: HumanActor): Promise<void>;
   availability(context: Context, actor: HumanActor, filters: KnowledgeSearchFilters): Promise<boolean>;
   errors: AccessErrors;
-  storageErrors: StorageErrorPolicy;
   clock: Clock;
   callTimeoutMs: number;
-  profile: { id: string };
   index?: KnowledgeIndexSearch<Context>;
 };
 export function createSearchEngine<Context, Source extends { kind: string }>({
   runtime,
   store,
-  embeddings,
   authorization,
-  lexical: lexicalIndex,
-  vector: vectorIndex,
   sessions,
   selectReaders,
   availability,
   errors,
-  storageErrors,
   clock,
   callTimeoutMs,
-  profile: knowledgeEmbeddingProfile,
   index,
 }: SearchEngineOptions<Context, Source>) {
   type Transaction = Context;
   const { AccessDenied, SourceAuthorizationUnavailable } = errors;
   const { authority: createKnowledgeAuthorizer, admit: admitKnowledgePrincipal } = authorization;
-  async function until<T>(promise: Promise<T>, deadlineAt: number, clock: Clock): Promise<T> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      return await Promise.race([
-        promise,
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(storageErrors.timeout()), Math.max(0, deadlineAt - clock.now()));
-        }),
-      ]);
-    } finally {
-      clearTimeout(timer);
-    }
-  }
 
-  const processing = new Set<Promise<unknown>>();
   async function transaction<T>(
     workspaceId: string,
     userId: string,
     deadlineAt: number,
-    write: boolean,
     operation: (tx: Transaction, actor: HumanActor) => Promise<T>,
   ) {
-    const compatibility = { deadlineAt };
-    return runtime.transaction(workspaceId, compatibility, async raw => {
+    return runtime.transaction(workspaceId, { deadlineAt }, async raw => {
       const tx = store.bind(raw);
-      const actor = requireAccess(await admitKnowledgePrincipal(tx, userId, write ? 'write' : 'read'));
+      const actor = requireAccess(await admitKnowledgePrincipal(tx, userId, 'read'));
       await selectReaders(tx, actor);
       return operation(tx, actor);
     });
   }
-  async function lexical(
+  async function readable(
+    externalIndex: KnowledgeIndexSearch<Context>,
     workspaceId: string,
     userId: string,
-    query: string,
     filters: KnowledgeSearchFilters,
-    typing: boolean,
     deadlineAt: number,
-    allowKeywordFallback = false,
-    externalIndex?: KnowledgeIndexSearch<Context>,
   ) {
-    return transaction(workspaceId, userId, deadlineAt, false, async (tx, actor) => {
-      const prefix = (query.match(/[\p{L}\p{N}]+/gu) ?? [])
-        .slice(0, 8)
-        .map(word => `${word.slice(0, 64)}:*`)
-        .join(' & ');
-      // Load eligibility once, then drive matching from the GIN indexes with a hashed publication filter.
-      // A join against the eligibility CTE is misestimated as one row and scans every eligible chunk.
-      const readable = z
-        .array(eligibleLexicalSchema)
-        .parse(
-          (await lexicalIndex(tx).eligiblePublications([...values(actor, filters), knowledgeEmbeddingProfile.id])).rows,
-        );
-      // Documents the external index holds are answered by it; the rest stay with the local index.
-      const held =
-        externalIndex && readable.length
-          ? await externalIndex.held(
-              tx,
-              readable.map(row => ({ documentId: row.document_id, publicationId: row.publication_id })),
-            )
-          : new Set<string>();
-      const indexed = readable.filter(row => held.has(row.document_id));
-      const eligible = readable.filter(row => !held.has(row.document_id));
-      const coverage = { lexical: eligible.length, semantic: eligible.filter(row => row.semantic).length };
-      const byPublication = new Map(eligible.map(row => [row.publication_id, row]));
-      const match = async (broaden: boolean) =>
-        eligible.length
-          ? z
-              .array(lexicalMatchSchema)
-              .parse(
-                (
-                  await lexicalIndex(tx).match(
-                    [query, prefix, typing, normalizeIdentifier(query), [...byPublication.keys()]],
-                    { broaden, publicationCount: byPublication.size },
-                  )
-                ).rows,
-              )
-          : [];
-      let matched = await match(false);
-      let broadened = false;
-      // Preserve explicit phrases, exclusions and OR syntax; only widen plain topic queries with no strict match.
-      if (allowKeywordFallback && !typing && !matched.length && !/"|(?:^|\s)-\S|\bor\b/i.test(query)) {
-        matched = await match(true);
-        broadened = matched.length > 0;
-      }
-      const candidates = matched
-        .flatMap(row => {
-          const owner = byPublication.get(row.publication_id);
-          return owner ? [{ row, owner }] : [];
-        })
-        .sort(
-          (a, b) =>
-            Number(b.row.exact) - Number(a.row.exact) ||
-            b.row.rank - a.row.rank ||
-            (a.owner.document_id < b.owner.document_id
-              ? -1
-              : a.owner.document_id > b.owner.document_id
-                ? 1
-                : a.row.ordinal - b.row.ordinal),
-        )
-        .map(({ row, owner }) => ({
-          document_id: owner.document_id,
-          source_id: owner.source_id,
-          revision_id: owner.revision_id,
-          publication_id: owner.publication_id,
-          access_epoch: owner.access_epoch,
-          ordinal: row.ordinal,
-          vector_publication_id: null,
-          exact: row.exact,
-          ...(broadened ? { broadened: true } : {}),
-        }));
-      const unavailable = await availability(tx, actor, filters);
+    return transaction(workspaceId, userId, deadlineAt, async (tx, actor) => {
+      const eligible = z
+        .array(eligibleSchema)
+        .parse((await sessions(tx).eligiblePublications(values(actor, filters))).rows);
+      const held = eligible.length
+        ? await externalIndex.held(
+            tx,
+            eligible.map(row => ({ documentId: row.document_id, publicationId: row.publication_id })),
+          )
+        : new Set<string>();
       return {
-        candidates: z.array(candidateSchema).parse(candidates),
-        coverage,
-        unavailable,
-        indexed,
+        held: eligible.filter(row => held.has(row.document_id)),
+        complete: held.size === eligible.length && !(await availability(tx, actor, filters)),
       };
     });
   }
-  async function semantic(
-    workspaceId: string,
-    userId: string,
-    filters: KnowledgeSearchFilters,
-    vector: number[],
-    deadlineAt: number,
-    indexed: ReadonlySet<string>,
-  ) {
-    return transaction(workspaceId, userId, deadlineAt, false, async (tx, actor) => {
-      // Load eligible publications first. Joining the eligibility CTE inside the vector query lets the
-      // planner misestimate it as one row and replace the HNSW scan with a brute-force distance sort.
-      const eligible = z
-        .array(eligibleVectorSchema)
-        .parse(
-          (await vectorIndex(tx).eligiblePublications([...values(actor, filters), knowledgeEmbeddingProfile.id])).rows,
-        )
-        .filter(row => !indexed.has(row.document_id));
-      if (!eligible.length) return [];
-      const byVector = new Map(eligible.map(row => [row.vector_publication_id, row]));
-      const ids = [...byVector.keys()];
-      const query = JSON.stringify(vector);
-      const count = z
-        .object({ count: z.number() })
-        .parse((await vectorIndex(tx).boundedCount([knowledgeEmbeddingProfile.id, ids])).rows[0]).count;
-      const exact = count <= 2048;
-      if (!exact) await vectorIndex(tx).configureNearest();
-
-      const documents = new Set<string>();
-      const candidates: Candidate[] = [];
-      for (let attempt = 0; attempt < 3; attempt++) {
-        const rows = z
-          .array(nearestSchema)
-          .parse(
-            (
-              await vectorIndex(tx).nearest(
-                exact
-                  ? [knowledgeEmbeddingProfile.id, ids, query]
-                  : [knowledgeEmbeddingProfile.id, ids, query, candidates.map(candidate => candidate.publication_id)],
-                exact,
-              )
-            ).rows,
-          );
-        const ranked = rows
-          .flatMap(row => {
-            const owner = byVector.get(row.vector_publication_id);
-            return owner && owner.publication_id === row.lexical_publication_id ? [{ row, owner }] : [];
-          })
-          .sort(
-            (a, b) =>
-              a.row.distance - b.row.distance ||
-              (a.owner.document_id < b.owner.document_id
-                ? -1
-                : a.owner.document_id > b.owner.document_id
-                  ? 1
-                  : a.row.ordinal - b.row.ordinal),
-          );
-        for (const { row, owner } of ranked)
-          if (!documents.has(owner.document_id)) {
-            documents.add(owner.document_id);
-            candidates.push({
-              document_id: owner.document_id,
-              source_id: owner.source_id,
-              revision_id: owner.revision_id,
-              publication_id: owner.publication_id,
-              access_epoch: owner.access_epoch,
-              ordinal: row.ordinal,
-              vector_publication_id: row.vector_publication_id,
-              exact: false,
-            });
-          }
-        if (exact || candidates.length >= 100 || rows.length < 2000) break;
-      }
-      return candidates.slice(0, 200);
-    });
-  }
-  async function indexed(
+  async function rank(
     externalIndex: KnowledgeIndexSearch<Context>,
     workspaceId: string,
     query: string,
-    held: z.infer<typeof eligibleLexicalSchema>[],
+    held: z.infer<typeof eligibleSchema>[],
   ) {
     const byDocument = new Map(held.map(row => [row.document_id, row]));
     // The index only sees documents this actor may read now; page() re-checks each hit before returning it.
@@ -396,15 +165,13 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
         publication_id: owner.publication_id,
         access_epoch: owner.access_epoch,
         ordinal: hit.ordinal,
-        vector_publication_id: null,
-        exact: false,
       });
       if (candidates.length === 100) break;
     }
     return z.array(candidateSchema).parse(candidates);
   }
   async function readSession(workspaceId: string, userId: string, id: string, deadlineAt: number) {
-    return transaction(workspaceId, userId, deadlineAt, false, async (tx, actor) =>
+    return transaction(workspaceId, userId, deadlineAt, async (tx, actor) =>
       sessionSchema.optional().parse((await sessions(tx).readLive([id, actor.membershipId, actor.userId])).rows[0]),
     );
   }
@@ -418,7 +185,7 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
   ): Promise<KnowledgeSearchResult> {
     // Saving a session admits in read mode. A chat tool's guarded transaction already holds the shared authorization
     // lock and then its conversation row, so upgrading here deadlocks against a reply transaction waiting on that row.
-    return transaction(workspaceId, userId, deadlineAt, false, async (tx, actor) => {
+    return transaction(workspaceId, userId, deadlineAt, async (tx, actor) => {
       if (session.expires_at.getTime() <= clock.now()) throw new KnowledgeError('superseded');
       if (persist) {
         await sessions(tx).lockOwner([actor.membershipId]);
@@ -469,7 +236,6 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
               ...values(actor, session.filters),
               JSON.stringify(session.candidates),
               offset,
-              knowledgeEmbeddingProfile.id,
               session.candidates.slice(offset).map(candidate => candidate.document_id),
             ])
           ).rows,
@@ -552,14 +318,14 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
         rows.length === 20 ? (rows.at(-1)?.position ?? session.candidates.length) + 1 : session.candidates.length;
       return {
         hits,
-        mode: session.mode,
-        reason: session.reason,
-        ...(session.candidates.some(candidate => candidate.broadened) ? { queryBroadened: true } : {}),
+        mode: 'hybrid',
+        reason: null,
         coverage:
           freshRows.length < rows.length ||
-          (rows.length < Math.min(20, session.candidates.length - offset) && session.coverage === 'complete')
+          rows.length < Math.min(20, session.candidates.length - offset) ||
+          session.coverage !== 'complete'
             ? 'partial'
-            : session.coverage,
+            : 'complete',
         bounded: true,
         continuation: next < session.candidates.length ? `${session.id}:${next}` : null,
         validUntil: new Date(
@@ -578,7 +344,6 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
     value: unknown,
     requestDeadline = clock.now() + callTimeoutMs,
     signal?: AbortSignal,
-    attribution?: { taskFlowId?: string; allowKeywordFallback?: boolean },
   ): Promise<KnowledgeSearchResult> {
     const deadlineAt = Math.min(requestDeadline, clock.now() + callTimeoutMs);
     const input = knowledgeSearchRequestSchema.parse(value);
@@ -594,11 +359,7 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
       sourceIds: [...new Set(input.filters.sourceIds)].sort(),
       documentIds: [...new Set(input.filters.documentIds)].sort(),
     };
-    const hash = fingerprint({
-      query: input.query,
-      filters,
-      ...(attribution?.allowKeywordFallback ? { allowKeywordFallback: true } : {}),
-    });
+    const hash = fingerprint({ query: input.query, filters });
     if (input.kind === 'submitted') {
       const previous = await readSession(workspaceId, userId, input.commandId, deadlineAt);
       if (previous) {
@@ -606,116 +367,17 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
         return page(workspaceId, userId, previous, 0, deadlineAt, false);
       }
     }
-    const lexicalResult = await lexical(
-      workspaceId,
-      userId,
-      input.query,
-      filters,
-      input.kind === 'typing',
-      deadlineAt - 400,
-      attribution?.allowKeywordFallback,
-      index?.configured() ? index : undefined,
-    );
-    const held = lexicalResult.indexed;
-    const heldCandidates = index && held.length ? await indexed(index, workspaceId, input.query, held) : [];
-    // With an external index configured and every readable document held there, it alone answers the search.
-    const indexOnly = index?.configured() === true && lexicalResult.coverage.lexical === 0;
-    let semanticCandidates: Candidate[] = [];
-    let reason: KnowledgeSearchResult['reason'] = input.kind === 'typing' ? 'typing' : 'no-semantic-content';
-    let hybrid = false;
-    if (input.kind === 'submitted' && lexicalResult.coverage.semantic > 0 && clock.now() < deadlineAt - 600) {
-      try {
-        signal?.throwIfAborted();
-        const prepared = await embeddings.prepareSearchQuery(workspaceId, userId, {
-          commandId: input.commandId,
-          query: input.query,
-          filters,
-          deadlineAt: deadlineAt - 550,
-          retrySemantic: input.retrySemantic,
-          taskFlowId: attribution?.taskFlowId,
-        });
-        const cancel = () => {
-          void embeddings.cancelSearchQuery(workspaceId, userId, prepared.commandId).catch(() => undefined);
-        };
-        if (signal?.aborted) {
-          cancel();
-          signal.throwIfAborted();
-        }
-        signal?.addEventListener('abort', cancel, { once: true });
-        let status = prepared;
-        if (status.state === 'queued' || status.state === 'capacity-blocked') {
-          const pending = embeddings.process(
-            { workspaceId, jobId: prepared.jobId, generation: prepared.generation },
-            deadlineAt - 550,
-            signal,
-          );
-          processing.add(pending);
-          void pending.then(
-            () => {
-              processing.delete(pending);
-              signal?.removeEventListener('abort', cancel);
-            },
-            () => {
-              processing.delete(pending);
-              signal?.removeEventListener('abort', cancel);
-            },
-          );
-          await until(pending, deadlineAt - 550, clock);
-          status = await embeddings.queryStatus(workspaceId, userId, prepared.commandId, deadlineAt - 500);
-        } else signal?.removeEventListener('abort', cancel);
-        while (status.state === 'busy' && clock.now() < deadlineAt - 650) {
-          await clock.sleep(25);
-          status = await embeddings.queryStatus(workspaceId, userId, prepared.commandId, deadlineAt - 550);
-        }
-        if (status.state === 'ready' && status.vector?.some(value => value !== 0)) {
-          semanticCandidates = await semantic(
-            workspaceId,
-            userId,
-            filters,
-            status.vector,
-            deadlineAt - 350,
-            new Set(held.map(row => row.document_id)),
-          );
-          hybrid = true;
-          reason = null;
-        } else
-          reason =
-            status.state === 'disabled'
-              ? 'semantic-not-enabled'
-              : status.state === 'credits-blocked'
-                ? 'credits-blocked'
-                : status.state === 'capacity-blocked'
-                  ? 'capacity-blocked'
-                  : status.state === 'busy' || status.state === 'queued'
-                    ? 'embedding-pending'
-                    : 'provider-unavailable';
-      } catch (error) {
-        if (error instanceof KnowledgeError && error.code === 'conflict') throw error;
-        if (storageErrors.deadline(error)) reason = 'deadline';
-        else throw error;
-      }
-    }
+    if (!index?.configured()) throw new KnowledgeSearchUnavailable('not-configured');
+    const found = await readable(index, workspaceId, userId, filters, deadlineAt - 400);
+    signal?.throwIfAborted();
     const session: Session = {
       id: input.kind === 'submitted' ? input.commandId : randomUUID(),
       fingerprint: hash,
       filters,
-      candidates: held.length
-        ? fuseKnowledgeCandidates(heldCandidates, fuseKnowledgeCandidates(lexicalResult.candidates, semanticCandidates))
-        : fuseKnowledgeCandidates(lexicalResult.candidates, semanticCandidates),
-      mode: hybrid || held.length || indexOnly ? 'hybrid' : 'keyword-only',
-      // The external index ranks by meaning, so a mixed search is hybrid; its coverage says whether every local document had vectors.
-      reason: held.length || indexOnly ? (input.kind === 'typing' ? 'typing' : null) : reason,
-      coverage: lexicalResult.unavailable
-        ? 'partial'
-        : indexOnly
-          ? 'complete'
-          : hybrid
-            ? lexicalResult.coverage.lexical === lexicalResult.coverage.semantic
-              ? 'complete'
-              : 'partial'
-            : held.length
-              ? 'partial'
-              : 'keyword-only',
+      candidates: await rank(index, workspaceId, input.query, found.held),
+      mode: 'hybrid',
+      reason: null,
+      coverage: found.complete ? 'complete' : 'partial',
       expires_at: new Date(clock.now() + 300000),
     };
     const result = await page(workspaceId, userId, session, 0, deadlineAt, input.kind === 'submitted');
@@ -723,8 +385,6 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
   }
   return {
     search,
-    close: async () => {
-      await Promise.allSettled(processing);
-    },
+    close: async () => {},
   };
 }

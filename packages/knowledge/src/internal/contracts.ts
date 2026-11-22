@@ -6,7 +6,6 @@ export {
   providerCoverage,
   sourceInput,
   parserProfileSchema,
-  embeddingProfileSchema,
   originalSchema,
   lexicalInput,
   proofInput,
@@ -15,6 +14,5 @@ export {
   KnowledgeError,
   KnowledgeSearchUnavailable,
   type KnowledgeCitation,
-  type EmbeddingProfile,
 } from '@tulipfarm/memory-core/documents/contracts';
 export const revisionInput = createRevisionInput(sourceDependenciesSchema);

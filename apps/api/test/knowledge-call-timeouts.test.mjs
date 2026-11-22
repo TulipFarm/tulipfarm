@@ -22,15 +22,14 @@ for (const kind of ['search', 'citation'])
       registerKnowledge(app, {
         auth: { api: { getSession: async () => ({ user: { id: 'owner' } }) } },
         service: {},
-        embeddings: {},
         search: {
           search: (_workspace, _user, _input, deadlineAt, signal) =>
             run(deadlineAt, signal, {
               hits: [],
               continuation: null,
-              mode: 'keyword-only',
-              reason: 'no-semantic-content',
-              coverage: 'keyword-only',
+              mode: 'hybrid',
+              reason: null,
+              coverage: 'complete',
               bounded: true,
               validUntil: '2027-01-15T08:05:00.000Z',
             }),

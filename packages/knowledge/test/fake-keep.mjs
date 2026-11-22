@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import { createKnowledgeKeepFeed, createKnowledgeKeepIndex, createKnowledgeSearch } from '../dist/index.js';
+
 /**
  * An in-memory Keep knowledge corpus: per-scope sources of episodes, keyword search and forget. `state.timeouts` holds
  * source ids whose ingest times out, and `state.beforeIngest` runs before each ingest.
@@ -72,4 +75,51 @@ export function fakeKnowledgeKeep() {
     },
   };
   return { client, calls, state, corpora };
+}
+
+// One corpus per process: delivery state lives in each workspace's tables, so every search over the same workspace must
+// read the same Keep.
+const sharedKeep = fakeKnowledgeKeep();
+
+/**
+ * Knowledge search backed by an in-memory Keep shared by the whole test process. `search.search` first delivers every
+ * due document of the workspace, so tests can search right after writing documents; `query` runs a submitted search.
+ */
+export function keepBackedSearch({ runtime, ...options }) {
+  const keep = sharedKeep;
+  const feed = createKnowledgeKeepFeed({ runtime, client: () => keep.client });
+  const engine = createKnowledgeSearch({
+    runtime,
+    ...options,
+    index: createKnowledgeKeepIndex({ client: () => keep.client }),
+  });
+  async function deliver(workspaceId) {
+    let after = null;
+    for (;;) {
+      const page = await feed.due(workspaceId, after, 50);
+      if (!page.length) return;
+      for (const work of page) await feed.sync(workspaceId, work.document_id);
+      after = page.at(-1).document_id;
+    }
+  }
+  const search = {
+    ...engine,
+    async search(workspaceId, ...rest) {
+      await deliver(workspaceId);
+      return engine.search(workspaceId, ...rest);
+    },
+  };
+  return {
+    keep,
+    feed,
+    search,
+    deliver,
+    query: (workspaceId, userId, query, filters) =>
+      search.search(workspaceId, userId, {
+        kind: 'submitted',
+        commandId: randomUUID(),
+        query,
+        ...(filters ? { filters } : {}),
+      }),
+  };
 }

@@ -59,14 +59,6 @@ export const parserProfileSchema = z.strictObject({
   ocr: z.literal('disabled'),
   fallback: z.enum(['unsupported', 'malformed']).optional(),
 });
-export const embeddingProfileSchema = z.strictObject({
-  id: boundedText,
-  model: z.literal('text-embedding-3-large'),
-  deployment: boundedText,
-  dimensions: z.union([z.literal(1536), z.literal(3072)]),
-  tokenizer: boundedText,
-  preparation: boundedText,
-});
 export const originalSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('file'),
@@ -139,7 +131,6 @@ export const citationSchema = knowledgeCitationSchema.extend({
     .max(knowledgeLimits.chunksPerRevision - 1),
 });
 export type KnowledgeCitation = z.infer<typeof citationSchema>;
-export type EmbeddingProfile = z.infer<typeof embeddingProfileSchema>;
 /** The connected provider account is no longer the one an automatic request was recorded for. */
 export class KnowledgeAccountChanged extends Error {
   readonly code = 'account-changed';

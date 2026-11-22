@@ -8,8 +8,8 @@ import {
   createDefaultKnowledgeGate,
   createGitHubKnowledge,
   createGoogleKnowledge,
-  createKnowledgeEmbeddings,
   createKnowledgeKeepFeed,
+  createKnowledgeKeepIndex,
   createKnowledgeSearch,
   createLocalKnowledge,
   createSlackKnowledge,
@@ -17,11 +17,10 @@ import {
   type AtlassianCorpusProvider,
   type DefaultKnowledge,
   type GitHubCorpusProvider,
+  type KnowledgeKeepDependencies,
   type LocalKnowledgeOptions,
   type SlackCorpusProvider,
 } from '@tulipfarm/knowledge';
-import { parseKnowledgeEmbeddingsConfig } from '@tulipfarm/config';
-import { createKnowledgeEmbeddingCapacity } from '@tulipfarm/knowledge/embedding-capacity';
 import { createGoogleWorkspaceService } from '@tulipfarm/google-workspace';
 import { createGoogleCorpusProvider } from '@tulipfarm/google-workspace/corpus';
 import { slackCorpusFromEnvironment } from '@tulipfarm/slack/corpus';
@@ -29,7 +28,6 @@ import { githubCorpusFromEnvironment } from '@tulipfarm/github/corpus';
 import { atlassianCorpusFromEnvironment } from '@tulipfarm/atlassian/corpus';
 import type { createTemporalClient } from './temporal.ts';
 import { githubKnowledgeEventsFromEnvironment } from './knowledge-github-events.ts';
-import { registerKnowledgeEmbeddingDispatch } from './knowledge-embedding-dispatch.ts';
 import { registerKnowledgeKeepDispatch } from './knowledge-keep-dispatch.ts';
 import { registerGoogleKnowledgeDispatch } from './knowledge-google-dispatch.ts';
 import { registerSlackKnowledgeDispatch } from './knowledge-slack-dispatch.ts';
@@ -42,7 +40,6 @@ export type KnowledgeServiceDependencies = {
   files?: LocalKnowledgeOptions['files'];
   pool?: Pool;
   env?: NodeJS.ProcessEnv;
-  provider?: Parameters<typeof createKnowledgeEmbeddings>[0]['provider'];
   /** Whether document-vision recognition could run for a workspace now; lets dispatch re-parse unread images. */
   recognitionAvailable?: LocalKnowledgeOptions['recognitionAvailable'];
   googleService?: ReturnType<typeof createGoogleWorkspaceService>;
@@ -51,6 +48,8 @@ export type KnowledgeServiceDependencies = {
   githubCorpus?: GitHubCorpusProvider;
   atlassianCorpus?: AtlassianCorpusProvider;
   defaultKnowledge?: ReturnType<typeof defaultKnowledgeStarter>;
+  /** Overrides the Keep client that Knowledge search and delivery use; defaults to the configured endpoint. */
+  keepClient?: KnowledgeKeepDependencies['client'];
 };
 
 export type KnowledgeServices = ReturnType<typeof createKnowledgeServices>;
@@ -118,27 +117,17 @@ export function createKnowledgeServices(dependencies: KnowledgeServiceDependenci
     engines: { google, slack, github, atlassian },
   });
   dependencies.defaultKnowledge?.attach(defaults);
-  const config = parseKnowledgeEmbeddingsConfig(dependencies.env ?? process.env);
-  if (config.kind === 'enabled' && !dependencies.pool)
-    throw new Error('Knowledge embeddings require the application registry pool');
-  const embeddings = createKnowledgeEmbeddings({
+  const keepClient = dependencies.keepClient ? { client: dependencies.keepClient } : {};
+  const search = createKnowledgeSearch({
     runtime: dependencies.runtime,
-    config,
     google,
     slack,
     github,
     atlassian,
-    gate,
-    ...(config.kind === 'enabled' && dependencies.pool
-      ? {
-          ...(dependencies.provider ? { provider: dependencies.provider } : {}),
-          capacity: createKnowledgeEmbeddingCapacity(dependencies.pool).acquire,
-        }
-      : {}),
+    index: createKnowledgeKeepIndex(keepClient),
   });
-  const search = createKnowledgeSearch({ runtime: dependencies.runtime, embeddings, google, slack, github, atlassian });
   const githubEvents = githubKnowledgeEventsFromEnvironment(dependencies.pool, dependencies.env ?? process.env);
-  const keep = createKnowledgeKeepFeed({ runtime: dependencies.runtime });
+  const keep = createKnowledgeKeepFeed({ runtime: dependencies.runtime, ...keepClient });
   return {
     gate,
     service,
@@ -148,7 +137,6 @@ export function createKnowledgeServices(dependencies: KnowledgeServiceDependenci
     github,
     atlassian,
     defaults,
-    embeddings,
     search,
     githubEvents,
     keep,
@@ -162,7 +150,6 @@ export function registerKnowledgeSweeps(
 ) {
   const { pool, temporal } = dependencies;
   registerDefaultKnowledgeDispatch(app, { pool, temporal, service: services.defaults });
-  registerKnowledgeEmbeddingDispatch(app, { pool, temporal, service: services.embeddings });
   registerKnowledgeKeepDispatch(app, { pool, temporal, feed: services.keep });
   registerGoogleKnowledgeDispatch(app, { pool, temporal, service: services.google });
   registerSlackKnowledgeDispatch(app, { pool, temporal, service: services.slack });

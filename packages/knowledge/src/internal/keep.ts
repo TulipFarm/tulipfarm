@@ -53,8 +53,8 @@ function failure(result: Exclude<KeepMemoryResult<unknown>, { status: 'ok' }>) {
 }
 
 /**
- * Searches a workspace's Knowledge in Keep whenever this deployment has a Keep endpoint. Keep answers only for documents
- * whose current publication it has received; the search engine matches the rest locally. Keep sees only the document
+ * Searches a workspace's Knowledge in Keep. Keep answers only for documents whose current publication it has received;
+ * documents it has not indexed yet are absent from results until delivery catches up. Keep sees only the document
  * ids passed in, which the search engine takes from the actor's current authorization, and every hit is mapped back to
  * the TulipFarm publication it came from.
  */

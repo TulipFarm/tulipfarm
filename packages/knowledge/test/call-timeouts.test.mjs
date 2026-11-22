@@ -15,7 +15,7 @@ test('search and knowledge tools share one-minute deadlines and preserve shorter
       throw entered;
     },
   };
-  const search = createKnowledgeSearch({ runtime, embeddings: {} });
+  const search = createKnowledgeSearch({ runtime });
   const tools = createKnowledgeAgentTools({ runtime, search });
   const workspace = randomUUID();
   const actor = { kind: 'human', userId: randomUUID(), membershipId: randomUUID() };

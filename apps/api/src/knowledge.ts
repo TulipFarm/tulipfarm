@@ -17,13 +17,7 @@ import {
   knowledgeCitationSchema,
   knowledgeEvidenceSchema,
   knowledgeSearchResultSchema,
-  embeddingQuerySchema,
-  embeddingQueryStatusSchema,
-  embeddingRetrySchema,
-  embeddingDocumentRetrySchema,
-  embeddingDocumentStatusSchema,
   knowledgeSourceFailuresSchema,
-  type createKnowledgeEmbeddings,
   type createKnowledgeSourceFailures,
   type createLocalKnowledge,
 } from '@tulipfarm/knowledge';
@@ -54,8 +48,6 @@ const sourceParams = workspaceParams.extend({ sourceId: uuidSchema });
 const originalQuery = z.strictObject({ revisionId: uuidSchema });
 const saveBody = knowledgeSaveSchema.omit({ documentId: true });
 const commandBody = knowledgeCommandSchema.omit({ documentId: true });
-const embeddingParams = workspaceParams.extend({ commandId: uuidSchema });
-const embeddingStatus = embeddingQueryStatusSchema.omit({ vector: true });
 const citationParams = workspaceParams.extend({ citationId: knowledgeCitationIdSchema });
 const citationEvidenceSchema = z.object({
   citationId: knowledgeCitationIdSchema,
@@ -78,7 +70,6 @@ export function registerKnowledge(
   dependencies: {
     auth: Parameters<typeof authenticateRoutes>[1];
     service: ReturnType<typeof createLocalKnowledge>;
-    embeddings: ReturnType<typeof createKnowledgeEmbeddings>;
     search?: ReturnType<typeof createKnowledgeSearch>;
     citations?: Pick<KnowledgeAgentTools, 'read'>;
     sourceFailures?: ReturnType<typeof createKnowledgeSourceFailures>;
@@ -97,36 +88,18 @@ export function registerKnowledge(
   },
 ) {
   const { service } = dependencies;
-  const processing = new Set<Promise<unknown>>();
-  app.addHook('onClose', async () => {
-    await Promise.allSettled(processing);
-  });
   app.addHook('onClose', async () => {
     await dependencies.search?.close();
   });
-  async function processQuery(
-    workspaceId: string,
-    actor: string,
-    prepared: Awaited<ReturnType<typeof dependencies.embeddings.prepareQuery>>,
-  ) {
-    const pending = dependencies.embeddings.process({
-      workspaceId,
-      jobId: prepared.jobId,
-      generation: prepared.generation,
-    });
-    processing.add(pending);
-    try {
-      await pending;
-    } finally {
-      processing.delete(pending);
-    }
-    return embeddingStatus.parse(await dependencies.embeddings.queryStatus(workspaceId, actor, prepared.commandId));
-  }
   app.register(async routes => {
     const deadlines = new WeakMap<FastifyRequest, number>();
     const cancellations = new WeakMap<FastifyRequest, AbortController>();
     routes.addHook('onRequest', async (request, reply) => {
-      if (!['searchKnowledgeV2', 'readKnowledgeCitationV1'].includes(request.routeOptions.schema?.operationId ?? ''))
+      if (
+        !['searchKnowledgeV1', 'searchKnowledgeV2', 'readKnowledgeCitationV1'].includes(
+          request.routeOptions.schema?.operationId ?? '',
+        )
+      )
         return;
       const deadlineAt = Date.now() + defaultCallTimeoutMs;
       deadlines.set(request, deadlineAt);
@@ -218,7 +191,7 @@ export function registerKnowledge(
         logLevel: 'silent',
         schema: schema(
           'searchKnowledgeV2',
-          'Search authorized Knowledge with keyword and semantic retrieval',
+          'Search authorized Knowledge',
           workspaceParams,
           knowledgeSearchResultSchema,
           knowledgeSearchRequestSchema,
@@ -287,108 +260,6 @@ export function registerKnowledge(
       },
     );
     const document = `${base}/documents/:documentId`;
-    routes.post(
-      `${base}/query-embeddings`,
-      {
-        logLevel: 'silent',
-        schema: schema(
-          'prepareKnowledgeQueryEmbeddingV1',
-          'Prepare a private knowledge query embedding',
-          workspaceParams,
-          embeddingStatus,
-          embeddingQuerySchema,
-        ),
-      },
-      async request => {
-        const { workspaceId } = workspaceParams.parse(request.params);
-        const actor = user(request);
-        const input = embeddingQuerySchema.parse(request.body);
-        const prepared = await dependencies.embeddings.prepareQuery(workspaceId, actor, input);
-        return processQuery(workspaceId, actor, prepared);
-      },
-    );
-    routes.get(
-      `${base}/query-embeddings/:commandId`,
-      {
-        logLevel: 'silent',
-        schema: schema(
-          'readKnowledgeQueryEmbeddingV1',
-          'Read private knowledge query embedding status',
-          embeddingParams,
-          embeddingStatus,
-        ),
-      },
-      async request => {
-        const { workspaceId, commandId } = embeddingParams.parse(request.params);
-        return embeddingStatus.parse(await dependencies.embeddings.queryStatus(workspaceId, user(request), commandId));
-      },
-    );
-    routes.post(
-      `${base}/query-embeddings/:commandId/retry`,
-      {
-        logLevel: 'silent',
-        schema: schema(
-          'retryKnowledgeQueryEmbeddingV1',
-          'Retry a private knowledge query embedding',
-          embeddingParams,
-          embeddingStatus,
-          embeddingRetrySchema,
-        ),
-      },
-      async request => {
-        const { workspaceId, commandId } = embeddingParams.parse(request.params);
-        const actor = user(request);
-        const prepared = await dependencies.embeddings.retryQuery(
-          workspaceId,
-          actor,
-          commandId,
-          embeddingRetrySchema.parse(request.body),
-        );
-        return processQuery(workspaceId, actor, prepared);
-      },
-    );
-    routes.get(
-      `${document}/embeddings`,
-      {
-        logLevel: 'silent',
-        schema: schema(
-          'readKnowledgeDocumentEmbeddingV1',
-          'Read private knowledge document embedding status',
-          documentParams,
-          embeddingDocumentStatusSchema,
-        ),
-      },
-      async request => {
-        const { workspaceId, documentId } = documentParams.parse(request.params);
-        return embeddingDocumentStatusSchema.parse(
-          await dependencies.embeddings.documentStatus(workspaceId, user(request), documentId),
-        );
-      },
-    );
-    routes.post(
-      `${document}/embeddings/retry`,
-      {
-        logLevel: 'silent',
-        schema: schema(
-          'retryKnowledgeDocumentEmbeddingV1',
-          'Retry a private knowledge document embedding',
-          documentParams,
-          embeddingDocumentStatusSchema,
-          embeddingDocumentRetrySchema,
-        ),
-      },
-      async request => {
-        const { workspaceId, documentId } = documentParams.parse(request.params);
-        return embeddingDocumentStatusSchema.parse(
-          await dependencies.embeddings.retryDocument(
-            workspaceId,
-            user(request),
-            documentId,
-            embeddingDocumentRetrySchema.parse(request.body),
-          ),
-        );
-      },
-    );
     routes.get(
       `${base}/documents`,
       {
@@ -481,16 +352,24 @@ export function registerKnowledge(
         logLevel: 'silent',
         schema: schema(
           'searchKnowledgeV1',
-          'Search personal knowledge by keyword',
+          'Search personal notes and files',
           workspaceParams,
           knowledgeSearchResultSchema,
           undefined,
           knowledgeSearchSchema,
         ),
       },
-      request => {
+      async request => {
         const { workspaceId } = workspaceParams.parse(request.params);
-        return service.search(workspaceId, user(request), request.query);
+        if (!dependencies.search) throw new KnowledgeSearchUnavailable('not-configured');
+        const { query } = knowledgeSearchSchema.parse(request.query);
+        return dependencies.search.search(
+          workspaceId,
+          user(request),
+          { kind: 'typing', query, filters: { kinds: ['note', 'file'], sourceIds: [], documentIds: [] } },
+          deadlines.get(request),
+          cancellations.get(request)?.signal,
+        );
       },
     );
     routes.post(

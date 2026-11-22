@@ -27,10 +27,6 @@
       "types": "./dist/atlassian-contracts.d.ts",
       "default": "./dist/atlassian-contracts.js"
     },
-    "./embedding-capacity": {
-      "types": "./dist/embedding-capacity.d.ts",
-      "default": "./dist/embedding-capacity.js"
-    },
     "./parser": {
       "types": "./dist/parser.d.ts",
       "default": "./dist/parser.js"

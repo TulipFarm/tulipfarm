@@ -23,7 +23,6 @@ const document = {
   lexical_publication_id: other,
   tombstoned_at: null,
 };
-const selection = { google: false, slack: false, github: false, atlassian: false, conversation: true };
 function fixture(results = []) {
   const calls = [];
   const tx = {
@@ -195,54 +194,6 @@ test('file checks preserve Files membership denial and do not grant from a cache
     [],
   );
   empty.done();
-});
-
-test('embedding owner and configured-provider checks cannot borrow another principal or adapter', async () => {
-  const { authorizer } = fixture();
-  await allow(authorizer, 'embeddingOwner', { owner_membership_id: id, owner_user_id: 'user' });
-  for (const job of [
-    { owner_membership_id: other, owner_user_id: 'user' },
-    { owner_membership_id: id, owner_user_id: 'other' },
-  ])
-    await denied(authorizer, 'embeddingOwner', job);
-  await allow(authorizer, 'embeddingProvider', { source: { ...source, provider: 'google' }, providers: ['google'] });
-  await denied(authorizer, 'embeddingProvider', { source: { ...source, provider: 'google' }, providers: [] });
-});
-
-test('query dispatch checks cancellation, fresh clock and SQL eligibility before provider use', async () => {
-  const scope = {
-    filters: { kinds: ['note'], sourceIds: [], documentIds: [] },
-    expires_at: new Date(2_000),
-    cancelled: false,
-  };
-  const { authorizer, calls, done } = fixture([[scope], [{ allowed: 1 }]]);
-  const clock = {
-    now: () => {
-      assert.equal(calls.length, 1);
-      return 1_000;
-    },
-  };
-  assert.equal(await allow(authorizer, 'queryDispatch', { jobId: id, selection, clock }), 2_000);
-  assert.deepEqual(calls[1].values, [id, 'user', ['note'], [], []]);
-  done();
-  for (const row of [
-    { ...scope, cancelled: true },
-    { ...scope, expires_at: new Date(1_000) },
-  ])
-    await denied(fixture([[row]]).authorizer, 'queryDispatch', { jobId: id, selection, clock: { now: () => 1_000 } });
-  await denied(fixture([[scope], []]).authorizer, 'queryDispatch', {
-    jobId: id,
-    selection,
-    clock: { now: () => 1_000 },
-  });
-  assert.equal(
-    await allow(fixture([[]]).authorizer, 'queryDispatch', {
-      jobId: id,
-      selection,
-      clock: { now: () => assert.fail() },
-    }),
-    undefined,
-  );
 });
 
 test('selected readers report each enabled provider and skip disabled providers', async () => {

@@ -1,6 +1,10 @@
 import type { RepositoryResult } from './repository-result.ts';
 
 export interface SearchSessions {
+  /** The current publication of every document the actor may read under these filters. */
+  eligiblePublications(
+    values: [membershipId: string, userId: string, kinds: string[], sources: string[], documents: string[]],
+  ): Promise<RepositoryResult>;
   readLive(values: [id: string, membershipId: string, userId: string]): Promise<RepositoryResult>;
   /** Serializes one member's session saves until the transaction ends, so the per-member cap holds. */
   lockOwner(values: [membershipId: string]): Promise<RepositoryResult>;
@@ -31,7 +35,6 @@ export interface SearchSessions {
       documents: string[],
       candidates: string,
       offset: number,
-      profileId: string,
       remainingDocuments: string[],
     ],
   ): Promise<RepositoryResult>;

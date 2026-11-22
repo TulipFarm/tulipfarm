@@ -37,7 +37,6 @@ test(
       errorCode: 'credits-exhausted',
       retryAt: null,
       compactionId,
-      embeddingStatus: null,
     };
     const recap =
       '## Decisions\n\nUse the support inbox for new requests.\n\n## Open work\n\nReview the first week of response times.';
@@ -275,7 +274,7 @@ test(
       maintenance = { ...maintenance, state: 'publishing' };
       await page.waitForTimeout(500);
       await silent('a publishing recap shows nothing');
-      maintenance = { ...maintenance, state: 'ready', embeddingStatus: 'disabled' };
+      maintenance = { ...maintenance, state: 'ready' };
       await saved.waitFor();
       assert.equal(
         await saved.evaluate(divider => {
@@ -299,19 +298,13 @@ test(
           captured = true;
         } else await page.screenshot({ path: process.env.CHAT_MAINTENANCE_SCREENSHOT });
       }
-      maintenance = { ...maintenance, state: 'ready', embeddingStatus: 'credits-blocked' };
-      await load();
-      await status.getByText('Saved to Knowledge. Semantic search is paused; keyword search works.').waitFor();
-      await status.getByRole('button', { name: 'Resume semantic search' }).click();
-      await status.waitFor({ state: 'detached' });
-      assert.equal(commands.length, 3, 'semantic recovery uses the maintenance command rather than a chat turn');
-      maintenance = { ...maintenance, state: 'failed', errorCode: null, embeddingStatus: null };
+      maintenance = { ...maintenance, state: 'failed', errorCode: null };
       await load();
       await status.getByText('Could not save this chat to Knowledge yet. It will retry in the background.').waitFor();
       assert.equal(await page.getByRole('alert').count(), 0, 'a failed recap is a quiet line, not an alert');
       await status.getByRole('button', { name: 'Resume Knowledge update' }).click();
       await status.waitFor({ state: 'detached' });
-      assert.equal(commands.length, 4, 'resume works from the failed line');
+      assert.equal(commands.length, 3, 'resume works from the failed line');
       maintenance = { ...maintenance, state: 'blocked', errorCode: 'generation-unconfirmed' };
       await load();
       await status.getByText(/Automatic retries are paused to avoid charging twice/).waitFor();
@@ -327,7 +320,7 @@ test(
       holdRead = new Promise(resolve => {
         release = resolve;
       });
-      maintenance = { ...job, state: 'ready', embeddingStatus: 'ready' };
+      maintenance = { ...job, state: 'ready' };
       await load();
       await silent('nothing shows while the status loads');
       release();

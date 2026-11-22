@@ -8,8 +8,8 @@ Inspected and implemented 4 October 2026. Runtime ownership is
 ## Composition
 
 Create `google = createGoogleKnowledge({ runtime, provider })`. Pass the same
-`google` to `createKnowledgeSearch` and `createKnowledgeEmbeddings` through their
-optional `google` property. Other knowledge callers can spread `google.authority`
+`google` to `createKnowledgeSearch` through its optional
+`google` property. Other knowledge callers can spread `google.authority`
 into `createKnowledge({ runtime, ...google.authority })`.
 
 The service exports `discover(workspaceId, userId, kind, cursor?)`,
@@ -63,8 +63,8 @@ sources and bounds `validUntil` by the actual returned proof expiries.
 
 Deploy readers accepting common version 70 before applying
 `common/0094_knowledge_google.sql`. Historical migration files are unchanged.
-Google writes require version 70. Local ingestion and embeddings preserve their
-older minimum versions; search retains its version 69 minimum and references no
+Google writes require version 70. Local ingestion preserves its older minimum
+version; search retains its version 69 minimum and references no
 Google relations before version 70. Migration composition verifies the unique
 0094 prefix and preservation of old receipts.
 
@@ -79,6 +79,6 @@ Reauthorization and existing integrations are not backfilled.
 ## Verification
 
 `test/google.integration.mjs` runs through restricted PostgreSQL logins and the
-actual P1 parser, lexical search, P2 embeddings, and P3 search coordinator.
-Google responses and embedding vectors are fixtures. Live Google authorization,
+actual parser and search coordinator with an in-memory Keep.
+Google responses are fixtures. Live Google authorization,
 real mailbox/Drive behavior, and production throughput remain unverified.

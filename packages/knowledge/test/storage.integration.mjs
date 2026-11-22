@@ -117,74 +117,61 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       },
     );
 
-    await t.test(
-      'runtime logins cannot cross workspaces, change immutable bytes or forge vector readiness',
-      async () => {
-        for (const workspace of [one, two]) await verifyWorkspaceIsolation(db.platform, workspace.id);
-        const login = await connect(db.login(one));
-        try {
-          await denied(login, `SELECT * FROM ${table('revisions', two)}`);
-          await denied(login, `UPDATE ${table('revisions')} SET title='forged' WHERE id=$1`, [original.id]);
-          await denied(login, `DELETE FROM ${table('revisions')} WHERE id=$1`, [original.id]);
-          await denied(login, `UPDATE ${table('publications')} SET markdown='forged' WHERE id=$1`, [build.id]);
-          await assert.rejects(
-            login.query(`UPDATE ${table('documents')} SET vector_publication_id=$1 WHERE id=$2`, [
-              randomUUID(),
-              original.documentId,
-            ]),
-            { code: '23503' },
-          );
-          await denied(login, `UPDATE ${table('vector_publications')} SET profile='{}'`);
-        } finally {
-          await login.end();
-        }
-        await assert.rejects(
-          service.readEvidence(two.id, { kind: 'human', userId: two.userId, membershipId: two.membershipId }, citation),
-          AccessDenied,
-        );
-        await assert.rejects(service.readEvidence(one.id, other, citation), AccessDenied);
-        await assert.rejects(
-          service.readEvidence(one.id, { kind: 'agent', runId: randomUUID() }, citation),
-          AccessDenied,
-        );
-      },
-    );
+    await t.test('runtime logins cannot cross workspaces, or change immutable bytes', async () => {
+      for (const workspace of [one, two]) await verifyWorkspaceIsolation(db.platform, workspace.id);
+      const login = await connect(db.login(one));
+      try {
+        await denied(login, `SELECT * FROM ${table('revisions', two)}`);
+        await denied(login, `UPDATE ${table('revisions')} SET title='forged' WHERE id=$1`, [original.id]);
+        await denied(login, `DELETE FROM ${table('revisions')} WHERE id=$1`, [original.id]);
+        await denied(login, `UPDATE ${table('publications')} SET markdown='forged' WHERE id=$1`, [build.id]);
+      } finally {
+        await login.end();
+      }
+      await assert.rejects(
+        service.readEvidence(two.id, { kind: 'human', userId: two.userId, membershipId: two.membershipId }, citation),
+        AccessDenied,
+      );
+      await assert.rejects(service.readEvidence(one.id, other, citation), AccessDenied);
+      await assert.rejects(
+        service.readEvidence(one.id, { kind: 'agent', runId: randomUUID() }, citation),
+        AccessDenied,
+      );
+    });
 
-    await t.test(
-      'duplicate delivery is idempotent and embedding failure preserves readable lexical evidence',
-      async () => {
-        await service.observeRevision(one.id, owner, original);
-        assert.deepEqual(await service.publishLexical(one.id, owner, build), citation);
-        await assert.rejects(
-          service.observeRevision(one.id, owner, { ...original, title: 'Changed replay' }),
-          code('conflict'),
-        );
-        await service.recordFailure(one.id, owner, {
+    await t.test('duplicate delivery is idempotent and a published revision cannot record a failure', async () => {
+      await service.observeRevision(one.id, owner, original);
+      assert.deepEqual(await service.publishLexical(one.id, owner, build), citation);
+      await assert.rejects(
+        service.observeRevision(one.id, owner, { ...original, title: 'Changed replay' }),
+        code('conflict'),
+      );
+      await assert.rejects(
+        service.recordFailure(one.id, owner, {
           documentId: original.documentId,
           revisionId: original.id,
-          axis: 'embedding',
           failure: 'provider',
-        });
-        assert.equal((await service.status(one.id, owner, original.documentId)).embedding, 'failed');
-        assert.equal((await service.readEvidence(one.id, owner, citation)).text, 'Return orders in 30 days.');
-        assert.equal(
-          (
-            await db.platform.query(`SELECT count(*)::int AS count FROM ${table('chunks')} WHERE publication_id=$1`, [
-              build.id,
-            ])
-          ).rows[0].count,
-          1,
-        );
-        await assert.rejects(
-          withMcpSourceContext(
-            { schema: one.names.schema, client: db.platform },
-            [{ kind: 'mcp-integration', integrationId: randomUUID(), authorizationEpoch: 1 }],
-            () => service.publishLexical(one.id, owner, build),
-          ),
-          AccessDenied,
-        );
-      },
-    );
+        }),
+        code('conflict'),
+      );
+      assert.equal((await service.readEvidence(one.id, owner, citation)).text, 'Return orders in 30 days.');
+      assert.equal(
+        (
+          await db.platform.query(`SELECT count(*)::int AS count FROM ${table('chunks')} WHERE publication_id=$1`, [
+            build.id,
+          ])
+        ).rows[0].count,
+        1,
+      );
+      await assert.rejects(
+        withMcpSourceContext(
+          { schema: one.names.schema, client: db.platform },
+          [{ kind: 'mcp-integration', integrationId: randomUUID(), authorizationEpoch: 1 }],
+          () => service.publishLexical(one.id, owner, build),
+        ),
+        AccessDenied,
+      );
+    });
 
     await t.test(
       'observed edits remove old eligibility and reject late publication and concurrent lost updates',
@@ -531,13 +518,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         await service.recordFailure(one.id, owner, {
           documentId: item.documentId,
           revisionId: item.id,
-          axis: 'parsing',
           failure: 'ocr-required',
         });
         await service.recordFailure(one.id, owner, {
           documentId: item.documentId,
           revisionId: item.id,
-          axis: 'parsing',
           failure: 'provider',
         });
         await assert.rejects(service.publishLexical(one.id, owner, publication(item)), code('incomplete'));
@@ -546,14 +531,12 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           await service.recordFailure(one.id, owner, {
             documentId: item.documentId,
             revisionId: item.id,
-            axis: 'embedding',
             failure: 'provider',
           });
         await assert.rejects(
           service.recordFailure(one.id, owner, {
             documentId: item.documentId,
             revisionId: item.id,
-            axis: 'embedding',
             failure: 'provider',
           }),
           code('quota'),

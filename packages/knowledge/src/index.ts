@@ -4,13 +4,12 @@ export {
   knowledgeLimits,
   providerCoverage,
   parserProfileSchema,
-  embeddingProfileSchema,
   citationSchema,
   KnowledgeAccountChanged,
   KnowledgeError,
   KnowledgeSearchUnavailable,
 } from './internal/contracts.ts';
-export type { KnowledgeCitation, EmbeddingProfile } from './internal/contracts.ts';
+export type { KnowledgeCitation } from './internal/contracts.ts';
 export { createLocalKnowledge } from './internal/local.ts';
 export {
   createConversationKnowledge,
@@ -29,8 +28,6 @@ export {
 export * from './contracts.ts';
 export * from './settings-contracts.ts';
 export * from './retrieval-contracts.ts';
-export * from './embeddings.ts';
-export { createKnowledgeEmbeddings } from './internal/embeddings.ts';
 export { createKnowledgeSearch } from './internal/search.ts';
 export {
   createKnowledgeKeepFeed,

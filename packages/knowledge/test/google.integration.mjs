@@ -4,17 +4,11 @@ import { test } from 'node:test';
 import { fixture, loadPlatformBaseline } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createWorkspaceRuntime, qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { workspaceTableMigrations } from '../../workspaces/dist/table-migrations.js';
-import {
-  createGoogleKnowledge,
-  createKnowledgeEmbeddings,
-  createKnowledgeSearch,
-  createKnowledgeSourceFailures,
-  createLocalKnowledge,
-} from '../dist/index.js';
+import { createGoogleKnowledge, createKnowledgeSourceFailures, createLocalKnowledge } from '../dist/index.js';
 import { AccessDenied } from '@tulipfarm/access';
 import { GoogleCorpusError } from '@tulipfarm/google-workspace/corpus';
 import { createFiles } from '@tulipfarm/files';
-import { knowledgeEmbeddingProfile as profile } from '@tulipfarm/config';
+import { keepBackedSearch } from './fake-keep.mjs';
 
 test('Google corpus persists through real restricted PostgreSQL and enforces reader authority', async t => {
   const db = await fixture();
@@ -43,7 +37,7 @@ test('Google corpus persists through real restricted PostgreSQL and enforces rea
     });
     for (const work of await local.due(ws.id)) assert.equal((await local.process(work)).disposition, 'ready');
     assert.equal(
-      (await local.search(ws.id, ws.userId, { query: 'orchid' })).hits[0].citation.documentId,
+      (await keepBackedSearch({ runtime }).query(ws.id, ws.userId, 'orchid')).hits[0].citation.documentId,
       note.documentId,
     );
     const reader = { userId: randomUUID(), membershipId: randomUUID() };
@@ -131,7 +125,7 @@ test('Google corpus persists through real restricted PostgreSQL and enforces rea
     async function restart() {
       await db.platform.query(`UPDATE ${table('google_sources')} SET next_attempt_at=clock_timestamp()`);
     }
-    await t.test('native original and lexical publication; automatic P2 discovery and hybrid search', async () => {
+    await t.test('native original and lexical publication; automatic P2 discovery and Keep search', async () => {
       assert.equal((await processPage()).disposition, 'retry');
       assert.equal((await processPage()).disposition, 'ready');
       const sharedSource = (await google.list(ws.id, reader.userId)).items[0];
@@ -141,35 +135,13 @@ test('Google corpus persists through real restricted PostgreSQL and enforces rea
       assert.equal(sharedSource.selection, null);
       assert.equal(sharedSource.counts, null);
       assert.deepEqual(sharedSource.memberIds, []);
-      await db.platform.query(
-        `UPDATE ${table('tf_credit_account')} SET available=10000000000000,granted=10000000000000`,
-      );
-      const embeddings = createKnowledgeEmbeddings({
-        runtime,
-        google,
-        config: { kind: 'enabled', endpoint: 'https://example.services.ai.azure.com/', apiKey: 'fixture', profile },
-        capacity: async () => true,
-        provider: async () => ({
-          dispatch: 'dispatched',
-          requestId: 'google-test',
-          inputTokensUpperBound: 1,
-          usage: { kind: 'known', inputTokens: 1, totalTokens: 1, exceedsUpperBound: false },
-          result: {
-            kind: 'success',
-            model: profile.model,
-            vectors: [Array.from({ length: 1536 }, (_, i) => (i === 0 ? 1 : 0))],
-          },
-        }),
-      });
-      for (let i = 0; i < 5; i++) for (const work of await embeddings.due(ws.id)) await embeddings.process(work);
-      const search = createKnowledgeSearch({ runtime, embeddings, google });
+      const { search } = keepBackedSearch({ runtime, google });
       const hit = await search.search(ws.id, ws.userId, {
         kind: 'submitted',
         commandId: randomUUID(),
         query: 'supplier',
         filters: { kinds: ['google'] },
       });
-      assert.equal(hit.mode, 'hybrid');
       assert.equal(hit.hits.length, 1);
       const { synced_at: syncedAt } = (
         await db.platform.query(`SELECT synced_at FROM ${table('sources')} WHERE id=$1`, [source.sourceId])
@@ -311,12 +283,11 @@ test('Google corpus persists through real restricted PostgreSQL and enforces rea
       const pending = processPage();
       await started;
       const row = (
-        await db.platform.query(
-          `SELECT lexical_publication_id,vector_publication_id FROM ${table('documents')} WHERE source_id=$1`,
-          [source.sourceId],
-        )
+        await db.platform.query(`SELECT lexical_publication_id FROM ${table('documents')} WHERE source_id=$1`, [
+          source.sourceId,
+        ])
       ).rows[0];
-      assert.deepEqual(row, { lexical_publication_id: null, vector_publication_id: null });
+      assert.deepEqual(row, { lexical_publication_id: null });
       await google.manage(ws.id, ws.userId, source.sourceId, { commandId: randomUUID(), action: 'pause' });
       release();
       assert.equal((await pending).disposition, 'stale');
@@ -418,8 +389,7 @@ test('Google corpus persists through real restricted PostgreSQL and enforces rea
       await processPage();
       await processPage();
       await google.refresh(ws.id, reader.userId, source.sourceId);
-      const embeddings = createKnowledgeEmbeddings({ runtime, google, config: { kind: 'disabled' } });
-      const search = createKnowledgeSearch({ runtime, google, embeddings });
+      const { search } = keepBackedSearch({ runtime, google });
       const query = () =>
         search.search(ws.id, reader.userId, {
           kind: 'typing',
@@ -495,11 +465,7 @@ test('Google corpus persists through real restricted PostgreSQL and enforces rea
       });
       const work = (await mail.due(ws.id)).find(w => w.sourceId === source.sourceId);
       assert.equal((await mail.process(work)).disposition, 'retry');
-      const search = createKnowledgeSearch({
-        runtime,
-        google: mail,
-        embeddings: createKnowledgeEmbeddings({ runtime, google: mail, config: { kind: 'disabled' } }),
-      });
+      const { search } = keepBackedSearch({ runtime, google: mail });
       const result = await search.search(ws.id, ws.userId, {
         kind: 'typing',
         query: 'delivery',

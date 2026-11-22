@@ -39,21 +39,21 @@ export default defineExtension({
 });
 ```
 
-| Slot                 | Kind            | Default                                                                              | Read by                                                                                                       |
-| -------------------- | --------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| `creditGate`         | one per process | `unlimitedCredits`: funds all work, stores no balance                                | the credit meter in `@tulipfarm/workspace-storage/credits`                                                    |
-| `creditPricing`      | one per process | `providerCostPricing`: one credit per $0.01 of provider cost, no markup, no rounding | `creditUnitsForProviderCost`, the credit meter, knowledge-embedding credits, the model catalog's credit rates |
-| `flagProvider`       | one per process | none: each flag's env override, then its declared default (see below)                | `isFeatureEnabled`, `featureFlagSnapshot` in `@tulipfarm/observability`                                       |
-| `socialPlatformApps` | one per process | none: operator `SOCIAL_<PLATFORM>_*` settings supply platform apps                   | social platform-app resolution in `@tulipfarm/social`; when set, X and Reddit need a workspace's own app      |
-| `executionBackend`   | one per process | none: execution is unavailable                                                       | API/core-worker startup preflight when `TULIPFARM_EXECUTION_BACKEND=extension`                                |
-| `appBuilder`         | one per process | none: apps build with no extension builder                                           | app publishing, through `appBuilder()`                                                                        |
-| `appPublisher`       | one per process | none: `hostHeaderPublisher` from `@tulipfarm/apps/host-header-publisher` once wired  | app publishing and edge reconciliation, through `appPublisher()`                                              |
-| `appHost`            | one per process | `unavailableAppHost`: every call fails with `AppHostUnavailableError`                | server apps, through `appHost()`                                                                              |
-| `usageSink`          | many            | none                                                                                 | `recordUsage(usage)`                                                                                          |
-| `analytics`          | many            | none                                                                                 | `captureEvent`, `observeInference` in `@tulipfarm/observability`                                              |
-| `errorReporter`      | many            | none                                                                                 | `captureException` in `@tulipfarm/observability`                                                              |
-| `hooks`              | many            | none                                                                                 | `emitHook(event, payload)`                                                                                    |
-| `migrations`         | many            | none                                                                                 | `extensionMigrations()`                                                                                       |
+| Slot                 | Kind            | Default                                                                              | Read by                                                                                                  |
+| -------------------- | --------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `creditGate`         | one per process | `unlimitedCredits`: funds all work, stores no balance                                | the credit meter in `@tulipfarm/workspace-storage/credits`                                               |
+| `creditPricing`      | one per process | `providerCostPricing`: one credit per $0.01 of provider cost, no markup, no rounding | `creditUnitsForProviderCost`, the credit meter, knowledge credits, the model catalog's credit rates      |
+| `flagProvider`       | one per process | none: each flag's env override, then its declared default (see below)                | `isFeatureEnabled`, `featureFlagSnapshot` in `@tulipfarm/observability`                                  |
+| `socialPlatformApps` | one per process | none: operator `SOCIAL_<PLATFORM>_*` settings supply platform apps                   | social platform-app resolution in `@tulipfarm/social`; when set, X and Reddit need a workspace's own app |
+| `executionBackend`   | one per process | none: execution is unavailable                                                       | API/core-worker startup preflight when `TULIPFARM_EXECUTION_BACKEND=extension`                           |
+| `appBuilder`         | one per process | none: apps build with no extension builder                                           | app publishing, through `appBuilder()`                                                                   |
+| `appPublisher`       | one per process | none: `hostHeaderPublisher` from `@tulipfarm/apps/host-header-publisher` once wired  | app publishing and edge reconciliation, through `appPublisher()`                                         |
+| `appHost`            | one per process | `unavailableAppHost`: every call fails with `AppHostUnavailableError`                | server apps, through `appHost()`                                                                         |
+| `usageSink`          | many            | none                                                                                 | `recordUsage(usage)`                                                                                     |
+| `analytics`          | many            | none                                                                                 | `captureEvent`, `observeInference` in `@tulipfarm/observability`                                         |
+| `errorReporter`      | many            | none                                                                                 | `captureException` in `@tulipfarm/observability`                                                         |
+| `hooks`              | many            | none                                                                                 | `emitHook(event, payload)`                                                                               |
+| `migrations`         | many            | none                                                                                 | `extensionMigrations()`                                                                                  |
 
 A second extension setting a single slot fails startup. Failures inside
 analytics, error reporters, usage sinks, and hook subscribers never reach the
@@ -153,7 +153,7 @@ interface CreditPricing {
 ```
 
 The rate applies to each call; `round` applies once to an aggregate (a flow's
-total in `settleCredits`, a workspace's knowledge-embedding total), never per
+total in `settleCredits`, a workspace's knowledge total), never per
 call. It must map 0 to 0, never return less than its input, and be monotonic.
 Reservations use the same pricing, so a reservation still covers its settlement.
 

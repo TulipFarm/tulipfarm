@@ -1496,7 +1496,7 @@ export function createFiles(
     const ids = entries.map(entry => entry.id);
     await tx.client.query(
       `UPDATE ${table(tx, 'tf_knowledge_documents')} SET tombstoned_at=clock_timestamp(),
-        retain_until=clock_timestamp()+interval '30 days',lexical_publication_id=NULL,vector_publication_id=NULL
+        retain_until=clock_timestamp()+interval '30 days',lexical_publication_id=NULL
       WHERE id=ANY($1::uuid[])`,
       [ids],
     );

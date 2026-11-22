@@ -1,7 +1,6 @@
 import { keepChatRecallOn, queueCompactedMessages } from './keep-chat-recall.ts';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { knowledgeEmbeddingProfile } from '@tulipfarm/config';
 import {
   AccessDenied,
   SourceAuthorizationUnavailable,
@@ -108,7 +107,7 @@ export type ConversationRecapPublication = {
 };
 export type ConversationRecapPublisher = (
   input: ConversationRecapPublication,
-) => Promise<{ documentId: string; revisionId: string; embeddingStatus: string }>;
+) => Promise<{ documentId: string; revisionId: string }>;
 const requester = (job: Job): HumanActor => ({
   kind: 'human',
   userId: job.requester_user_id,
@@ -129,12 +128,9 @@ export async function readMaintenance(tx: AuthorizationTransaction, conversation
     await tx.client.query(
       `SELECT id, generation, covered_through AS "coveredThrough", state, error_code AS "errorCode",
     CASE WHEN state IN ('queued','failed') THEN to_char(next_attempt_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') END AS "retryAt",
-    compaction_id AS "compactionId", COALESCE((SELECT e.state FROM ${table(tx, 'tf_knowledge_embedding_jobs')} e
-      JOIN ${table(tx, 'tf_knowledge_documents')} d ON d.id=e.document_id
-        AND d.observed_revision_id=e.revision_id AND d.lexical_publication_id=e.publication_id
-      WHERE e.document_id=j.document_id AND e.revision_id=j.revision_id AND e.purpose='ingestion' AND e.profile_id=$2),embedding_status) AS "embeddingStatus"
+    compaction_id AS "compactionId"
     FROM ${table(tx, 'tf_conversation_maintenance')} j WHERE conversation_id=$1 ORDER BY generation DESC LIMIT 1`,
-      [conversationId, knowledgeEmbeddingProfile.id],
+      [conversationId],
     )
   ).rows[0];
   return maintenanceViewSchema.parse({ maintenance: row ?? null });
@@ -164,14 +160,9 @@ export async function resumeMaintenance(
     epoch=epoch+1, lease_until=NULL, resume_command_id=$4, updated_at=clock_timestamp(),
     memory_step=memory_step+1,memory_base_revision=NULL
     FROM ${table(tx, 'tf_conversations')} c WHERE j.conversation_id=$1 AND c.id=j.conversation_id AND c.is_closed
-    AND c.activity_generation=j.generation AND j.error_code IS DISTINCT FROM 'generation-unconfirmed' AND (j.state IN ('blocked','failed') OR (j.state='ready' AND EXISTS (
-      SELECT 1 FROM ${table(tx, 'tf_knowledge_embedding_jobs')} e
-      JOIN ${table(tx, 'tf_knowledge_documents')} d ON d.id=e.document_id
-        AND d.observed_revision_id=e.revision_id AND d.lexical_publication_id=e.publication_id
-      WHERE e.document_id=j.document_id AND e.revision_id=j.revision_id AND e.profile_id=$5
-      AND e.purpose='ingestion' AND e.state IN ('credits-blocked','capacity-blocked','failed','unknown'))))
+    AND c.activity_generation=j.generation AND j.error_code IS DISTINCT FROM 'generation-unconfirmed' AND j.state IN ('blocked','failed')
     AND ${eligible(tx)} AND ${idle(tx)}`,
-    [conversationId, actor.userId, actor.membershipId, commandId, knowledgeEmbeddingProfile.id],
+    [conversationId, actor.userId, actor.membershipId, commandId],
   );
   if (!changed.rowCount) throw new ConversationConflict('maintenance-not-resumable');
   await tx.client.query(`INSERT INTO ${table(tx, 'tf_conversation_maintenance_commands')} VALUES ($1,$2,$3)`, [
@@ -616,9 +607,9 @@ export function createConversationMaintenance(runtime: ConversationRuntime) {
       await transaction(work.workspaceId, async tx => {
         await requireMaintenanceFence(tx, fence);
         await tx.client.query(
-          `UPDATE ${table(tx, 'tf_conversation_maintenance')} SET state='ready',document_id=$2,revision_id=$3,embedding_status=$4,
+          `UPDATE ${table(tx, 'tf_conversation_maintenance')} SET state='ready',document_id=$2,revision_id=$3,
           lease_until=NULL,error_code=NULL,updated_at=clock_timestamp() WHERE id=$1`,
-          [work.jobId, published.documentId, published.revisionId, published.embeddingStatus],
+          [work.jobId, published.documentId, published.revisionId],
         );
         await notifyConversationChange(tx, { workspaceId: work.workspaceId, conversationId: work.conversationId });
       });

@@ -11,8 +11,8 @@ The provider contract lives in this package, as for Slack, so that
 ## Composition
 
 Create `github = createGitHubKnowledge({ runtime, provider })`. Pass the same
-`github` to `createKnowledgeSearch` and `createKnowledgeEmbeddings` through their
-optional `github` property, next to `google` and `slack`. `externalAuthority`
+`github` to `createKnowledgeSearch` through its optional
+`github` property, next to `google` and `slack`. `externalAuthority`
 dispatches source and proof checks to the adapter that owns each provider.
 
 `githubCorpusFromEnvironment` reuses the personal GitHub OAuth configuration
@@ -526,7 +526,7 @@ on later passes, repository, kind, path and cutoff opt-outs, full history and th
 webhook dispatch for owned repositories, shared and disconnected exceptions,
 duplicate-free search, and migration 0010 (idempotence, narrowed sources, cleared
 commit heads and a full commit history afterwards). `test/github.integration.mjs` uses restricted PostgreSQL logins, the actual parser,
-lexical search, embeddings, and the search coordinator with a fixture provider.
+the search coordinator and an in-memory Keep with a fixture provider.
 `packages/github/test/corpus-provider.test.mjs` covers REST and GraphQL mapping
 against `packages/github/test/corpus-fixture.mjs`, including head-unchanged skips,
 compare listings with renames, removals and opt-outs, compare fallbacks and

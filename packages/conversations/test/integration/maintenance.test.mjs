@@ -2,8 +2,6 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { AccessDenied, SourceAuthorizationUnavailable } from '@tulipfarm/access';
-import { knowledgeEmbeddingProfile } from '@tulipfarm/config';
-import { createConversationKnowledge } from '@tulipfarm/knowledge';
 import { createConversationMaintenance } from '../../src/maintenance.ts';
 import { createConversationExecutor } from '../../src/runtime.ts';
 import { conversationFixture } from '../fixture.mjs';
@@ -48,90 +46,7 @@ function compactor(onCall = async () => {}) {
     },
   };
 }
-const published = () => ({ documentId: randomUUID(), revisionId: randomUUID(), embeddingStatus: 'disabled' });
-
-test('recap embedding status and resume select the current profile and publication', { timeout: 60000 }, async () => {
-  const f = await conversationFixture();
-  try {
-    const id = await chat(f),
-      w = f.workspace,
-      maintenance = createConversationMaintenance(f.runtime);
-    await exchange(f, id);
-    await due(f, id);
-    await maintenance.sweep(w.id);
-    const [job] = await work(f, maintenance);
-    const knowledge = createConversationKnowledge({ runtime: f.runtime });
-    assert.equal(await maintenance.process(job, compactor(), knowledge.publish), 'ready');
-    const saved = (
-      await f.db.platform.query(
-        `SELECT j.document_id,j.revision_id,d.lexical_publication_id AS publication_id
-      FROM ${f.table('tf_conversation_maintenance')} j JOIN ${f.table('tf_knowledge_documents')} d ON d.id=j.document_id
-      WHERE j.id=$1`,
-        [job.jobId],
-      )
-    ).rows[0];
-    const oldProfile = `${knowledgeEmbeddingProfile.id}-old`;
-    for (const profileId of [oldProfile, knowledgeEmbeddingProfile.id]) {
-      await f.db.platform.query(
-        `INSERT INTO ${f.table('tf_knowledge_embedding_profiles')} (id,profile) VALUES ($1,$2)`,
-        [profileId, { ...knowledgeEmbeddingProfile, id: profileId }],
-      );
-    }
-    async function embedding(profileId, publicationId, state) {
-      const embeddingId = randomUUID();
-      await f.db.platform.query(
-        `INSERT INTO ${f.table('tf_knowledge_embedding_jobs')}
-        (id,purpose,owner_membership_id,owner_user_id,profile_id,document_id,revision_id,publication_id,access_epoch,total_chunks,state)
-        VALUES ($1,'ingestion',$2,$3,$4,$5,$6,$7,1,1,$8)`,
-        [embeddingId, w.membershipId, w.userId, profileId, saved.document_id, saved.revision_id, publicationId, state],
-      );
-      return embeddingId;
-    }
-    const status = async () => (await f.store.maintenance(w.id, w.userId, id)).maintenance.embeddingStatus;
-    const resume = () => f.store.resumeMaintenance(w.id, w.userId, id, { commandId: randomUUID() });
-    const reset = () =>
-      f.db.platform.query(
-        `UPDATE ${f.table('tf_conversation_maintenance')}
-      SET state='ready',embedding_status='pending' WHERE id=$1`,
-        [job.jobId],
-      );
-    const oldJob = await embedding(oldProfile, saved.publication_id, 'ready');
-    assert.equal(await status(), 'pending', 'without a current-profile job, retain pending publication status');
-    const currentJob = await embedding(knowledgeEmbeddingProfile.id, saved.publication_id, 'credits-blocked');
-    assert.equal(await status(), 'credits-blocked');
-    await resume();
-    await reset();
-    await f.db.platform.query(
-      `UPDATE ${f.table('tf_knowledge_embedding_jobs')} SET state=CASE WHEN id=$1 THEN 'ready' ELSE 'failed' END
-      WHERE id=ANY($2::uuid[])`,
-      [currentJob, [currentJob, oldJob]],
-    );
-    assert.equal(await status(), 'ready');
-    await assert.rejects(resume(), { message: 'maintenance-not-resumable' });
-    const nextPublication = randomUUID();
-    await f.db.platform.query(
-      `INSERT INTO ${f.table('tf_knowledge_publications')}
-      (id,document_id,revision_id,markdown,pages,tokens,chunk_count,fingerprint)
-      SELECT $1,document_id,revision_id,markdown,pages,tokens,chunk_count,fingerprint
-      FROM ${f.table('tf_knowledge_publications')} WHERE id=$2`,
-      [nextPublication, saved.publication_id],
-    );
-    await f.db.platform.query(`UPDATE ${f.table('tf_knowledge_documents')} SET lexical_publication_id=$2 WHERE id=$1`, [
-      saved.document_id,
-      nextPublication,
-    ]);
-    await f.db.platform.query(`UPDATE ${f.table('tf_knowledge_embedding_jobs')} SET state='failed' WHERE id=$1`, [
-      currentJob,
-    ]);
-    assert.equal(await status(), 'pending', 'jobs for the prior publication do not replace pending status');
-    await assert.rejects(resume(), { message: 'maintenance-not-resumable' });
-    await embedding(knowledgeEmbeddingProfile.id, nextPublication, 'failed');
-    assert.equal(await status(), 'failed');
-    await resume();
-  } finally {
-    await f.close();
-  }
-});
+const published = () => ({ documentId: randomUUID(), revisionId: randomUUID() });
 
 async function chat(f) {
   const id = randomUUID(),

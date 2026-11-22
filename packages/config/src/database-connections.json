@@ -17,8 +17,6 @@
     "appPlatform": 4,
     "slackPrompts": 1,
     "recommendationBudget": 2,
-    "knowledgeCapacity": 2,
-    "knowledgeEmbeddings": 2,
     "subagentStops": 1,
     "migrationRegistry": 2,
     "workspaceMaintenance": 2,
@@ -49,12 +47,10 @@
         "appPlatform",
         "slackPrompts",
         "recommendationBudget",
-        "knowledgeCapacity",
-        "knowledgeEmbeddings",
         "subagentStops"
       ]
     },
-    "knowledge-worker": { "workspaceRuntimes": 1, "pools": ["tableAuthoring", "knowledgeEmbeddings"] },
+    "knowledge-worker": { "workspaceRuntimes": 1, "pools": ["tableAuthoring"] },
     "storage-worker": {
       "workspaceRuntimes": 0,
       "pools": ["migrationRegistry", "workspaceMaintenance", "maintenanceSessions"]

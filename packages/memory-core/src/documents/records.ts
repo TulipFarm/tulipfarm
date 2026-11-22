@@ -16,7 +16,6 @@ export const documentRow = z.object({
   native_id: z.string(),
   observed_revision_id: uuidSchema.nullable(),
   lexical_publication_id: uuidSchema.nullable(),
-  vector_publication_id: uuidSchema.nullable(),
   tombstoned_at: z.date().nullable(),
 });
 export type ExternalSource = z.infer<typeof sourceRow>;

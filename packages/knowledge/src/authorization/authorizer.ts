@@ -19,9 +19,6 @@ import {
 import { requireReadableFile } from '@tulipfarm/files';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import { requireAccess, type AccessDecision, type Authorizer } from '@tulipfarm/memory-core/ports/authorizer';
-import type { Clock } from '@tulipfarm/memory-core/ports/runtime';
-import { knowledgeSearchFiltersSchema } from '../contracts.ts';
-import { createKnowledgeEligibilityFilter, type KnowledgeEligibilitySelection } from './eligibility.ts';
 import { KnowledgeError, originalSchema } from '../internal/contracts.ts';
 import type { ExternalSource, KnowledgeDocument, KnowledgeOptions } from '../internal/store.ts';
 import { requireConversationReader, requireConversationRevision } from './conversation.ts';
@@ -44,12 +41,6 @@ type Checks = {
   proof: { input: { document: KnowledgeDocument; source: ExternalSource }; value: void };
   tenant: { input: string; value: void };
   binding: { input: { document: KnowledgeDocument; source: ExternalSource; dependency: Dependency }; value: void };
-  embeddingOwner: { input: { owner_membership_id: string; owner_user_id: string }; value: void };
-  embeddingProvider: { input: { source: ExternalSource; providers: string[] }; value: void };
-  queryDispatch: {
-    input: { jobId: string; selection: KnowledgeEligibilitySelection; clock: Clock };
-    value: number | undefined;
-  };
 };
 
 async function decision<Value>(operation: () => Value | Promise<Value>): Promise<AccessDecision<Value>> {
@@ -67,18 +58,6 @@ export function authorizeKnowledgeDocument(value: KnowledgeDocument | undefined)
   return decision(() => {
     if (!value || value.tombstoned_at) throw new AccessDenied();
     return value;
-  });
-}
-
-export function lockKnowledgeAuthorization(tx: AuthorizationTransaction, mode: 'read' | 'write') {
-  return decision(() => lockAuthorization(tx, mode));
-}
-
-export function resolveKnowledgeMember(tx: AuthorizationTransaction, userId: string) {
-  return decision(async () => {
-    const actor = await resolveHuman(tx, userId);
-    await currentMember(tx, actor);
-    return actor;
   });
 }
 
@@ -184,50 +163,6 @@ export function createKnowledgeAuthorizer(
       if (origin.id !== dependency.sourceId || origin.access_epoch !== dependency.accessEpoch) throw new AccessDenied();
       if (doc.observed_revision_id !== dependency.revisionId || doc.lexical_publication_id !== dependency.publicationId)
         throw new KnowledgeError('superseded');
-    },
-    async embeddingOwner(job) {
-      if (job.owner_membership_id !== actor.membershipId || job.owner_user_id !== actor.userId)
-        throw new AccessDenied();
-    },
-    async embeddingProvider({ source: origin, providers }) {
-      if (
-        origin.provider !== 'note' &&
-        origin.provider !== 'file' &&
-        origin.provider !== 'conversation' &&
-        !providers.includes(origin.provider)
-      )
-        throw new AccessDenied();
-    },
-    async queryDispatch({ jobId, selection, clock }) {
-      const scope = z
-        .object({
-          filters: knowledgeSearchFiltersSchema,
-          expires_at: z.date(),
-          cancelled: z.boolean(),
-        })
-        .optional()
-        .parse(
-          (
-            await tx.client.query(
-              `SELECT filters,expires_at,cancelled FROM ${qualified(tx.schema, 'tf_knowledge_search_queries')} WHERE job_id=$1`,
-              [jobId],
-            )
-          ).rows[0],
-        );
-      if (scope) {
-        if (scope.cancelled || scope.expires_at.getTime() <= clock.now()) throw new AccessDenied();
-        const { kinds, sourceIds, documentIds } = scope.filters;
-        if (
-          !(
-            await tx.client.query(
-              `SELECT 1 FROM (${createKnowledgeEligibilityFilter(tx.schema).predicate(selection)}) eligible WHERE vector_publication_id IS NOT NULL LIMIT 1`,
-              [actor.membershipId, actor.userId, kinds, sourceIds, documentIds],
-            )
-          ).rowCount
-        )
-          throw new AccessDenied();
-        return scope.expires_at.getTime();
-      }
     },
   };
   return {
