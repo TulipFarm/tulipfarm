@@ -348,6 +348,7 @@ export function createCodingRuns(
         backend,
         configuration,
         {
+          workspaceId,
           areaId: run.conversationId,
           repository: call.repository,
           task: call.task,
@@ -365,6 +366,7 @@ export function createCodingRuns(
 }
 
 export type CodingJob = {
+  workspaceId: string;
   /** The area whose machines the job shares, such as the chat or the workflow run. */
   areaId: string;
   repository: string;
@@ -405,6 +407,7 @@ export async function runCodingJob(
     backend,
     configuration,
     {
+      workspaceId: job.workspaceId,
       areaId: job.areaId,
       command: {
         program: 'bash',

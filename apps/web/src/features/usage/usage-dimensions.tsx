@@ -44,7 +44,17 @@ const activities: Record<string, string> = {
   'table-search': 'Table search',
   'app-build': 'App build',
   'app-hosting': 'App hosting',
+  storage: 'Storage',
+  compute: 'Compute',
   other: 'Other',
+};
+// Storage and compute charges name what they measured in place of a model.
+const resourceModels: Record<string, string> = {
+  'storage-database': 'Database storage',
+  'storage-objects': 'File storage',
+  'storage-apps': 'Published app storage',
+  'compute-sandbox': 'Sandboxes',
+  'compute-runs': 'Agent and workflow runs',
 };
 const activityName = (value: string) =>
   activities[value] ?? (value.startsWith('knowledge-') ? `Knowledge (${value.slice(10).replaceAll('-', ' ')})` : value);
@@ -109,7 +119,7 @@ export function usageDimensions(report: UsageReport, members: ReadonlyMap<string
   const dimensions: Record<UsageDimension, DimensionInfo> = {
     model: {
       label: 'Model',
-      name: id => report.labels.models[id]?.name ?? (id === 'unknown' ? 'Unknown model' : id),
+      name: id => report.labels.models[id]?.name ?? resourceModels[id] ?? (id === 'unknown' ? 'Unknown model' : id),
       icon: modelIcon,
     },
     provider: {

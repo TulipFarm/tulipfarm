@@ -80,13 +80,20 @@ export async function reserveCredits(
  */
 export async function chargeCredits(
   tx: Transaction,
-  input: { id: string; flowId: string; activity: 'app-build' | 'app-hosting'; units: bigint },
+  input: {
+    id: string;
+    flowId: string;
+    activity: 'app-build' | 'app-hosting' | 'storage' | 'compute';
+    /** What the charge is for within its activity, shown in place of a model; the activity when omitted. */
+    modelId?: string;
+    units: bigint;
+  },
 ) {
   if (input.units < 0n) throw new Error('credit-charge-negative');
   await lockCredits(tx);
   const inserted = await tx.client.query(
-    `INSERT INTO ${table(tx, 'tf_credit_usage')} (id,flow_id,model_id,agent_id,activity,reserved,charged,pricing_revision) VALUES ($1,$2,$3,NULL,$3,$4,$4,'units') ON CONFLICT (id) DO NOTHING`,
-    [input.id, input.flowId, input.activity, input.units.toString()],
+    `INSERT INTO ${table(tx, 'tf_credit_usage')} (id,flow_id,model_id,agent_id,activity,reserved,charged,pricing_revision) VALUES ($1,$2,$3,NULL,$4,$5,$5,'units') ON CONFLICT (id) DO NOTHING`,
+    [input.id, input.flowId, input.modelId ?? input.activity, input.activity, input.units.toString()],
   );
   if (!inserted.rowCount) return false;
   await creditGate().debit(tx, input.units, { id: input.id, activity: input.activity });

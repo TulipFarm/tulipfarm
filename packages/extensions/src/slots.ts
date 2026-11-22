@@ -27,7 +27,9 @@ export type CreditActivity =
   | 'knowledge-query'
   | 'knowledge-reindex'
   | 'app-build'
-  | 'app-hosting';
+  | 'app-hosting'
+  | 'storage'
+  | 'compute';
 
 /** The metered attempt a credit-account change belongs to. */
 export type CreditEntry = {
@@ -71,6 +73,40 @@ export type CreditPricing = {
   readonly unitsPerPicoUsd: bigint;
   /** Rounds an aggregate charge in credit units. Must map 0 to 0, never return less than its input, and never decrease as its input grows. */
   round(units: bigint): bigint;
+};
+
+/** Prices for storage and shared-worker compute, in pico-USD. TulipFarm converts them with `CreditPricing.unitsPerPicoUsd`. */
+export type ResourcePricing = {
+  /** Per GiB-month of the workspace's Postgres tables and their indexes. */
+  readonly databasePicoUsdPerGibMonth: bigint;
+  /** Per GiB-month of the workspace's objects in object storage, and of the release files `releaseStorage` reports. */
+  readonly objectPicoUsdPerGibMonth: bigint;
+  /** Per hour an agent task step or workflow step runs on a shared worker. */
+  readonly runPicoUsdPerHour: bigint;
+};
+
+/** One closed hour, as ISO 8601 times: `start` inclusive, `end` exclusive. */
+export type ResourceWindow = { readonly start: string; readonly end: string };
+
+/**
+ * Meters storage and compute. Without it TulipFarm charges neither. Each usage iterator must yield every workspace's
+ * complete total or throw: a window or day is charged only after its iterator finishes.
+ */
+export type ResourceMeter = {
+  readonly pricing: ResourcePricing;
+  /**
+   * Optional. Sandbox compute per workspace for a closed hour, already priced in credit units. Throws while the
+   * provider has not settled the hour, so it is asked again later.
+   */
+  computeUsage?(
+    window: ResourceWindow,
+    signal: AbortSignal,
+  ): AsyncIterable<{ readonly workspaceId: string; readonly units: bigint }>;
+  /**
+   * Optional. Bytes of each published app release whose files the extension's app publisher holds. TulipFarm charges
+   * them, at the object rate, to the workspace whose app the release belongs to.
+   */
+  releaseStorage?(signal: AbortSignal): AsyncIterable<{ readonly releaseId: string; readonly bytes: bigint }>;
 };
 
 export type UsageRecord = {
@@ -511,6 +547,8 @@ export type ExtensionRegistrar = {
   creditGate(gate: CreditGate): void;
   /** Single slot: a second extension setting it fails startup. */
   creditPricing(pricing: CreditPricing): void;
+  /** Single slot: a second extension setting it fails startup. Register it in the worker. */
+  resourceMeter(meter: ResourceMeter): void;
   /** Single slot: a second extension setting it fails startup. */
   flagProvider(provider: FlagProvider): void;
   /** Single slot: a second extension setting it fails startup. */

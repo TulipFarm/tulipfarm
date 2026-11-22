@@ -8,6 +8,15 @@ One version identifies all apps and images of a release.
 
 ## [Unreleased]
 
+### Added
+
+- An extension can charge workspaces for storage and compute in credits by
+  registering the new `resourceMeter` slot: database and object storage each
+  day, agent-task and workflow step time, and sandbox hours it reports. The
+  Usage page shows them as Storage and Compute, and shows an overdrawn
+  balance. Without a meter, nothing changes. While a workspace's credits are
+  used up, workflow steps wait and new hosted MCP servers don't start.
+
 ### Changed
 
 - Keep now always holds personal memory, answers Knowledge search and recalls

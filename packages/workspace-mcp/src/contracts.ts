@@ -54,7 +54,8 @@ export class McpError extends Error {
       | 'outcome-unknown'
       | 'oauth-conflict'
       | 'secret-denied'
-      | 'install-failed',
+      | 'install-failed'
+      | 'credits-exhausted',
     options?: ErrorOptions,
   ) {
     super(`Workspace MCP ${code}`, options);

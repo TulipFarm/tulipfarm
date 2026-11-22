@@ -77,6 +77,7 @@ import { createAgentLessonComposition } from './agent-lesson-composition.ts';
 import { createSocialPublisherComposition } from './social-publisher-composition.ts';
 import { createSecretsSweep } from './secrets-sweep.ts';
 import { createAppComposition, repeatFromStart } from './app-composition.ts';
+import { createResourceBilling } from './resource-billing.ts';
 import { appEditingFromEnvironment, createAppBuildDispatcher } from './app-editing-composition.ts';
 import { workerRole, workerTelemetryService } from './worker-role.ts';
 import { workspaceSchemaPending } from '@tulipfarm/workspace-storage/runtime';
@@ -151,6 +152,7 @@ async function run() {
   let apps: ReturnType<typeof createAppComposition>;
   const appJobs: ReturnType<typeof repeatFromStart>[] = [];
   const appAbort = new AbortController();
+  let resourceBilling: ReturnType<typeof createResourceBilling>;
   const sweepTelemetry: ReturnType<typeof createBackgroundJob>[] = [];
   let recommendations: ReturnType<typeof createRecommendationComposition> | undefined;
   let memberProfiles: ReturnType<typeof createMemberProfileComposition> | undefined;
@@ -273,6 +275,31 @@ async function run() {
         schedule('reconcile', createBackgroundJob('app-reconcile', 300), 300);
         schedule('usage', createBackgroundJob('app-usage', 3600), 3600);
       }
+      resourceBilling = createResourceBilling({
+        runtime: coreResources.runtime,
+        discover: coreResources.readyTaskWorkspaces,
+      });
+      if (resourceBilling) {
+        const billing = resourceBilling;
+        for (const [name, work] of [
+          ['compute', billing.meterCompute],
+          ['storage', billing.meterStorage],
+        ] as const) {
+          const job = createBackgroundJob(`resource-${name}`, 3600);
+          sweepTelemetry.push(job);
+          appJobs.push(
+            repeatFromStart(
+              () =>
+                job
+                  .run(() => work(appAbort.signal))
+                  .catch(error =>
+                    Runtime.instance().logger.error(`Resource ${name} metering failed`, errorAttributes(error)),
+                  ),
+              3600 * 1000,
+            ),
+          );
+        }
+      }
     }
     if (
       (process.env.SLACK_LINK_PROMPTS_ENABLED === 'true' || process.env.SLACK_DIRECT_MESSAGES_ENABLED === 'true') &&
@@ -390,21 +417,40 @@ async function run() {
       : undefined;
     const gmail = coreResources ? createGoogleHeartbeatActivities(coreResources.runtime) : undefined;
     const workflowSlack = guarded ? slackActionsFromEnvironment()?.(guarded) : undefined;
+    const meteredWorkflowStep =
+      <T>(advance: (work: unknown) => Promise<T>) =>
+      (work: unknown) =>
+        resourceBilling ? resourceBilling.workflowStep(work, () => advance(work)) : advance(work);
+    const meteredTaskActivities = (activities: NonNullable<typeof tasks>['activities']) => ({
+      ...activities,
+      processAgentTaskStep: (workspaceId: string, taskId: string) =>
+        resourceBilling
+          ? resourceBilling.agentTaskStep(workspaceId, taskId, () =>
+              activities.processAgentTaskStep(workspaceId, taskId),
+            )
+          : activities.processAgentTaskStep(workspaceId, taskId),
+      processAgentTask: (workspaceId: string, taskId: string) =>
+        resourceBilling
+          ? resourceBilling.agentTaskStep(workspaceId, taskId, () => activities.processAgentTask(workspaceId, taskId))
+          : activities.processAgentTask(workspaceId, taskId),
+    });
     const workflows = coreResources
       ? {
-          advanceWorkflow: createWorkflows(coreResources.runtime, {
-            ...(workflowSlack ? { slackActions: workflowSlack } : {}),
-            ...(snippets ? { snippets } : {}),
-            ...(workflowCoding ? { codingRuns: workflowCoding.runner } : {}),
-            ...(agentTasks
-              ? {
-                  agentTasks: createWorkflowAgentTasks(
-                    agentTasks,
-                    (workspaceId, taskId) => taskDispatch?.wake(workspaceId, taskId) ?? Promise.resolve(),
-                  ),
-                }
-              : {}),
-          }).activity,
+          advanceWorkflow: meteredWorkflowStep(
+            createWorkflows(coreResources.runtime, {
+              ...(workflowSlack ? { slackActions: workflowSlack } : {}),
+              ...(snippets ? { snippets } : {}),
+              ...(workflowCoding ? { codingRuns: workflowCoding.runner } : {}),
+              ...(agentTasks
+                ? {
+                    agentTasks: createWorkflowAgentTasks(
+                      agentTasks,
+                      (workspaceId, taskId) => taskDispatch?.wake(workspaceId, taskId) ?? Promise.resolve(),
+                    ),
+                  }
+                : {}),
+            }).activity,
+          ),
         }
       : undefined;
     recommendations = coreResources
@@ -424,7 +470,7 @@ async function run() {
               ...activities,
               ...coreResources?.activities,
               ...agents?.activities,
-              ...tasks?.activities,
+              ...(tasks ? meteredTaskActivities(tasks.activities) : {}),
               ...taskRecovery,
               ...plans?.activities,
               ...documents?.activities,

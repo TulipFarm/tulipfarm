@@ -23,6 +23,7 @@ import type {
   HookSubscriber,
   McpHost,
   ProductAnalytics,
+  ResourceMeter,
   ServerExtension,
   SocialPlatformApps,
   UsageRecord,
@@ -82,6 +83,7 @@ type State = {
   extensions: string[];
   creditGate?: Registered<CreditGate>;
   creditPricing?: Registered<CreditPricing>;
+  resourceMeter?: Registered<ResourceMeter>;
   flagProvider?: Registered<FlagProvider>;
   socialPlatformApps?: Registered<SocialPlatformApps>;
   mcpHost?: Registered<McpHost>;
@@ -159,6 +161,7 @@ export async function registerExtension(extension: ServerExtension, context: Ext
     slot:
       | 'creditGate'
       | 'creditPricing'
+      | 'resourceMeter'
       | 'flagProvider'
       | 'socialPlatformApps'
       | 'executionBackend'
@@ -206,6 +209,19 @@ export async function registerExtension(extension: ServerExtension, context: Ext
           `Extension "${extension.name}" credit pricing needs a positive bigint unitsPerPicoUsd and a round function`,
         );
       staged.creditPricing = wrap(pricing);
+    }),
+    resourceMeter: guard(meter => {
+      single('resourceMeter', 'resource meter');
+      const prices = meter?.pricing && [
+        meter.pricing.databasePicoUsdPerGibMonth,
+        meter.pricing.objectPicoUsdPerGibMonth,
+        meter.pricing.runPicoUsdPerHour,
+      ];
+      if (!prices?.every(price => typeof price === 'bigint' && price >= 0n))
+        throw new ExtensionRegistrationError(
+          `Extension "${extension.name}" resource meter needs non-negative bigint prices`,
+        );
+      staged.resourceMeter = wrap(meter);
     }),
     flagProvider: guard(provider => {
       single('flagProvider', 'flag provider');
@@ -280,6 +296,7 @@ export async function registerExtension(extension: ServerExtension, context: Ext
   current.extensions.push(extension.name);
   if (staged.creditGate) current.creditGate = staged.creditGate;
   if (staged.creditPricing) current.creditPricing = staged.creditPricing;
+  if (staged.resourceMeter) current.resourceMeter = staged.resourceMeter;
   if (staged.flagProvider) current.flagProvider = staged.flagProvider;
   if (staged.socialPlatformApps) current.socialPlatformApps = staged.socialPlatformApps;
   if (staged.executionBackend) current.executionBackend = staged.executionBackend;
@@ -334,6 +351,11 @@ export function appBuilder(): AppBuilder | undefined {
 }
 
 /** The registered app publisher, or undefined to use the built-in one, if the operator configured it. */
+/** The registered storage and compute meter, or undefined: then neither is charged. */
+export function resourceMeter(): ResourceMeter | undefined {
+  return state().resourceMeter?.value;
+}
+
 export function appPublisher(): AppPublisher | undefined {
   return state().appPublisher?.value;
 }
