@@ -166,6 +166,24 @@ test(
         sessionId: 'session',
       });
 
+      // Before the app's code runs, a remembered workspace's pages paint a placeholder: the home its
+      // composer, other pages their title and rows. A home with a query string paints nothing.
+      const early = page.locator('#tf-early');
+      await page.route('**/assets/*.js', route => route.abort());
+      await page.goto(`${origin}northstar/projects`);
+      assert.equal(await early.locator('header').textContent(), 'Projects');
+      assert.equal(await early.locator('textarea').count(), 0);
+      await page.goto(`${origin}northstar`);
+      assert.equal(await early.locator('header').textContent(), 'New chat');
+      assert.equal(await early.locator('textarea').count(), 1);
+      await page.goto(`${origin}northstar?start=1`);
+      assert.equal(await early.count(), 0);
+      await page.unroute('**/assets/*.js');
+      // Once the app loads, the page replaces the placeholder.
+      await page.goto(`${origin}northstar/projects`);
+      await page.locator('header[aria-label="Workspace header"]').waitFor();
+      await waitFor(async () => (await early.count()) === 0, 'The page replaces the placeholder');
+
       // Same session: the provisional workspace is confirmed, held writes go out after the check, and
       // the reads started for the remembered session are used rather than repeated.
       await heldVisit();
