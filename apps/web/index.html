@@ -137,9 +137,32 @@
         margin: 5px 0 0;
         min-height: 16px;
       }
+      #tf-early .rows {
+        margin: 20px 36px;
+        border: 1px solid var(--l);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      #tf-early b {
+        display: block;
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--l);
+      }
+      #tf-early b i {
+        margin: 0;
+        height: 12px;
+      }
+      #tf-early b i + i {
+        width: 64px;
+        margin-top: 10px;
+        height: 10px;
+      }
       @media (max-width: 767px) {
         #tf-early aside {
           display: none;
+        }
+        #tf-early .rows {
+          margin: 16px;
         }
         #tf-early .col {
           margin-top: 32px;
@@ -158,53 +181,94 @@
   <body>
     <div id="root"></div>
     <script>
-      // Paints the workspace home before the app's scripts arrive; the chat takes over its text (early-composer.ts).
-      try {
-        var session = JSON.parse(localStorage.getItem('tulipfarm:last-session') || 'null');
-        var slug = location.pathname.split('/')[1];
-        var ids = session && JSON.parse(localStorage.getItem('tulipfarm:workspace-ids:' + session.userId) || '{}');
-        if (ids && slug && location.pathname.replace(/\/+$/, '') === '/' + slug && !location.search && ids[slug]) {
-          var theme = localStorage.getItem('tulipfarm.theme');
-          var light = theme === 'light' || (theme !== 'dark' && matchMedia('(prefers-color-scheme: light)').matches);
-          var shell = document.createElement('div');
-          shell.id = 'tf-early';
-          shell.className = light ? 'light' : '';
-          shell.dataset.path = location.pathname;
-          var bars = '';
-          for (var n = 0; n < 14; n++) bars += '<i style="width:' + (50 + ((n * 37) % 40)) + '%"></i>';
-          shell.innerHTML =
-            '<aside aria-hidden="true"><i style="margin:6px 6px 20px;height:20px"></i>' +
-            bars +
-            '</aside>' +
-            '<main><header>New chat</header><div class="col">' +
-            '<i style="width:min(360px,80%);height:40px;border-radius:10px;margin:4px 0 16px"></i>' +
-            '<i style="width:min(440px,90%);height:28px;border-radius:8px;margin:0"></i></div>' +
-            '<footer><form><textarea rows="1" aria-label="Message" placeholder="What would you like to get done?"></textarea>' +
-            '<div><button type="submit" aria-label="Send"></button></div></form><p role="status"></p></footer></main>';
-          document.body.appendChild(shell);
-          var form = shell.querySelector('form');
-          var input = shell.querySelector('textarea');
-          var queue = function () {
-            if (!input.value.trim()) return;
-            shell.dataset.send = 'true';
-            shell.querySelector('p').textContent = 'Sending as soon as TulipFarm is ready…';
-          };
-          input.addEventListener('input', function () {
-            form.classList.toggle('ready', !!input.value.trim());
-          });
-          input.addEventListener('keydown', function (event) {
-            if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+      // Paints the workspace page before the app's scripts arrive; the chat takes over its text (early-composer.ts).
+      (function () {
+        try {
+          var session = JSON.parse(localStorage.getItem('tulipfarm:last-session') || 'null');
+          var slug = location.pathname.split('/')[1];
+          var ids = session && JSON.parse(localStorage.getItem('tulipfarm:workspace-ids:' + session.userId) || '{}');
+          var rest = location.pathname.replace(/\/+$/, '').split('/').slice(2);
+          var home = !rest.length && !location.search;
+          if (ids && slug && ids[slug] && (home || rest.length)) {
+            var theme = localStorage.getItem('tulipfarm.theme');
+            var light = theme === 'light' || (theme !== 'dark' && matchMedia('(prefers-color-scheme: light)').matches);
+            var shell = document.createElement('div');
+            shell.id = 'tf-early';
+            shell.className = light ? 'light' : '';
+            shell.dataset.path = location.pathname;
+            var bars = '';
+            for (var n = 0; n < 14; n++) bars += '<i style="width:' + (50 + ((n * 37) % 40)) + '%"></i>';
+            // Other workspace pages get their sidebar title and placeholder rows until the page renders.
+            var titles = {
+              chat: 'Chats',
+              inbox: 'Inbox',
+              tasks: 'Tasks',
+              settings: 'Settings',
+              'settings/account': 'Account',
+              'settings/secrets': 'Secrets',
+              'settings/models': 'Models',
+              'settings/usage': 'Usage',
+              'settings/soul': 'Soul repository',
+              members: 'Members',
+              teams: 'Teams',
+              agents: 'Agents',
+              apps: 'Apps',
+              workflows: 'Workflows',
+              tables: 'Tables',
+              files: 'Files',
+              integrations: 'Integrations',
+              grants: 'Table access',
+              calendar: 'Calendar',
+              projects: 'Projects',
+              'agent-tasks': 'My agent tasks',
+              skills: 'Skills',
+              packages: 'Packages',
+              knowledge: 'Knowledge',
+              help: 'Help and support',
+            };
+            var rows = '';
+            for (var r = 0; r < 8; r++) rows += '<b><i style="width:' + (20 + ((r * 23) % 25)) + '%"></i><i></i></b>';
+            shell.innerHTML =
+              '<aside aria-hidden="true"><i style="margin:6px 6px 20px;height:20px"></i>' +
+              bars +
+              '</aside>' +
+              (home
+                ? '<main><header>New chat</header><div class="col">' +
+                  '<i style="width:min(360px,80%);height:40px;border-radius:10px;margin:4px 0 16px"></i>' +
+                  '<i style="width:min(440px,90%);height:28px;border-radius:8px;margin:0"></i></div>' +
+                  '<footer><form><textarea rows="1" aria-label="Message" placeholder="What would you like to get done?"></textarea>' +
+                  '<div><button type="submit" aria-label="Send"></button></div></form><p role="status"></p></footer></main>'
+                : '<main><header>' +
+                  (titles[rest.join('/')] || '') +
+                  '</header><div class="rows">' +
+                  rows +
+                  '</div></main>');
+            document.body.appendChild(shell);
+            if (!home) return;
+            var form = shell.querySelector('form');
+            var input = shell.querySelector('textarea');
+            var queue = function () {
+              if (!input.value.trim()) return;
+              shell.dataset.send = 'true';
+              shell.querySelector('p').textContent = 'Sending as soon as TulipFarm is ready…';
+            };
+            input.addEventListener('input', function () {
+              form.classList.toggle('ready', !!input.value.trim());
+            });
+            input.addEventListener('keydown', function (event) {
+              if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+                event.preventDefault();
+                queue();
+              }
+            });
+            form.addEventListener('submit', function (event) {
               event.preventDefault();
               queue();
-            }
-          });
-          form.addEventListener('submit', function (event) {
-            event.preventDefault();
-            queue();
-          });
-          input.focus();
-        }
-      } catch (error) {}
+            });
+            input.focus();
+          }
+        } catch (error) {}
+      })();
     </script>
     <script>
       // Paints the login page before the app's scripts and styles arrive. Its sizes and colors
