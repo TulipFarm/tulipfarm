@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { git, gitBytes, readSoulObject, seedSchema } from './soul.ts';
+import { git, gitBlobs, readSoulObject, seedSchema } from './soul.ts';
 import {
   restoreRepository,
   validatePointer,
@@ -27,6 +27,7 @@ import {
 
 const directories = new Set(['tables', 'agents', 'workflows', 'skills', 'integrations', 'roles']);
 const digest = (text: string) => createHash('sha256').update(text).digest('hex');
+const readChunkBytes = 4 * 1024 * 1024;
 export type SoulExplorerSnapshot = {
   seed: SoulSeed;
   pointer: SoulPointer;
@@ -54,11 +55,12 @@ async function repository<T>(storage: SoulStorage, snapshot: SoulExplorerSnapsho
 
 async function visibleEntries(repository: string, snapshot: SoulExplorerSnapshot) {
   const entries: SoulEntry[] = [];
+  const objects = new Map<string, string>();
   const tree = (await git(repository, ['ls-tree', '-r', '-l', '-z', snapshot.pointer.commit])).stdout;
   for (const record of tree.split('\0').filter(Boolean)) {
-    const match = /^(\d+) blob [a-f0-9]{40}\s+(\d+)\t(.+)$/s.exec(record);
+    const match = /^(\d+) blob ([a-f0-9]{40})\s+(\d+)\t(.+)$/s.exec(record);
     if (!match || match[1] !== '100644') continue;
-    const [, , length, rawPath] = match;
+    const [, , object, length, rawPath] = match;
     const path = soulPathSchema.safeParse(rawPath);
     if (!path.success) continue;
     const size = Number(length);
@@ -83,6 +85,7 @@ async function visibleEntries(repository: string, snapshot: SoulExplorerSnapshot
     if (parent && directories.has(parent) && name === '.gitkeep' && extra === undefined && size === 0) allowed = true;
     if (!allowed) continue;
     entries.push({ path: path.data, kind: 'file', size });
+    objects.set(path.data, object!);
   }
   const parents = new Set(
     entries.flatMap(entry => {
@@ -91,7 +94,7 @@ async function visibleEntries(repository: string, snapshot: SoulExplorerSnapshot
     }),
   );
   entries.push(...[...parents].map(path => ({ path, kind: 'directory' as const, size: 0 })));
-  return entries;
+  return { entries, objects };
 }
 
 export async function readSoulTree(
@@ -103,7 +106,7 @@ export async function readSoulTree(
   if (query.revision && query.revision !== snapshot.pointer.commit)
     throw new SoulExplorerError('soul-revision-changed', 409);
   return repository(storage, snapshot, async path => {
-    const entries = await visibleEntries(path, snapshot);
+    const { entries } = await visibleEntries(path, snapshot);
     const directory = query.directory ?? '';
     if (directory && !entries.some(entry => entry.kind === 'directory' && entry.path === directory))
       throw new SoulExplorerError('soul-not-found', 404);
@@ -135,18 +138,35 @@ export async function readSoulFile(
   const query = soulFileQuerySchema.parse(input);
   if (query.revision !== snapshot.pointer.commit) throw new SoulExplorerError('soul-revision-changed', 409);
   return repository(storage, snapshot, async path => {
-    const entry = (await visibleEntries(path, snapshot)).find(
-      entry => entry.kind === 'file' && entry.path === query.path,
-    );
+    const { entries, objects } = await visibleEntries(path, snapshot);
+    const entry = entries.find(entry => entry.kind === 'file' && entry.path === query.path);
     if (!entry) throw new SoulExplorerError('soul-not-found', 404);
-    return readEntry(path, snapshot, entry);
+    const [file] = await readEntries(path, snapshot, objects, [entry]);
+    return file!;
   });
 }
 
-async function readEntry(repository: string, snapshot: SoulExplorerSnapshot, entry: SoulEntry): Promise<SoulFile> {
+const previewable = (entry: SoulEntry) => entry.size <= soulPreviewBytes;
+
+async function readEntries(
+  repository: string,
+  snapshot: SoulExplorerSnapshot,
+  objects: ReadonlyMap<string, string>,
+  entries: readonly SoulEntry[],
+) {
+  const readable = entries.filter(previewable);
+  const blobs = await gitBlobs(
+    repository,
+    readable.map(entry => objects.get(entry.path)!),
+    readable.reduce((total, entry) => total + entry.size, 0),
+  );
+  const bytes = new Map(readable.map((entry, index) => [entry, blobs[index]!]));
+  return entries.map(entry => readEntry(snapshot, entry, bytes.get(entry)));
+}
+
+function readEntry(snapshot: SoulExplorerSnapshot, entry: SoulEntry, bytes: Uint8Array | undefined): SoulFile {
   const result = { revision: snapshot.pointer.commit, path: entry.path };
-  if (entry.size > soulPreviewBytes) return { ...result, kind: 'unavailable', reason: 'too-large' };
-  const bytes = (await gitBytes(repository, ['show', `${snapshot.pointer.commit}:${entry.path}`])).stdout;
+  if (!bytes) return { ...result, kind: 'unavailable', reason: 'too-large' };
   let content: string;
   try {
     content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
@@ -165,16 +185,27 @@ export async function readSoulRepository(
   snapshot: SoulExplorerSnapshot,
 ): Promise<SoulRepository> {
   return repository(storage, snapshot, async path => {
-    const entries = await visibleEntries(path, snapshot);
+    const { entries, objects } = await visibleEntries(path, snapshot);
     const visibleFiles = entries.filter(entry => entry.kind === 'file');
     if (visibleFiles.length > soulSnapshotFiles) throw new SoulExplorerError('soul-snapshot-too-large', 503);
     const result: SoulRepository = { revision: snapshot.pointer.commit, entries, files: [] };
     let size = Buffer.byteLength(JSON.stringify(result));
-    for (const entry of visibleFiles) {
-      const file = await readEntry(path, snapshot, entry);
-      size += Buffer.byteLength(JSON.stringify(file)) + (result.files.length ? 1 : 0);
-      if (size > soulSnapshotBytes) throw new SoulExplorerError('soul-snapshot-too-large', 503);
-      result.files.push(file);
+    for (let start = 0; start < visibleFiles.length;) {
+      let end = start;
+      let chunkBytes = 0;
+      while (end < visibleFiles.length) {
+        const entry = visibleFiles[end]!;
+        const bytes = previewable(entry) ? entry.size : 0;
+        if (end > start && chunkBytes + bytes > readChunkBytes) break;
+        chunkBytes += bytes;
+        end += 1;
+      }
+      for (const file of await readEntries(path, snapshot, objects, visibleFiles.slice(start, end))) {
+        size += Buffer.byteLength(JSON.stringify(file)) + (result.files.length ? 1 : 0);
+        if (size > soulSnapshotBytes) throw new SoulExplorerError('soul-snapshot-too-large', 503);
+        result.files.push(file);
+      }
+      start = end;
     }
     return result;
   });

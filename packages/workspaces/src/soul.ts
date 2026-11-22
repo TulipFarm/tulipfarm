@@ -58,8 +58,33 @@ export async function git(directory: string, args: string[], seed?: Seed, input?
   return result;
 }
 
-export function gitBytes(directory: string, args: string[]) {
-  return execute('git', gitArguments(args), { ...gitOptions(directory), encoding: 'buffer' });
+/** Reads many blobs through one `git cat-file --batch` process, in request order. */
+export async function gitBlobs(directory: string, objects: readonly string[], maxBytes: number) {
+  if (!objects.length) return [];
+  const command = execute('git', gitArguments(['cat-file', '--batch']), {
+    ...gitOptions(directory),
+    encoding: 'buffer',
+    maxBuffer: maxBytes + objects.length * 64,
+  });
+  const stdin = command.child.stdin;
+  if (!stdin) {
+    command.child.kill();
+    await command.catch(() => undefined);
+    throw new Error('Git input pipe is unavailable');
+  }
+  const [{ stdout }] = await Promise.all([command, pipeline([objects.map(object => `${object}\n`).join('')], stdin)]);
+  const blobs: Buffer[] = [];
+  let offset = 0;
+  for (const object of objects) {
+    const newline = stdout.indexOf(0x0a, offset);
+    const header = newline < 0 ? null : /^([a-f0-9]{40}) blob (\d+)$/.exec(stdout.toString('latin1', offset, newline));
+    if (!header || header[1] !== object) throw new Error('Git returned an unexpected object');
+    const end = newline + 1 + Number(header[2]);
+    if (end >= stdout.length || stdout[end] !== 0x0a) throw new Error('Git returned a truncated object');
+    blobs.push(stdout.subarray(newline + 1, end));
+    offset = end + 1;
+  }
+  return blobs;
 }
 
 export async function verifySoulRepository(repository: string, seed: Seed) {
