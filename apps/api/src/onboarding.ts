@@ -1,4 +1,3 @@
-import { fromNodeHeaders } from 'better-auth/node';
 import { createBackgroundJob } from '@tulipfarm/observability';
 import { APIError } from 'better-auth/api';
 import type { FastifyInstance } from 'fastify';
@@ -24,6 +23,7 @@ import type { WorkspaceStore } from '@tulipfarm/workspaces/storage';
 import { authConfig, type registerAuth } from './auth.ts';
 import { createTurnstileVerifier, turnstileConfig } from './turnstile.ts';
 import { workspaceUpdatingError } from './security.ts';
+import { requestSession } from './request-session.ts';
 
 const json = (schema: z.ZodType) => z.toJSONSchema(schema, { target: 'openapi-3.0' });
 const errorSchema = json(z.object({ error: z.string() }));
@@ -114,7 +114,7 @@ export function registerOnboarding(
         },
       },
       async (request, reply) => {
-        const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+        const session = await requestSession(request, auth);
         if (!session) return reply.code(401).send({ error: 'Sign in to resume onboarding.' });
         return resumeOnboarding(pool, resumeOnboardingSchema.parse(request.body).token, session.user.id);
       },
@@ -139,7 +139,7 @@ export function registerOnboarding(
         },
       },
       async (request, reply) => {
-        const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+        const session = await requestSession(request, auth);
         if (!session) return reply.code(401).send({ error: 'Sign in to create a workspace.' });
         if (!session.user.name.trim())
           return reply.code(403).send({ error: 'Complete your profile before creating a workspace.' });

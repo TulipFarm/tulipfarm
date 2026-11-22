@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
@@ -40,6 +39,7 @@ import type { registerAuth } from './auth.ts';
 import { authConfig } from './auth.ts';
 import { routeValidation } from './route-validation.ts';
 import { requestBoundaryError } from './security.ts';
+import { requestSession } from './request-session.ts';
 
 type Runtime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
 type Tx = Parameters<Parameters<Runtime['transaction']>[2]>[0];
@@ -351,7 +351,7 @@ export function registerAppPages(app: FastifyInstance, dependencies: AppPageDepe
       reply.header('Cache-Control', 'private, no-store');
       if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && request.headers.origin !== authConfig().webOrigin)
         return reply.code(403).send({ error: 'untrusted-origin' });
-      const session = await dependencies.auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+      const session = await requestSession(request, dependencies.auth);
       if (!session) return reply.code(401).send({ error: 'sign-in-required' });
       const workspace = z.uuid().safeParse((request.params as { workspaceId?: string }).workspaceId);
       if (!workspace.success || !(await isFeatureEnabled('app-hosting', null, { id: workspace.data })))

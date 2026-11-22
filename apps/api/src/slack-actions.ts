@@ -1,5 +1,4 @@
 import type { FastifyError, FastifyInstance } from 'fastify';
-import { fromNodeHeaders } from 'better-auth/node';
 import { z } from 'zod';
 import { AccessDenied, lockAuthorization, resolveHuman } from '@tulipfarm/access';
 import {
@@ -28,6 +27,7 @@ import { createFollowUps } from '@tulipfarm/agents/follow-ups';
 import { slackFollowUpCancelAction, slackFollowUpCancelValueSchema } from '@tulipfarm/agents/follow-up-contracts';
 import { authConfig, type registerAuth } from './auth.ts';
 import { SlackSignatureError, verifySlackRequest } from './slack-request.ts';
+import { requestSession } from './request-session.ts';
 
 // Tells only the person who pressed a button what happened; the thread itself stays unchanged.
 async function respondEphemeral(responseUrl: string | undefined, text: string) {
@@ -118,13 +118,13 @@ export function registerSlackActions(
       return reply.code(503).send({ error: 'slack-action-unavailable' });
     });
     routes.get('/workspaces/:workspaceId/slack/tasks/:taskId/actions', async (request, reply) => {
-      const session = await options.auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+      const session = await requestSession(request, options.auth);
       if (!session) return reply.code(401).send({ error: 'sign-in-required' });
       const p = z.object({ workspaceId: z.uuid(), taskId: z.uuid() }).parse(request.params);
       return service.taskActions(p.workspaceId, session.user.id, p.taskId);
     });
     routes.get('/workspaces/:workspaceId/slack/destinations/:destinationId', async (request, reply) => {
-      const session = await options.auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+      const session = await requestSession(request, options.auth);
       if (!session) return reply.code(401).send({ error: 'sign-in-required' });
       const p = z.object({ workspaceId: z.uuid(), destinationId: z.uuid() }).parse(request.params);
       return service.destination(p.workspaceId, session.user.id, p.destinationId);
@@ -136,7 +136,7 @@ export function registerSlackActions(
         handler: async (request, reply) => {
           if (method === 'PUT' && request.headers.origin !== authConfig().webOrigin)
             return reply.code(403).send({ error: 'untrusted-origin' });
-          const session = await options.auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+          const session = await requestSession(request, options.auth);
           if (!session) return reply.code(401).send({ error: 'sign-in-required' });
           const { workspaceId } = z.object({ workspaceId: z.uuid() }).parse(request.params);
           return method === 'GET'
@@ -151,7 +151,7 @@ export function registerSlackActions(
         handler: async (request, reply) => {
           if (method === 'PUT' && request.headers.origin !== authConfig().webOrigin)
             return reply.code(403).send({ error: 'untrusted-origin' });
-          const session = await options.auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+          const session = await requestSession(request, options.auth);
           if (!session) return reply.code(401).send({ error: 'sign-in-required' });
           const p = z.object({ workspaceId: z.uuid(), conversationId: z.uuid() }).parse(request.params);
           try {
@@ -174,7 +174,7 @@ export function registerSlackActions(
         handler: async (request, reply) => {
           if (method === 'PUT' && request.headers.origin !== authConfig().webOrigin)
             return reply.code(403).send({ error: 'untrusted-origin' });
-          const session = await options.auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+          const session = await requestSession(request, options.auth);
           if (!session) return reply.code(401).send({ error: 'sign-in-required' });
           const params = z.object({ workspaceId: z.uuid(), actionId: z.uuid() }).parse(request.params);
           const result = slackActionViewSchema.parse(

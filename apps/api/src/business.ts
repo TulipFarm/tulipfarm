@@ -1,5 +1,4 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { fromNodeHeaders } from 'better-auth/node';
 import { z } from 'zod';
 import { observeStep } from '@tulipfarm/observability';
 import { WorkspaceMembershipDenied } from '@tulipfarm/access';
@@ -8,6 +7,7 @@ import { workflowWebhookOperations } from './abuse.ts';
 import { authConfig } from './auth.ts';
 import { rejectChangedSession, type authenticateRoutes } from './authenticated-routes.ts';
 import { requestBoundaryError } from './security.ts';
+import { requestSession } from './request-session.ts';
 
 const workspaceParams = z.object({ workspaceId: z.uuid() });
 
@@ -40,9 +40,7 @@ export function protectWorkspaceRequests(
   app.addHook('onRequest', async (request, reply) => {
     if (!protectedRequest(request)) return;
     reply.header('Cache-Control', 'no-store');
-    const session = await observeStep('auth.session.get', () =>
-      auth.api.getSession({ headers: fromNodeHeaders(request.headers) }),
-    );
+    const session = await requestSession(request, auth);
     if (!session) return reply.code(401).send({ error: 'sign-in-required' });
     if (rejectChangedSession(request, reply, session)) return reply;
     const params = workspaceParams.safeParse(request.params);

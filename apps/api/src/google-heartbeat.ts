@@ -1,5 +1,4 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { fromNodeHeaders } from 'better-auth/node';
 import { z } from 'zod';
 import { AccessDenied } from '@tulipfarm/access';
 import { GoogleWorkspaceError } from '@tulipfarm/google-workspace/contracts';
@@ -17,6 +16,7 @@ import type { createGmailHeartbeat } from '@tulipfarm/google-workspace/heartbeat
 import { authConfig, type registerAuth } from './auth.ts';
 import { routeValidation } from './route-validation.ts';
 import { requestBoundaryError } from './security.ts';
+import { requestSession } from './request-session.ts';
 
 export function registerGoogleHeartbeat(
   app: FastifyInstance,
@@ -36,7 +36,7 @@ export function registerGoogleHeartbeat(
       reply.header('Cache-Control', 'no-store').header('Referrer-Policy', 'no-referrer');
       if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && request.headers.origin !== authConfig().webOrigin)
         return reply.code(403).send({ error: 'untrusted-origin' });
-      const session = await dependencies.auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+      const session = await requestSession(request, dependencies.auth);
       if (!session) return reply.code(401).send({ error: 'sign-in-required' });
       users.set(request, session.user.id);
     });

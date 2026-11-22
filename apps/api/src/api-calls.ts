@@ -1,4 +1,3 @@
-import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied, resolveHuman } from '@tulipfarm/access';
@@ -18,6 +17,7 @@ import { errorAttributes } from '@tulipfarm/observability';
 import { authConfig, type registerAuth } from './auth.ts';
 import { routeValidation } from './route-validation.ts';
 import { requestBoundaryError } from './security.ts';
+import { requestSession } from './request-session.ts';
 
 export type ApiCallsHttpAuth = { api: Pick<ReturnType<typeof registerAuth>['auth']['api'], 'getSession'> };
 
@@ -92,7 +92,7 @@ export function registerApiCalls(app: FastifyInstance, auth: ApiCallsHttpAuth, s
       reply.header('Referrer-Policy', 'no-referrer');
       if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && request.headers.origin !== authConfig().webOrigin)
         return reply.code(403).send({ error: 'untrusted-origin' });
-      const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+      const session = await requestSession(request, auth);
       if (!session) return reply.code(401).send({ error: 'sign-in-required' });
       sessions.set(request, session.user.id);
     });

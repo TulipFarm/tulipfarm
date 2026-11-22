@@ -1,9 +1,9 @@
-import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { featureFlagNames } from '@tulipfarm/config/feature-flags';
 import { featureFlagSnapshot } from '@tulipfarm/observability';
 import type { registerAuth } from './auth.ts';
+import { requestSession } from './request-session.ts';
 
 type Workspace = { id: string; name: string; slug: string; createdAt: string } | null;
 
@@ -39,7 +39,7 @@ export function registerFeatureFlags(
     },
     async (request, reply) => {
       reply.header('Cache-Control', 'no-store');
-      const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+      const session = await requestSession(request, auth);
       if (!session) return reply.code(401).send({ error: 'sign-in-required' });
       const parsed = query.safeParse(request.query);
       if (!parsed.success) return reply.code(400).send({ error: 'invalid-request' });

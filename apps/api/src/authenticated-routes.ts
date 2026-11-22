@@ -1,8 +1,7 @@
-import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { observeStep } from '@tulipfarm/observability';
 import type { registerAuth } from './auth.ts';
+import { requestSession } from './request-session.ts';
 
 export const sessionIndependentOperations: ReadonlySet<string> = new Set([
   'getApiIndex',
@@ -64,9 +63,7 @@ export function protectExpectedSession(routes: FastifyInstance, auth: Parameters
     )
       return;
     reply.header('Cache-Control', 'no-store');
-    const session = await observeStep('auth.session.get', () =>
-      auth.api.getSession({ headers: fromNodeHeaders(request.headers) }),
-    );
+    const session = await requestSession(request, auth);
     if (!session) return reply.code(401).send({ error: 'sign-in-required' });
     return rejectChangedSession(request, reply, session);
   });
@@ -89,9 +86,7 @@ export function authenticateRoutes(
       const origin = typeof options.origin === 'function' ? options.origin() : options.origin;
       if (request.headers.origin !== origin) return reply.code(403).send({ error: 'untrusted-origin' });
     }
-    const session = await observeStep('auth.session.get', () =>
-      auth.api.getSession({ headers: fromNodeHeaders(request.headers) }),
-    );
+    const session = await requestSession(request, auth);
     if (!session) return reply.code(401).send({ error: 'sign-in-required' });
     if (rejectChangedSession(request, reply, session)) return reply;
     users.set(request, session.user.id);

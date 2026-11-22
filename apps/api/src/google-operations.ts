@@ -1,4 +1,3 @@
-import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied, lockAuthorization, resolveHuman } from '@tulipfarm/access';
@@ -30,6 +29,7 @@ import { authConfig, type registerAuth } from './auth.ts';
 import { routeValidation } from './route-validation.ts';
 import { requestBoundaryError } from './security.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
+import { requestSession } from './request-session.ts';
 
 const workspace = z.strictObject({ workspaceId: z.uuid() });
 const proposal = workspace.extend({ proposalId: z.uuid() });
@@ -57,7 +57,7 @@ export function registerGoogleOperations(
       reply.header('Referrer-Policy', 'no-referrer');
       if (request.method !== 'GET' && request.headers.origin !== authConfig().webOrigin)
         return reply.code(403).send({ error: 'untrusted-origin' });
-      const session = await dependencies.auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+      const session = await requestSession(request, dependencies.auth);
       if (!session) return reply.code(401).send({ error: 'sign-in-required' });
       users.set(request, session.user.id);
     });
@@ -114,7 +114,7 @@ export function registerGoogleOperations(
       });
     };
     const recheckSession = async (request: FastifyRequest) => {
-      const session = await dependencies.auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+      const session = await requestSession(request, dependencies.auth);
       if (!session || session.user.id !== user(request)) throw new AccessDenied();
     };
     routes.addHook('onResponse', async request => {

@@ -1,4 +1,3 @@
-import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied, uuidSchema } from '@tulipfarm/access';
@@ -18,6 +17,7 @@ import { authConfig } from './auth.ts';
 import { routeValidation } from './route-validation.ts';
 import { fileErrorStatus } from './files.ts';
 import { requestBoundaryError } from './security.ts';
+import { requestSession } from './request-session.ts';
 
 const params = z.strictObject({ workspaceId: uuidSchema, fileId: uuidSchema });
 const copyBody = z.strictObject({
@@ -70,7 +70,7 @@ export function registerFilesGoogleCopy(
       return reply.code(500).send({ error: 'file-operation-failed' });
     });
     const recheckSession = async (request: FastifyRequest) => {
-      const session = await dependencies.auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+      const session = await requestSession(request, dependencies.auth);
       if (!session || session.user.id !== user(request)) throw new AccessDenied();
     };
     routes.put(

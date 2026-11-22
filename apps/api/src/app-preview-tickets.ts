@@ -1,4 +1,3 @@
-import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { AppId } from '@tulipfarm/apps';
@@ -10,6 +9,7 @@ import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import type { AppRouteDependencies } from './apps.ts';
 import type { registerAuth } from './auth.ts';
 import { requestBoundaryError } from './security.ts';
+import { requestSession } from './request-session.ts';
 
 const enabled = (workspaceId: string) => isFeatureEnabled('app-hosting', null, { id: workspaceId });
 
@@ -33,7 +33,7 @@ export function registerPreviewTickets(
     { schema: { operationId: 'createAppPreviewTicketV1', hide: true } },
     async (request, reply) => {
       reply.header('Cache-Control', 'no-store');
-      const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+      const session = await requestSession(request, auth);
       if (!session) return reply.code(401).send({ error: 'sign-in-required' });
       const parsed = params.safeParse(request.params);
       if (!parsed.success || !(await enabled(parsed.data.workspaceId)))

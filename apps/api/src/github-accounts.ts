@@ -1,4 +1,3 @@
-import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyError, FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied } from '@tulipfarm/access';
@@ -21,6 +20,7 @@ import { GitHubReadError, selectAccountSchema, selectionSchema } from '@tulipfar
 import { botGrantInputSchema, botGrantListSchema } from '@tulipfarm/github/batch-contracts';
 import type { createGitHubBotGrants } from '@tulipfarm/github/bot';
 import { workspaceUpdatingError } from './security.ts';
+import { requestSession } from './request-session.ts';
 
 const errorSchema = {
   type: 'object',
@@ -70,7 +70,7 @@ export function registerGitHubAccounts(
       reply.header('Referrer-Policy', 'no-referrer');
       if (request.method !== 'GET' && request.headers.origin !== authConfig().webOrigin)
         return reply.code(403).send({ error: 'untrusted-origin' });
-      const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+      const session = await requestSession(request, auth);
       if (!session) return reply.code(401).send({ error: 'sign-in-required' });
       sessions.set(request, { userId: session.user.id, sessionId: session.session.id });
       if (!accounts) return reply.code(503).send({ error: 'account-disabled' });

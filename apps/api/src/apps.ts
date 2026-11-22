@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
 import { z } from 'zod';
@@ -102,6 +101,7 @@ import type { registerAuth } from './auth.ts';
 import { authConfig } from './auth.ts';
 import { routeValidation } from './route-validation.ts';
 import { requestBoundaryError } from './security.ts';
+import { requestSession } from './request-session.ts';
 
 type Runtime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
 type WorkspaceTransaction = Parameters<Parameters<Runtime['transaction']>[2]>[0];
@@ -238,7 +238,7 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
       reply.header('Cache-Control', 'no-store');
       if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && request.headers.origin !== authConfig().webOrigin)
         return reply.code(403).send({ error: 'untrusted-origin' });
-      const session = await dependencies.auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+      const session = await requestSession(request, dependencies.auth);
       if (!session) return reply.code(401).send({ error: 'sign-in-required' });
       const workspace = workspaceParams.safeParse({
         workspaceId: (request.params as { workspaceId?: string }).workspaceId,

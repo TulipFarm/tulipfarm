@@ -1,7 +1,6 @@
 import { createHmac } from 'node:crypto';
-import { createBackgroundJob, observeStep } from '@tulipfarm/observability';
+import { createBackgroundJob } from '@tulipfarm/observability';
 import { normalizeIP } from '@fastify/rate-limit';
-import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { Pool } from 'pg';
 import { databasePools } from '@tulipfarm/config/database-connections';
@@ -9,6 +8,7 @@ import { z } from 'zod';
 import { canonicalEmail } from '@tulipfarm/workspaces/canonical-email';
 import { idSchema } from '@tulipfarm/workflows/contracts';
 import { authConfig, type registerAuth } from './auth.ts';
+import { requestSession } from './request-session.ts';
 
 const counterSchema = z.object({ current: z.number().int().positive(), ttl: z.number().int().positive() });
 type Policy = { name: string; max: number; windowMs: number };
@@ -227,9 +227,7 @@ export function registerAbuseHooks(
     }
     const policy = mutations.get(request.routeOptions.schema?.operationId ?? '');
     if (!policy) return;
-    const session = await observeStep('auth.session.get', () =>
-      auth.api.getSession({ headers: fromNodeHeaders(request.headers) }),
-    );
+    const session = await requestSession(request, auth);
     if (session && !(await enforce(reply, { ...policy, max: policy.max * userLimitMultiplier }, session.user.id)))
       return reply;
   });

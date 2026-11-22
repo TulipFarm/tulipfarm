@@ -1,7 +1,7 @@
-import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance } from 'fastify';
 import type { getLastWorkspace } from '@tulipfarm/workspaces/store';
 import { authConfig, type registerAuth } from './auth.ts';
+import { requestSession } from './request-session.ts';
 
 export function registerViewer(
   app: FastifyInstance,
@@ -21,7 +21,7 @@ export function registerViewer(
         return reply.code(403).send({ error: 'untrusted-origin' });
       }
       if (request.method === 'OPTIONS') return reply.code(204).send();
-      const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+      const session = await requestSession(request, auth);
       const user = session
         ? { name: session.user.name, email: session.user.email, image: session.user.image ?? null }
         : null;
