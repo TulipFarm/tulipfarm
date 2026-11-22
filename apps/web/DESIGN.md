@@ -445,8 +445,10 @@ avatars, and glass chips can be pill-shaped. Glass banners use 20px corners.
 Icons come from `@tulipfarm/icons`, which wraps Hugeicons (Stroke Rounded).
 Import a named icon such as `AddIcon` and size it with a token: `xs` 12px,
 `sm` 14px, `md` 16px, `lg` 18px, `xl` 20px or `2xl` 24px. Sidebar navigation
-uses `lg`, controls `md` and dense rows `sm`. To change an icon or a size
-everywhere, edit `packages/icons/src/index.tsx`. Third-party marks use
+uses `lg`, controls `md` and dense rows `sm`. Each icon has its own module in
+`packages/icons/src/icons/`, so a page loads only the icons it uses. To change
+an icon everywhere, edit its module, such as `icons/chat.tsx`. Sizes and stroke
+width live in `icons/create-icon.tsx`. Third-party marks use
 `BrandIcon`.
 
 Dropdowns are Sprout's searchable `Combobox` (`@tulipfarm/sprout/combobox`):
