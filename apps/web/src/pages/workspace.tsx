@@ -46,7 +46,6 @@ import { Link, Outlet, useLocation, useNavigate, useRouter } from '@tanstack/rea
 import { Toaster } from '@tulipfarm/sprout/toast';
 import { preloadRouteCode, workspaceRoute } from '@/router';
 import { whenCodeQuiet } from '@/lib/code-quiet';
-import { WorkspaceSetup } from './workspace-setup';
 import { RecordLinkPrefetch } from '@/features/navigation/record-link-prefetch';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Spinner } from '@tulipfarm/sprout/spinner';
@@ -88,11 +87,10 @@ import {
 import { SidebarRecents } from '@/features/navigation/sidebar-recents';
 import { TooltipProvider } from '@tulipfarm/sprout/tooltip';
 import { authClient } from '@/lib/auth';
-import { SearchPalette, useSearchShortcut } from '@/features/search/search-palette';
+import { useSearchShortcut } from '@/features/search/search-shortcut';
 import { overrides } from '@/extensions';
 import { PageChromeContext } from '@tulipfarm/sprout/page-header';
 import { ChatHeaderContext } from '@/features/chat/header-context';
-import { InviteMembersPrompt } from '@/features/governance/invite-members-prompt';
 import { useOwnMembership } from '@/features/governance/queries';
 import { BudProvider } from '@/features/chat/bud-provider';
 import { WorkspaceQueryProvider } from '@/lib/query';
@@ -135,6 +133,14 @@ export type WorkspacePath =
 export type Page = { label: string; to: WorkspacePath; icon?: typeof AddIcon; recent?: RecentSection };
 const SidebarCredits = overrides.get('credits');
 const creditsShown = overrides.overriddenBy('credits') !== undefined;
+// Parts most visits never show load on their own, after the page.
+const WorkspaceSetup = lazy(() => import('./workspace-setup').then(module => ({ default: module.WorkspaceSetup })));
+const SearchPalette = lazy(() =>
+  import('@/features/search/search-palette').then(module => ({ default: module.SearchPalette })),
+);
+const InviteMembersPrompt = lazy(() =>
+  import('@/features/governance/invite-members-prompt').then(module => ({ default: module.InviteMembersPrompt })),
+);
 const SidebarNavItem = lazy(() =>
   import('@/features/navigation/sidebar-nav-item').then(module => ({ default: module.SidebarNavItem })),
 );
@@ -822,6 +828,9 @@ function WorkspaceShellContent() {
   }, [onNewChat]);
   const navigate = useNavigate();
   const [searchOpen, setSearchOpen] = useState(false);
+  // The palette's code loads the first time it opens, then it stays mounted.
+  const [searchUsed, setSearchUsed] = useState(false);
+  if (searchOpen && !searchUsed) setSearchUsed(true);
   useGoToSettingsShortcut();
   useSearchShortcut(useCallback(() => setSearchOpen(open => !open), []));
   useEffect(() => {
@@ -865,12 +874,14 @@ function WorkspaceShellContent() {
               <div ref={setHeaderElement} className="flex min-w-0 flex-1 items-center gap-2" />
               <div ref={setActionsElement} className="flex shrink-0 items-center gap-2" />
               {membershipId && workspace.status === 'ready' && currentPage !== members && (
-                <InviteMembersPrompt
-                  key={workspace.id}
-                  userId={user.id}
-                  workspaceId={workspace.id}
-                  workspaceSlug={workspace.slug}
-                />
+                <Suspense fallback={null}>
+                  <InviteMembersPrompt
+                    key={workspace.id}
+                    userId={user.id}
+                    workspaceId={workspace.id}
+                    workspaceSlug={workspace.slug}
+                  />
+                </Suspense>
               )}
               {/* Under 20rem, or beside page actions on a phone, the page title needs the room; the navigation sheet still names the workspace. */}
               {!onCalendar && (
@@ -885,7 +896,9 @@ function WorkspaceShellContent() {
             <PageChromeContext value={chrome}>
               <ChatHeaderContext value={headerElement}>
                 {workspace.status === 'provisioning' ? (
-                  <WorkspaceSetup key={workspace.slug} name={workspace.name} slug={workspace.slug} />
+                  <Suspense fallback={null}>
+                    <WorkspaceSetup key={workspace.slug} name={workspace.name} slug={workspace.slug} />
+                  </Suspense>
                 ) : SidebarMockPage && workspace.slug === 'sidebar-mock' ? (
                   <Suspense fallback={<p role="status">Opening mock...</p>}>
                     <SidebarMockPage />
@@ -905,12 +918,16 @@ function WorkspaceShellContent() {
               </ChatHeaderContext>
             </PageChromeContext>
           </main>
-          <SearchPalette
-            open={searchOpen}
-            onOpenChange={setSearchOpen}
-            pages={searchPages.filter(page => appsEnabled || page !== apps)}
-            onOpen={to => void navigate({ to, params: { workspaceSlug: workspace.slug } })}
-          />
+          {searchUsed && (
+            <Suspense fallback={null}>
+              <SearchPalette
+                open={searchOpen}
+                onOpenChange={setSearchOpen}
+                pages={searchPages.filter(page => appsEnabled || page !== apps)}
+                onOpen={to => void navigate({ to, params: { workspaceSlug: workspace.slug } })}
+              />
+            </Suspense>
+          )}
         </SidebarProvider>
       </div>
       <Toaster />

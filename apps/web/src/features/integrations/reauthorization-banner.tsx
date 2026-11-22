@@ -12,7 +12,7 @@ import { useMcpApi, useMcpCapabilities, useMcpIntegrations } from '@/features/wo
 import { useAtlassianAccounts, useGitHubAccounts, useGoogleIntegration, useSlackIntegration } from './queries';
 import { slackInstallUrl } from './slack';
 import { useFeatureContext } from '@/lib/query/provider';
-import { mcpPagePrefix } from './mcp-apps';
+import { mcpPagePrefix } from './mcp-page';
 import { authorizationAttention, type AuthorizationSources } from './authorization-attention';
 import type { ReadState } from '@/features/tables/request-state';
 

@@ -1,34 +1,17 @@
 import { ChatIcon } from '@tulipfarm/icons';
 import { Link } from '@tanstack/react-router';
 import { z } from 'zod';
-import { tableDetailRoute, tableEditRoute, tablesRoute, tasksRoute, workspaceRoute } from '@/router';
+import { tableDetailRoute, tableEditRoute, tasksRoute, workspaceRoute } from '@/router';
 import { Button } from '@tulipfarm/sprout/button';
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { CreateInChatSample, StatePanel } from '@tulipfarm/sprout/state-panel';
-import { TableDetail, TableList } from '@/features/tables/tables';
+import { TableDetail } from '@/features/tables/tables';
 import { TaskBoard } from '@/features/task-board/task-board';
 import { TableRequestError } from '@/features/tables/request-state';
 import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson, responseError } from '@/lib/http';
 import { useFeatureRead } from '@/lib/query';
-
-export function TablesPage() {
-  const { workspace } = workspaceRoute.useRouteContext();
-  const search = tablesRoute.useSearch();
-  const navigate = tablesRoute.useNavigate();
-  return (
-    <PageContent>
-      <TableList
-        key={workspace.id}
-        workspaceId={workspace.id}
-        workspaceSlug={workspace.slug}
-        search={search}
-        changeSearch={next => void navigate({ search: current => ({ ...current, ...next }), replace: true })}
-      />
-    </PageContent>
-  );
-}
 
 export function TableDetailPage() {
   const { tableId } = tableDetailRoute.useParams();

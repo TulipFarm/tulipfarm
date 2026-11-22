@@ -97,6 +97,3 @@ export const fillTemplate = (template: string, values: Record<string, string>) =
 
 /** True when the app's URL needs per-account values, so it can't be matched by exact address. */
 export const isTemplate = (app: McpApp) => app.variables.length > 0;
-
-/** Connected servers that aren't in the catalog open at `mcp-<integration id>`. */
-export const mcpPagePrefix = 'mcp-';
