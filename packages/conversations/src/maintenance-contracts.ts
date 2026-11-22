@@ -19,7 +19,6 @@ export const maintenanceViewSchema = z.object({
       errorCode: z.string().nullable(),
       retryAt: z.string().nullable(),
       compactionId: z.uuid().nullable(),
-      embeddingStatus: z.string().nullable(),
     })
     .nullable(),
 });

@@ -6,16 +6,9 @@ import { fixture } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createWorkspaceRuntime, qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { AccessDenied } from '@tulipfarm/access';
 import { workspaceTableMigrations } from '../../workspaces/dist/table-migrations.js';
-import {
-  createGitHubKnowledge,
-  createSlackKnowledge,
-  createKnowledgeEmbeddings,
-  createKnowledgeSearch,
-  createLocalKnowledge,
-  GitHubCorpusError,
-} from '../dist/index.js';
+import { createGitHubKnowledge, createSlackKnowledge, createLocalKnowledge, GitHubCorpusError } from '../dist/index.js';
+import { keepBackedSearch } from './fake-keep.mjs';
 import { createFiles } from '@tulipfarm/files';
-import { knowledgeEmbeddingProfile as profile } from '@tulipfarm/config';
 import { parseKnowledgeDocument, KnowledgeParseError } from '../dist/parser.js';
 
 // Search has a bounded 1.95 second deadline. Retry only the storage deadline so host load cannot hide an authorization result.
@@ -240,8 +233,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       };
       const fast = { sleep: async () => {} };
       const github = createGitHubKnowledge({ runtime, provider, sync: fast });
-      const disabled = createKnowledgeEmbeddings({ runtime, github, config: { kind: 'disabled' } });
-      const search = createKnowledgeSearch({ runtime, embeddings: disabled, github });
+      const { search } = keepBackedSearch({ runtime, github });
 
       const member = async role => {
         const who = { userId: randomUUID(), membershipId: randomUUID() };
@@ -417,7 +409,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         (
           await db.platform.query(
             `SELECT d.id,d.tombstoned_at,d.retain_until,
-      (d.lexical_publication_id IS NOT NULL) AS published,(d.vector_publication_id IS NOT NULL) AS vector_published,
+      (d.lexical_publication_id IS NOT NULL) AS published,
       i.seen_generation,r.state AS repository_state,r.failure AS repository_failure,
       g.reconciliation,g.sync_state,g.lease_token,g.cursor->>'phase' AS phase,
       (SELECT count(*)::int FROM ${table('access_proofs')} p WHERE p.document_id=d.id) AS proofs
@@ -441,7 +433,6 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       function unchangedTombstone(before, after) {
         assert.equal(after.id, before.id);
         assert.equal(after.published, false);
-        assert.equal(after.vector_published, false);
         assert.equal(after.proofs, 0);
         assert.deepEqual(after.tombstoned_at, before.tombstoned_at);
         assert.deepEqual(after.retain_until, before.retain_until);
@@ -462,7 +453,6 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
             const missing = await reconcileDocument(nativeId);
             assert.equal(missing.reads, 1);
             assert.equal(missing.published, false);
-            assert.equal(missing.vector_published, false);
             assert.equal(missing.proofs, 0);
             assert.ok(missing.tombstoned_at instanceof Date);
             assert.ok(Math.abs(missing.retain_until - missing.tombstoned_at - 30 * 86400000) < 1000);
@@ -1230,70 +1220,6 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         assert.deepEqual((await query(ownerActor, 'tulip')).hits, []);
       });
 
-      await t.test('hybrid embeddings use the same GitHub eligibility', async () => {
-        await db.platform.query(
-          `UPDATE ${table('tf_credit_account')} SET available=10000000000000,granted=10000000000000`,
-        );
-        const embeddings = createKnowledgeEmbeddings({
-          runtime,
-          github,
-          config: { kind: 'enabled', endpoint: 'https://example.services.ai.azure.com/', apiKey: 'fixture', profile },
-          capacity: async () => true,
-          provider: async () => ({
-            dispatch: 'dispatched',
-            requestId: 'github-test',
-            inputTokensUpperBound: 1,
-            usage: { kind: 'known', inputTokens: 1, totalTokens: 1, exceedsUpperBound: false },
-            result: {
-              kind: 'success',
-              model: profile.model,
-              vectors: [Array.from({ length: 1536 }, (_, i) => (i === 0 ? 1 : 0))],
-            },
-          }),
-        });
-        for (let i = 0; i < 20; i++) {
-          for (const work of await embeddings.due(ws.id)) await embeddings.process(work);
-          if (
-            (
-              await db.platform.query(
-                `SELECT count(*)::int n FROM ${table('documents')} WHERE source_id=$1 AND tombstoned_at IS NULL AND vector_publication_id IS NOT NULL`,
-                [sourceId],
-              )
-            ).rows[0].n === 2
-          )
-            break;
-        }
-        const hybrid = createKnowledgeSearch({ runtime, embeddings, github });
-        let owner;
-        for (let attempt = 0; attempt < 5; attempt++) {
-          owner = await bounded(() =>
-            hybrid.search(ws.id, ws.userId, {
-              kind: 'submitted',
-              commandId: randomUUID(),
-              query: 'orchid',
-              filters: { kinds: ['github'], sourceIds: [sourceId] },
-            }),
-          );
-          if (owner.reason !== 'deadline') break;
-        }
-        assert.equal(owner.mode, 'hybrid', JSON.stringify({ reason: owner.reason, coverage: owner.coverage }));
-        assert.equal(owner.hits.length, 2);
-        await db.platform.query(
-          `UPDATE ${table('github_access')} SET observed_at=now()-interval '6 minutes',expires_at=now()-interval '1 minute' WHERE membership_id=$1 AND binding IS NOT NULL`,
-          [reader.membershipId],
-        );
-        const denied = await bounded(() =>
-          hybrid.search(ws.id, reader.userId, {
-            kind: 'submitted',
-            commandId: randomUUID(),
-            query: 'orchid',
-            filters: { kinds: ['github'], sourceIds: [sourceId] },
-          }),
-        );
-        assert.deepEqual(denied.hits, []);
-        await hybrid.close();
-      });
-
       await t.test(
         'an oversized replacement reports its failure and offers the retained original only as an earlier version',
         async () => {
@@ -1314,7 +1240,6 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
             title: 'acme/handbook: docs/vendors.md',
             publicationId: null,
             parsing: 'failed',
-            embedding: 'pending',
             failure: 'too-large',
             historical: true,
           };
@@ -1541,12 +1466,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
             read: async () => assert.fail(),
           },
         });
-        const combined = createKnowledgeSearch({
+        const combined = keepBackedSearch({
           runtime,
           slack,
           github,
-          embeddings: createKnowledgeEmbeddings({ runtime, slack, github, config: { kind: 'disabled' } }),
-        });
+        }).search;
         assert.equal(
           (await bounded(() => combined.search(ws.id, ws.userId, { kind: 'typing', query: 'orchid local' }))).hits.some(
             h => h.citation.documentId === note.documentId,

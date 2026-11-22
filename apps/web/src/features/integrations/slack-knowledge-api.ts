@@ -51,7 +51,6 @@ const slackDocumentSchema = z.object({
   title: z.string(),
   publicationId: z.uuid().nullable(),
   parsing: z.enum(['queued', 'parsing', 'ready', 'failed', 'ocr-unavailable']),
-  embedding: z.enum(['pending', 'failed', 'credits-blocked', 'ready']),
   failure: z.string().nullable(),
   historical: z.boolean().default(false),
   validUntil: z.iso.datetime(),

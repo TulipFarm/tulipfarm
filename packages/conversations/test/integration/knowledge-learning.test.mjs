@@ -13,7 +13,7 @@ import { fakeKeep } from '../fake-keep.mjs';
 
 await registerExtension(creditAccountExtension, { app: 'worker', env: {} });
 
-const published = () => ({ documentId: randomUUID(), revisionId: randomUUID(), embeddingStatus: 'disabled' });
+const published = () => ({ documentId: randomUUID(), revisionId: randomUUID() });
 
 /** A model that summarizes chats and saves the given facts, citing the member's latest message. */
 function model(facts = () => []) {

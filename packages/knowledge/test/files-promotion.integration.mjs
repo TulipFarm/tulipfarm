@@ -8,6 +8,7 @@ import { workspaceTableMigrations } from '../../workspaces/dist/table-migrations
 import { createFiles } from '@tulipfarm/files';
 import { AccessDenied } from '@tulipfarm/access';
 import { createLocalKnowledge } from '../dist/index.js';
+import { keepBackedSearch } from './fake-keep.mjs';
 
 test(
   'Knowledge added from a shared file stops answering once the source is revoked or deleted forever',
@@ -50,6 +51,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         },
       });
       const knowledge = createLocalKnowledge({ runtime, files });
+      const indexed = keepBackedSearch({ runtime });
       const fileId = randomUUID();
       await files.upload(
         one.id,
@@ -88,9 +90,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.equal((await knowledge.process(work)).disposition, 'ready');
       assert.equal((await events()).length, 1, 'a repeated parse receipt is not a new publication');
       const search = async () =>
-        (await knowledge.search(one.id, reader.userId, { query: 'thirty days' })).hits.map(
-          hit => hit.citation.documentId,
-        );
+        (await indexed.query(one.id, reader.userId, 'thirty days')).hits.map(hit => hit.citation.documentId);
       assert.deepEqual(await search(), [add.documentId]);
 
       await files.share(one.id, owner.userId, fileId, { kind: 'individual', id: reader.membershipId }, null);

@@ -47,7 +47,6 @@ function fixture({ afterChunkRead, afterChunkWrite, refreshExternalProof } = {})
         native_id,
         observed_revision_id: null,
         lexical_publication_id: null,
-        vector_publication_id: null,
         tombstoned_at: null,
       });
       return result();

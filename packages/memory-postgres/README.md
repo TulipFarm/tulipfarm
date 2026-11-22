@@ -1,8 +1,8 @@
 # Memory Postgres adapters
 
-The Postgres/pgvector/FTS implementation of the
+The Postgres implementation of the
 [memory-core ports](../memory-core/README.md). This package owns the extracted
-document, retrieval, search-session, lexical/vector and embedding storage
+document, retrieval and search-session storage
 operations, and the progress and transcript reads of background learning. Provider ACLs and host-only permission
 queries remain in Knowledge.
 
@@ -47,5 +47,4 @@ node --test --test-concurrency=1 \
 Use only a disposable local test cluster. Each conformance schema and
 connection is cleaned up by the suite. These minimal port fixtures do not
 replace the full-workspace Postgres and Temporal tests in Knowledge,
-Conversations, API, and Worker. Phase 1 adds no application migration and
-does not change API responses or the default embedding profile.
+Conversations, API, and Worker.

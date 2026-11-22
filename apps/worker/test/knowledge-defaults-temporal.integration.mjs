@@ -4,7 +4,6 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import { NativeConnection } from '@temporalio/worker';
 import { Client, Connection } from '@temporalio/client';
-import { knowledgeEmbeddingProfile as profile } from '@tulipfarm/config';
 import {
   createDefaultKnowledgeGate,
   defaultKnowledgeFlagEnabled,
@@ -12,7 +11,6 @@ import {
 } from '@tulipfarm/knowledge';
 import { createGitHubKnowledgeWorker } from '../dist/knowledge-github-composition.js';
 import { createDefaultKnowledgeWorker } from '../dist/knowledge-defaults-composition.js';
-import { createKnowledgeEmbeddingWorker } from '../dist/knowledge-embedding-composition.js';
 import { startDefaultKnowledgeWorkflow } from '../../api/dist/knowledge-defaults-dispatch.js';
 import { knowledgeFixture } from '../../api/test/knowledge-fixture.mjs';
 import { githubProviderFixture } from '../../api/test/knowledge-github-provider-fixture.mjs';
@@ -35,30 +33,7 @@ test(
     const queue = `default-knowledge-${randomUUID()}`;
     process.env.TEMPORAL_TASK_QUEUE = queue;
     const gh = githubProviderFixture();
-    let f,
-      connection,
-      clientConnection,
-      githubWorker,
-      defaultsWorker,
-      embeddingWorker,
-      githubRunning,
-      defaultsRunning,
-      embeddingRunning;
-    const embeddingCalls = [];
-    const embed = async input => {
-      embeddingCalls.push(input);
-      return {
-        dispatch: 'dispatched',
-        requestId: randomUUID(),
-        inputTokensUpperBound: 1,
-        usage: { kind: 'known', inputTokens: 1, totalTokens: 1, exceedsUpperBound: false },
-        result: {
-          kind: 'success',
-          model: profile.model,
-          vectors: [Array.from({ length: 1536 }, (_, i) => (i === 0 ? 1 : 0))],
-        },
-      };
-    };
+    let f, connection, clientConnection, githubWorker, defaultsWorker, githubRunning, defaultsRunning;
     try {
       const address = process.env.TEST_TEMPORAL_ADDRESS ?? '127.0.0.1:7233';
       connection = await NativeConnection.connect({ address });
@@ -67,11 +42,8 @@ test(
       const temporal = { connection: clientConnection, client };
       const env = {
         TEMPORAL_TASK_QUEUE: queue,
-        KNOWLEDGE_EMBEDDINGS_ENABLED: 'true',
-        AZURE_FOUNDRY_ENDPOINT: 'https://example.services.ai.azure.com/',
-        AZURE_FOUNDRY_API_KEY: 'fixture-only',
       };
-      f = await knowledgeFixture({ githubCorpus: gh.provider, temporal, embeddings: { env, provider: embed } });
+      f = await knowledgeFixture({ githubCorpus: gh.provider, temporal });
       await f.db.platform.query(
         `UPDATE ${f.table('tf_credit_account')} SET available=10000000000000,granted=10000000000000`,
       );
@@ -89,17 +61,7 @@ test(
         env,
         engines: { github: githubWorker.service },
       });
-      embeddingWorker = await createKnowledgeEmbeddingWorker({
-        runtime: f.runtime,
-        connection,
-        env,
-        pool: f.signed.identity,
-        gate,
-        github: githubWorker.service,
-        provider: embed,
-      });
       githubRunning = githubWorker.worker.run();
-      embeddingRunning = embeddingWorker.worker.run();
       defaultsRunning = defaultsWorker.worker.run();
       const owner = await gh.connect(f, f.signed.owner, 101, 'owner', undefined, {
         enabled: defaultKnowledgeFlagEnabled,
@@ -141,25 +103,6 @@ test(
         async () => (await published('doc:7001:docs/supplier.md')) && (await published('code:7001:src/app.ts')),
         'docs and code at default-branch head publish without opening Knowledge',
       );
-      const vectors = async () =>
-        (
-          await f.db.platform.query(
-            `SELECT count(*)::int AS n FROM ${f.table('tf_knowledge_documents')} WHERE source_id=$1 AND vector_publication_id IS NULL AND tombstoned_at IS NULL`,
-            [source.source_id],
-          )
-        ).rows[0].n;
-      await eventually(async () => (await vectors()) === 0, 'automatic GitHub documents embed');
-      const ledger = (
-        await f.db.platform.query(
-          `SELECT attribution_kind,attribution_id,state FROM ${f.table('tf_knowledge_credit_attempts')} WHERE purpose='ingestion'`,
-        )
-      ).rows;
-      assert.ok(
-        ledger.length > 0 && embeddingCalls.length > 0,
-        'automatic GitHub embeddings produce settled credit evidence',
-      );
-      for (const entry of ledger)
-        assert.deepEqual(entry, { attribution_kind: 'source', attribution_id: source.source_id, state: 'known' });
       const members = (
         await f.db.platform.query(
           `SELECT m.membership_id,s.owner_membership_id FROM ${f.table('tf_knowledge_github_members')} m JOIN ${f.table('tf_knowledge_sources')} s ON s.id=m.source_id WHERE m.source_id=$1`,
@@ -229,10 +172,6 @@ test(
       if (defaultsWorker) {
         defaultsWorker.worker.shutdown();
         await defaultsRunning;
-      }
-      if (embeddingWorker) {
-        embeddingWorker.worker.shutdown();
-        await embeddingRunning;
       }
       await f?.close();
       await connection?.close();

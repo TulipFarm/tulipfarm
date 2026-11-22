@@ -139,7 +139,6 @@ const computedReads = {
       ['CLIENT_ID', 'CLIENT_SECRET', 'REDIRECT_URI', 'SCOPES'].map(suffix => `${prefix}_${suffix}`),
     ),
   },
-  'packages/config/src/knowledge-embeddings.ts': { sites: 1, names: [] },
   // Checks that no removed Firecrawl setting is set; those names are deliberately undeclared.
   'packages/config/src/public-web.ts': { sites: 1, names: [] },
   // Reads each registered flag's override variable.

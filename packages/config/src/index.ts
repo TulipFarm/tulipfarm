@@ -3,7 +3,6 @@ export * from './model-capabilities.ts';
 export * from './model-endpoints.ts';
 export * from './model-cost.ts';
 export * from './model-bundle.ts';
-export * from './knowledge-embeddings.ts';
 export * from './compaction.ts';
 export * from './model-catalog-file.ts';
 export * from './model-catalog-loader.ts';

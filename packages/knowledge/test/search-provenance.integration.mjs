@@ -7,12 +7,8 @@ import { createWorkspaceRuntime, qualified } from '@tulipfarm/workspace-storage/
 import { workspaceTableMigrations } from '../../workspaces/dist/table-migrations.js';
 import { createFiles } from '@tulipfarm/files';
 import { AccessDenied } from '@tulipfarm/access';
-import {
-  createKnowledge,
-  createKnowledgeEmbeddings,
-  createKnowledgeSearch,
-  createLocalKnowledge,
-} from '../dist/index.js';
+import { createKnowledge, createLocalKnowledge } from '../dist/index.js';
+import { keepBackedSearch } from './fake-keep.mjs';
 
 test(
   'Knowledge search hides a generated file once its recorded sources stop being readable',
@@ -54,10 +50,9 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       });
       const local = createLocalKnowledge({ runtime, files });
       const knowledge = createKnowledge({ runtime });
-      search = createKnowledgeSearch({
+      search = keepBackedSearch({
         runtime,
-        embeddings: createKnowledgeEmbeddings({ runtime, config: { kind: 'disabled' } }),
-      });
+      }).search;
       const text = 'orchid provenance sentinel';
       const fileId = randomUUID(),
         documentId = randomUUID(),

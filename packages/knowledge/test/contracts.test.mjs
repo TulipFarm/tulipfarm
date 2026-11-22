@@ -1,23 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { embeddingProfileSchema, parserProfileSchema } from '../dist/index.js';
+import { parserProfileSchema } from '../dist/index.js';
 import { knowledgeSaveSchema, knowledgeSearchSchema } from '../dist/contracts.js';
 
-test('profiles preserve preparation identities and reject OCR or mixed dimensions', () => {
+test('parser profiles preserve preparation identities and reject OCR', () => {
   const parser = { id: 'text-v1', engine: 'text', version: '1', normalization: 'markdown-v1', ocr: 'disabled' };
   assert.deepEqual(parserProfileSchema.parse(parser), parser);
   assert.equal(parserProfileSchema.safeParse({ ...parser, ocr: 'cloud' }).success, false);
-  const profile = {
-    id: 'azure-large-1536-v1',
-    model: 'text-embedding-3-large',
-    deployment: 'deployment-to-qualify',
-    dimensions: 1536,
-    tokenizer: 'cl100k_base',
-    preparation: 'headings-v1',
-  };
-  assert.deepEqual(embeddingProfileSchema.parse(profile), profile);
-  assert.equal(embeddingProfileSchema.safeParse({ ...profile, dimensions: 2048 }).success, false);
-  assert.equal(embeddingProfileSchema.safeParse({ ...profile, preparation: '' }).success, false);
 });
 
 test('browser-safe admission accepts only user content and rejects forged parser or original metadata', () => {

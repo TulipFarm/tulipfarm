@@ -2,12 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import {
-  initialBundleModels,
-  initialModelMapping,
-  modelBundleSchema,
-  knowledgeEmbeddingProfile,
-} from '@tulipfarm/config';
+import { initialBundleModels, initialModelMapping, modelBundleSchema } from '@tulipfarm/config';
 import { createFiles } from '../../files/dist/index.js';
 import { createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
@@ -19,27 +14,13 @@ import { savedTaskAgent } from './task-fixture.mjs';
 import { createAgentExecutor } from '../src/executor.ts';
 import {
   createKnowledgeAgentTools,
-  createKnowledgeEmbeddings,
-  createKnowledgeSearch,
   createLocalKnowledge,
   withKnowledgeSourceAuthorization,
 } from '../../knowledge/dist/index.js';
-import { creditPricing } from '@tulipfarm/extensions';
-
-const embedding = {
-  dispatch: 'dispatched',
-  inputTokensUpperBound: 1,
-  requestId: 'task-fixture',
-  usage: { kind: 'known', inputTokens: 1, totalTokens: 1, exceedsUpperBound: false },
-  result: {
-    kind: 'success',
-    model: knowledgeEmbeddingProfile.model,
-    vectors: [Array.from({ length: 1536 }, (_, index) => (index === 0 ? 1 : 0))],
-  },
-};
+import { keepBackedSearch } from '../../knowledge/test/fake-keep.mjs';
 
 test(
-  'a durable task answers from knowledge, attributes query spend to its budget and fails closed after revocation',
+  'a durable task answers from knowledge, keeps model spend on the task and fails closed after revocation',
   { timeout: 180000 },
   async t => {
     const db = await fixture();
@@ -86,23 +67,8 @@ test(
         read: async key => bytes.get(key),
       }),
     });
-    let embeddingCalls = 0;
-    const embeddings = createKnowledgeEmbeddings({
-      runtime: base,
-      config: {
-        kind: 'enabled',
-        endpoint: 'https://example.services.ai.azure.com/',
-        apiKey: 'fixture-only',
-        profile: knowledgeEmbeddingProfile,
-      },
-      capacity: async () => true,
-      provider: async () => {
-        embeddingCalls++;
-        return embedding;
-      },
-    });
     const knowledge = guarded =>
-      createKnowledgeAgentTools({ runtime: guarded, search: createKnowledgeSearch({ runtime: guarded, embeddings }) });
+      createKnowledgeAgentTools({ runtime: guarded, search: keepBackedSearch({ runtime: guarded }).search });
     const saved = await local.save(w.id, user, {
       commandId: randomUUID(),
       documentId: randomUUID(),
@@ -111,7 +77,6 @@ test(
       input: { kind: 'note', text: 'Suppliers are paid within 30 days of delivery.' },
     });
     for (const work of await local.due(w.id)) await local.process(work);
-    for (let step = 0; step < 20; step++) for (const work of await embeddings.due(w.id)) await embeddings.process(work);
 
     const route = {
       id: 'knowledge-task',
@@ -206,17 +171,6 @@ test(
       ),
       'the answer inherits the knowledge dependency',
     );
-    assert.equal(embeddingCalls, 2, 'one document and one task query embedding');
-
-    const attempt = (
-      await db.platform.query(
-        `SELECT a.task_flow_id,a.attribution_id,o.provider_pico_usd FROM ${table('tf_knowledge_credit_attempts')} a JOIN ${table('tf_knowledge_credit_observations')} o ON o.attempt_id=a.id WHERE a.purpose='query'`,
-      )
-    ).rows;
-    assert.deepEqual(
-      attempt.map(row => [row.task_flow_id, row.attribution_id]),
-      [[task.id, member]],
-    );
     const model_charged = BigInt(
       (
         await db.platform.query(
@@ -225,20 +179,7 @@ test(
         )
       ).rows[0].charged,
     );
-    assert.equal(
-      BigInt(done.cost.chargedCreditUnits),
-      model_charged + BigInt(attempt[0].provider_pico_usd) * creditPricing().unitsPerPicoUsd,
-      'task usage presents model and knowledge spend',
-    );
-    assert.equal(
-      (
-        await db.platform.query(`SELECT count(*)::int AS count FROM ${table('tf_credit_usage')} WHERE model_id=$1`, [
-          knowledgeEmbeddingProfile.model,
-        ])
-      ).rows[0].count,
-      0,
-      'no second wallet charge through model usage',
-    );
+    assert.equal(BigInt(done.cost.chargedCreditUnits), model_charged, 'task usage presents model spend');
 
     const oldRoot = (
       await db.platform.query(`SELECT knowledge_root FROM ${table('tf_agent_tasks')} WHERE id=$1`, [task.id])

@@ -10,14 +10,6 @@ import {
   lexicalInput,
   proofInput,
 } from '../dist/documents/contracts.js';
-import {
-  embeddingWorkSchema,
-  embeddingQuerySchema,
-  embeddingRetrySchema,
-  embeddingDocumentRetrySchema,
-  embeddingQueryStatusSchema,
-  embeddingDocumentStatusSchema,
-} from '../dist/contracts/embeddings.js';
 import { knowledgeCitationSchema } from '../dist/contracts/knowledge.js';
 
 const uppercase = 'ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF';
@@ -39,21 +31,15 @@ test('the internal UUID schema accepts uppercase UUIDs and normalizes them as th
   assert.equal(uuidSchema.safeParse('not-a-uuid').success, false);
 });
 
-test('every moved document and embedding UUID field preserves lowercase normalization', () => {
+test('every moved document UUID field preserves lowercase normalization', () => {
   for (const schema of [
     sourceInput,
     createRevisionInput(z.array(z.object({ kind: z.literal('knowledge-document') }))),
     lexicalInput,
     proofInput,
-    embeddingWorkSchema,
-    embeddingQuerySchema,
-    embeddingRetrySchema,
-    embeddingDocumentRetrySchema,
-    embeddingQueryStatusSchema,
-    embeddingDocumentStatusSchema,
   ]) {
     const fields = Object.entries(schema.shape).filter(
-      ([key]) => !['profileId', 'nativeId'].includes(key) && (key === 'id' || key.endsWith('Id')),
+      ([key]) => key !== 'nativeId' && (key === 'id' || key.endsWith('Id')),
     );
     assert.ok(fields.length > 0);
     for (const [name, field] of fields) assert.equal(field.parse(uppercase), lowercase, name);
@@ -75,7 +61,6 @@ test('every moved document and embedding UUID field preserves lowercase normaliz
     publicationId: lowercase,
   });
   assert.equal(createRevisionInput(z.array(z.never())).shape.nativeId.parse(uppercase), uppercase);
-  assert.equal(embeddingQueryStatusSchema.shape.profileId.parse(uppercase), uppercase);
 });
 
 test('the earlier browser citation contract retains its original case-preserving behavior', () => {

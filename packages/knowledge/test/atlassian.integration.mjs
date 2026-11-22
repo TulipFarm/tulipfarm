@@ -8,13 +8,11 @@ import { AccessDenied } from '@tulipfarm/access';
 import {
   createAtlassianKnowledge,
   createSlackKnowledge,
-  createKnowledgeEmbeddings,
-  createKnowledgeSearch,
   createLocalKnowledge,
   AtlassianCorpusError,
 } from '../dist/index.js';
+import { keepBackedSearch } from './fake-keep.mjs';
 import { createFiles } from '@tulipfarm/files';
-import { knowledgeEmbeddingProfile as profile } from '@tulipfarm/config';
 
 // Search has a bounded 1.95 second deadline. Retry only the storage deadline so host load cannot hide an authorization result.
 async function bounded(operation) {
@@ -276,8 +274,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         },
       };
       const atlassian = createAtlassianKnowledge({ runtime, provider });
-      const disabled = createKnowledgeEmbeddings({ runtime, atlassian, config: { kind: 'disabled' } });
-      const search = createKnowledgeSearch({ runtime, embeddings: disabled, atlassian });
+      const { search } = keepBackedSearch({ runtime, atlassian });
       const reader = { userId: randomUUID(), membershipId: randomUUID() };
       await db.platform.query(`INSERT INTO ${table('tf_memberships')} (id,user_id,role) VALUES ($1,$2,'member')`, [
         reader.membershipId,
@@ -786,72 +783,6 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         );
       });
 
-      await t.test('hybrid embeddings use the same Atlassian eligibility', async () => {
-        await db.platform.query(
-          `UPDATE ${table('tf_credit_account')} SET available=10000000000000,granted=10000000000000`,
-        );
-        const embeddings = createKnowledgeEmbeddings({
-          runtime,
-          atlassian,
-          config: { kind: 'enabled', endpoint: 'https://example.services.ai.azure.com/', apiKey: 'fixture', profile },
-          capacity: async () => true,
-          provider: async () => ({
-            dispatch: 'dispatched',
-            requestId: 'atlassian-test',
-            inputTokensUpperBound: 1,
-            usage: { kind: 'known', inputTokens: 1, totalTokens: 1, exceedsUpperBound: false },
-            result: {
-              kind: 'success',
-              model: profile.model,
-              vectors: [Array.from({ length: 1536 }, (_, i) => (i === 0 ? 1 : 0))],
-            },
-          }),
-        });
-        await atlassian.refresh(ws.id, ws.userId, sourceId);
-        for (let i = 0; i < 30; i++) {
-          for (const work of await embeddings.due(ws.id)) await embeddings.process(work);
-          if (
-            (
-              await db.platform.query(
-                `SELECT count(*)::int n FROM ${table('documents')} WHERE source_id=$1 AND tombstoned_at IS NULL AND vector_publication_id IS NOT NULL`,
-                [sourceId],
-              )
-            ).rows[0].n === 4
-          )
-            break;
-          await atlassian.refresh(ws.id, ws.userId, sourceId);
-        }
-        const hybrid = createKnowledgeSearch({ runtime, embeddings, atlassian });
-        let owner;
-        for (let attempt = 0; attempt < 5; attempt++) {
-          owner = await bounded(() =>
-            hybrid.search(ws.id, ws.userId, {
-              kind: 'submitted',
-              commandId: randomUUID(),
-              query: 'orchid',
-              filters: { kinds: ['confluence'], sourceIds: [sourceId] },
-            }),
-          );
-          if (owner.reason !== 'deadline') break;
-        }
-        assert.equal(owner.mode, 'hybrid', JSON.stringify({ reason: owner.reason, coverage: owner.coverage }));
-        assert.ok(owner.hits.length >= 3);
-        await db.platform.query(
-          `UPDATE ${table('atlassian_access')} SET observed_at=now()-interval '6 minutes',expires_at=now()-interval '1 minute' WHERE membership_id=$1 AND binding IS NOT NULL`,
-          [reader.membershipId],
-        );
-        const denied = await bounded(() =>
-          hybrid.search(ws.id, reader.userId, {
-            kind: 'submitted',
-            commandId: randomUUID(),
-            query: 'orchid',
-            filters: { kinds: ['confluence'], sourceIds: [sourceId] },
-          }),
-        );
-        assert.deepEqual(denied.hits, []);
-        await hybrid.close();
-      });
-
       await t.test(
         'an oversized page replacement reports its failure and offers the retained original only as an earlier version',
         async () => {
@@ -869,7 +800,6 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
             title: 'Roadmap root',
             publicationId: null,
             parsing: 'failed',
-            embedding: 'pending',
             failure: 'item-too-large',
             historical: true,
           };
@@ -919,12 +849,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
             read: async () => assert.fail(),
           },
         });
-        const combined = createKnowledgeSearch({
+        const combined = keepBackedSearch({
           runtime,
           slack,
           atlassian,
-          embeddings: createKnowledgeEmbeddings({ runtime, slack, atlassian, config: { kind: 'disabled' } }),
-        });
+        }).search;
         await atlassian.refresh(ws.id, ws.userId, sourceId);
         assert.ok(
           (await bounded(() => combined.search(ws.id, ws.userId, { kind: 'typing', query: 'orchid' }))).hits.some(

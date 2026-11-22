@@ -5,12 +5,9 @@ import { fixture, connect, loadPlatformBaseline } from '../../workspace-storage/
 import { commonCompatibility, createWorkspaceRuntime, qualified } from '@tulipfarm/workspace-storage/runtime';
 import { workspaceTableMigrations } from '../../workspaces/dist/table-migrations.js';
 import { AccessDenied, requireProtectedSource } from '@tulipfarm/access';
-import { knowledgeEmbeddingProfile } from '@tulipfarm/config';
 import {
   createConversationKnowledge,
   createKnowledge,
-  createKnowledgeEmbeddings,
-  createKnowledgeSearch,
   createKnowledgeAgentTools,
   withKnowledgeSourceAuthorization,
   KnowledgeError,
@@ -18,6 +15,7 @@ import {
 } from '../dist/index.js';
 import { registerExtension } from '@tulipfarm/extensions';
 import { creditAccountExtension } from '@tulipfarm/workspace-storage/credit-account';
+import { keepBackedSearch } from './fake-keep.mjs';
 
 // These tests exhaust workspace balances, so they fund work from the credit account as a billing extension would.
 await registerExtension(creditAccountExtension, { app: 'worker', env: {} });
@@ -47,12 +45,14 @@ test('conversation Knowledge publishes saved recaps and dynamically retains the 
       ]);
     const service = createConversationKnowledge({ runtime });
     const core = createKnowledge({ runtime });
-    const embeddings = createKnowledgeEmbeddings({ runtime, config: { kind: 'disabled' } });
-    search = createKnowledgeSearch({ runtime, embeddings });
+    const indexed = keepBackedSearch({ runtime });
+    search = indexed.search;
     const tools = createKnowledgeAgentTools({ runtime, search });
     const protectedRuntime = withKnowledgeSourceAuthorization(runtime);
-    const find = (actor, query = 'orchid') =>
-      search.search(ws.id, actor.userId, { kind: 'typing', query, filters: { kinds: ['conversation'] } });
+    const find = async (actor, query = 'orchid') => {
+      await indexed.deliver(ws.id);
+      return search.search(ws.id, actor.userId, { kind: 'typing', query, filters: { kinds: ['conversation'] } });
+    };
     const reference = hit => {
       const { ordinal: _ordinal, ...source } = hit.citation;
       return source;
@@ -137,7 +137,7 @@ test('conversation Knowledge publishes saved recaps and dynamically retains the 
       await db.platform.query(`DELETE FROM ${table('sources')} WHERE id=ANY($1::uuid[])`, [ids]);
     });
     await t.test(
-      'one stable document, immutable original, lexical ready before embeddings and retry after lost acknowledgement',
+      'one stable document, immutable original, searchable and retry after lost acknowledgement',
       async () => {
         first = await service.publish(privateInput);
         assert.deepEqual(await service.publish(privateInput), first);
@@ -157,7 +157,6 @@ test('conversation Knowledge publishes saved recaps and dynamically retains the 
           ).rows[0].n,
           1,
         );
-        assert.deepEqual(await embeddings.due(ws.id), []);
         assert.equal((await find(owner)).hits.length, 1);
         const login = await connect(db.login(ws));
         try {
@@ -311,9 +310,25 @@ test('conversation Knowledge publishes saved recaps and dynamically retains the 
           sources: [reference(firstHit)],
         });
         const result = await service.publish(derived);
-        const hit = (await find(owner)).hits.find(item => item.citation.documentId === result.documentId);
-        assert.ok(hit);
-        assert.ok(!(await find(peer)).hits.some(item => item.citation.documentId === result.documentId));
+        // Keep never receives documents derived from other sources, so search leaves them out.
+        assert.ok(!(await find(owner)).hits.some(item => item.citation.documentId === result.documentId));
+        const { rows } = await db.platform.query(
+          `SELECT d.source_id,d.lexical_publication_id,s.access_epoch FROM ${table('documents')} d
+          JOIN ${table('sources')} s ON s.id=d.source_id WHERE d.id=$1`,
+          [result.documentId],
+        );
+        const hit = {
+          citation: {
+            ...firstHit.citation,
+            documentId: result.documentId,
+            sourceId: rows[0].source_id,
+            revisionId: result.revisionId,
+            publicationId: rows[0].lexical_publication_id,
+            accessEpoch: rows[0].access_epoch,
+            ordinal: 0,
+          },
+        };
+        assert.ok((await service.evidence(ws.id, owner.userId, hit.citation)).text);
         assert.equal((await read(peer, hit)).result.error, 'knowledge-unavailable');
         await db.platform.query(`UPDATE ${table('tf_conversations')} SET deleted_at=clock_timestamp() WHERE id=$1`, [
           privateInput.conversationId,
@@ -371,7 +386,6 @@ test('conversation Knowledge publishes saved recaps and dynamically retains the 
           core.recordFailure(ws.id, peer, {
             documentId: sharedHit.citation.documentId,
             revisionId: sharedHit.citation.revisionId,
-            axis: 'embedding',
             failure: 'provider',
           }),
           AccessDenied,
@@ -462,126 +476,6 @@ test('conversation Knowledge publishes saved recaps and dynamically retains the 
       ]);
       await service.publish(blocked);
     });
-    await t.test(
-      'embedding failure preserves keyword publication and standard paid jobs can finish independently',
-      async () => {
-        await db.platform.query(
-          `UPDATE ${table('tf_credit_account')} SET available=10000000000000,granted=10000000000000`,
-        );
-        const fresh = await recap({ text: 'Orchid embedding-only fixture.' });
-        const document = await service.publish(fresh);
-        let fail = true,
-          calls = 0;
-        const enabled = createKnowledgeEmbeddings({
-          runtime,
-          config: {
-            kind: 'enabled',
-            endpoint: 'https://example.services.ai.azure.com/',
-            apiKey: 'fixture',
-            profile: knowledgeEmbeddingProfile,
-          },
-          capacity: async () => true,
-          provider: async input => {
-            calls++;
-            if (fail) throw new Error('fixture provider failure');
-            return {
-              dispatch: 'dispatched',
-              inputTokensUpperBound: 100,
-              requestId: 'conversation-fixture',
-              usage: { kind: 'known', inputTokens: 1, totalTokens: 1, exceedsUpperBound: false },
-              result: {
-                kind: 'success',
-                model: knowledgeEmbeddingProfile.model,
-                vectors: input.inputs.map(() => Array.from({ length: 1536 }, (_, i) => (i === 0 ? 1 : 0))),
-              },
-            };
-          },
-        });
-        for (let i = 0; i < 10; i++) {
-          for (const work of await enabled.due(ws.id)) await enabled.process(work);
-          if (
-            (
-              await db.platform.query(`SELECT 1 FROM ${table('embedding_jobs')} WHERE document_id=$1`, [
-                document.documentId,
-              ])
-            ).rowCount
-          )
-            break;
-        }
-        assert.ok(calls > 0);
-        assert.ok((await find(owner)).hits.some(item => item.citation.documentId === document.documentId));
-        const status = await enabled.documentStatus(ws.id, owner.userId, document.documentId);
-        assert.notEqual(status.state, 'ready');
-        fail = false;
-        if (status.canRetry) {
-          const commandId = randomUUID();
-          const retried = await enabled.resumeDocument(ws.id, owner.userId, document.documentId, commandId);
-          assert.equal(
-            (await enabled.resumeDocument(ws.id, owner.userId, document.documentId, commandId)).generation,
-            retried.generation,
-          );
-          for (const work of await enabled.due(ws.id)) await enabled.process(work);
-        }
-        assert.equal((await enabled.documentStatus(ws.id, owner.userId, document.documentId)).state, 'ready');
-        const retained = await db.platform.query(
-          `SELECT lexical_publication_id FROM ${table('documents')} WHERE id=$1`,
-          [document.documentId],
-        );
-        assert.ok(retained.rows[0].lexical_publication_id);
-        const blocked = await recap({
-          project: projectId,
-          text: 'Orchid authorize a new project member for embeddings.',
-        });
-        const blockedDocument = await service.publish(blocked);
-        await db.platform.query(`UPDATE ${table('tf_credit_account')} SET available=0`);
-        await db.platform.query(`UPDATE ${table('credit_group')} SET unfunded=1`);
-        const before = calls;
-        for (const work of await enabled.due(ws.id)) await enabled.process(work);
-        assert.equal(
-          (await enabled.documentStatus(ws.id, owner.userId, blockedDocument.documentId)).state,
-          'credits-blocked',
-        );
-        assert.equal(calls, before);
-        const commandId = randomUUID();
-        await db.platform.query(
-          `UPDATE ${table('tf_conversation_maintenance')} SET requester_membership_id=$2,requester_user_id=$3,resume_command_id=$4 WHERE conversation_id=$1`,
-          [blocked.conversationId, peer.membershipId, peer.userId, commandId],
-        );
-        await db.platform.query(
-          `INSERT INTO ${table('tf_conversation_maintenance_commands')} (membership_id,command_id,conversation_id) VALUES ($1,$2,$3)`,
-          [peer.membershipId, commandId, blocked.conversationId],
-        );
-        await db.platform.query(`UPDATE ${table('tf_credit_account')} SET available=10000000000000`);
-        await db.platform.query(`UPDATE ${table('credit_group')} SET unfunded=0`);
-        const resumeInput = { ...blocked, requester: peer, resumeCommandId: commandId };
-        const resumed = createConversationKnowledge({ runtime, embeddings: enabled });
-        await db.platform.query(`UPDATE ${table('tf_memberships')} SET removed_at=clock_timestamp() WHERE id=$1`, [
-          owner.membershipId,
-        ]);
-        await resumed.publish(resumeInput);
-        for (const work of await enabled.due(ws.id)) await enabled.process(work);
-        assert.equal((await enabled.documentStatus(ws.id, peer.userId, blockedDocument.documentId)).state, 'ready');
-        assert.equal(
-          (await service.original(ws.id, peer.userId, blockedDocument.documentId)).bytes.toString(),
-          blocked.text,
-        );
-        await db.platform.query(`UPDATE ${table('tf_memberships')} SET removed_at=NULL WHERE id=$1`, [
-          owner.membershipId,
-        ]);
-        const billedCalls = calls;
-        await resumed.publish(resumeInput);
-        assert.equal(calls, billedCalls);
-        assert.equal(
-          (
-            await db.platform.query(
-              `SELECT requester_membership_id FROM ${table('conversation_revisions')} WHERE revision_id=$1`,
-              [blockedDocument.revisionId],
-            )
-          ).rows[0].requester_membership_id,
-          owner.membershipId,
-        );
-      },
-    );
     await t.test('changed payload cannot rewrite an immutable generation receipt', async () => {
       await assert.rejects(service.publish({ ...shared, text: 'forged content' }), AccessDenied);
       await service.publish({ ...shared, title: 'Changed title' });

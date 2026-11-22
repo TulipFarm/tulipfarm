@@ -10,12 +10,11 @@ import { workspaceTableMigrations } from '../../workspaces/dist/table-migrations
 import {
   createKnowledge,
   createKnowledgeAgentTools,
-  createKnowledgeEmbeddings,
-  createKnowledgeSearch,
   createLocalKnowledge,
   knowledgeRetrieveInputSchema,
   knowledgeRetrieveResultSchema,
 } from '../dist/index.js';
+import { keepBackedSearch } from './fake-keep.mjs';
 import { retrievalCorpus, retrievalCases } from './fixtures/retrieval-corpus.mjs';
 
 const textOf = output =>
@@ -64,8 +63,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       return result;
     }
     for (const document of retrievalCorpus) saved.push(await note(document.text, document.title));
-    const embeddings = createKnowledgeEmbeddings({ runtime, config: { kind: 'disabled' } });
-    search = createKnowledgeSearch({ runtime, embeddings });
+    search = keepBackedSearch({ runtime }).search;
     const tools = createKnowledgeAgentTools({ runtime, search });
     const actor = { kind: 'human', userId: workspace.userId, membershipId: workspace.membershipId };
     const retrieve = (input, context = {}) =>
@@ -110,77 +108,6 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.ok(textCharacters(output) <= 16_000);
       assert.ok(JSON.stringify(output).length <= 64_000);
     });
-
-    await t.test(
-      'grouped plain-topic fallback recovers cross-document queries without changing strict search',
-      async () => {
-        const query = 'pitch product workflow pilot';
-        const request = {
-          kind: 'submitted',
-          commandId: randomUUID(),
-          query,
-          filters: { kinds: ['note'], sourceIds: [], documentIds: [] },
-        };
-        assert.deepEqual((await search.search(workspace.id, workspace.userId, request)).hits, []);
-        let calls = 0;
-        const counted = createKnowledgeAgentTools({
-          runtime,
-          search: {
-            search: (...args) => {
-              calls++;
-              return search.search(...args);
-            },
-          },
-        });
-        const output = await counted.retrieve(
-          workspace.id,
-          actor,
-          { action: 'search', query },
-          { commandId: randomUUID() },
-        );
-        assert.equal(calls, 1);
-        assert.equal(output.result.branches[0].queryBroadened, true);
-        assert.equal(output.sources.length, 4);
-        assert.deepEqual(
-          retrievalCases[0].requiredFacts.filter(fact => !textOf(output).includes(fact)),
-          [],
-        );
-        assert.ok(textCharacters(output) <= 16_000);
-        assert.ok(JSON.stringify(output).length <= 64_000);
-        const exact = await retrieve({ action: 'search', query: 'pitch product' });
-        assert.equal(exact.result.branches[0].queryBroadened, undefined);
-        assert.deepEqual(
-          exact.sources.map(source => source.documentId),
-          [saved[0].documentId],
-        );
-        const scoped = await retrieve({ action: 'search', query, documentIds: [saved[1].documentId] });
-        assert.equal(scoped.result.branches[0].queryBroadened, true);
-        assert.deepEqual(
-          scoped.sources.map(source => source.documentId),
-          [saved[1].documentId],
-        );
-        for (const filters of [{ sourceIds: [randomUUID()] }, { kind: 'file' }]) {
-          const empty = await retrieve({ action: 'search', query, ...filters });
-          assert.equal(empty.result.branches[0].status, 'no-match');
-          assert.deepEqual(empty.sources, []);
-        }
-        for (const query of ['"pitch product workflow pilot"', 'pitch -pitch', 'unfindablealpha OR unfindablebeta']) {
-          const explicit = await retrieve({ action: 'search', query });
-          assert.equal(explicit.result.branches[0].status, 'no-match');
-          assert.equal(explicit.result.branches[0].queryBroadened, undefined);
-        }
-        const replayRequest = { ...request, commandId: randomUUID() };
-        const broad = () =>
-          search.search(workspace.id, workspace.userId, replayRequest, Date.now() + 10_000, undefined, {
-            allowKeywordFallback: true,
-          });
-        const first = await broad();
-        const replay = await broad();
-        assert.equal(replay.queryBroadened, true);
-        assert.deepEqual(replay.hits, first.hits);
-        await assert.rejects(search.search(workspace.id, workspace.userId, replayRequest), { code: 'conflict' });
-      },
-    );
 
     await t.test('anchor expansion performs no search and obeys document scope', async () => {
       const found = await tools.search(workspace.id, actor, { query: 'pitch' }, { commandId: randomUUID() });
@@ -274,7 +201,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         { commandId: randomUUID(), deadlineAt: Date.now() + 10_000 },
       );
       assert.equal(entered, 3);
-      assert.equal(new Set(commands).size, 3, 'Each branch has a distinct embedding/search identity.');
+      assert.equal(new Set(commands).size, 3, 'Each branch has a distinct search identity.');
       const ids = passagesOf(output).map(passage => passage.citationId);
       assert.equal(new Set(ids).size, ids.length);
       for (const branch of output.result.branches)

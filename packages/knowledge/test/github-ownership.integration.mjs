@@ -5,13 +5,8 @@ import { test } from 'node:test';
 import { fixture } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createWorkspaceRuntime, qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { workspaceTableMigrations } from '../../workspaces/dist/table-migrations.js';
-import {
-  createGitHubKnowledge,
-  createKnowledgeEmbeddings,
-  createKnowledgeSearch,
-  GitHubCorpusError,
-  recordDefaultKnowledgeIntent,
-} from '../dist/index.js';
+import { createGitHubKnowledge, GitHubCorpusError, recordDefaultKnowledgeIntent } from '../dist/index.js';
+import { keepBackedSearch } from './fake-keep.mjs';
 
 const allKinds = ['code', 'commits', 'discussions', 'docs', 'issues', 'pulls'];
 const earlierKinds = ['code', 'discussions', 'docs', 'issues', 'pulls'];
@@ -109,11 +104,10 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       const fake = fakeGitHub(binding);
       for (let id = 1; id <= 4; id++) fake.add(id);
       const github = createGitHubKnowledge({ runtime, provider: fake.provider, sync: { sleep: async () => {} } });
-      const search = createKnowledgeSearch({
+      const search = keepBackedSearch({
         runtime,
-        embeddings: createKnowledgeEmbeddings({ runtime, github, config: { kind: 'disabled' } }),
         github,
-      });
+      }).search;
       const configure = selection =>
         github.configure(ws.id, ws.userId, { commandId: randomUUID(), accountId, selection, memberIds: [] });
       const sync = async sourceId => {

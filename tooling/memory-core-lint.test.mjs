@@ -26,7 +26,7 @@ test('the actual lint configuration fences the core without restricting host ada
       ['parent-inside', 'export * from "../contracts/knowledge.js";', false],
       ['data', 'export const label = "@tulipfarm/access";', false],
       ['host', 'import "@tulipfarm/access";', true],
-      ['host-subpath', 'import "@tulipfarm/config/knowledge-embeddings";', true],
+      ['host-subpath', 'import "@tulipfarm/config/feature-flags";', true],
       ['self', 'import "@tulipfarm/memory-core";', true],
       ['pg', 'import "pg";', true],
       ['pg-subpath', 'import "pg/lib/client";', true],

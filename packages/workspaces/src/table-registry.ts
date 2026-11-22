@@ -94,8 +94,6 @@ async function verifyRegistryPrivileges(
     SELECT 'routine' FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
       AND (p.proowner = $1::regrole OR (has_schema_privilege($1, n.oid, 'USAGE') AND has_function_privilege($1, p.oid, 'EXECUTE')))
-      AND NOT ($4 = 'authoring' AND p.oid = coalesce(to_regprocedure('app.acquire_knowledge_embedding_capacity(uuid,text,integer,uuid)'), 0::oid)
-        AND p.proowner <> $1::regrole)
       AND NOT ($4 = 'authoring' AND p.oid=ANY(ARRAY[
         coalesce(to_regprocedure('app.workspace_member_profiles(uuid,uuid[])'),0::oid),
         coalesce(to_regprocedure('app.workspace_flag_context(uuid)'),0::oid),
@@ -162,10 +160,6 @@ export async function grantTableRegistryAccess(
       });
       if (privileges.length)
         await client.query(`GRANT ${privileges.join(', ')} ON app.${escapeIdentifier(access.table)} TO ${name}`);
-    }
-    const embeddingCapacity = 'app.acquire_knowledge_embedding_capacity(uuid,text,integer,uuid)';
-    if ((await client.query('SELECT to_regprocedure($1) AS routine', [embeddingCapacity])).rows[0]?.routine) {
-      await client.query(`GRANT EXECUTE ON FUNCTION ${embeddingCapacity} TO ${name}`);
     }
     for (const signature of [
       'app.workspace_member_profiles(uuid,uuid[])',

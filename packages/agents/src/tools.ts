@@ -2992,7 +2992,6 @@ export function createChatTools(
         commandId: context.callId,
         ...(context.origin ? { turnId: context.origin.turnId } : {}),
         ...(context.knowledgeAttemptId ? { attemptId: context.knowledgeAttemptId } : {}),
-        ...(context.knowledgeAttemptId ? { taskFlowId: context.knowledgeAttemptId } : {}),
         ...(context.deadlineAt ? { deadlineAt: context.deadlineAt } : {}),
         ...(context.signal ? { signal: context.signal } : {}),
       },

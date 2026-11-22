@@ -53,7 +53,6 @@ import { integrationCredentialKeyring } from '@tulipfarm/integrations';
 import { createKnowledgeActivities } from './knowledge-activities.ts';
 import { knowledgeMediaRecognition } from './media-recognition.ts';
 import { createFiles } from '@tulipfarm/files';
-import { createKnowledgeEmbeddingWorker } from './knowledge-embedding-composition.ts';
 import { createKnowledgeKeepWorker } from './knowledge-keep-composition.ts';
 import { createGoogleKnowledgeWorker } from './knowledge-google-composition.ts';
 import { createSlackKnowledgeWorker } from './knowledge-slack-composition.ts';
@@ -153,7 +152,6 @@ async function run() {
   const appJobs: ReturnType<typeof repeatFromStart>[] = [];
   const appAbort = new AbortController();
   const sweepTelemetry: ReturnType<typeof createBackgroundJob>[] = [];
-  let knowledgeEmbeddings: Awaited<ReturnType<typeof createKnowledgeEmbeddingWorker>>;
   let recommendations: ReturnType<typeof createRecommendationComposition> | undefined;
   let memberProfiles: ReturnType<typeof createMemberProfileComposition> | undefined;
   let agentLessons: ReturnType<typeof createAgentLessonComposition> | undefined;
@@ -166,7 +164,7 @@ async function run() {
     if (resources) registerFlagSubjectResolver(resources.flagContext);
     // Core: chats, tasks, plans, Slack, email, scheduled sweeps and the health-check workflow.
     const coreResources = role === 'knowledge' ? undefined : resources;
-    // Knowledge: source sync, document parsing and embeddings.
+    // Knowledge: source sync, document parsing and delivery to Keep.
     const knowledgeResources = role === 'core' ? undefined : resources;
     if (coreResources) {
       memberProfiles = createMemberProfileComposition({
@@ -432,11 +430,7 @@ async function run() {
               ...documents?.activities,
               ...email?.activities,
               ...conversations,
-              ...(coreResources
-                ? createConversationMaintenanceActivities(coreResources.runtime, {
-                    embeddings: () => knowledgeEmbeddings?.service,
-                  })
-                : {}),
+              ...(coreResources ? createConversationMaintenanceActivities(coreResources.runtime) : {}),
               ...workflows,
               ...slack?.activities,
               ...apps?.activities,
@@ -538,20 +532,6 @@ async function run() {
             },
           })
         : undefined;
-    // Core still needs the embedding service for chat maintenance, without serving the embeddings queue.
-    knowledgeEmbeddings = resources
-      ? await createKnowledgeEmbeddingWorker({
-          runtime: resources.runtime,
-          connection,
-          telemetry,
-          serve: role !== 'core',
-          gate: createDefaultKnowledgeGate({ runtime: resources.runtime }),
-          ...(googleKnowledge ? { google: googleKnowledge.service } : {}),
-          ...(slackKnowledge ? { slack: slackKnowledge.service } : {}),
-          ...(githubKnowledge ? { github: githubKnowledge.service } : {}),
-          ...(atlassianKnowledge ? { atlassian: atlassianKnowledge.service } : {}),
-        })
-      : undefined;
     const knowledgeKeep = knowledgeResources
       ? await createKnowledgeKeepWorker({ runtime: knowledgeResources.runtime, connection, telemetry })
       : undefined;
@@ -564,7 +544,6 @@ async function run() {
       ...(githubKnowledge ? [githubKnowledge.worker] : []),
       ...(atlassianKnowledge ? [atlassianKnowledge.worker] : []),
       ...(defaultKnowledge ? [defaultKnowledge.worker] : []),
-      ...(knowledgeEmbeddings?.worker ? [knowledgeEmbeddings.worker] : []),
       ...(knowledgeKeep ? [knowledgeKeep.worker] : []),
     ];
     await taskDispatch?.startRecovery();
@@ -586,7 +565,6 @@ async function run() {
     await agentLessons?.close();
     await socialPublisher?.close();
     await recommendations?.close();
-    await knowledgeEmbeddings?.close();
     clearInterval(importTimer);
     clearInterval(hostedTimer);
     hostedAbort.abort();

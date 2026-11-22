@@ -43,7 +43,7 @@ export function registerKnowledgeRoutes(
   },
   services: KnowledgeServices,
 ) {
-  const { service, conversations, google, slack, github, atlassian, defaults, embeddings, search } = services;
+  const { service, conversations, google, slack, github, atlassian, defaults, search } = services;
   async function documentAdapter(workspaceId: string, userId: string, documentId: string) {
     const provider = await dependencies.runtime.transaction(
       uuidSchema.parse(workspaceId),
@@ -113,7 +113,6 @@ export function registerKnowledgeRoutes(
   registerKnowledge(app, {
     auth: dependencies.auth,
     service,
-    embeddings,
     search,
     documentAdapter,
     citations: createKnowledgeAgentTools({ runtime: dependencies.runtime, search }),

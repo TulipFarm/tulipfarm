@@ -1038,7 +1038,7 @@ export function createDefaultKnowledge({
       if (action === 'narrow') {
         await tx.client.query(
           `UPDATE ${table(tx, 'documents')} SET tombstoned_at=clock_timestamp(),retain_until=clock_timestamp()+interval '30 days',
-          lexical_publication_id=NULL,vector_publication_id=NULL WHERE source_id=ANY($1::uuid[])`,
+          lexical_publication_id=NULL WHERE source_id=ANY($1::uuid[])`,
           [ids],
         );
         await tx.client.query(

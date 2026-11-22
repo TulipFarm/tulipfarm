@@ -23,7 +23,6 @@ import {
   createRevisionInput,
   type KnowledgeCitation,
 } from './contracts.ts';
-import { exactIdentifiers } from './identifiers.ts';
 export type { ExternalSource, KnowledgeDocument } from './records.ts';
 type Dependency = KnowledgeDependency;
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -329,16 +328,7 @@ export function createDocumentStore<Context, Source extends { kind: string }>({
         offset: chunk.offset,
         hash: hash(`${chunk.heading}\n${chunk.text}`),
       }));
-      if (local)
-        await repository(tx).insertSearchChunks([
-          input.id,
-          chunks.map(chunk => ({
-            ...chunk,
-            title: revision.title,
-            identifiers: exactIdentifiers(`${revision.title}\n${local.filename}\n${chunk.heading}\n${chunk.passage}`),
-          })),
-        ]);
-      else await repository(tx).insertChunks([input.id, chunks]);
+      await repository(tx).insertChunks([input.id, chunks]);
     }
     await requireProof(tx, human, doc, origin);
     await repository(tx).publishDocument([doc.id, input.id]);
@@ -447,7 +437,7 @@ export function createDocumentStore<Context, Source extends { kind: string }>({
       const revision = revisionRow.parse((await repository(tx).readRevision([doc.observed_revision_id])).rows[0]);
       await dependencies(tx, human, revision);
       const work = z
-        .object({ parsing: z.string(), embedding: z.string(), failure: z.string().nullable(), attempts: z.number() })
+        .object({ parsing: z.string(), failure: z.string().nullable(), attempts: z.number() })
         .parse((await repository(tx).readWork([doc.observed_revision_id])).rows[0]);
       await requireProof(tx, human, doc, origin);
       return {
@@ -466,7 +456,6 @@ export function createDocumentStore<Context, Source extends { kind: string }>({
       .strictObject({
         documentId: uuidSchema,
         revisionId: uuidSchema,
-        axis: z.enum(['parsing', 'embedding']),
         failure: z.enum([
           'unsupported',
           'encrypted',
@@ -486,21 +475,12 @@ export function createDocumentStore<Context, Source extends { kind: string }>({
           await authority(tx, human).decide('conversation', { revisionId: input.revisionId, writing: true }),
         );
       if (doc.observed_revision_id !== input.revisionId) throw new KnowledgeError('superseded');
-      if (input.axis === 'parsing' && doc.lexical_publication_id) throw new KnowledgeError('conflict');
-      const result = await repository(tx).recordFailure(
-        [
-          input.revisionId,
-          input.axis === 'embedding'
-            ? input.failure === 'credits'
-              ? 'credits-blocked'
-              : 'failed'
-            : input.failure === 'ocr-required'
-              ? 'ocr-unavailable'
-              : 'failed',
-          input.failure,
-        ],
-        input.axis,
-      );
+      if (doc.lexical_publication_id) throw new KnowledgeError('conflict');
+      const result = await repository(tx).recordFailure([
+        input.revisionId,
+        input.failure === 'ocr-required' ? 'ocr-unavailable' : 'failed',
+        input.failure,
+      ]);
       if (!result.rowCount) throw new KnowledgeError('quota');
       return { revisionId: input.revisionId };
     });

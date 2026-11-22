@@ -5,7 +5,6 @@ import { test } from 'node:test';
 import { fixture } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createWorkspaceRuntime, qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { AccessDenied } from '@tulipfarm/access';
-import { knowledgeEmbeddingProfile as profile } from '@tulipfarm/config';
 import { GoogleCorpusError } from '@tulipfarm/google-workspace/corpus';
 import { workspaceTableMigrations } from '../../workspaces/dist/table-migrations.js';
 import {
@@ -13,7 +12,6 @@ import {
   createDefaultKnowledgeGate,
   createGoogleKnowledge,
   createGitHubKnowledge,
-  createKnowledgeEmbeddings,
   createSlackKnowledge,
   recordDefaultKnowledgeIntent,
   SlackCorpusError,
@@ -222,14 +220,6 @@ test(
           1,
           `manual Slack still syncs with the flag ${flag ? 'on' : 'off'}`,
         );
-        const embeddings = createKnowledgeEmbeddings({
-          runtime,
-          slack,
-          gate,
-          config: { kind: 'enabled', endpoint: 'https://example.services.ai.azure.com/', apiKey: 'fixture', profile },
-          capacity: async () => false,
-        });
-        assert.ok(Array.isArray(await embeddings.due(ws.id)), 'embedding dispatch works without automatic tables');
       }
     } finally {
       await env.close();
@@ -330,82 +320,6 @@ test(
         assert.equal((await defaults.held(ws.id)).length, 21);
         assert.ok(intentId);
       });
-    } finally {
-      await env.close();
-    }
-  },
-);
-
-test(
-  'a flag change holds queued paid embedding work for automatic sources before any claim or credit use',
-  { timeout: 300000 },
-  async () => {
-    const env = await setup();
-    const { ws, runtime, member, db, table } = env;
-    try {
-      const who = await member();
-      let flag = true;
-      const enabled = async () => flag;
-      const world = await slackWorld(env);
-      await world.link(who, 'UAUTO');
-      const gate = createDefaultKnowledgeGate({ runtime, enabled });
-      const slack = createSlackKnowledge({ runtime, provider: world.provider, gate });
-      const sourceId = (await slack.configure(ws.id, who.userId, channels('CAUTO'))).sourceId;
-      await automatic(env, who, 'slack', 'TTEAM', [sourceId]);
-      await sync(slack, env, 'slack_sources', sourceId);
-      assert.equal(await env.live(sourceId), 1);
-      await db.platform.query(
-        `UPDATE ${table('tf_credit_account')} SET available=10000000000000,granted=10000000000000`,
-      );
-      let dispatched = 0;
-      const embeddings = createKnowledgeEmbeddings({
-        runtime,
-        slack,
-        gate,
-        config: { kind: 'enabled', endpoint: 'https://example.services.ai.azure.com/', apiKey: 'fixture', profile },
-        capacity: async () => true,
-        provider: async () => {
-          dispatched++;
-          return {
-            dispatch: 'dispatched',
-            requestId: `gate-${dispatched}`,
-            inputTokensUpperBound: 1,
-            usage: { kind: 'known', inputTokens: 1, totalTokens: 1, exceedsUpperBound: false },
-            result: {
-              kind: 'success',
-              model: profile.model,
-              vectors: [Array.from({ length: 1536 }, (_, i) => (i === 0 ? 1 : 0))],
-            },
-          };
-        },
-      });
-      const queued = await embeddings.due(ws.id);
-      assert.ok(queued.length > 0, 'the automatic source queued paid ingestion work');
-      const attempts = async () =>
-        (await db.platform.query(`SELECT count(*)::int AS n FROM ${table('credit_attempts')}`)).rows[0].n;
-      const before = await attempts();
-      flag = false;
-      assert.deepEqual(await embeddings.due(ws.id), [], 'held ingestion is not dispatched');
-      for (const work of queued) assert.equal((await embeddings.process(work)).disposition, 'stale');
-      assert.equal(dispatched, 0, 'no provider call while the owner is held');
-      assert.equal(await attempts(), before, 'no credit attempt is reserved while the owner is held');
-      flag = true;
-      await db.platform.query(`UPDATE ${table('embedding_jobs')} SET dispatch_after=clock_timestamp()`);
-      for (
-        let i = 0;
-        i < 10 &&
-        !(
-          await db.platform.query(
-            `SELECT 1 FROM ${table('documents')} WHERE source_id=$1 AND vector_publication_id IS NOT NULL`,
-            [sourceId],
-          )
-        ).rowCount;
-        i++
-      ) {
-        for (const work of await embeddings.due(ws.id)) await embeddings.process(work);
-      }
-      assert.ok(dispatched > 0, 'work resumes when the flag is on again');
-      assert.ok((await attempts()) > before);
     } finally {
       await env.close();
     }

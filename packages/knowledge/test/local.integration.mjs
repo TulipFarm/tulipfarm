@@ -9,8 +9,9 @@ import { createFiles } from '@tulipfarm/files';
 import { AccessDenied } from '@tulipfarm/access';
 import { createKnowledgeSourceFailures, createLocalKnowledge, KnowledgeError } from '../dist/index.js';
 import { docx, pdf } from './fixtures/parser-documents.mjs';
+import { keepBackedSearch } from './fake-keep.mjs';
 
-test('local knowledge originals, actual parsing, indexed search and durable work', async t => {
+test('local knowledge originals, actual parsing, Keep-backed search and durable work', async t => {
   const db = await fixture();
   let runtime;
   try {
@@ -54,6 +55,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       },
     });
     const api = createLocalKnowledge({ runtime, files });
+    const indexed = keepBackedSearch({ runtime });
     const save = (text, overrides = {}) => ({
       commandId: randomUUID(),
       documentId: randomUUID(),
@@ -103,16 +105,14 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       }
     });
     let citation;
-    await t.test('real parser publication, weighted GIN and punctuation-sensitive identifiers', async () => {
+    await t.test('real parser publication reaches Keep with punctuation-sensitive identifiers', async () => {
       const work = await run(input.commandId);
       assert.equal((await api.process(work)).disposition, 'ready');
       const current = await api.get(one.id, owner.userId, input.documentId);
       assert.equal(current.parsing, 'ready');
       assert.equal(current.canRetry, false);
       for (const query of ['returns', 'OPS-123', 'src/orders.ts', 'https://example.test/a/b?x=1']) {
-        const result = await api.search(one.id, owner.userId, { query });
-        assert.equal(result.mode, 'keyword-only');
-        assert.equal(result.reason, 'semantic-not-enabled');
+        const result = await indexed.query(one.id, owner.userId, query);
         assert.equal(result.hits[0].title, 'Returns handbook');
         assert.match(result.hits[0].text, /thirty days/);
         citation = result.hits[0].citation;
@@ -121,30 +121,8 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.deepEqual(result.original, { kind: 'note' });
       assert.match(result.text, /OPS-123/);
       assert.equal((await api.list(one.id, owner.userId)).items[0].documentId, input.documentId);
-      assert.deepEqual((await api.search(one.id, one.userId, { query: 'returns' })).hits, []);
+      assert.deepEqual((await indexed.query(one.id, one.userId, 'returns')).hits, []);
       await assert.rejects(api.get(one.id, one.userId, input.documentId), AccessDenied);
-      const login = await connect(db.login(one));
-      try {
-        await login.query('SET enable_seqscan=off');
-        for (const [predicate, index, parameter] of [
-          ["search_vector @@ websearch_to_tsquery('english',$1)", 'tf_knowledge_search_english_gin', 'returns'],
-          ['identifiers @> ARRAY[$1]::text[]', 'tf_knowledge_search_identifiers_gin', 'src/orders.ts'],
-        ]) {
-          const plan = await login.query(
-            `EXPLAIN (ANALYZE,FORMAT JSON) SELECT ordinal FROM ${table('chunks')} WHERE ${predicate}`,
-            [parameter],
-          );
-          assert.match(JSON.stringify(plan.rows), new RegExp(index));
-        }
-      } finally {
-        await login.end();
-      }
-      const identifierRows = await db.platform.query(
-        `SELECT identifiers FROM ${table('chunks')} WHERE publication_id=$1`,
-        [citation.publicationId],
-      );
-      assert.ok(identifierRows.rows[0].identifiers.includes('src/orders.ts'));
-      assert.ok(!identifierRows.rows[0].identifiers.includes('srcordersts'));
     });
     await t.test('observed edits invalidate old evidence and tombstones retain bytes', async () => {
       const next = save('# Replacement\nReplacement policy.', {
@@ -165,7 +143,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         Buffer.from((await api.original(one.id, owner.userId, next.documentId, next.commandId)).bytes),
         Buffer.from('# Replacement\nReplacement policy.'),
       );
-      assert.deepEqual((await api.search(one.id, owner.userId, { query: 'thirty' })).hits, []);
+      assert.deepEqual((await indexed.query(one.id, owner.userId, 'thirty')).hits, []);
       await run(next.commandId);
       const removal = { commandId: randomUUID(), documentId: next.documentId, expectedRevisionId: next.commandId };
       assert.equal((await api.remove(one.id, owner.userId, removal)).removed, true);
@@ -195,12 +173,12 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       const fileInput = save('', { title: 'Inventory', input: { kind: 'file', fileId } });
       await api.save(one.id, owner.userId, fileInput);
       await run(fileInput.commandId);
-      const hit = (await api.search(one.id, owner.userId, { query: 'warehouse' })).hits[0];
+      const hit = (await indexed.query(one.id, owner.userId, 'warehouse')).hits[0];
       assert.equal(hit.title, 'Inventory');
       assert.deepEqual((await api.evidence(one.id, owner.userId, hit.citation)).original, { kind: 'file', fileId });
       assert.equal((await api.original(one.id, owner.userId, fileInput.documentId)).filename, 'inventory.md');
       await files.trash(one.id, owner.userId, folderId, true);
-      assert.deepEqual((await api.search(one.id, owner.userId, { query: 'warehouse' })).hits, []);
+      assert.deepEqual((await indexed.query(one.id, owner.userId, 'warehouse')).hits, []);
       assert.equal((await api.get(one.id, owner.userId, fileInput.documentId)).documentId, fileInput.documentId);
       await assert.rejects(api.evidence(one.id, owner.userId, hit.citation), AccessDenied);
       await assert.rejects(api.original(one.id, owner.userId, fileInput.documentId), AccessDenied);
@@ -331,7 +309,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           const item = save('', { title: filename, input: { kind: 'file', fileId } });
           await api.save(one.id, owner.userId, item);
           await run(item.commandId);
-          const hits = (await api.search(one.id, owner.userId, { query: 'Harvest apples Tuesday' })).hits;
+          const hits = (await indexed.query(one.id, owner.userId, 'Harvest apples Tuesday')).hits;
           assert.ok(hits.some(hit => hit.citation.documentId === item.documentId));
           assert.deepEqual(
             Buffer.from((await api.original(one.id, owner.userId, item.documentId)).bytes),
@@ -355,7 +333,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         assert.equal(published.gaps.count, 1);
         assert.equal(published.gaps.items[0].reason, 'recognition-unavailable');
         assert.deepEqual(published.gaps.items[0].location, { kind: 'page', page: 2 });
-        const mixedHit = (await api.search(one.id, owner.userId, { query: 'Harvest apples Tuesday' })).hits.find(
+        const mixedHit = (await indexed.query(one.id, owner.userId, 'Harvest apples Tuesday')).hits.find(
           hit => hit.citation.documentId === mixed.documentId,
         );
         assert.deepEqual(mixedHit.location, { kind: 'page', page: 1 });
@@ -392,7 +370,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           Buffer.from(bytes),
         );
         assert.ok(
-          !(await api.search(one.id, owner.userId, { query: 'Scanned page' })).hits.some(
+          !(await indexed.query(one.id, owner.userId, 'Scanned page')).hits.some(
             hit => hit.citation.documentId === item.documentId,
           ),
         );
@@ -477,7 +455,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         const item = save('', { title: 'Orchard ledger', input: { kind: 'file', fileId } });
         await api.save(one.id, owner.userId, item);
         await run(item.commandId);
-        const hit = (await api.search(one.id, owner.userId, { query: 'plum shipments Fridays' })).hits.find(
+        const hit = (await indexed.query(one.id, owner.userId, 'plum shipments Fridays')).hits.find(
           entry => entry.citation.documentId === item.documentId,
         );
         assert.ok(hit);

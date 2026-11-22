@@ -405,7 +405,6 @@ export const githubKnowledgeStatusSchema = z.strictObject({
   title: z.string().max(512),
   publicationId: z.uuid().nullable(),
   parsing: z.enum(['queued', 'parsing', 'ready', 'failed', 'ocr-unavailable']),
-  embedding: z.enum(['pending', 'failed', 'credits-blocked', 'ready']),
   failure: z.string().max(128).nullable(),
   historical: z.boolean(),
 });

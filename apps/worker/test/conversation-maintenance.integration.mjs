@@ -69,7 +69,7 @@ test(
         publish: async () => {
           publications++;
           if (publications === 1) throw new Error('retry publication');
-          return { documentId: randomUUID(), revisionId: randomUUID(), embeddingStatus: 'disabled' };
+          return { documentId: randomUUID(), revisionId: randomUUID() };
         },
       });
       assert.equal(await activities.processConversationMaintenance(jobs[0]), 'failed');
@@ -120,7 +120,7 @@ test('maintenance retains returned model answers across bounded save retries', {
   const w = f.workspace;
   const summary = JSON.stringify({ goal: 'Launch next week', openWork: ['Invite customers'] });
   const recap = '## Goal\nLaunch next week\n## Open work\nInvite customers';
-  const publish = async () => ({ documentId: randomUUID(), revisionId: randomUUID(), embeddingStatus: 'disabled' });
+  const publish = async () => ({ documentId: randomUUID(), revisionId: randomUUID() });
   async function prepare(fallback = 'deepseek-flash') {
     const id = randomUUID();
     await f.store.create(w.id, w.userId, { chatId: id, commandId: randomUUID() });

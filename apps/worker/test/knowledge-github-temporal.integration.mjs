@@ -4,9 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import { NativeConnection } from '@temporalio/worker';
 import { Client, Connection } from '@temporalio/client';
-import { knowledgeEmbeddingProfile as profile } from '@tulipfarm/config';
 import { createGitHubKnowledgeWorker } from '../dist/knowledge-github-composition.js';
-import { createKnowledgeEmbeddingWorker } from '../dist/knowledge-embedding-composition.js';
 import { startGitHubKnowledgeWorkflow } from '../../api/dist/knowledge-github-dispatch.js';
 import { knowledgeFixture } from '../../api/test/knowledge-fixture.mjs';
 import { githubProviderFixture } from '../../api/test/knowledge-github-provider-fixture.mjs';
@@ -21,34 +19,16 @@ async function eventually(operation, message) {
 }
 
 test(
-  'real Temporal reconciles due GitHub sources, renews owner proofs and embeds repository items',
+  'real Temporal reconciles due GitHub sources, renews owner proofs and publishes repository items',
   { timeout: 180000 },
   async () => {
     const priorQueue = process.env.TEMPORAL_TASK_QUEUE;
     const queue = `github-corpus-${randomUUID()}`;
     process.env.TEMPORAL_TASK_QUEUE = queue;
     const gh = githubProviderFixture();
-    let f, connection, clientConnection, githubWorker, embeddingWorker, githubRunning, embeddingRunning;
-    const embeddingCalls = [];
+    let f, connection, clientConnection, githubWorker, githubRunning;
     const env = {
       TEMPORAL_TASK_QUEUE: queue,
-      KNOWLEDGE_EMBEDDINGS_ENABLED: 'true',
-      AZURE_FOUNDRY_ENDPOINT: 'https://example.services.ai.azure.com/',
-      AZURE_FOUNDRY_API_KEY: 'fixture-only',
-    };
-    const embed = async input => {
-      embeddingCalls.push(input);
-      return {
-        dispatch: 'dispatched',
-        requestId: randomUUID(),
-        inputTokensUpperBound: 1,
-        usage: { kind: 'known', inputTokens: 1, totalTokens: 1, exceedsUpperBound: false },
-        result: {
-          kind: 'success',
-          model: profile.model,
-          vectors: [Array.from({ length: 1536 }, (_, i) => (i === 0 ? 1 : 0))],
-        },
-      };
     };
     try {
       const address = process.env.TEST_TEMPORAL_ADDRESS ?? '127.0.0.1:7233';
@@ -56,7 +36,7 @@ test(
       clientConnection = await Connection.connect({ address });
       const client = new Client({ connection: clientConnection });
       const temporal = { connection: clientConnection, client };
-      f = await knowledgeFixture({ githubCorpus: gh.provider, temporal, embeddings: { env, provider: embed } });
+      f = await knowledgeFixture({ githubCorpus: gh.provider, temporal });
       await f.db.platform.query(
         `UPDATE ${f.table('tf_credit_account')} SET available=10000000000000,granted=10000000000000`,
       );
@@ -78,16 +58,7 @@ test(
         env,
         githubCorpus: gh.provider(f.runtime),
       });
-      embeddingWorker = await createKnowledgeEmbeddingWorker({
-        runtime: f.runtime,
-        connection,
-        env,
-        pool: f.signed.identity,
-        github: githubWorker.service,
-        provider: embed,
-      });
       githubRunning = githubWorker.worker.run();
-      embeddingRunning = embeddingWorker.worker.run();
       const source = async () =>
         (
           await f.db.platform.query(
@@ -103,25 +74,11 @@ test(
           )
         ).rows[0];
       await eventually(
-        async () => (await source()).sync_state === 'ready' && (await document())?.vector_publication_id,
-        'API background discovery must publish and embed without an HTTP read',
+        async () => (await source()).sync_state === 'ready' && (await document())?.lexical_publication_id,
+        'API background discovery must publish without an HTTP read',
       );
-      assert.ok(embeddingCalls.length > 0);
       const ready = await source();
       const doc = await document();
-      const ledger = (
-        await f.db.platform.query(
-          `SELECT a.purpose,a.attribution_kind,a.attribution_id,a.state FROM ${f.table('tf_knowledge_credit_attempts')} a WHERE a.purpose='ingestion'`,
-        )
-      ).rows;
-      assert.ok(ledger.length > 0);
-      for (const entry of ledger)
-        assert.deepEqual(entry, {
-          purpose: 'ingestion',
-          attribution_kind: 'source',
-          attribution_id: sourceId,
-          state: 'known',
-        });
       let result;
       for (let attempt = 0; attempt < 5; attempt++) {
         result = await f.call('/search', {
@@ -133,11 +90,10 @@ test(
             filters: { kinds: ['github'] },
           },
         });
-        if (result.status === 200 && result.json().mode === 'hybrid') break;
+        if (result.status === 200 && result.json().hits.length) break;
         await delay(500);
       }
       assert.equal(result.status, 200, result.bytes.toString());
-      assert.equal(result.json().mode, 'hybrid', JSON.stringify(result.json()));
       assert.ok(result.json().hits.some(hit => hit.citation.documentId === doc.id));
       await f.db.platform.query(
         `UPDATE ${f.table('tf_knowledge_access_proofs')} SET acl_checked_at=now()-interval '6 minutes',membership_checked_at=now()-interval '6 minutes',expires_at=now()-interval '1 minute' WHERE document_id=$1`,
@@ -194,11 +150,6 @@ test(
       if (githubWorker) {
         githubWorker.worker.shutdown();
         await githubRunning;
-      }
-      if (embeddingWorker) {
-        embeddingWorker.worker.shutdown();
-        await embeddingRunning;
-        await embeddingWorker.close();
       }
       await f?.close();
       await connection?.close();

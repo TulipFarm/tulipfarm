@@ -291,7 +291,6 @@ function SearchResults({ api, query }: { api: Api; query: string }) {
     <ReadResult state={read.state} label="search results" retry={read.refresh}>
       {data => (
         <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">Keyword results from your Knowledge.</p>
           {!data.hits.length && <p>No matching passages.</p>}
           <ul aria-label="Matching passages" className="space-y-4">
             {data.hits.map(hit => (

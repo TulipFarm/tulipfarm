@@ -13,10 +13,11 @@ import { registerKnowledgeComposition } from '../dist/knowledge-composition.js';
 import { securityServerOptions } from '../dist/security.js';
 import { createGoogleWorkspaceService } from '@tulipfarm/google-workspace';
 import { registerGoogleWorkspace } from '../dist/google-workspace.js';
+import { createKnowledgeKeepFeed } from '@tulipfarm/knowledge';
+import { fakeKnowledgeKeep } from '../../../packages/knowledge/test/fake-keep.mjs';
 
 export async function knowledgeFixture({
   filesEnabled = true,
-  embeddings = {},
   googleOptions,
   temporal,
   slackCorpus,
@@ -53,6 +54,17 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await markWorkspaceReady(db.platform, workspace.id);
     }
     let service, files;
+    const keep = fakeKnowledgeKeep();
+    const feed = createKnowledgeKeepFeed({ runtime, client: () => keep.client });
+    async function deliver(workspaceId = workspace.id) {
+      let after = null;
+      for (;;) {
+        const page = await feed.due(workspaceId, after, 50);
+        if (!page.length) return;
+        for (const work of page) await feed.sync(workspaceId, work.document_id);
+        after = page.at(-1).document_id;
+      }
+    }
     app = Fastify(securityServerOptions());
     app.register(
       async routes => {
@@ -64,7 +76,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
           auth: signed.auth,
           files,
           pool: signed.identity,
-          ...embeddings,
+          keepClient: () => keep.client,
           ...(googleService ? { googleService, providerFetch: googleOptions.providerFetch } : {}),
           ...(temporal ? { temporal } : {}),
           ...(slackCorpus ? { slackCorpus: slackCorpus(runtime) } : {}),
@@ -81,6 +93,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       path = '/documents',
       { method = 'GET', body, cookie = signed.owner.cookie, headers = {} } = {},
     ) {
+      if (path.startsWith('/search')) await deliver();
       const response = await fetch(`${origin}${path.startsWith('/v1/') ? path : base + path}`, {
         method,
         headers: {
@@ -135,6 +148,8 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       service,
       files,
       googleService,
+      keep,
+      deliver,
       origin,
       base,
       call,

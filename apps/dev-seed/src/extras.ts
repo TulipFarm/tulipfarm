@@ -327,7 +327,7 @@ export const extraGenerators: Generator[] = [
   },
   {
     name: 'knowledge',
-    description: 'Save text knowledge notes and parse them in-process (no embeddings).',
+    description: 'Save text knowledge notes and parse them in-process.',
     requires: ['workspace'],
     options: { count: 'notes (default 3)' },
     run: (context, target, options) => ensureKnowledge(context, target, number(options.count, 3)),

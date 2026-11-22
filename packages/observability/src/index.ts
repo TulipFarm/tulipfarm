@@ -1514,7 +1514,6 @@ export const backgroundJobs = [
   'github-delivery-retention',
   'knowledge-atlassian-dispatch',
   'knowledge-defaults-dispatch',
-  'knowledge-embedding-dispatch',
   'knowledge-keep-dispatch',
   'skill-import-dispatch',
   'agent-eval-dispatch',
@@ -1833,15 +1832,7 @@ export function recordChatDispatch(
     .add(1, { ...dimensions, dispatch_source: source, dispatch_reason: reason, outcome });
 }
 
-export type DispatchSkipper =
-  | 'github'
-  | 'slack'
-  | 'google'
-  | 'atlassian'
-  | 'embedding'
-  | 'defaults'
-  | 'knowledge'
-  | 'keep-knowledge';
+export type DispatchSkipper = 'github' | 'slack' | 'google' | 'atlassian' | 'defaults' | 'knowledge' | 'keep-knowledge';
 /**
  * A background dispatcher skipped a workspace because its storage schema is outside the running release's
  * compatibility window. Work for that workspace stalls until it is migrated, so any sustained rate needs attention.

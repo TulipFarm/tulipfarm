@@ -8,11 +8,6 @@ import type { ConversationApi, MaintenanceView } from './conversation-api';
 
 type Maintenance = NonNullable<MaintenanceView['maintenance']>;
 
-const embeddingPending = (status: string | null) =>
-  status !== null && ['pending', 'queued', 'running'].includes(status);
-const embeddingBlocked = (status: string | null) =>
-  status !== null && ['credits-blocked', 'capacity-blocked', 'failed', 'unknown'].includes(status);
-
 /** The quiet line for a recap that needs attention, or null when the recap is routine. */
 export function maintenanceProblem(maintenance: Maintenance) {
   if (maintenance.errorCode) return maintenanceReason(maintenance.errorCode);
@@ -23,10 +18,6 @@ export function maintenanceProblem(maintenance: Maintenance) {
       return 'Could not save this chat to Knowledge yet. It will retry in the background.';
     case 'stale':
       return 'The Knowledge recap no longer covers this chat. It needs a fresh update.';
-    case 'ready':
-      return embeddingBlocked(maintenance.embeddingStatus)
-        ? 'Saved to Knowledge. Semantic search is paused; keyword search works.'
-        : null;
     default:
       return null;
   }
@@ -48,10 +39,7 @@ export function ChatMaintenance({
   const read = useFeatureRead({
     key: conversationKeys.maintenance(chatId),
     load: signal => api.maintenance(chatId, signal),
-    pollWhile: view =>
-      !!view.maintenance &&
-      (['queued', 'running', 'publishing'].includes(view.maintenance.state) ||
-        (view.maintenance.state === 'ready' && embeddingPending(view.maintenance.embeddingStatus))),
+    pollWhile: view => !!view.maintenance && ['queued', 'running', 'publishing'].includes(view.maintenance.state),
   });
   const write = useConversationCommand(api, () => {
     void read.refresh();
@@ -59,10 +47,9 @@ export function ChatMaintenance({
   const state = read.state;
   const maintenance = state.kind === 'ready' ? state.data.maintenance : null;
   const failed = state.kind === 'error' || (state.kind === 'ready' && !!state.error);
-  const resumeEmbedding = maintenance?.state === 'ready' && embeddingBlocked(maintenance.embeddingStatus);
   const resume =
     !!maintenance &&
-    (['blocked', 'failed'].includes(maintenance.state) || resumeEmbedding) &&
+    ['blocked', 'failed'].includes(maintenance.state) &&
     maintenance.errorCode !== 'generation-unconfirmed';
   const problem = failed
     ? 'Could not check whether this chat was saved to Knowledge. Your messages are unchanged.'
@@ -111,11 +98,7 @@ export function ChatMaintenance({
             aria-busy={write.state.kind === 'sending'}
             onClick={() => void write.submit({ kind: 'resume-maintenance', chatId, commandId: crypto.randomUUID() })}
           >
-            {write.state.kind === 'sending'
-              ? 'Resuming update...'
-              : resumeEmbedding
-                ? 'Resume semantic search'
-                : 'Resume Knowledge update'}
+            {write.state.kind === 'sending' ? 'Resuming update...' : 'Resume Knowledge update'}
           </Button>
         )}
       </div>

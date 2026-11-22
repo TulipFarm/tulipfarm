@@ -12,7 +12,7 @@ package imports the contract; this package never imports `@tulipfarm/slack`.
 ## Composition
 
 Create `slack = createSlackKnowledge({ runtime, provider })`. Pass the same `slack`
-to `createKnowledgeSearch` and `createKnowledgeEmbeddings` through their optional
+to `createKnowledgeSearch` through its optional
 `slack` property, next to `google`. `externalAuthority` dispatches source and proof
 checks to the adapter that owns each provider.
 
@@ -109,6 +109,6 @@ channels, and DMs and group messages stay opt-in.
 ## Verification
 
 `test/slack.integration.mjs` uses restricted PostgreSQL logins, the actual parser,
-lexical search, embeddings, and the search coordinator with a fixture provider.
+the search coordinator and an in-memory Keep with a fixture provider.
 `packages/slack/test/corpus-provider.test.mjs` covers the Web API mapping. Live
 Slack, Slack rate limits under load, and throughput remain unverified.

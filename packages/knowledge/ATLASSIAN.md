@@ -13,8 +13,8 @@ imports the contract; this package never imports `@tulipfarm/atlassian`.
 ## Composition
 
 Create `atlassian = createAtlassianKnowledge({ runtime, provider })`. Pass the same
-`atlassian` to `createKnowledgeSearch` and `createKnowledgeEmbeddings` through their
-optional `atlassian` property. `externalAuthority` dispatches both source providers,
+`atlassian` to `createKnowledgeSearch` through its optional
+`atlassian` property. `externalAuthority` dispatches both source providers,
 `confluence` and `jira`, to this adapter.
 
 `atlassianCorpusFromEnvironment` reuses the existing `ATLASSIAN_REST_*` account
@@ -138,7 +138,7 @@ offers **Allow Knowledge access** when REST consent is missing or insufficient.
 ## Verification
 
 `test/atlassian.integration.mjs` uses restricted PostgreSQL logins, the actual parser,
-lexical search, embeddings, and the search coordinator with a fixture provider.
+the search coordinator and an in-memory Keep with a fixture provider.
 `packages/atlassian/test/corpus-provider.test.mjs` covers the REST mapping and the
 ADF serializer. Live Confluence and Jira, their rate limits, and throughput remain
 unverified.

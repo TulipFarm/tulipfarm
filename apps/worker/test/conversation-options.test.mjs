@@ -6,7 +6,7 @@ const runtime = { transaction: async () => assert.fail('Reply construction must 
 
 function environment(t, values = {}) {
   const previous = process.env;
-  process.env = { SLACK_OUTBOUND_ENABLED: 'false', KNOWLEDGE_EMBEDDINGS_ENABLED: 'false', ...values };
+  process.env = { SLACK_OUTBOUND_ENABLED: 'false', ...values };
   t.after(() => {
     process.env = previous;
   });
@@ -34,15 +34,4 @@ test('omitted and undefined MCP settings use the environment, while null and a s
   assert.equal(typeof meteredReply(runtime, { mcp: null }), 'function');
   const mcp = () => assert.fail('MCP must not be constructed until the reply runs');
   assert.equal(typeof meteredReply(runtime, { mcp }), 'function');
-});
-
-test('omitted and undefined knowledge settings use the environment, but a supplied factory bypasses it', t => {
-  environment(t, { KNOWLEDGE_EMBEDDINGS_ENABLED: 'invalid' });
-  assert.throws(() => meteredReply(runtime), /Invalid server knowledge embeddings configuration/);
-  assert.throws(
-    () => meteredReply(runtime, { knowledge: undefined }),
-    /Invalid server knowledge embeddings configuration/,
-  );
-  const knowledge = () => assert.fail('Knowledge must not be constructed until a tool runs');
-  assert.equal(typeof meteredReply(runtime, { knowledge }), 'function');
 });
