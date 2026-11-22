@@ -52,7 +52,6 @@ test(
           window.__tfAuthOptions = seed;
           const root = createRoot(document.body.appendChild(document.createElement('div')));
           flushSync(() => root.render(React.createElement(PublicAuthQueryProvider, null, React.createElement(Reader))));
-          await new Promise(resolve => requestAnimationFrame(resolve));
           const text = document.querySelector('output')?.textContent;
           root.unmount();
           document.body.replaceChildren();
@@ -164,7 +163,7 @@ test(
         Date.now = now;
         const afterFocus = calls.length;
         const storage = {
-          local: localStorage.length,
+          local: Object.keys(localStorage),
           session: sessionStorage.length,
           databases: (await indexedDB.databases()).length,
         };
@@ -185,7 +184,8 @@ test(
       assert.equal(result.concurrent, 1);
       assert.equal(result.revisit, 1);
       assert.equal(result.afterFocus, 1, 'Even stale public options ignore focus and reconnect');
-      assert.deepEqual(result.storage, { local: 0, session: 0, databases: 0 });
+      // Only the sign-in methods, for the login page index.html paints before the app loads.
+      assert.deepEqual(result.storage, { local: ['tulipfarm:auth-methods'], session: 0, databases: 0 });
       assert.equal(result.failed, 2, 'A new provider has no persisted options and failure does not retry');
       assert.deepEqual(result.calls, Array(3).fill({ path: '/v1/auth/options', credentials: 'omit' }));
       assert.deepEqual(errors, []);

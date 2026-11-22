@@ -206,6 +206,86 @@
         }
       } catch (error) {}
     </script>
+    <script>
+      // Paints the login page before the app's scripts and styles arrive. Its sizes and colors
+      // match the app's login page; AuthForm takes over the typed email (early-sign-in.ts). It shows
+      // the sign-in methods this browser last saw (public-query.tsx), else Google and email links,
+      // and stays out of the way when it would differ: a remembered session, an error, passwords.
+      (function () {
+        try {
+          var query = new URLSearchParams(location.search);
+          var methods = JSON.parse(localStorage.getItem('tulipfarm:auth-methods') || 'null') || {
+            google: true,
+            magicLink: true,
+          };
+          if (
+            location.pathname.replace(/\/+$/, '') === '/login' &&
+            !query.has('error') &&
+            !localStorage.getItem('tulipfarm:last-session') &&
+            !methods.emailPassword &&
+            (methods.google || methods.magicLink)
+          ) {
+            var mode = localStorage.getItem('tulipfarm.theme');
+            var lightMode =
+              mode === 'light' || (mode !== 'dark' && matchMedia('(prefers-color-scheme: light)').matches);
+            var back = query.get('redirect') || '/';
+            if (back[0] !== '/' || back[1] === '/') back = '/';
+            var style = document.createElement('style');
+            style.textContent =
+              "@font-face{font-family:'Inter Fallback';src:local('Arial'),local('ArialMT'),local('Liberation Sans'),local('Arimo');size-adjust:106.55%;ascent-override:90.92%;descent-override:22.64%;line-gap-override:0%}" +
+              '#tf-sign-in{--c:oklch(18.26% .002 264.5);--t:oklch(91.87% .0029 264.54);--m:oklch(67.05% .003 264.5);--x:#fff;--s:oklch(20.06% .002 264.5);--i:oklch(33.5% .006 271);--l:oklch(26.01% .0045 272);--p:oklch(77.88% .1259 151.59);--pt:oklch(24.35% .0444 151.34);' +
+              "position:fixed;inset:0;z-index:2147483000;overflow:auto;background:var(--c);color:var(--t);font:450 15px/24px 'Inter Variable',Inter,'Inter Fallback',ui-sans-serif,system-ui,sans-serif}" +
+              '#tf-sign-in.light{--c:oklch(98.24% .0013 286.38);--t:oklch(30.6% .0035 286.19);--m:oklch(47.55% .0032 286.3);--x:oklch(22.21% 0 0);--s:#fff;--i:oklch(86.5% 0 0);--l:oklch(90.06% 0 0);--p:oklch(52.7% .141 148.39);--pt:#fff}' +
+              '#tf-sign-in *{box-sizing:border-box;margin:0}#tf-sign-in>div{display:flex;flex-direction:column;min-height:100svh}' +
+              '#tf-sign-in header{padding:24px}#tf-sign-in header img{display:block;height:32px}' +
+              '#tf-sign-in main{flex:1;display:flex;align-items:center;justify-content:center;padding:0 8px 64px}' +
+              '#tf-sign-in section{width:100%;max-width:384px}' +
+              '#tf-sign-in h1{font-size:24px;line-height:32px;font-weight:500;letter-spacing:-.6px;text-wrap:balance;color:var(--t)}' +
+              '#tf-sign-in h1+p{margin:8px 0 32px;font-size:18px;line-height:28px;color:var(--m)}' +
+              '#tf-sign-in button,#tf-sign-in input{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;height:36px;padding:0 10px;border:1px solid var(--i);border-radius:10px;background:var(--s);color:var(--x);font-family:inherit;font-size:13px;line-height:20px;font-weight:500}' +
+              '#tf-sign-in input{display:block;padding:4px 12px;border-radius:8px;font-weight:400;outline:0}#tf-sign-in input:focus{border-color:var(--p)}#tf-sign-in input::placeholder{color:var(--m)}' +
+              '#tf-sign-in .or{display:flex;align-items:center;gap:8px;margin:24px 0;font-size:13px;line-height:20px;color:var(--m)}#tf-sign-in .or:before,#tf-sign-in .or:after{content:"";flex:1;height:1px;background:var(--l)}' +
+              '#tf-sign-in label{display:block;margin-bottom:6px;font-size:13px;line-height:16px;font-weight:500;color:var(--x)}' +
+              '#tf-sign-in form button{margin-top:20px;border-color:transparent;background:var(--p);color:var(--pt)}' +
+              '#tf-sign-in section>p:last-child{margin-top:32px;font-size:13px;line-height:20px;color:var(--m)}#tf-sign-in a{color:var(--x);font-weight:500;text-decoration:underline;text-underline-offset:4px}' +
+              '@media (min-width:360px){#tf-sign-in main{padding:0 24px 64px}}@media (min-width:640px){#tf-sign-in header{padding:24px 40px}}' +
+              '@media (min-width:1024px){#tf-sign-in>div{width:50%}}';
+            document.head.appendChild(style);
+            var shell = document.createElement('div');
+            shell.id = 'tf-sign-in';
+            shell.className = lightMode ? 'light' : '';
+            shell.innerHTML =
+              '<div><header><img alt="TulipFarm" fetchpriority="low" src="/logo-' +
+              (lightMode ? 'ink' : 'white') +
+              '.svg"></header><main><section><h1>Log in to TulipFarm</h1><p>' +
+              (methods.magicLink
+                ? 'We will email you a magic link to sign in.'
+                : 'Continue with your Google account.') +
+              '</p>' +
+              (methods.google
+                ? '<button type="button"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">' +
+                  '<path fill="#4285f4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47a5.57 5.57 0 0 1-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82Z"/>' +
+                  '<path fill="#34a853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09A11.99 11.99 0 0 0 12 24Z"/>' +
+                  '<path fill="#fbbc05" d="M5.27 14.29A7.2 7.2 0 0 1 4.89 12c0-.8.14-1.57.38-2.29V6.62H1.29a11.99 11.99 0 0 0 0 10.76l3.98-3.09Z"/>' +
+                  '<path fill="#ea4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42A11.46 11.46 0 0 0 12 0 11.99 11.99 0 0 0 1.29 6.62l3.98 3.09C6.22 6.86 8.87 4.75 12 4.75Z"/>' +
+                  '</svg>Continue with Google</button>'
+                : '') +
+              (methods.google && methods.magicLink ? '<div class="or">or</div>' : '') +
+              (methods.magicLink
+                ? '<form novalidate><label for="tf-sign-in-email">Email</label><input id="tf-sign-in-email" type="email" name="email" placeholder="you@company.com" autocomplete="email">' +
+                  '<button type="submit">Email me a sign-in link</button></form>'
+                : '') +
+              '<p>New to TulipFarm? <a href="/register?redirect=' +
+              encodeURIComponent(back) +
+              '">Create an account</a></p></section></main></div>';
+            shell.querySelector('section').addEventListener('submit', function (event) {
+              event.preventDefault();
+            });
+            document.body.appendChild(shell);
+          }
+        } catch (error) {}
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

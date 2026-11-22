@@ -1,4 +1,13 @@
-import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
 import { Link } from '@tanstack/react-router';
 import { z } from 'zod';
 import { MailCheckIcon } from '@tulipfarm/icons';
@@ -8,6 +17,7 @@ import { Field, FieldSeparator } from '@tulipfarm/sprout/field';
 import { Form, FormFooter } from '@tulipfarm/sprout/form';
 import { Input } from '@tulipfarm/sprout/input';
 import { apiOrigin, authClient, authCallbackURLs, safeAuthRedirect } from '@/lib/auth';
+import { takeEarlySignIn } from '@/lib/early-sign-in';
 import { AuthVerification } from '@/features/auth/verification';
 import { PublicAuthQueryProvider, useAuthOptions } from '@/features/auth/public-query';
 import type { useOnboardingFields } from './onboarding-fields';
@@ -224,6 +234,13 @@ export function AuthForm({
   const [devLink, setDevLink] = useState('');
   const [nameInput, setNameInput] = useState('');
   const [emailInput, setEmailInput] = useState(email ?? '');
+  // Replaces the login page index.html painted, before the browser paints, keeping what was typed.
+  useLayoutEffect(() => {
+    const early = takeEarlySignIn();
+    if (!early) return;
+    if (early.email && email === undefined) setEmailInput(early.email);
+    if (early.focused) document.getElementById('email')?.focus();
+  }, [email]);
   const [submitted, setSubmitted] = useState(false);
   const nameError = submitted && withName && !nameInput.trim() ? 'Enter your name.' : undefined;
   const emailError =

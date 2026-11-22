@@ -21,6 +21,15 @@ declare global {
   }
 }
 
+/** Which sign-in methods the login page index.html paints before the app loads should show. */
+function rememberMethods({ emailPassword, google, magicLink }: z.infer<typeof optionsSchema>) {
+  try {
+    localStorage.setItem('tulipfarm:auth-methods', JSON.stringify({ emailPassword, google, magicLink }));
+  } catch {
+    // Storage can be full or blocked; the early page then shows its default methods.
+  }
+}
+
 /** The early request, once and only for the same URL: later fetches, such as a retry, go to the network. */
 function takeEarlyOptions(url: string) {
   const early = globalThis.window?.__tfAuthOptions;
@@ -38,6 +47,7 @@ export function PublicAuthQueryProvider({ children }: { children: ReactNode }) {
     if (early?.url === new URL(`${apiOrigin}/v1/auth/options`, location.href).href && parsed.success) {
       delete globalThis.window?.__tfAuthOptions;
       created.setQueryData(authOptionsQuery().queryKey, parsed.data);
+      rememberMethods(parsed.data);
     }
     return created;
   });
@@ -71,6 +81,7 @@ export function authOptionsQuery() {
       if (!response.ok) throw new Error('Options unavailable');
       const options = optionsSchema.parse(await response.json());
       deadline.throwIfAborted();
+      rememberMethods(options);
       return options;
     },
   });
