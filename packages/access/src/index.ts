@@ -13,6 +13,14 @@ import {
 } from './contracts.ts';
 import type { SourceDependency } from './source-dependencies.ts';
 import { requireAgentGrant, requireAgentRunInvocation } from './agent-permissions.ts';
+import {
+  forgetInTransaction,
+  knownInTransaction,
+  memoizeInTransaction,
+  pipelined,
+  relationInstalled,
+  rememberInTransaction,
+} from '@tulipfarm/workspace-storage/transaction-reads';
 export * from './agent-permissions.ts';
 export * from './contracts.ts';
 export * from './source-dependencies.ts';
@@ -115,7 +123,16 @@ const lockBudgetMs = 15_000;
 export async function lockAuthorization(
   transaction: AuthorizationTransaction,
   mode: 'read' | 'write' = 'read',
-  { retry = true, budgetMs = lockBudgetMs }: { retry?: boolean; budgetMs?: number } = {},
+  options: { retry?: boolean; budgetMs?: number } = {},
+) {
+  await takeAuthorizationLock(transaction, mode, options);
+  heldLock(transaction, mode);
+}
+
+async function takeAuthorizationLock(
+  transaction: AuthorizationTransaction,
+  mode: 'read' | 'write',
+  { retry = true, budgetMs = lockBudgetMs }: { retry?: boolean; budgetMs?: number },
 ) {
   const take = waitForLock(transaction, mode);
   if (!retry) {
@@ -129,7 +146,33 @@ export async function lockAuthorization(
       return;
     }
   }
-  if ((await retryLockWait(transaction, mode, budgetMs, take)).rowCount !== 1) throw new AccessDenied();
+  if ((await retryLockWait(transaction, mode, budgetMs, take)).taken.rowCount !== 1) throw new AccessDenied();
+}
+
+/**
+ * Other transactions change memberships only under the exclusive lock, so once this transaction holds either lock each
+ * member it reads stays as read. This transaction's own membership writes call `forgetMembers`.
+ */
+function heldLock(transaction: AuthorizationTransaction, mode: 'read' | 'write') {
+  rememberInTransaction(transaction.client, `authorization:${mode}`, true);
+}
+
+function membersStable(transaction: AuthorizationTransaction) {
+  return (
+    knownInTransaction(transaction.client, 'authorization:read') ||
+    knownInTransaction(transaction.client, 'authorization:write')
+  );
+}
+
+/** Drops members read earlier in this transaction. Call it after every write to `tf_memberships`. */
+export function forgetMembers(transaction: AuthorizationTransaction) {
+  forgetInTransaction(transaction.client, 'member:');
+}
+
+function rememberMember(transaction: AuthorizationTransaction, member: z.infer<typeof membershipSchema>) {
+  if (!membersStable(transaction)) return;
+  rememberInTransaction(transaction.client, `member:${member.id}:${member.user_id}`, member);
+  rememberInTransaction(transaction.client, `member:user:${member.user_id}`, member);
 }
 
 // The row is locked only after the join has produced it, so the queue is always joined first.
@@ -151,48 +194,92 @@ function lockWaitFailed(error: unknown) {
   return code === '55P03' || code === '40P01';
 }
 
-async function retryLockWait<T extends { rowCount: number | null }>(
+/**
+ * Takes the lock inside a savepoint so a timed-out wait can be retried. Each attempt sends the savepoint, the lock, the
+ * release and `follow` together in one round trip; Postgres runs them in order, so `follow` reads only once the lock is
+ * held. A failed wait leaves the later statements failed as well, and rolling back to the savepoint clears them.
+ */
+async function retryLockWait<T extends { rowCount: number | null }, F = never>(
   transaction: AuthorizationTransaction,
   mode: 'read' | 'write',
   budgetMs: number,
   take: () => Promise<T>,
-) {
+  follow?: () => Promise<F>,
+): Promise<{ taken: T; followed: F | undefined }> {
   const started = performance.now();
   for (let retries = 0; ; retries++) {
-    await transaction.client.query('SAVEPOINT tf_authorization_lock');
-    try {
-      const result = await take();
-      await transaction.client.query('RELEASE SAVEPOINT tf_authorization_lock');
+    const [saved, taken, released, followed] = await pipelined(transaction.client, () => [
+      transaction.client.query('SAVEPOINT tf_authorization_lock'),
+      take(),
+      transaction.client.query('RELEASE SAVEPOINT tf_authorization_lock'),
+      ...(follow ? [follow()] : []),
+    ]);
+    if (saved?.status === 'rejected') throw saved.reason;
+    if (taken?.status === 'fulfilled') {
+      if (released?.status === 'rejected') throw released.reason;
+      if (followed?.status === 'rejected') throw followed.reason;
       recordAuthorizationLock(mode, retries === 0 ? 'acquired' : 'retried', retries, performance.now() - started);
-      return result;
-    } catch (error) {
-      if (!lockWaitFailed(error)) throw error;
-      const now = performance.now();
-      const backoff = Math.min(1_000, 50 * 2 ** retries) * (0.5 + Math.random());
-      if (now - started + backoff >= budgetMs) {
-        recordAuthorizationLock(mode, 'failed', retries, now - started);
-        throw error;
-      }
-      await transaction.client.query('ROLLBACK TO SAVEPOINT tf_authorization_lock');
-      await transaction.client.query('RELEASE SAVEPOINT tf_authorization_lock');
-      await delay(backoff);
+      return { taken: taken.value as T, followed: followed?.value as F | undefined };
     }
+    const error: unknown = taken?.reason;
+    if (!lockWaitFailed(error)) throw error;
+    const now = performance.now();
+    const backoff = Math.min(1_000, 50 * 2 ** retries) * (0.5 + Math.random());
+    if (now - started + backoff >= budgetMs) {
+      recordAuthorizationLock(mode, 'failed', retries, now - started);
+      throw error;
+    }
+    const [rolledBack, cleared] = await pipelined(transaction.client, () => [
+      transaction.client.query('ROLLBACK TO SAVEPOINT tf_authorization_lock'),
+      transaction.client.query('RELEASE SAVEPOINT tf_authorization_lock'),
+    ]);
+    if (rolledBack?.status === 'rejected') throw rolledBack.reason;
+    if (cleared?.status === 'rejected') throw cleared.reason;
+    await delay(backoff);
   }
 }
 
-export async function resolveHuman(transaction: AuthorizationTransaction, userId: string): Promise<HumanActor> {
-  return humanFrom(
-    await transaction.client.query(
-      `SELECT id, user_id, role FROM ${table(transaction, 'tf_memberships')} WHERE user_id = $1 AND removed_at IS NULL`,
-      [userId],
-    ),
-    userId,
+const readMember = (transaction: AuthorizationTransaction, userId: string) => () =>
+  transaction.client.query(
+    `SELECT id, user_id, role FROM ${table(transaction, 'tf_memberships')} WHERE user_id = $1 AND removed_at IS NULL`,
+    [userId],
   );
+
+export async function resolveHuman(transaction: AuthorizationTransaction, userId: string): Promise<HumanActor> {
+  const known = `member:user:${userId}`;
+  if (membersStable(transaction) && knownInTransaction(transaction.client, known)) {
+    const member = await memoizeInTransaction(
+      transaction.client,
+      known,
+      async (): Promise<z.infer<typeof membershipSchema>> => {
+        throw new Error('unreachable');
+      },
+    );
+    return { kind: 'human', userId: member.user_id, membershipId: member.id };
+  }
+  return humanFrom(transaction, await readMember(transaction, userId)(), userId);
 }
 
-function humanFrom(result: { rows: unknown[] }, userId: string): HumanActor {
+/**
+ * `lockAuthorization(transaction, mode)`, reading `userId`'s membership in the same round trip so a later `resolveHuman`
+ * for them needs none. A non-member is not refused here: `resolveHuman` still refuses them where it did before.
+ */
+export async function lockAndPrefetchHuman(
+  transaction: AuthorizationTransaction,
+  userId: string,
+  mode: 'read' | 'write' = 'read',
+) {
+  try {
+    await lockAndResolveHuman(transaction, userId, mode);
+  } catch (error) {
+    if (!(error instanceof WorkspaceMembershipDenied)) throw error;
+  }
+}
+
+function humanFrom(transaction: AuthorizationTransaction, result: { rows: unknown[] }, userId: string): HumanActor {
   const member = membershipSchema.optional().parse(result.rows[0]);
   if (!member) throw new WorkspaceMembershipDenied(userId);
+  rememberMember(transaction, member);
   return { kind: 'human', userId: member.user_id, membershipId: member.id };
 }
 
@@ -207,41 +294,66 @@ export async function lockAndResolveHuman(
   mode: 'read' | 'write' = 'read',
 ) {
   if (mode === 'write') {
-    await lockAuthorization(transaction, 'write');
-    return resolveHuman(transaction, userId);
+    const { taken, followed } = await retryLockWait(
+      transaction,
+      'write',
+      lockBudgetMs,
+      waitForLock(transaction, 'write'),
+      readMember(transaction, userId),
+    );
+    if (taken.rowCount !== 1) throw new AccessDenied();
+    heldLock(transaction, 'write');
+    return humanFrom(transaction, followed!, userId);
   }
   const connection = transaction.client as { pipeline?: boolean | undefined };
   const previous = connection.pipeline;
   // pg sends queries without waiting for earlier replies while this is on; it stays on until both replies arrive.
   connection.pipeline = true;
-  const [lock, member] = await Promise.allSettled([
-    tryReadLock(transaction),
-    transaction.client.query(
-      `SELECT id, user_id, role FROM ${table(transaction, 'tf_memberships')} WHERE user_id = $1 AND removed_at IS NULL`,
-      [userId],
-    ),
-  ]);
+  const [lock, member] = await Promise.allSettled([tryReadLock(transaction), readMember(transaction, userId)()]);
   connection.pipeline = previous;
   if (lock.status === 'rejected') throw lock.reason;
   // A failed read aborted the transaction, so report it as resolveHuman would have after the wait.
   if (member.status === 'rejected') throw member.reason;
   if (lock.value.rowCount !== 1) {
-    if ((await retryLockWait(transaction, 'read', lockBudgetMs, waitForLock(transaction, 'read'))).rowCount !== 1)
-      throw new AccessDenied();
-    return resolveHuman(transaction, userId);
+    const { taken, followed } = await retryLockWait(
+      transaction,
+      'read',
+      lockBudgetMs,
+      waitForLock(transaction, 'read'),
+      readMember(transaction, userId),
+    );
+    if (taken.rowCount !== 1) throw new AccessDenied();
+    heldLock(transaction, 'read');
+    return humanFrom(transaction, followed!, userId);
   }
   recordAuthorizationLock('read', 'acquired', 0, 0);
-  return humanFrom(member.value, userId);
+  heldLock(transaction, 'read');
+  return humanFrom(transaction, member.value, userId);
+}
+
+/** `lockAuthorization(transaction, mode)`, then `resolveHuman` for a user id, in one round trip when the lock is free. */
+export async function lockAndResolvePrincipal<A>(
+  transaction: AuthorizationTransaction,
+  principal: string | A,
+  mode: 'read' | 'write' = 'read',
+): Promise<HumanActor | A> {
+  if (typeof principal === 'string') return lockAndResolveHuman(transaction, principal, mode);
+  await lockAuthorization(transaction, mode);
+  return principal;
 }
 
 export async function currentMember(transaction: AuthorizationTransaction, actor: HumanActor) {
-  const result = await transaction.client.query(
-    `SELECT id, user_id, role FROM ${table(transaction, 'tf_memberships')} WHERE id = $1 AND user_id = $2 AND removed_at IS NULL`,
-    [actor.membershipId, actor.userId],
-  );
-  const member = membershipSchema.optional().parse(result.rows[0]);
-  if (!member) throw new WorkspaceMembershipDenied(actor.userId);
-  return member;
+  const read = async () => {
+    const result = await transaction.client.query(
+      `SELECT id, user_id, role FROM ${table(transaction, 'tf_memberships')} WHERE id = $1 AND user_id = $2 AND removed_at IS NULL`,
+      [actor.membershipId, actor.userId],
+    );
+    const member = membershipSchema.optional().parse(result.rows[0]);
+    if (!member) throw new WorkspaceMembershipDenied(actor.userId);
+    return member;
+  };
+  if (!membersStable(transaction)) return read();
+  return { ...(await memoizeInTransaction(transaction.client, `member:${actor.membershipId}:${actor.userId}`, read)) };
 }
 
 export async function requireTaskInvocation(transaction: AuthorizationTransaction, actor: HumanActor, agentId: string) {
@@ -258,10 +370,7 @@ export async function canAccessTable(
 }
 
 export async function tablePersonGrantsInstalled(transaction: AuthorizationTransaction) {
-  const result = await transaction.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [
-    table(transaction, 'tf_table_person_grants'),
-  ]);
-  return z.object({ installed: z.boolean() }).parse(result.rows[0]).installed;
+  return relationInstalled(transaction.client, table(transaction, 'tf_table_person_grants'));
 }
 
 // Expressions are trusted SQL from callers, never request input. Values stay parameterized.
@@ -289,11 +398,7 @@ export async function humanTableGrantPredicate(
     WHERE pcat.id = ${assetId} AND opg.membership_id = ${membershipId}
       AND opg.permission <> 'table.create' AND opg.permission = ANY(${permissions}))`,
     );
-  const installed = (
-    await transaction.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [
-      table(transaction, 'tf_system_tables'),
-    ])
-  ).rows[0]?.installed;
+  const installed = await relationInstalled(transaction.client, table(transaction, 'tf_system_tables'));
   if (installed)
     alternatives.push(`('table.row.read'=ANY(${permissions}) AND EXISTS (
     SELECT 1 FROM ${table(transaction, 'tf_system_tables')} directory
@@ -338,11 +443,10 @@ export async function canAccessAsset(
   actor = actorSchema.parse(actor);
   assetId = uuidSchema.parse(assetId);
   if (['table.row.create', 'table.row.update', 'table.row.delete'].includes(permission)) {
-    const installed = (
-      await transaction.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [
-        table(transaction, 'tf_system_package_installations'),
-      ])
-    ).rows[0]?.installed;
+    const installed = await relationInstalled(
+      transaction.client,
+      table(transaction, 'tf_system_package_installations'),
+    );
     if (
       installed &&
       (
@@ -510,6 +614,17 @@ export async function resolveActor(transaction: AuthorizationTransaction, princi
   const actor = actorSchema.parse(principal);
   await requireCurrentActor(transaction, actor);
   return actor;
+}
+
+/** `lockAuthorization(transaction, mode)`, then `resolveActor`, in one round trip for a user id when the lock is free. */
+export async function lockAndResolveActor(
+  transaction: AuthorizationTransaction,
+  principal: string | Actor,
+  mode: 'read' | 'write' = 'read',
+): Promise<Actor> {
+  if (typeof principal === 'string') return lockAndResolveHuman(transaction, principal, mode);
+  await lockAuthorization(transaction, mode);
+  return resolveActor(transaction, principal);
 }
 
 export async function requirePersistedIssueCall(

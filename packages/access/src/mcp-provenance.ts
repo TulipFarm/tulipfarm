@@ -11,6 +11,7 @@ import {
 } from './source-dependencies.ts';
 import { uuidSchema } from './contracts.ts';
 import { githubTaskContext, withoutGitHubSourcesBefore } from './github-task.ts';
+import { pipelinedAll, relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
 
 const referenceSchema = z.union([
   sourceDependencySchema,
@@ -20,7 +21,6 @@ const referenceSchema = z.union([
   taskGoogleFileSourceSchema,
 ]);
 const referencesSchema = z.array(referenceSchema).max(1000);
-const installedSchema = z.object({ installed: z.boolean() });
 const allowedSchema = z.object({ allowed: z.boolean() });
 const skillReferencesSchema = z.array(z.object({ id: z.string(), revision: z.string() }));
 const webPagesSchema = z.array(z.object({ url: z.string() }));
@@ -105,13 +105,7 @@ export async function currentTableRevisions(
 }
 
 async function tableInstalled(tx: AuthorizationTransaction, installed: Map<string, boolean>, name: string) {
-  if (!installed.has(name))
-    installed.set(
-      name,
-      installedSchema.parse(
-        (await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [table(tx, name)])).rows[0],
-      ).installed,
-    );
+  if (!installed.has(name)) installed.set(name, await relationInstalled(tx.client, table(tx, name)));
   return installed.get(name);
 }
 
@@ -148,33 +142,65 @@ async function readConversationSources(
     );
     for (const row of rows.rows) (conversations.get(row.conversation_id)?.[key] as unknown[] | undefined)?.push(row);
   };
-  if (await tableInstalled(tx, installed, 'tf_conversation_model_sources')) {
-    await read(
-      'models',
-      `SELECT t.conversation_id, s.sources FROM ${table(tx, 'tf_conversation_model_sources')} s JOIN ${table(tx, 'tf_conversation_turns')} t ON t.id=s.turn_id WHERE t.conversation_id=ANY($1::uuid[])`,
-    );
-    await read(
-      'steps',
-      `SELECT t.conversation_id, s.sources, CASE WHEN s.output IS NULL OR s.output='null'::jsonb THEN NULL ELSE jsonb_build_object('sources', s.output->'sources') END AS output FROM ${table(tx, 'tf_conversation_execution_steps')} s JOIN ${table(tx, 'tf_conversation_turns')} t ON t.id=s.turn_id WHERE t.conversation_id=ANY($1::uuid[])`,
-    );
-  }
-  if (await tableInstalled(tx, installed, 'tf_conversation_results')) {
-    prefetch.resultsReadable = await resultsReadable(tx);
-    if (prefetch.resultsReadable)
-      await read(
-        'results',
-        `SELECT conversation_id, sources FROM ${table(tx, 'tf_conversation_results')} WHERE conversation_id=ANY($1::uuid[])`,
-      );
-  }
-  if (await tableInstalled(tx, installed, 'tf_mcp_actions'))
-    await read(
-      'actions',
-      `SELECT a.origin->>'conversationId' AS conversation_id,a.integration_id,a.authorization_epoch,a.sources,r.sources AS result_sources FROM ${table(tx, 'tf_mcp_actions')} a LEFT JOIN ${table(tx, 'tf_mcp_receipts')} r ON r.action_id=a.id WHERE a.origin->>'kind'='private-chat' AND a.origin->>'conversationId'=ANY($1::text[])`,
-    );
+  const [models, results, actions] = await pipelinedAll(
+    tx.client,
+    conversationSourceTables.map(name => () => tableInstalled(tx, installed, name)),
+  );
+  await pipelinedAll(tx.client, [
+    ...(models
+      ? [
+          () =>
+            read(
+              'models',
+              `SELECT t.conversation_id, s.sources FROM ${table(tx, 'tf_conversation_model_sources')} s JOIN ${table(tx, 'tf_conversation_turns')} t ON t.id=s.turn_id WHERE t.conversation_id=ANY($1::uuid[])`,
+            ),
+          () =>
+            read(
+              'steps',
+              `SELECT t.conversation_id, s.sources, CASE WHEN s.output IS NULL OR s.output='null'::jsonb THEN NULL ELSE jsonb_build_object('sources', s.output->'sources') END AS output FROM ${table(tx, 'tf_conversation_execution_steps')} s JOIN ${table(tx, 'tf_conversation_turns')} t ON t.id=s.turn_id WHERE t.conversation_id=ANY($1::uuid[])`,
+            ),
+        ]
+      : []),
+    ...(results
+      ? [
+          async () => {
+            prefetch.resultsReadable = await resultsReadable(tx);
+            if (prefetch.resultsReadable)
+              await read(
+                'results',
+                `SELECT conversation_id, sources FROM ${table(tx, 'tf_conversation_results')} WHERE conversation_id=ANY($1::uuid[])`,
+              );
+          },
+        ]
+      : []),
+    ...(actions
+      ? [
+          () =>
+            read(
+              'actions',
+              `SELECT a.origin->>'conversationId' AS conversation_id,a.integration_id,a.authorization_epoch,a.sources,r.sources AS result_sources FROM ${table(tx, 'tf_mcp_actions')} a LEFT JOIN ${table(tx, 'tf_mcp_receipts')} r ON r.action_id=a.id WHERE a.origin->>'kind'='private-chat' AND a.origin->>'conversationId'=ANY($1::text[])`,
+            ),
+        ]
+      : []),
+  ]);
   return prefetch;
 }
 
 /** Reads a page of private conversations' source rows up front so their closures need no per-conversation reads. */
+const conversationSourceTables = [
+  'tf_conversation_model_sources',
+  'tf_conversation_results',
+  'tf_mcp_actions',
+] as const;
+
+/**
+ * Checks, for the rest of this transaction, which tables a conversation's sources are read from. Send it with the
+ * query that finds the conversations so the source check needs no round trip of its own.
+ */
+export function warmConversationSources(tx: AuthorizationTransaction) {
+  return Promise.all(conversationSourceTables.map(name => relationInstalled(tx.client, table(tx, name))));
+}
+
 export async function prefetchConversationSources(tx: AuthorizationTransaction, conversationIds: string[]) {
   return readConversationSources(tx, conversationIds, new Map());
 }
@@ -510,10 +536,7 @@ export async function requireNoMcpDerived(tx: AuthorizationTransaction, sources:
 }
 
 async function requireNoMcpDerivedTasks(tx: AuthorizationTransaction, runId: string) {
-  const installed = installedSchema.parse(
-    (await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [table(tx, 'tf_agent_task_runs')]))
-      .rows[0],
-  ).installed;
+  const installed = await relationInstalled(tx.client, table(tx, 'tf_agent_task_runs'));
   if (!installed) return;
   const tasks = await tx.client.query(
     `SELECT r.task_id,max(m.sequence) AS sequence FROM ${table(tx, 'tf_agent_task_runs')} r JOIN ${table(tx, 'tf_agent_task_messages')} m ON m.task_id=r.task_id WHERE r.run_id=$1 GROUP BY r.task_id`,

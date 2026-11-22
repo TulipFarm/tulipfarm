@@ -3,14 +3,13 @@ import { tableProposalSupersededCondition } from '@tulipfarm/conversations/tool-
 import { z } from 'zod';
 import {
   AccessDenied,
-  SkillUnavailable,
   currentMember,
-  humanActorSchema,
-  lockAuthorization,
-  requireTablePermission,
-  resolveHuman,
-  sourceDependenciesSchema,
   type HumanActor,
+  humanActorSchema,
+  lockAndResolvePrincipal,
+  requireTablePermission,
+  SkillUnavailable,
+  sourceDependenciesSchema,
   type SourceDependency,
 } from '@tulipfarm/access';
 import { withMaintenanceTransaction } from '@tulipfarm/workspace-storage/provisioning';
@@ -130,9 +129,10 @@ function operations(options: TableProposalOptions) {
     operation: (tx: TableTransaction, actor: HumanActor) => Promise<T>,
   ) {
     return options.runtime.transaction(z.uuid().parse(workspaceId), range, async tx => {
-      await lockAuthorization(tx);
-      const actor =
-        typeof principal === 'string' ? await resolveHuman(tx, principal) : humanActorSchema.parse(principal);
+      const actor = await lockAndResolvePrincipal(
+        tx,
+        typeof principal === 'string' ? principal : humanActorSchema.parse(principal),
+      );
       await currentMember(tx, actor);
       return operation(tx, actor);
     });

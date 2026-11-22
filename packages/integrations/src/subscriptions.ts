@@ -6,7 +6,12 @@ import {
   type HumanActor,
   lockAndResolveHuman,
 } from '@tulipfarm/access';
-import { commonCompatibility, qualified, type createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
+import {
+  commonCompatibility,
+  pipelinedAll,
+  qualified,
+  type createWorkspaceRuntime,
+} from '@tulipfarm/workspace-storage/runtime';
 import { hasPlanAccounts, setUses, useColumn, type PlanUse } from './plan-accounts.ts';
 
 export { maxPlanAccounts, planUses, type PlanUse } from './plan-accounts.ts';
@@ -266,6 +271,43 @@ export function createSubscriptions(options: { runtime: Runtime }) {
     return byConnection;
   }
 
+  /** `models` for several providers, read in one transaction. */
+  async function modelsFor<P extends SubscriptionProvider>(
+    workspaceId: string,
+    userId: string,
+    providers: readonly P[],
+  ): Promise<Map<P, (SubscriptionModel & { plan: SubscriptionModelPlan })[]>> {
+    try {
+      return await authorized(workspaceId, userId, 'read', async (tx, actor) => {
+        const candidates = await pipelinedAll(
+          tx.client,
+          providers.map(provider => () => eligibleIn(tx, provider, actor.membershipId, true)),
+        );
+        return new Map(
+          providers.map((provider, index) => {
+            const models = new Map<string, SubscriptionModel & { plan: SubscriptionModelPlan }>();
+            for (const candidate of candidates[index]!) {
+              const plan = {
+                connectionId: candidate.connectionId,
+                ownerMembershipId: candidate.ownerMembershipId,
+                own: candidate.own,
+                limitedAt: candidate.limitedAt,
+              };
+              for (const model of candidate.labels) {
+                const known = models.get(model.slug);
+                if (!known || (known.plan.limitedAt && !plan.limitedAt)) models.set(model.slug, { ...model, plan });
+              }
+            }
+            return [provider, [...models.values()]] as const;
+          }),
+        );
+      });
+    } catch (error) {
+      if (error instanceof AccessDenied) return new Map();
+      throw error;
+    }
+  }
+
   return {
     /**
      * For a model call: the plans `caller` may use for `use`, best first. `preferredConnectionId`, the account the chat or
@@ -361,28 +403,10 @@ export function createSubscriptions(options: { runtime: Runtime }) {
       userId: string,
       provider: SubscriptionProvider,
     ): Promise<(SubscriptionModel & { plan: SubscriptionModelPlan })[]> {
-      try {
-        return await authorized(workspaceId, userId, 'read', async (tx, actor) => {
-          const models = new Map<string, SubscriptionModel & { plan: SubscriptionModelPlan }>();
-          for (const candidate of await eligibleIn(tx, provider, actor.membershipId, true)) {
-            const plan = {
-              connectionId: candidate.connectionId,
-              ownerMembershipId: candidate.ownerMembershipId,
-              own: candidate.own,
-              limitedAt: candidate.limitedAt,
-            };
-            for (const model of candidate.labels) {
-              const known = models.get(model.slug);
-              if (!known || (known.plan.limitedAt && !plan.limitedAt)) models.set(model.slug, { ...model, plan });
-            }
-          }
-          return [...models.values()];
-        });
-      } catch (error) {
-        if (error instanceof AccessDenied) return [];
-        throw error;
-      }
+      return (await modelsFor(workspaceId, userId, [provider])).get(provider) ?? [];
     },
+
+    modelsFor,
 
     /** Turns one of the owner's connections on or off for chats, coding runs or both. Owner only; not while signed out. */
     async setUses(

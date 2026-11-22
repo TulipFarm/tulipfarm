@@ -3,6 +3,7 @@ import type { AuthorizationTransaction } from '@tulipfarm/access';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import { attribute } from './file-references.ts';
 import type { FetchPublicFile, PublicFile, PublicFileFailure } from './public-web.ts';
+import { relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
 
 /** Links of one message read before a reply; later links are named, not read. */
 export const linksPerMessage = 5;
@@ -64,13 +65,7 @@ export type LinkReader = { fetch: FetchPublicFile; keep: KeepLink };
 /** Whether this workspace's storage has link reads; a workspace not yet rolled out reads no links. */
 export async function linkReadsInstalled(tx: AuthorizationTransaction & { commonVersion?: number }) {
   if (typeof tx.commonVersion === 'number') return tx.commonVersion >= linksMigration;
-  return Boolean(
-    (
-      await tx.client.query(`SELECT to_regclass($1) IS NOT NULL AS installed`, [
-        qualified(tx.schema, 'tf_conversation_link_reads'),
-      ])
-    ).rows[0]?.installed,
-  );
+  return Boolean(await relationInstalled(tx.client, qualified(tx.schema, 'tf_conversation_link_reads')));
 }
 
 const linkReadRow = z.object({

@@ -1,11 +1,10 @@
 import { z } from 'zod';
 import {
   AccessDenied,
-  currentMember,
-  lockAuthorization,
-  resolveHuman,
   type AuthorizationTransaction,
+  currentMember,
   type HumanActor,
+  lockAndResolvePrincipal,
 } from '@tulipfarm/access';
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import type { AccountRuntime } from './accounts.ts';
@@ -146,8 +145,7 @@ export function authorized(runtime: AccountRuntime) {
     operation: (tx: AuthorizationTransaction, actor: HumanActor) => Promise<T>,
   ) =>
     runtime.transaction(z.uuid().parse(workspaceId), commonCompatibility, async tx => {
-      await lockAuthorization(tx);
-      const actor = typeof principal === 'string' ? await resolveHuman(tx, principal) : principal;
+      const actor = await lockAndResolvePrincipal(tx, principal);
       await currentMember(tx, actor);
       return operation(tx, actor);
     });

@@ -2,15 +2,15 @@ import { z } from 'zod';
 import {
   AccessDenied,
   currentMember,
+  type HumanActor,
   humanActorSchema,
+  lockAndResolvePrincipal,
   lockAuthorization,
   requireCurrentActor,
-  resolveHuman,
   SourceAuthorizationUnavailable,
   sourceDependenciesSchema,
-  uuidSchema,
-  type HumanActor,
   type SourceDependency,
+  uuidSchema,
 } from '@tulipfarm/access';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
 import { agentCompatibility, relation, type AgentStorage, type AgentTransaction } from './store.ts';
@@ -168,8 +168,11 @@ export function createWorkspaceSkills(storage: AgentStorage) {
     operation: (tx: AgentTransaction & { commonVersion: number }, actor: HumanActor) => Promise<T>,
   ) {
     return storage.transaction(uuidSchema.parse(workspaceId), agentCompatibility, async tx => {
-      await lockAuthorization(tx, write ? 'write' : 'read');
-      const actor = typeof user === 'string' ? await resolveHuman(tx, user) : humanActorSchema.parse(user);
+      const actor = await lockAndResolvePrincipal(
+        tx,
+        typeof user === 'string' ? user : humanActorSchema.parse(user),
+        write ? 'write' : 'read',
+      );
       await currentMember(tx, actor);
       return operation(tx, actor);
     });

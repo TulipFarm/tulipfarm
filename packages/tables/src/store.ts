@@ -40,6 +40,7 @@ import {
   WorkspaceMemberError,
   type MemberProfile,
 } from './workspace-members.ts';
+import { relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
 
 export type GenerationTransaction = AuthorizationTransaction;
 export const generationSchema = z.object({
@@ -137,9 +138,7 @@ async function currentTableGeneration(tx: GenerationTransaction, tableId: string
 }
 
 export async function workspaceMembersTable(tx: GenerationTransaction) {
-  const installed = (
-    await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [table(tx, 'tf_system_tables')])
-  ).rows[0]?.installed;
+  const installed = await relationInstalled(tx.client, table(tx, 'tf_system_tables'));
   if (!installed) return null;
   const row = (
     await tx.client.query(

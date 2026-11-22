@@ -8,6 +8,7 @@ import {
   type HumanActor,
 } from './index.ts';
 import { mcpSourceDependencySchema } from './source-dependencies.ts';
+import { relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
 
 const table = (tx: AuthorizationTransaction, name: string) =>
   `${escapeIdentifier(tx.schema)}.${escapeIdentifier(name)}`;
@@ -20,12 +21,7 @@ export async function requireMcpSource(
   const source = mcpSourceDependencySchema.parse(input);
   await lockAuthorization(tx);
   await currentMember(tx, actor);
-  const installed = z
-    .object({ installed: z.boolean() })
-    .parse(
-      (await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [table(tx, 'tf_mcp_integrations')]))
-        .rows[0],
-    ).installed;
+  const installed = await relationInstalled(tx.client, table(tx, 'tf_mcp_integrations'));
   if (!installed) throw new AccessDenied();
   const allowed = await tx.client.query(
     `SELECT c.id FROM ${table(tx, 'tf_mcp_integrations')} c
@@ -95,11 +91,7 @@ export async function requireMcpPrivateConversation(
   );
   if (!allowed.rowCount) throw new AccessDenied();
   for (const name of ['tf_slack_dm_roots', 'tf_slack_default_turns']) {
-    const installed = z
-      .object({ installed: z.boolean() })
-      .parse(
-        (await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [table(tx, name)])).rows[0],
-      ).installed;
+    const installed = await relationInstalled(tx.client, table(tx, name));
     if (
       installed &&
       (await tx.client.query(`SELECT 1 FROM ${table(tx, name)} WHERE conversation_id=$1`, [conversationId])).rowCount

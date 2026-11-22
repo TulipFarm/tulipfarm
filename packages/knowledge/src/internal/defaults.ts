@@ -35,6 +35,7 @@ import {
   type DefaultKnowledgeProduct,
   type DefaultKnowledgeWork,
 } from '../default-contracts.ts';
+import { relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
 
 type Runtime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
 type Tx = AuthorizationTransaction;
@@ -51,12 +52,7 @@ export * from '../default-contracts.ts';
 export const defaultKnowledgeStorageVersion = 1;
 async function installed(tx: Tx & { commonVersion?: number }) {
   if (typeof tx.commonVersion === 'number') return tx.commonVersion >= defaultKnowledgeStorageVersion;
-  return z
-    .object({ installed: z.boolean() })
-    .parse(
-      (await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [table(tx, 'default_intents')]))
-        .rows[0],
-    ).installed;
+  return await relationInstalled(tx.client, table(tx, 'default_intents'));
 }
 
 /**

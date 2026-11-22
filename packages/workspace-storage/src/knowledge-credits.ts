@@ -3,6 +3,7 @@ import { creditGate, creditPricing, emitHook } from '@tulipfarm/extensions';
 import { qualified, workspaceIdFromSchema } from './names.ts';
 import { afterCommit, type SqlClient } from './transactions.ts';
 import { CreditsExhausted, lockCredits } from './credits.ts';
+import { relationInstalled } from './transaction-reads.ts';
 
 type Transaction = { client: SqlClient; schema: string };
 const units = z.string().regex(/^(0|[1-9]\d{0,29})$/);
@@ -287,15 +288,7 @@ export async function recordKnowledgeCreditOutcome(tx: Transaction, input: Knowl
 // Credit units of knowledge credit attempts attributed to one agent task.
 // The wallet is charged only through the knowledge aggregate; this is a budget observation.
 export async function knowledgeTaskUsage(tx: Transaction, taskFlowId: string) {
-  const installed = z
-    .object({ installed: z.boolean() })
-    .parse(
-      (
-        await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [
-          table(tx, 'tf_knowledge_credit_attempts'),
-        ])
-      ).rows[0],
-    ).installed;
+  const installed = await relationInstalled(tx.client, table(tx, 'tf_knowledge_credit_attempts'));
   if (!installed) return { known: 0n, held: 0n };
   const row = z.object({ known: units, held: units }).parse(
     (

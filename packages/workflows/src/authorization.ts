@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   AccessDenied,
   hasWorkflowGrant,
+  lockAndPrefetchHuman,
   lockAuthorization,
   resolveHuman,
   type AuthorizationTransaction,
@@ -26,9 +27,11 @@ export function workflowTransaction<T>(
   workspaceId: string,
   operation: (tx: WorkflowTransaction) => Promise<T>,
   mode: 'read' | 'write' = 'write',
+  user?: string,
 ) {
   return runtime.transaction(idSchema.parse(workspaceId), workflowCompatibility, async tx => {
-    await lockAuthorization(tx, mode);
+    if (user === undefined) await lockAuthorization(tx, mode);
+    else await lockAndPrefetchHuman(tx, user, mode);
     return operation(tx);
   });
 }

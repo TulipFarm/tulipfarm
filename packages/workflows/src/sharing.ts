@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { AccessDenied, type AuthorizationTransaction } from '@tulipfarm/access';
-import { qualified } from '@tulipfarm/workspace-storage/runtime';
+import { pipelinedAll, qualified } from '@tulipfarm/workspace-storage/runtime';
 import { z } from 'zod';
 import { grantTable, hasGrant, requireGrant, workflowMember, type GrantDomain } from './authorization.ts';
 import { recordRecommendationChange, recommendationsInstalled } from '@tulipfarm/workspace-storage/recommendations';
@@ -10,25 +10,19 @@ import { WorkflowConflict } from './commands.ts';
 const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, name);
 export async function sharingCandidates(tx: AuthorizationTransaction, user: string) {
   const actor = await workflowMember(tx, user);
-  const people = z
-    .array(z.object({ id: idSchema, userId: z.string(), name: z.string() }))
-    .parse(
-      (
-        await tx.client.query(
-          `SELECT id,user_id AS "userId",user_id AS name FROM ${table(tx, 'tf_memberships')} WHERE removed_at IS NULL ORDER BY user_id`,
-        )
-      ).rows,
-    );
-  const teams = z
-    .array(z.object({ id: idSchema, name: z.string() }))
-    .parse(
-      (
-        await tx.client.query(
-          `SELECT t.id,t.name FROM ${table(tx, 'tf_teams')} t JOIN ${table(tx, 'tf_member_teams')} mt ON mt.team_id=t.id WHERE mt.membership_id=$1 ORDER BY t.name`,
-          [actor.membershipId],
-        )
-      ).rows,
-    );
+  const [members, memberTeams] = await pipelinedAll(tx.client, [
+    () =>
+      tx.client.query(
+        `SELECT id,user_id AS "userId",user_id AS name FROM ${table(tx, 'tf_memberships')} WHERE removed_at IS NULL ORDER BY user_id`,
+      ),
+    () =>
+      tx.client.query(
+        `SELECT t.id,t.name FROM ${table(tx, 'tf_teams')} t JOIN ${table(tx, 'tf_member_teams')} mt ON mt.team_id=t.id WHERE mt.membership_id=$1 ORDER BY t.name`,
+        [actor.membershipId],
+      ),
+  ]);
+  const people = z.array(z.object({ id: idSchema, userId: z.string(), name: z.string() })).parse(members.rows);
+  const teams = z.array(z.object({ id: idSchema, name: z.string() })).parse(memberTeams.rows);
   return { membershipId: actor.membershipId, people, teams };
 }
 export async function listGrants(tx: AuthorizationTransaction, user: string, id: string, domain: GrantDomain) {

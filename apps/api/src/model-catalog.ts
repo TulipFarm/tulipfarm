@@ -79,11 +79,15 @@ export type ModelCatalogDependencies = {
   modelFamilyResolution?: ModelFamilyResolution;
   modelCatalogSnapshot?: (workspaceId: string) => Promise<ModelCatalogSnapshot>;
   /**
-   * The models of `provider` the member may use on their own or a shared plan, with the provider's names and the usage
-   * status of the plan each runs on; absent when no plan provider is on. Every model listed here is offered, whether or
-   * not the catalog names it.
+   * For each of `providers`, the models the member may use on their own or a shared plan, with the provider's names and
+   * the usage status of the plan each runs on; absent when no plan provider is on. Every model listed here is offered,
+   * whether or not the catalog names it. A provider missing from the result offers none.
    */
-  planModels?: (workspaceId: string, userId: string, provider: PlanProvider) => Promise<readonly PlanModelChoice[]>;
+  planModels?: (
+    workspaceId: string,
+    userId: string,
+    providers: readonly PlanProvider[],
+  ) => Promise<ReadonlyMap<PlanProvider, readonly PlanModelChoice[]>>;
 };
 
 export type PlanUsage = NonNullable<ModelCatalogFamily['planUsage']>;
@@ -287,18 +291,15 @@ export function registerModelCatalog(app: FastifyInstance, dependencies: ModelCa
       async request => {
         const { workspaceId } = params.parse(request.params);
         const userId = user(request);
+        const offered = dependencies.planModels
+          ? await dependencies.planModels(workspaceId, userId, planProviderNames)
+          : new Map<PlanProvider, readonly PlanModelChoice[]>();
         const planModels = new Map(
-          dependencies.planModels
-            ? (
-                await Promise.all(
-                  planProviderNames.map(async provider =>
-                    (await dependencies.planModels!(workspaceId, userId, provider)).map(
-                      ({ slug, label, usage }) => [`${provider}:${slug}`, { provider, slug, label, usage }] as const,
-                    ),
-                  ),
-                )
-              ).flat()
-            : [],
+          planProviderNames.flatMap(provider =>
+            (offered.get(provider) ?? []).map(
+              ({ slug, label, usage }) => [`${provider}:${slug}`, { provider, slug, label, usage }] as const,
+            ),
+          ),
         );
         return dependencies.runtime.transaction(workspaceId, dependencies.compatibility, async transaction => {
           const actor = await lockAndResolveHuman(transaction, userId);

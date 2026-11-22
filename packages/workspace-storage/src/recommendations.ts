@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { commonCompatibility, qualified, type SqlClient } from './runtime.ts';
+import { relationInstalled } from './transaction-reads.ts';
 
 export const recommendationCompatibility = { minimum: 1, maximum: commonCompatibility.maximum };
 export const recommendationEventChannel = 'tulipfarm_recommendations_v1';
@@ -28,10 +29,7 @@ export type RecommendationTransaction = { client: SqlClient; schema: string; com
 
 export async function recommendationsInstalled(tx: RecommendationTransaction) {
   if (tx.commonVersion !== undefined) return tx.commonVersion >= recommendationCompatibility.minimum;
-  const row = await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [
-    qualified(tx.schema, 'tf_recommendation_refresh'),
-  ]);
-  return z.object({ installed: z.boolean() }).parse(row.rows[0]).installed;
+  return relationInstalled(tx.client, qualified(tx.schema, 'tf_recommendation_refresh'));
 }
 
 export async function recordRecommendationChange(tx: RecommendationTransaction, input: RecommendationChange) {

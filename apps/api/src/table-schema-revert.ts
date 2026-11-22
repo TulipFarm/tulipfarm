@@ -22,6 +22,7 @@ import { mappedValueKey } from '@tulipfarm/tables/transforms';
 import { schemaRevertBuilder, type SchemaRevert } from '@tulipfarm/tables/schema-revert';
 import { summarizeSchemaChange } from '@tulipfarm/tables/schema-summary';
 import { generationProposalData, workspaceMembersTable } from '@tulipfarm/tables/store';
+import { pipelinedAll } from '@tulipfarm/workspace-storage/runtime';
 
 type Transaction = Parameters<TableProposalOptions['requireSources']>[0];
 
@@ -57,20 +58,14 @@ const latestSchema = z
  * table still has the revision that change produced.
  */
 async function revertable(tx: Transaction, actor: HumanActor, tableId: string) {
-  if (
-    (
-      await tx.client.query(`SELECT 1 FROM "${tx.schema}".tf_table_catalog WHERE id=$1 AND archived_at IS NOT NULL`, [
-        tableId,
-      ])
-    ).rowCount ||
-    tableId === (await workspaceMembersTable(tx))?.coreDefinition.id ||
-    !(await canAccessTable(tx, actor, tableId, 'table.schema.manage'))
-  )
-    return { manages: false, latestId: null, latest: null } as const;
   const s = `"${tx.schema}"`;
-  const latest = latestSchema.parse(
-    (
-      await tx.client.query(
+  // These are all reads, so they go together in one round trip even when an earlier answer makes a later one moot.
+  const [archived, membersTable, manages, latestRows] = await pipelinedAll(tx.client, [
+    () => tx.client.query(`SELECT 1 FROM ${s}.tf_table_catalog WHERE id=$1 AND archived_at IS NOT NULL`, [tableId]),
+    () => workspaceMembersTable(tx),
+    () => canAccessTable(tx, actor, tableId, 'table.schema.manage'),
+    () =>
+      tx.client.query(
         `SELECT e.id,e.revision,g.id AS generation_id,p.manifest,
           (SELECT revision FROM ${s}.tf_table_generations WHERE table_id=e.table_id AND state='active') AS active_revision
         FROM ${s}.tf_table_executions e JOIN ${s}.tf_table_proposals p ON p.id=e.proposal_id
@@ -79,9 +74,11 @@ async function revertable(tx: Transaction, actor: HumanActor, tableId: string) {
           AND EXISTS(SELECT 1 FROM jsonb_array_elements(p.manifest->'plans') plan WHERE plan->'input'->>'tableId'=e.table_id::text AND plan->'input'->>'kind'='schema')
         ORDER BY g.activated_at DESC,e.id DESC LIMIT 1`,
         [tableId],
-      )
-    ).rows[0],
-  );
+      ),
+  ]);
+  if (archived.rowCount || tableId === membersTable?.coreDefinition.id || !manages)
+    return { manages: false, latestId: null, latest: null } as const;
+  const latest = latestSchema.parse(latestRows.rows[0]);
   if (!latest) return { manages: true, latestId: null, latest: null } as const;
   if (latest.active_revision !== latest.revision) return { manages: true, latestId: latest.id, latest: null } as const;
   const manifest = proposalManifestSchema.safeParse(latest.manifest);
@@ -104,23 +101,13 @@ async function revertable(tx: Transaction, actor: HumanActor, tableId: string) {
 
 /** Revert actions and links for Schema history entries. */
 export async function schemaRevertLinks(tx: Transaction, actor: HumanActor, tableId: string) {
-  const { manages, latestId, latest } = await revertable(tx, actor, tableId);
   const s = `"${tx.schema}"`;
-  // A completed change reverts an earlier one when it swaps that change's definitions back.
-  const changes = z
-    .array(
-      z.object({
-        id: z.uuid(),
-        reverts: z.uuid().nullable(),
-        reverted_before: definitionSchema.nullable(),
-        reverted_after: definitionSchema.nullable(),
-        reverted_outputs: z.array(z.object({ fieldId: z.string() })).nullable(),
-      }),
-    )
-    .parse(
-      (
-        await tx.client.query(
-          `WITH changes AS (
+  const [{ manages, latestId, latest }, changeRows] = await pipelinedAll(tx.client, [
+    () => revertable(tx, actor, tableId),
+    // A completed change reverts an earlier one when it swaps that change's definitions back.
+    () =>
+      tx.client.query(
+        `WITH changes AS (
           SELECT e.id,g.activated_at,plan->'before' AS before,plan->'after' AS after,plan->'input'->'transforms'->'outputs' AS outputs
           FROM ${s}.tf_table_executions e JOIN ${s}.tf_table_proposals p ON p.id=e.proposal_id
           JOIN ${s}.tf_table_generations g ON g.table_id=e.table_id AND g.revision=e.revision AND g.activated_at IS NOT NULL
@@ -132,10 +119,20 @@ export async function schemaRevertLinks(tx: Transaction, actor: HumanActor, tabl
         FROM changes c LEFT JOIN LATERAL (SELECT o.id,o.before,o.after,o.outputs FROM changes o
           WHERE o.activated_at<c.activated_at AND o.after=c.before AND o.before=c.after
           ORDER BY o.activated_at DESC,o.id DESC LIMIT 1) o ON true`,
-          [tableId],
-        )
-      ).rows,
-    );
+        [tableId],
+      ),
+  ]);
+  const changes = z
+    .array(
+      z.object({
+        id: z.uuid(),
+        reverts: z.uuid().nullable(),
+        reverted_before: definitionSchema.nullable(),
+        reverted_after: definitionSchema.nullable(),
+        reverted_outputs: z.array(z.object({ fieldId: z.string() })).nullable(),
+      }),
+    )
+    .parse(changeRows.rows);
   const links = new Map(
     changes.map(row => [
       row.id,

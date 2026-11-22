@@ -47,6 +47,7 @@ import {
   readMemoryFile,
   writeMemoryFile,
 } from './memory-files.ts';
+import { relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
 export * from './personal-memory-contracts.ts';
 export { MemoryEditsInvalid, MemoryFileNotFound, type MemoryFileWrite } from './memory-files.ts';
 export {
@@ -130,11 +131,7 @@ async function changed(
 }
 
 async function clearBudPreferences(tx: PersonalMemoryTransaction, actor: HumanActor) {
-  const installed = (
-    await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [
-      qualified(tx.schema, 'tf_bud_preferences'),
-    ])
-  ).rows[0]?.installed;
+  const installed = await relationInstalled(tx.client, qualified(tx.schema, 'tf_bud_preferences'));
   if (installed)
     await tx.client.query(`DELETE FROM ${qualified(tx.schema, 'tf_bud_preferences')} WHERE membership_id=$1`, [
       actor.membershipId,

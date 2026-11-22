@@ -2,11 +2,11 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   AccessDenied,
-  currentMember,
-  lockAuthorization,
-  resolveHuman,
   type AuthorizationTransaction,
+  currentMember,
   type HumanActor,
+  lockAndResolvePrincipal,
+  lockAuthorization,
 } from '@tulipfarm/access';
 import type { IntegrationKeyring } from '@tulipfarm/integrations';
 import {
@@ -105,8 +105,7 @@ export function createAtlassianAccounts(options: {
       accountUuidSchema.parse(workspaceId),
       atlassianAccountCompatibility,
       async tx => {
-        await lockAuthorization(tx, mode);
-        const actor = typeof principal === 'string' ? await resolveHuman(tx, principal) : principal;
+        const actor = await lockAndResolvePrincipal(tx, principal, mode);
         await currentMember(tx, actor);
         return operation(tx, actor);
       },

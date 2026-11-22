@@ -308,6 +308,15 @@ export function createWorkflows(
   ) {
     return workflowTransaction(runtime, workspaceId, operation, mode);
   }
+  // `transaction` that also reads `user`'s membership while taking the lock, so their first `workflowMember` is free.
+  function memberTransaction<T>(
+    workspaceId: string,
+    user: string,
+    operation: (tx: WorkflowTransaction) => Promise<T>,
+    mode: 'read' | 'write' = 'write',
+  ) {
+    return workflowTransaction(runtime, workspaceId, operation, mode, user);
+  }
   // A trigger that reads a source carries that source's data into runs, so each member who sponsors or sees them needs source access.
   async function authorizeSource(tx: AuthorizationTransaction, trigger: Trigger, membershipId: string) {
     if (trigger.kind === 'provider') await providers.authorize(tx, trigger, membershipId);
@@ -412,12 +421,21 @@ export function createWorkflows(
   async function wakeAfter<T>(
     workspaceId: string,
     operation: (tx: WorkflowTransaction, woken: Set<string>) => Promise<T>,
+    user?: string,
   ) {
     const woken = new Set<string>();
-    const result = await transaction(workspaceId, tx => operation(tx, woken));
+    const result = await workflowTransaction(runtime, workspaceId, tx => operation(tx, woken), 'write', user);
     const wake = options.wake;
     if (wake) await Promise.all([...woken].map(runId => wake({ workspaceId, runId })));
     return result;
+  }
+  // `wakeAfter` that also reads `user`'s membership while taking the lock.
+  function memberWakeAfter<T>(
+    workspaceId: string,
+    user: string,
+    operation: (tx: WorkflowTransaction, woken: Set<string>) => Promise<T>,
+  ) {
+    return wakeAfter(workspaceId, operation, user);
   }
   async function liveRuns(tx: AuthorizationTransaction, workflowId: string, woken: Set<string>) {
     for (const row of (
@@ -636,8 +654,9 @@ export function createWorkflows(
   }
   /** The repositories a `github` trigger may name for this user: the same rule as the save check. */
   async function githubRepositories(workspaceId: string, user: string) {
-    return transaction(
+    return memberTransaction(
       workspaceId,
+      user,
       async tx => {
         const { membershipId } = await workflowMember(tx, user);
         const { rows } = await tx.client.query(
@@ -655,7 +674,7 @@ export function createWorkflows(
   }
   /** Runs the repository check a save would, so a chat draft fails before review. */
   async function checkGitHubRepository(workspaceId: string, user: string, trigger: GitHubTrigger) {
-    return transaction(workspaceId, async tx =>
+    return memberTransaction(workspaceId, user, async tx =>
       requireGitHubRepository(tx, trigger, (await workflowMember(tx, user)).membershipId),
     );
   }
@@ -687,7 +706,7 @@ export function createWorkflows(
   }
   /** Runs the record checks a save would, so a chat draft fails before review, and names the table and field for the card. */
   async function recordSourceLabels(workspaceId: string, user: string, trigger: RecordTrigger) {
-    return transaction(workspaceId, async tx => {
+    return memberTransaction(workspaceId, user, async tx => {
       const { definition } = await savableRecordSource(tx, trigger, (await workflowMember(tx, user)).membershipId);
       const field = definition.fields.find(item => item.id === trigger.field.fieldId);
       if (!field) throw new WorkflowConflict('record-field-unavailable');
@@ -700,7 +719,7 @@ export function createWorkflows(
   }
   /** Runs the row checks a save would, so a chat draft fails before review, and names the table, watched fields, and filter for the card. */
   async function rowSourceLabels(workspaceId: string, user: string, trigger: RowTrigger) {
-    return transaction(workspaceId, async tx => {
+    return memberTransaction(workspaceId, user, async tx => {
       const { definition } = await savableRowSource(tx, trigger, (await workflowMember(tx, user)).membershipId);
       const label = (id: string) => definition.fields.find(item => item.id === id)?.label ?? '';
       return {
@@ -712,7 +731,7 @@ export function createWorkflows(
   }
   /** Runs the table step checks a save, and the activation that makes the member sponsor, would, so a chat draft fails before review. */
   async function checkTableSteps(workspaceId: string, user: string, definition: z.infer<typeof definitionSchema>) {
-    return transaction(workspaceId, async tx => {
+    return memberTransaction(workspaceId, user, async tx => {
       const { membershipId } = await workflowMember(tx, user);
       const labels = await requireTableStepFields(tx, membershipId, definition);
       if (definition.triggers.some(isUnattendedTrigger))
@@ -721,8 +740,9 @@ export function createWorkflows(
     });
   }
   async function list(workspaceId: string, user: string, options: { archived?: boolean } = {}) {
-    return transaction(
+    return memberTransaction(
       workspaceId,
+      user,
       async tx => {
         const actor = await workflowMember(tx, user);
         if (options.archived) {
@@ -756,7 +776,7 @@ export function createWorkflows(
   }
   async function calendar(workspaceId: string, user: string, value: unknown) {
     const range = calendarRangeSchema.parse(value);
-    return transaction(workspaceId, async tx => {
+    return memberTransaction(workspaceId, user, async tx => {
       const actor = await workflowMember(tx, user);
       if (tx.commonVersion < 1) throw new StorageUnavailableError('incompatible_version');
       const rows = (
@@ -857,7 +877,7 @@ export function createWorkflows(
   }
   async function followCalendar(workspaceId: string, user: string, id: string, value: unknown) {
     const input = calendarFollowSchema.parse(value);
-    return transaction(workspaceId, async tx => {
+    return memberTransaction(workspaceId, user, async tx => {
       const actor = await workflowMember(tx, user);
       if (tx.commonVersion < 1) throw new StorageUnavailableError('incompatible_version');
       await requireGrant(tx, actor.membershipId, id, 'read');
@@ -875,7 +895,7 @@ export function createWorkflows(
     });
   }
   async function recent(workspaceId: string, user: string) {
-    return transaction(workspaceId, async tx => {
+    return memberTransaction(workspaceId, user, async tx => {
       const actor = await workflowMember(tx, user);
       return z.array(z.object({ id: idSchema, name: z.string() })).parse(
         (
@@ -893,8 +913,9 @@ export function createWorkflows(
   /** Enabled workflows whose active revision mentions the table, limited to ones the person can read. */
   async function usingTable(workspaceId: string, user: string, tableId: string) {
     tableId = idSchema.parse(tableId);
-    return transaction(
+    return memberTransaction(
       workspaceId,
+      user,
       async tx => {
         const actor = await workflowMember(tx, user);
         return z.array(z.object({ id: idSchema, name: z.string() })).parse(
@@ -928,7 +949,7 @@ export function createWorkflows(
     } catch {
       throw new WorkflowConflict('invalid-schedule');
     }
-    return transaction(workspaceId, async tx => {
+    return memberTransaction(workspaceId, user, async tx => {
       const actor = await workflowMember(tx, user);
       const previous = (await tx.client.query(`SELECT revision FROM ${table(tx, 'tf_workflows')} WHERE id=$1`, [id]))
         .rows[0];
@@ -1087,7 +1108,7 @@ export function createWorkflows(
   async function activate(workspaceId: string, user: string, id: string, value: unknown) {
     const input = activationSchema.parse(value);
     const { revision, enabled } = input;
-    return wakeAfter(workspaceId, async (tx, woken) => {
+    return memberWakeAfter(workspaceId, user, async (tx, woken) => {
       const actor = await workflowMember(tx, user);
       await requireGrant(tx, actor.membershipId, id, 'manage');
       const current = await read(tx, id);
@@ -1235,7 +1256,7 @@ export function createWorkflows(
   }
   async function archive(workspaceId: string, user: string, id: string, value: unknown) {
     const input = commandSchema.parse(value);
-    return wakeAfter(workspaceId, async (tx, woken) => {
+    return memberWakeAfter(workspaceId, user, async (tx, woken) => {
       const actor = await workflowMember(tx, user);
       await requireGrant(tx, actor.membershipId, id, 'manage');
       if (tx.commonVersion < 1) throw new WorkflowConflict('workflow-archive-unavailable');
@@ -1342,7 +1363,7 @@ export function createWorkflows(
   // Restoring returns the workflow disabled; its triggers and webhook keys start again only after a manager reactivates it.
   async function restore(workspaceId: string, user: string, id: string, value: unknown) {
     const input = commandSchema.parse(value);
-    return transaction(workspaceId, async tx => {
+    return memberTransaction(workspaceId, user, async tx => {
       const actor = await workflowMember(tx, user);
       await requireGrant(tx, actor.membershipId, id, 'manage');
       if (tx.commonVersion < 1) throw new WorkflowConflict('workflow-archive-unavailable');
@@ -1376,7 +1397,7 @@ export function createWorkflows(
    */
   async function switchTrigger(workspaceId: string, user: string, id: string, value: unknown) {
     const input = triggerSwitchSchema.parse(value);
-    return wakeAfter(workspaceId, async tx => {
+    return memberWakeAfter(workspaceId, user, async tx => {
       const actor = await workflowMember(tx, user);
       await requireGrant(tx, actor.membershipId, id, 'manage');
       await tx.client.query(`SELECT 1 FROM ${table(tx, 'tf_workflows')} WHERE id=$1 FOR UPDATE`, [idSchema.parse(id)]);
@@ -1498,7 +1519,7 @@ export function createWorkflows(
   }
   async function cancelRowEvents(workspaceId: string, user: string, id: string, value: unknown) {
     const input = commandSchema.parse(value);
-    return transaction(workspaceId, async tx => {
+    return memberTransaction(workspaceId, user, async tx => {
       const actor = await workflowMember(tx, user);
       await requireGrant(tx, actor.membershipId, id, 'manage');
       if (tx.commonVersion < rowTriggerCommonVersion) throw new WorkflowConflict('record-trigger-unavailable');
@@ -1663,7 +1684,7 @@ export function createWorkflows(
   }
   async function start(workspaceId: string, user: string, id: string, value: unknown) {
     const input = startSchema.parse(value);
-    return transaction(workspaceId, async tx => {
+    return memberTransaction(workspaceId, user, async tx => {
       const actor = await workflowMember(tx, user);
       const { runId } = await admit(
         tx,
@@ -1695,8 +1716,9 @@ export function createWorkflows(
   }
   async function definition(workspaceId: string, user: string, id: string, value: unknown = {}) {
     const query = definitionQuerySchema.parse(value);
-    return transaction(
+    return memberTransaction(
       workspaceId,
+      user,
       async tx => {
         const actor = await workflowMember(tx, user);
         await requireGrant(tx, actor.membershipId, id, 'read');
@@ -1764,7 +1786,7 @@ export function createWorkflows(
       );
   }
   async function runDetail(workspaceId: string, user: string, id: string, runId: string) {
-    return transaction(workspaceId, async tx => {
+    return memberTransaction(workspaceId, user, async tx => {
       const actor = await workflowMember(tx, user);
       await requireRunAccess(tx, actor.membershipId, id, runId, false);
       const row = (
@@ -1786,7 +1808,7 @@ export function createWorkflows(
   async function history(workspaceId: string, user: string, id: string, value: unknown = {}) {
     const query = runHistoryQuerySchema.parse(value);
     const [beforeAt, beforeId] = query.before?.split('~') ?? [];
-    return transaction(workspaceId, async tx => {
+    return memberTransaction(workspaceId, user, async tx => {
       const actor = await workflowMember(tx, user);
       await requireGrant(tx, actor.membershipId, id, 'read');
       const runs = async (statuses: readonly string[], limit: number | null, skips: readonly string[] = []) =>
@@ -1876,7 +1898,7 @@ export function createWorkflows(
   // Unattended runs always use the authority of the member who last activated or shared the workflow; nobody else can be named.
   async function sponsorship(workspaceId: string, user: string, id: string, value: unknown) {
     const input = sponsorshipSchema.parse(value);
-    return wakeAfter(workspaceId, async (tx, woken) => {
+    return memberWakeAfter(workspaceId, user, async (tx, woken) => {
       const actor = await workflowMember(tx, user);
       await requireGrant(tx, actor.membershipId, id, 'manage');
       if (input.sponsorMembershipId !== undefined && input.sponsorMembershipId !== actor.membershipId)
@@ -1938,7 +1960,7 @@ export function createWorkflows(
     const input = z
       .strictObject({ stepId: z.string().max(48), responseId: idSchema, output: payloadSchema })
       .parse(value);
-    return wakeAfter(workspaceId, async (tx, woken) => {
+    return memberWakeAfter(workspaceId, user, async (tx, woken) => {
       const actor = await workflowMember(tx, user);
       await requireRunAccess(tx, actor.membershipId, workflowId, runId, true);
       const row = (
@@ -1965,7 +1987,7 @@ export function createWorkflows(
     });
   }
   async function cancel(workspaceId: string, user: string, workflowId: string, runId: string) {
-    return wakeAfter(workspaceId, async (tx, woken) => {
+    return memberWakeAfter(workspaceId, user, async (tx, woken) => {
       const actor = await workflowMember(tx, user);
       await requireRunAccess(tx, actor.membershipId, workflowId, runId, true);
       const result = await tx.client.query(
@@ -1995,7 +2017,7 @@ export function createWorkflows(
     triggerId: string = legacyWebhookTriggerId,
   ) {
     const input = webhookKeySchema.parse(value);
-    return transaction(workspaceId, async tx => {
+    return memberTransaction(workspaceId, user, async tx => {
       const actor = await workflowMember(tx, user),
         current = await read(tx, id);
       await requireGrant(tx, actor.membershipId, id, 'manage');
@@ -2076,7 +2098,7 @@ export function createWorkflows(
     triggerId: string = legacyWebhookTriggerId,
   ) {
     const input = commandSchema.parse(value);
-    return transaction(workspaceId, async tx => {
+    return memberTransaction(workspaceId, user, async tx => {
       const actor = await workflowMember(tx, user),
         current = await read(tx, id);
       await requireGrant(tx, actor.membershipId, id, 'manage');
@@ -2335,7 +2357,7 @@ export function createWorkflows(
     triggerId: string = legacyWebhookTriggerId,
   ) {
     const input = webhookTestSchema.parse(value);
-    return transaction(workspaceId, async tx => {
+    return memberTransaction(workspaceId, user, async tx => {
       const actor = await workflowMember(tx, user);
       await requireGrant(tx, actor.membershipId, id, 'manage');
       const active = await activeWebhook(tx, id, triggerId);
@@ -2411,7 +2433,7 @@ export function createWorkflows(
     id: string,
     triggerId: string = legacyWebhookTriggerId,
   ) {
-    return transaction(workspaceId, async tx => {
+    return memberTransaction(workspaceId, user, async tx => {
       const actor = await workflowMember(tx, user);
       await requireGrant(tx, actor.membershipId, id, 'manage');
       if (!webhookLog(tx)) return webhookDeliveryLogSchema.parse({ available: false, deliveries: [] });
@@ -2434,7 +2456,7 @@ export function createWorkflows(
   }
   async function event(workspaceId: string, user: string, id: string, eventName: string, value: unknown) {
     const input = startSchema.parse(value);
-    return transaction(workspaceId, async tx => {
+    return memberTransaction(workspaceId, user, async tx => {
       const actor = await workflowMember(tx, user);
       await requireGrant(tx, actor.membershipId, id, 'invoke');
       const row = (
@@ -3732,11 +3754,12 @@ export function createWorkflows(
       throw new Error('workflow-storage-unavailable');
     }
   }
-  const candidates = (workspaceId: string, user: string) => transaction(workspaceId, tx => sharingCandidates(tx, user));
+  const candidates = (workspaceId: string, user: string) =>
+    memberTransaction(workspaceId, user, tx => sharingCandidates(tx, user), 'read');
   const grants = (workspaceId: string, user: string, id: string) =>
-    transaction(workspaceId, tx => listGrants(tx, user, id, 'workflow'));
+    memberTransaction(workspaceId, user, tx => listGrants(tx, user, id, 'workflow'), 'read');
   const share = (workspaceId: string, user: string, id: string, value: unknown) =>
-    wakeAfter(workspaceId, async (tx, woken) => {
+    memberWakeAfter(workspaceId, user, async (tx, woken) => {
       const result = await changeGrant(tx, user, id, value, 'workflow');
       await liveRuns(tx, id, woken);
       return result;

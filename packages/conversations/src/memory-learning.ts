@@ -2,6 +2,7 @@ import type { HumanActor } from '@tulipfarm/access';
 import { savePersonalMemorySchema } from '@tulipfarm/memory-core/personal-memory-contracts';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import type { PersonalMemoryTransaction } from './keep-personal-memory.ts';
+import { relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
 
 /** The common migration that adds the learning record. Before it, background learning does nothing. */
 export const memoryLearningVersion = 98;
@@ -13,13 +14,7 @@ export type MemoryEdit =
 
 export async function memoryLearningInstalled(tx: PersonalMemoryTransaction) {
   if (tx.commonVersion !== undefined) return tx.commonVersion >= memoryLearningVersion;
-  return Boolean(
-    (
-      await tx.client.query<{ installed: boolean }>('SELECT to_regclass($1) IS NOT NULL AS installed', [
-        qualified(tx.schema, 'tf_memory_learning'),
-      ])
-    ).rows[0]?.installed,
-  );
+  return Boolean(await relationInstalled(tx.client, qualified(tx.schema, 'tf_memory_learning')));
 }
 
 function occurrences(text: string, part: string) {

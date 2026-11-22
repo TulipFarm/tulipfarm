@@ -12,6 +12,7 @@ import {
   type RunState,
   type TasksRegistration,
 } from './tasks-table.ts';
+import { relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
 
 type Tx = AuthorizationTransaction;
 const relation = (tx: Tx, name: string) => qualified(tx.schema, name);
@@ -30,9 +31,7 @@ export function tasksTable(tx: Tx): Promise<TasksRegistration | null> {
 }
 
 async function readTasksTable(tx: Tx): Promise<TasksRegistration | null> {
-  const installed = (
-    await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [relation(tx, 'tf_row_assignments')])
-  ).rows[0]?.installed;
+  const installed = await relationInstalled(tx.client, relation(tx, 'tf_row_assignments'));
   if (!installed) return null;
   const row = (
     await tx.client.query(

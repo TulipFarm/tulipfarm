@@ -3,6 +3,7 @@ import { creditGate, creditPricing, creditUnitsForProviderCost, emitHook } from 
 import { observeChatDetail } from '@tulipfarm/observability';
 import { qualified, workspaceIdFromSchema } from './names.ts';
 import { afterCommit, type SqlClient } from './transactions.ts';
+import { pipelinedAll } from './transaction-reads.ts';
 import { creditActivitySchema, creditSummarySchema } from './credits-contracts.ts';
 
 type Transaction = { client: SqlClient; schema: string };
@@ -382,23 +383,21 @@ export async function creditBalance(tx: Transaction) {
 }
 
 export async function creditSummary(tx: Transaction & { commonVersion?: number }, view?: CreditUsageView) {
-  const balance = await creditBalance(tx);
   const periodStart = `(((clock_timestamp() AT TIME ZONE 'UTC')::date-29)::timestamp AT TIME ZONE 'UTC')`;
   if (view?.kind === 'personal') {
     const flows = [...view.flowIds];
-    const own = z
-      .object({ used: units, held: units })
-      .parse(
-        (
-          await tx.client.query(
-            `SELECT COALESCE(sum(charged),0)::text AS used, COALESCE(sum(reserved) FILTER (WHERE charged IS NULL),0)::text AS held FROM ${table(tx, 'tf_credit_usage')} WHERE flow_id = ANY($1::text[])`,
-            [flows],
-          )
-        ).rows[0],
-      );
     const kind = usageActivity(tx, view);
     const activity = `SELECT u.model_id,u.agent_id,${kind.activity} AS activity,u.charged,u.created_at AS occurred_at FROM ${table(tx, 'tf_credit_usage')} u ${kind.join} WHERE u.created_at >= ${periodStart} AND u.flow_id = ANY($1::text[])`;
-    const { days, breakdown, series } = await usageRows(tx, activity, [flows]);
+    const balance = await creditBalance(tx);
+    const [ownRows, { days, breakdown, series }] = await pipelinedAll(tx.client, [
+      () =>
+        tx.client.query(
+          `SELECT COALESCE(sum(charged),0)::text AS used, COALESCE(sum(reserved) FILTER (WHERE charged IS NULL),0)::text AS held FROM ${table(tx, 'tf_credit_usage')} WHERE flow_id = ANY($1::text[])`,
+          [flows],
+        ),
+      () => usageRows(tx, activity, [flows]),
+    ]);
+    const own = z.object({ used: units, held: units }).parse(ownRows.rows[0]);
     return creditSummarySchema.parse({
       scope: 'personal',
       ...balance,
@@ -410,14 +409,25 @@ export async function creditSummary(tx: Transaction & { commonVersion?: number }
     });
   }
   const knowledgeGroup = `SELECT known,pending,unfunded FROM ${table(tx, 'tf_knowledge_credit_group')} WHERE version=1`;
-  const sums = z.object({ used: units, held: units, known: units, pending: units, unfunded: units }).parse(
-    (
-      await tx.client.query(`
+  const kind = usageActivity(tx, view);
+  const knowledge = knowledgeActivity(tx, view);
+  const usage = `
+    SELECT u.model_id,u.agent_id,${kind.activity} AS activity,u.charged,u.created_at AS occurred_at FROM ${table(tx, 'tf_credit_usage')} u ${kind.join} WHERE u.created_at >= ${periodStart}
+    UNION ALL
+    SELECT a.model_id,NULL::uuid AS agent_id,${knowledge.activity} AS activity,o.charged,o.observed_at AS occurred_at
+    FROM ${table(tx, 'tf_knowledge_credit_observations')} o JOIN ${table(tx, 'tf_knowledge_credit_attempts')} a ON a.id=o.attempt_id ${knowledge.join} WHERE o.observed_at >= ${periodStart}`;
+  const balance = await creditBalance(tx);
+  const [sumRows, { days, breakdown, series }] = await pipelinedAll(tx.client, [
+    () =>
+      tx.client.query(`
     SELECT legacy.used::text AS used, legacy.held::text AS held, k.known::text AS known, k.pending::text AS pending, k.unfunded::text AS unfunded
     FROM (SELECT COALESCE(sum(charged),0) AS used, COALESCE(sum(reserved) FILTER (WHERE charged IS NULL),0) AS held FROM ${table(tx, 'tf_credit_usage')}) legacy
-    CROSS JOIN (${knowledgeGroup}) k`)
-    ).rows[0],
-  );
+    CROSS JOIN (${knowledgeGroup}) k`),
+    () => usageRows(tx, usage, []),
+  ]);
+  const sums = z
+    .object({ used: units, held: units, known: units, pending: units, unfunded: units })
+    .parse(sumRows.rows[0]);
   // Knowledge spend is one aggregate, rounded as a whole under the registered pricing.
   const { round } = creditPricing();
   const knowledgeUsed = round(BigInt(sums.known));
@@ -426,14 +436,6 @@ export async function creditSummary(tx: Transaction & { commonVersion?: number }
     held: (BigInt(sums.held) + round(BigInt(sums.known) + BigInt(sums.pending)) - knowledgeUsed).toString(),
     unfunded: sums.unfunded,
   };
-  const kind = usageActivity(tx, view);
-  const knowledge = knowledgeActivity(tx, view);
-  const usage = `
-    SELECT u.model_id,u.agent_id,${kind.activity} AS activity,u.charged,u.created_at AS occurred_at FROM ${table(tx, 'tf_credit_usage')} u ${kind.join} WHERE u.created_at >= ${periodStart}
-    UNION ALL
-    SELECT a.model_id,NULL::uuid AS agent_id,${knowledge.activity} AS activity,o.charged,o.observed_at AS occurred_at
-    FROM ${table(tx, 'tf_knowledge_credit_observations')} o JOIN ${table(tx, 'tf_knowledge_credit_attempts')} a ON a.id=o.attempt_id ${knowledge.join} WHERE o.observed_at >= ${periodStart}`;
-  const { days, breakdown, series } = await usageRows(tx, usage, []);
   return creditSummarySchema.parse({
     ...(view ? { scope: view.kind } : {}),
     ...balance,
@@ -447,16 +449,24 @@ export async function creditSummary(tx: Transaction & { commonVersion?: number }
 }
 
 async function usageRows(tx: Transaction, activity: string, values: unknown[]) {
-  const days = z
-    .array(z.object({ date: z.string(), amount: units }))
-    .parse(
-      (
-        await tx.client.query(
-          `WITH activity AS (${activity}) SELECT to_char(day,'YYYY-MM-DD') AS date, COALESCE(sum(u.charged),0)::text AS amount FROM generate_series((clock_timestamp() AT TIME ZONE 'UTC')::date-29, (clock_timestamp() AT TIME ZONE 'UTC')::date, interval '1 day') day LEFT JOIN activity u ON (u.occurred_at AT TIME ZONE 'UTC')::date=day::date GROUP BY day ORDER BY day`,
-          values,
-        )
-      ).rows,
-    );
+  const [dayRows, breakdownRows, seriesRows] = await pipelinedAll(tx.client, [
+    () =>
+      tx.client.query(
+        `WITH activity AS (${activity}) SELECT to_char(day,'YYYY-MM-DD') AS date, COALESCE(sum(u.charged),0)::text AS amount FROM generate_series((clock_timestamp() AT TIME ZONE 'UTC')::date-29, (clock_timestamp() AT TIME ZONE 'UTC')::date, interval '1 day') day LEFT JOIN activity u ON (u.occurred_at AT TIME ZONE 'UTC')::date=day::date GROUP BY day ORDER BY day`,
+        values,
+      ),
+    () =>
+      tx.client.query(
+        `WITH activity AS (${activity}) SELECT model_id,agent_id,activity,COALESCE(sum(charged),0)::text AS amount,count(*)::integer AS calls FROM activity GROUP BY model_id,agent_id,activity ORDER BY sum(charged) DESC NULLS LAST,model_id,agent_id,activity`,
+        values,
+      ),
+    () =>
+      tx.client.query(
+        `WITH activity AS (${activity}) SELECT to_char((occurred_at AT TIME ZONE 'UTC')::date,'YYYY-MM-DD') AS date,model_id,agent_id,activity,COALESCE(sum(charged),0)::text AS amount,count(*)::integer AS calls FROM activity GROUP BY 1,2,3,4 ORDER BY 1,2,3,4`,
+        values,
+      ),
+  ]);
+  const days = z.array(z.object({ date: z.string(), amount: units })).parse(dayRows.rows);
   const breakdown = z
     .array(
       z.object({
@@ -467,14 +477,7 @@ async function usageRows(tx: Transaction, activity: string, values: unknown[]) {
         calls: z.number().int(),
       }),
     )
-    .parse(
-      (
-        await tx.client.query(
-          `WITH activity AS (${activity}) SELECT model_id,agent_id,activity,COALESCE(sum(charged),0)::text AS amount,count(*)::integer AS calls FROM activity GROUP BY model_id,agent_id,activity ORDER BY sum(charged) DESC NULLS LAST,model_id,agent_id,activity`,
-          values,
-        )
-      ).rows,
-    );
+    .parse(breakdownRows.rows);
   const series = z
     .array(
       z.object({
@@ -486,14 +489,7 @@ async function usageRows(tx: Transaction, activity: string, values: unknown[]) {
         calls: z.number().int(),
       }),
     )
-    .parse(
-      (
-        await tx.client.query(
-          `WITH activity AS (${activity}) SELECT to_char((occurred_at AT TIME ZONE 'UTC')::date,'YYYY-MM-DD') AS date,model_id,agent_id,activity,COALESCE(sum(charged),0)::text AS amount,count(*)::integer AS calls FROM activity GROUP BY 1,2,3,4 ORDER BY 1,2,3,4`,
-          values,
-        )
-      ).rows,
-    );
+    .parse(seriesRows.rows);
   return {
     days: days.map(day => ({ date: day.date, credits: credits(day.amount) })),
     breakdown: breakdown.map(entry => ({

@@ -50,6 +50,10 @@
     "./team-labels": {
       "types": "./dist/team-labels.d.ts",
       "default": "./dist/team-labels.js"
+    },
+    "./transaction-reads": {
+      "types": "./dist/transaction-reads.d.ts",
+      "default": "./dist/transaction-reads.js"
     }
   },
   "scripts": {

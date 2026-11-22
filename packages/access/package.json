@@ -32,6 +32,7 @@
   },
   "dependencies": {
     "@tulipfarm/observability": "workspace:*",
+    "@tulipfarm/workspace-storage": "workspace:*",
     "pg": "8.23.0",
     "zod": "4.6.6"
   },

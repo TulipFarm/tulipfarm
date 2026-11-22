@@ -3,6 +3,7 @@ import { AccessDenied, type AuthorizationTransaction, type HumanActor } from '@t
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import { KnowledgeError } from '../internal/contracts.ts';
 import type { ExternalSource } from '../internal/store.ts';
+import { relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
 
 type Authority = {
   requireExternalSource: (tx: AuthorizationTransaction, actor: HumanActor, source: ExternalSource) => Promise<void>;
@@ -17,11 +18,7 @@ const families = {
   jira: 'atlassian',
 } as const;
 async function installed(tx: AuthorizationTransaction, name: string) {
-  return z
-    .object({ installed: z.boolean() })
-    .parse(
-      (await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [qualified(tx.schema, name)])).rows[0],
-    ).installed;
+  return await relationInstalled(tx.client, qualified(tx.schema, name));
 }
 
 // Reads the same reader and eligibility relations as each provider adapter, without

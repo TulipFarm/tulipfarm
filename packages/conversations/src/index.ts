@@ -26,6 +26,7 @@ import { rowChangeForReceipt, rowViewForReceipt } from './row-view.ts';
 import { readableWorkflows, workflowReferences } from './workflow-receipts.ts';
 import { mergeSources, sourceDependenciesSchema } from './results.ts';
 import { requireCredits, CreditsExhausted } from '@tulipfarm/workspace-storage/credits';
+import { pipelinedAll } from '@tulipfarm/workspace-storage/transaction-reads';
 import { recordFileUse } from '@tulipfarm/files';
 import { observeChatDetail, trackEvent } from '@tulipfarm/observability';
 import {
@@ -36,6 +37,7 @@ import {
   lockAndResolveHuman,
   prefetchConversationSources,
   SourceAuthorizationUnavailable,
+  warmConversationSources,
   uuidSchema,
 } from '@tulipfarm/access';
 import {
@@ -341,13 +343,10 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
     write = false,
     rule: ChatAccessRule = 'read',
   ) {
-    if (
-      (await tx.client.query(`SELECT 1 FROM ${table(tx, 'tf_slack_default_turns')} WHERE conversation_id=$1`, [chatId]))
-        .rowCount
-    )
-      throw new AccessDenied();
-    const row = (
-      await tx.client.query(
+    const slackDefault = () =>
+      tx.client.query(`SELECT 1 FROM ${table(tx, 'tf_slack_default_turns')} WHERE conversation_id=$1`, [chatId]);
+    const conversation = () =>
+      tx.client.query(
         `SELECT ${chatColumns}, project_id AS "projectId", next_message_sequence AS "nextSequence",
       (owner_user_id = $2 AND owner_membership_id = $3) AS owner,
       ${pinnedColumn(tx, '$3')},
@@ -355,8 +354,13 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
         ORDER BY t.accepted_sequence DESC LIMIT 1) AS model
       FROM ${table(tx, 'tf_conversations')} c WHERE id = $1 AND kind = 'private' AND deleted_at IS NULL ${write ? 'FOR UPDATE' : ''}`,
         [chatId, actor.userId, actor.membershipId],
-      )
-    ).rows[0];
+      );
+    // A write takes the row lock, so it waits until the Slack check has passed.
+    const [slack, found] = write
+      ? [await slackDefault(), undefined]
+      : await pipelinedAll(tx.client, [slackDefault, conversation]);
+    if (slack.rowCount) throw new AccessDenied();
+    const row = (found ?? (await conversation())).rows[0];
     if (!row) throw new AccessDenied();
     const chat = chatSchema
       .extend({ nextSequence: z.number().int(), titleManual: z.boolean(), owner: z.boolean() })
@@ -801,8 +805,10 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
   async function read(workspaceId: string, userId: string, chatId: string) {
     chatId = uuidSchema.parse(chatId);
     return human(workspaceId, userId, async (tx, actor) => {
-      const chat = await owned(tx, actor, chatId);
-      await requireConversationMcpSources(tx, actor, chatId);
+      const [chat] = await pipelinedAll(tx.client, [
+        () => owned(tx, actor, chatId),
+        () => requireConversationMcpSources(tx, actor, chatId),
+      ]);
       return chatSchema.parse(chat);
     });
   }
@@ -811,8 +817,10 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
     const chatId = uuidSchema.parse(chatIdInput);
     const compactionId = uuidSchema.parse(compactionIdInput);
     return human(workspaceId, userId, async (tx, actor) => {
-      await owned(tx, actor, chatId);
-      await requireConversationMcpSources(tx, actor, chatId);
+      await pipelinedAll(tx.client, [
+        () => owned(tx, actor, chatId),
+        () => requireConversationMcpSources(tx, actor, chatId),
+      ]);
       const detail = await readCompaction(tx, actor, chatId, compactionId);
       if (!detail) throw new AccessDenied();
       return detail;
@@ -842,8 +850,31 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
     const chatId = uuidSchema.parse(chatIdInput);
     const input = historyQuerySchema.parse(value);
     return human(workspaceId, userId, async (tx, actor) => {
-      const chat = await owned(tx, actor, chatId);
-      await requireConversationMcpSources(tx, actor, chatId);
+      const [chat] = await pipelinedAll(tx.client, [() => owned(tx, actor, chatId), () => warmConversationSources(tx)]);
+      const [, messageRows, gitHubProposal] = await pipelinedAll(tx.client, [
+        () => requireConversationMcpSources(tx, actor, chatId),
+        () =>
+          tx.client.query(
+            `SELECT m.id, m.sequence, m.author_kind AS author, m.created_at AS "createdAt",
+        (SELECT jsonb_agg(CASE p.kind WHEN 'text' THEN jsonb_strip_nulls(jsonb_build_object('kind', p.kind, 'text', p.text, 'content', p.rich_content)) WHEN 'attachment' THEN jsonb_build_object('kind', p.kind, 'attachmentId', to_jsonb(p)->>'attachment_id') WHEN 'file' THEN jsonb_build_object('kind', p.kind, 'fileId', to_jsonb(p)->>'file_id') WHEN 'google-file' THEN jsonb_build_object('kind', p.kind, 'fileId', to_jsonb(p)->'google_file'->>'fileId', 'name', to_jsonb(p)->'google_file'->>'name', 'mimeType', to_jsonb(p)->'google_file'->>'mimeType') WHEN 'request' THEN jsonb_build_object('kind', p.kind, 'requestId', to_jsonb(p)->>'request_id') WHEN 'response' THEN jsonb_build_object('kind', p.kind, 'responseId', to_jsonb(p)->>'response_id') WHEN 'layout' THEN jsonb_build_object('kind', p.kind, 'text', p.text, 'layout', to_jsonb(p)->'layout') WHEN 'layout-action' THEN jsonb_build_object('kind', p.kind, 'action', to_jsonb(p)->'layout_action') WHEN 'skill' THEN ${skillReference} WHEN 'skill-use' THEN ${skillReference} ${compactionParts(tx)} ELSE jsonb_build_object('kind', p.kind, 'approvalId', to_jsonb(p)->>'approval_id') END ORDER BY p.ordinal) FROM ${table(tx, 'tf_conversation_parts')} p WHERE p.message_id = m.id) AS parts,
+        CASE WHEN t.id IS NULL THEN NULL ELSE jsonb_strip_nulls(jsonb_build_object('id', t.id, 'status', t.status, 'generation', t.generation, 'epoch', t.attempt_epoch, 'errorCode', t.error_code, 'mode', CASE WHEN (to_jsonb(t)->>'planning_mode')::boolean THEN 'plan' END, 'stats', ${turnStats}${tx.commonVersion >= turnPlanConnectionVersion ? `, 'planSwitch', ${planSwitch(tx)}` : ''})) END AS turn
+        ${tx.commonVersion >= followUpsVersion ? `,(SELECT jsonb_build_object('id', f.id, 'instruction', f.instruction, 'requestedAt', to_char(f.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) FROM ${table(tx, 'tf_follow_ups')} f WHERE f.fired_message_id = m.id) AS "followUp"` : ''}
+        ,(SELECT st.id FROM ${table(tx, 'tf_conversation_results')} r JOIN ${table(tx, 'tf_conversation_turns')} st ON st.id = r.turn_id WHERE r.message_id = m.id AND st.status = 'cancelled' AND m.author_kind = 'assistant') AS "stoppedTurnId"
+        ,${turnSequenceColumn(tx)} AS "turnSequence"
+        FROM ${table(tx, 'tf_conversation_messages')} m LEFT JOIN ${table(tx, 'tf_conversation_turns')} t ON t.source_message_id = m.id
+        WHERE m.conversation_id = $1 AND ($2::integer IS NULL OR m.sequence < $2) ORDER BY m.sequence DESC LIMIT 51`,
+            [
+              chatId,
+              input.before ?? null,
+              ...(tx.commonVersion >= turnPlanConnectionVersion ? [actor.membershipId] : []),
+            ],
+          ),
+        () =>
+          tx.client.query(
+            `SELECT 1 FROM ${table(tx, 'tf_conversation_tool_calls')} c JOIN ${table(tx, 'tf_conversation_turns')} t ON t.id = c.turn_id WHERE t.conversation_id = $1 AND c.tool = 'github.personal.propose' LIMIT 1`,
+            [chatId],
+          ),
+      ]);
       const rows = z
         .array(
           messageSchema.extend({
@@ -852,25 +883,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
             turnSequence: z.number().int().positive().nullable(),
           }),
         )
-        .parse(
-          (
-            await tx.client.query(
-              `SELECT m.id, m.sequence, m.author_kind AS author, m.created_at AS "createdAt",
-        (SELECT jsonb_agg(CASE p.kind WHEN 'text' THEN jsonb_strip_nulls(jsonb_build_object('kind', p.kind, 'text', p.text, 'content', p.rich_content)) WHEN 'attachment' THEN jsonb_build_object('kind', p.kind, 'attachmentId', to_jsonb(p)->>'attachment_id') WHEN 'file' THEN jsonb_build_object('kind', p.kind, 'fileId', to_jsonb(p)->>'file_id') WHEN 'google-file' THEN jsonb_build_object('kind', p.kind, 'fileId', to_jsonb(p)->'google_file'->>'fileId', 'name', to_jsonb(p)->'google_file'->>'name', 'mimeType', to_jsonb(p)->'google_file'->>'mimeType') WHEN 'request' THEN jsonb_build_object('kind', p.kind, 'requestId', to_jsonb(p)->>'request_id') WHEN 'response' THEN jsonb_build_object('kind', p.kind, 'responseId', to_jsonb(p)->>'response_id') WHEN 'layout' THEN jsonb_build_object('kind', p.kind, 'text', p.text, 'layout', to_jsonb(p)->'layout') WHEN 'layout-action' THEN jsonb_build_object('kind', p.kind, 'action', to_jsonb(p)->'layout_action') WHEN 'skill' THEN ${skillReference} WHEN 'skill-use' THEN ${skillReference} ${compactionParts(tx)} ELSE jsonb_build_object('kind', p.kind, 'approvalId', to_jsonb(p)->>'approval_id') END ORDER BY p.ordinal) FROM ${table(tx, 'tf_conversation_parts')} p WHERE p.message_id = m.id) AS parts,
-        CASE WHEN t.id IS NULL THEN NULL ELSE jsonb_strip_nulls(jsonb_build_object('id', t.id, 'status', t.status, 'generation', t.generation, 'epoch', t.attempt_epoch, 'errorCode', t.error_code, 'mode', CASE WHEN (to_jsonb(t)->>'planning_mode')::boolean THEN 'plan' END, 'stats', ${turnStats}${tx.commonVersion >= turnPlanConnectionVersion ? `, 'planSwitch', ${planSwitch(tx)}` : ''})) END AS turn
-        ${tx.commonVersion >= followUpsVersion ? `,(SELECT jsonb_build_object('id', f.id, 'instruction', f.instruction, 'requestedAt', to_char(f.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) FROM ${table(tx, 'tf_follow_ups')} f WHERE f.fired_message_id = m.id) AS "followUp"` : ''}
-        ,(SELECT st.id FROM ${table(tx, 'tf_conversation_results')} r JOIN ${table(tx, 'tf_conversation_turns')} st ON st.id = r.turn_id WHERE r.message_id = m.id AND st.status = 'cancelled' AND m.author_kind = 'assistant') AS "stoppedTurnId"
-        ,${turnSequenceColumn(tx)} AS "turnSequence"
-        FROM ${table(tx, 'tf_conversation_messages')} m LEFT JOIN ${table(tx, 'tf_conversation_turns')} t ON t.source_message_id = m.id
-        WHERE m.conversation_id = $1 AND ($2::integer IS NULL OR m.sequence < $2) ORDER BY m.sequence DESC LIMIT 51`,
-              [
-                chatId,
-                input.before ?? null,
-                ...(tx.commonVersion >= turnPlanConnectionVersion ? [actor.membershipId] : []),
-              ],
-            )
-          ).rows,
-        );
+        .parse(messageRows.rows);
       const messages = transcriptOrder(rows.slice(0, 50)).map(({ stoppedTurnId, turnSequence, ...row }) => ({
         ...row,
         parts:
@@ -883,25 +896,40 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
         ...(stoppedTurnId ? { stoppedTurnId } : {}),
         ...(turnSequence ? { turnSequence } : {}),
       }));
-      const calendar = await calendarResultsForHistory(
-        tx,
-        actor,
-        chatId,
-        messages.map(message => message.id),
-      );
-      for (const message of messages) message.calendarResults = calendar.get(message.id) ?? [];
-      const origins = await generatedMessageSources(
-        tx,
-        chatId,
-        messages.map(message => message.id),
-      );
-      const results = new Map<string, unknown>(
-        (
-          await tx.client.query(
+      const googleRead = `EXISTS (
+        SELECT 1 FROM ${table(tx, 'tf_conversation_tool_calls')} gc JOIN ${table(tx, 'tf_conversation_turns')} gt ON gt.id=gc.turn_id
+        WHERE gt.conversation_id=$2 AND gc.tool='google.read' AND gt.accepted_sequence<=(SELECT accepted_sequence FROM ${table(tx, 'tf_conversation_turns')} WHERE id=c.turn_id)
+       )`;
+      const googleSafeActivity = `, CASE WHEN ${googleRead} THEN NULL ELSE c.activity END AS activity, c.activity AS stored_activity${
+        tx.commonVersion >= 23 ? `, CASE WHEN ${googleRead} THEN NULL ELSE c.narration END AS narration` : ''
+      }`;
+      const messageIds = messages.map(message => message.id);
+      const turnIds = messages.flatMap(message => (message.turn ? [message.turn.id] : []));
+      const [calendar, origins, resultRows, toolRows] = await pipelinedAll(tx.client, [
+        () => calendarResultsForHistory(tx, actor, chatId, messageIds),
+        () => generatedMessageSources(tx, chatId, messageIds),
+        () =>
+          tx.client.query(
             `SELECT message_id, sources FROM ${table(tx, 'tf_conversation_results')} WHERE message_id=ANY($1::uuid[])`,
-            [messages.map(message => message.id)],
-          )
-        ).rows.map(row => {
+            [messageIds],
+          ),
+        async () =>
+          turnIds.length
+            ? (
+                await tx.client.query(
+                  `SELECT c.turn_id, c.id, c.tool, c.status${googleSafeActivity}, s.call, s.output, s.sources, g.id AS google_proposal_id, d.id AS row_draft_id FROM ${table(tx, 'tf_conversation_tool_calls')} c LEFT JOIN ${table(tx, 'tf_conversation_execution_steps')} s ON s.call_id=c.id AND s.turn_id=c.turn_id
+        LEFT JOIN ${table(tx, 'tf_google_proposals')} g ON c.tool='google.propose' AND c.status='completed' AND g.command_id=c.id AND g.membership_id=$3 AND g.user_id=$4
+        LEFT JOIN ${table(tx, 'tf_chat_authoring_drafts')} d ON c.tool IN ('rows.create','rows.create.batch','rows.update','rows.update.batch','rows.delete') AND c.status='completed' AND d.id=c.id AND d.proposal->>'kind'='row' AND d.membership_id=$3 AND d.user_id=$4
+          AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_chat_authoring_decisions')} dc WHERE dc.draft_id=d.id AND dc.outcome->>'kind'='unavailable')
+        WHERE c.turn_id = ANY($1::uuid[]) AND c.conversation_id=$2 ORDER BY c.created_at, c.sequence, c.id`,
+                  [turnIds, chatId, actor.membershipId, actor.userId],
+                )
+              ).rows
+            : [],
+      ]);
+      for (const message of messages) message.calendarResults = calendar.get(message.id) ?? [];
+      const results = new Map<string, unknown>(
+        resultRows.rows.map(row => {
           const retained = sourceDependenciesSchema.safeParse(row.sources);
           const generated = origins.get(row.message_id);
           return [
@@ -959,33 +987,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
       );
       await conceal(hiddenReply, true, sources => requireWorkflowSources(tx, actor, sources));
       if (chat.projectId) await conceal(hiddenReply, true, sources => requireResultSources(tx, actor, chatId, sources));
-      let hasGitHubProposals = false;
-      hasGitHubProposals = !!(
-        await tx.client.query(
-          `SELECT 1 FROM ${table(tx, 'tf_conversation_tool_calls')} c JOIN ${table(tx, 'tf_conversation_turns')} t ON t.id = c.turn_id WHERE t.conversation_id = $1 AND c.tool = 'github.personal.propose' LIMIT 1`,
-          [chatId],
-        )
-      ).rowCount;
-      const googleRead = `EXISTS (
-        SELECT 1 FROM ${table(tx, 'tf_conversation_tool_calls')} gc JOIN ${table(tx, 'tf_conversation_turns')} gt ON gt.id=gc.turn_id
-        WHERE gt.conversation_id=$2 AND gc.tool='google.read' AND gt.accepted_sequence<=(SELECT accepted_sequence FROM ${table(tx, 'tf_conversation_turns')} WHERE id=c.turn_id)
-       )`;
-      const googleSafeActivity = `, CASE WHEN ${googleRead} THEN NULL ELSE c.activity END AS activity, c.activity AS stored_activity${
-        tx.commonVersion >= 23 ? `, CASE WHEN ${googleRead} THEN NULL ELSE c.narration END AS narration` : ''
-      }`;
-      const turnIds = messages.flatMap(message => (message.turn ? [message.turn.id] : []));
-      const toolRows = turnIds.length
-        ? (
-            await tx.client.query(
-              `SELECT c.turn_id, c.id, c.tool, c.status${googleSafeActivity}, s.call, s.output, s.sources, g.id AS google_proposal_id, d.id AS row_draft_id FROM ${table(tx, 'tf_conversation_tool_calls')} c LEFT JOIN ${table(tx, 'tf_conversation_execution_steps')} s ON s.call_id=c.id AND s.turn_id=c.turn_id
-        LEFT JOIN ${table(tx, 'tf_google_proposals')} g ON c.tool='google.propose' AND c.status='completed' AND g.command_id=c.id AND g.membership_id=$3 AND g.user_id=$4
-        LEFT JOIN ${table(tx, 'tf_chat_authoring_drafts')} d ON c.tool IN ('rows.create','rows.create.batch','rows.update','rows.update.batch','rows.delete') AND c.status='completed' AND d.id=c.id AND d.proposal->>'kind'='row' AND d.membership_id=$3 AND d.user_id=$4
-          AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_chat_authoring_decisions')} dc WHERE dc.draft_id=d.id AND dc.outcome->>'kind'='unavailable')
-        WHERE c.turn_id = ANY($1::uuid[]) AND c.conversation_id=$2 ORDER BY c.created_at, c.sequence, c.id`,
-              [turnIds, chatId, actor.membershipId, actor.userId],
-            )
-          ).rows
-        : [];
+      const hasGitHubProposals = !!gitHubProposal.rowCount;
       const toolsByTurn = new Map<string, typeof toolRows>();
       for (const row of toolRows) {
         const turn = toolsByTurn.get(row.turn_id);
@@ -1163,19 +1165,21 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
       })
       .parse(value);
     return human(workspaceId, userId, async (tx, actor) => {
-      const chat = await owned(tx, actor, uuidSchema.parse(chatId));
-      await requireConversationMcpSources(tx, actor, chatId);
-      const row = (
-        await tx.client.query(
-          `SELECT t.generation,t.attempt_epoch,t.source_message_id,to_jsonb(t)->'streamed' AS streamed,s.sources,s.output,
+      const [chat, , turn] = await pipelinedAll(tx.client, [
+        () => owned(tx, actor, uuidSchema.parse(chatId)),
+        () => requireConversationMcpSources(tx, actor, chatId),
+        () =>
+          tx.client.query(
+            `SELECT t.generation,t.attempt_epoch,t.source_message_id,to_jsonb(t)->'streamed' AS streamed,s.sources,s.output,
             (SELECT jsonb_agg(m.sources) FROM ${table(tx, 'tf_conversation_model_sources')} m
              WHERE m.turn_id=t.id AND m.epoch=$4) AS model_sources
            FROM ${table(tx, 'tf_conversation_turns')} t
            LEFT JOIN ${table(tx, 'tf_conversation_execution_steps')} s ON s.turn_id=t.id AND s.call_id=$3
            WHERE t.id=$1 AND t.conversation_id=$2`,
-          [input.turnId, chatId, input.id ?? null, input.epoch],
-        )
-      ).rows[0];
+            [input.turnId, chatId, input.id ?? null, input.epoch],
+          ),
+      ]);
+      const row = turn.rows[0];
       if (!row || row.generation !== input.generation || row.attempt_epoch !== input.epoch) return false;
       const generated =
         (await generatedMessageSources(tx, chatId, [row.source_message_id])).get(row.source_message_id) ?? [];
@@ -1214,9 +1218,9 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
     const input = listQuerySchema.parse(value);
     return human(workspaceId, userId, async (tx, actor) => {
       if (input.projectId) await requireProjectAccess(tx, actor, input.projectId);
-      const rows = z.array(chatSchema).parse(
-        (
-          await tx.client.query(
+      const [found] = await pipelinedAll(tx.client, [
+        () =>
+          tx.client.query(
             `SELECT ${chatColumns}, project_id AS "projectId",
           ${pinnedColumn(tx, '$2')}
         FROM ${table(tx, 'tf_conversations')} c
@@ -1235,9 +1239,10 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
               input.cursor?.id ?? null,
               input.projectId ?? null,
             ],
-          )
-        ).rows,
-      );
+          ),
+        () => warmConversationSources(tx),
+      ]);
+      const rows = z.array(chatSchema).parse(found.rows);
       const prefetch = await prefetchConversationSources(
         tx,
         rows.slice(0, 50).map(chat => chat.id),
@@ -1264,9 +1269,9 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
       // The MCP-source check runs per chat after the query, so scan pages until 20 pass, bounded to keep the picker fast.
       let after: { activityAt: string; id: string } | null = null;
       for (let page = 0; page < 10 && chats.length < 20; page++) {
-        const rows = z.array(chatDestinationSchema).parse(
-          (
-            await tx.client.query(
+        const [found] = await pipelinedAll(tx.client, [
+          () =>
+            tx.client.query(
               `SELECT c.id, c.title, to_char(c.activity_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "activityAt",
             c.project_id AS "projectId", p.name AS "projectName"
           FROM ${table(tx, 'tf_conversations')} c LEFT JOIN ${table(tx, 'tf_projects')} p ON p.id = c.project_id
@@ -1278,9 +1283,10 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
             AND ($4::timestamptz IS NULL OR (c.activity_at, c.id) < ($4::timestamptz, $5::uuid))
           ORDER BY c.activity_at DESC, c.id DESC LIMIT 20`,
               [actor.userId, actor.membershipId, query, after?.activityAt ?? null, after?.id ?? null],
-            )
-          ).rows,
-        );
+            ),
+          () => warmConversationSources(tx),
+        ]);
+        const rows = z.array(chatDestinationSchema).parse(found.rows);
         const prefetch = await prefetchConversationSources(
           tx,
           rows.map(chat => chat.id),
@@ -1306,9 +1312,9 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
   async function pinned(workspaceId: string, userId: string) {
     return human(workspaceId, userId, async (tx, actor) => {
       if (!hasPins(tx)) return { chats: [] };
-      const rows = z.array(chatSchema).parse(
-        (
-          await tx.client.query(
+      const [found] = await pipelinedAll(tx.client, [
+        () =>
+          tx.client.query(
             `SELECT ${chatColumns}, c.project_id AS "projectId", true AS pinned
           FROM ${table(tx, 'tf_conversation_pins')} pin
           JOIN ${table(tx, 'tf_conversations')} c ON c.id = pin.conversation_id
@@ -1319,9 +1325,10 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
             AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_slack_default_turns')} s WHERE s.conversation_id = c.id)
           ORDER BY pin.pinned_at DESC, c.id DESC LIMIT ${pinnedLimit}`,
             [actor.userId, actor.membershipId],
-          )
-        ).rows,
-      );
+          ),
+        () => warmConversationSources(tx),
+      ]);
+      const rows = z.array(chatSchema).parse(found.rows);
       const prefetch = await prefetchConversationSources(
         tx,
         rows.map(chat => chat.id),

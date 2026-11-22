@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { qualified, type createWorkspaceRuntime, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
-import { lockAuthorization, resolveActor, type Actor, type AuthorizationTransaction } from '@tulipfarm/access';
+import { type Actor, type AuthorizationTransaction, lockAndResolveActor } from '@tulipfarm/access';
 import { migrationStatusSchema, TableError } from './service-contracts.ts';
 
 export type TableRuntime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
@@ -42,8 +42,7 @@ export function withActor<T>(
   operation: (transaction: TableTransaction, actor: Actor) => Promise<T>,
 ) {
   return runtime.transaction(workspaceId, compatibility, async transaction => {
-    await lockAuthorization(transaction);
-    const actor = await resolveActor(transaction, principal);
+    const actor = await lockAndResolveActor(transaction, principal);
     if (actor.kind === 'agent')
       await transaction.client.query(`SELECT id FROM ${table(transaction, 'tf_agent_runs')} WHERE id=$1 FOR UPDATE`, [
         actor.runId,

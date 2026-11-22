@@ -50,6 +50,7 @@ import {
   sharingSnapshot,
 } from './sharing.ts';
 import { recordRecommendationChange, recommendationsInstalled } from '@tulipfarm/workspace-storage/recommendations';
+import { pipelinedAll, relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
 
 export { FileError } from './contracts.ts';
 export { readableFileSql } from './readable-sql.ts';
@@ -120,11 +121,7 @@ export type FileArrival =
     }
   | { kind: 'import'; source: FileCopySource; load: () => Promise<FileCopyRead> };
 const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, name);
-const installed = async (tx: AuthorizationTransaction, name: string) =>
-  z
-    .object({ relation: z.string().nullable() })
-    .parse((await tx.client.query('SELECT to_regclass($1)::text AS relation', [table(tx, name)])).rows[0]).relation !==
-  null;
+const installed = (tx: AuthorizationTransaction, name: string) => relationInstalled(tx.client, table(tx, name));
 /**
  * Bytes charged to the workspace quota: every Files row, every earlier version of a file, and every live chat attachment.
  * A sent attachment published into Files shares its id with that file and is charged once, through the file.
@@ -133,18 +130,22 @@ const installed = async (tx: AuthorizationTransaction, name: string) =>
  * Callers hold the advisory lock salted 209871 so concurrent checks see each other's writes.
  */
 export async function chargedBytes(tx: AuthorizationTransaction) {
-  const files = await installed(tx, 'tf_files');
-  const attachments = await installed(tx, 'tf_conversation_attachments');
-  const packages = await installed(tx, 'tf_skill_package_objects');
-  const versions = files && (await installed(tx, 'tf_file_versions'));
+  const [files, attachments, packages, fileVersions] = await pipelinedAll(tx.client, [
+    () => installed(tx, 'tf_files'),
+    () => installed(tx, 'tf_conversation_attachments'),
+    () => installed(tx, 'tf_skill_package_objects'),
+    () => installed(tx, 'tf_file_versions'),
+  ]);
+  const versions = files && fileVersions;
   const total = async (sql: string) =>
     z.object({ total: z.coerce.number() }).parse((await tx.client.query(sql)).rows[0]).total;
-  return (
-    (files ? await total(`SELECT COALESCE(sum(size),0) AS total FROM ${table(tx, 'tf_files')}`) : 0) +
+  const totals = await pipelinedAll(tx.client, [
+    async () => (files ? total(`SELECT COALESCE(sum(size),0) AS total FROM ${table(tx, 'tf_files')}`) : 0),
     // The current version is charged through its file row. A version that borrows an attachment's object is charged once,
     // through the attachment, whenever the attachment term below charges it.
-    (versions
-      ? await total(`SELECT COALESCE(sum(v.size),0) AS total FROM ${table(tx, 'tf_file_versions')} v
+    async () =>
+      versions
+        ? total(`SELECT COALESCE(sum(v.size),0) AS total FROM ${table(tx, 'tf_file_versions')} v
       JOIN ${table(tx, 'tf_files')} f ON f.id = v.file_id
       WHERE v.object_key IS DISTINCT FROM f.object_key
       ${
@@ -154,13 +155,16 @@ export async function chargedBytes(tx: AuthorizationTransaction) {
           AND NOT (a.state = 'bound' AND f.creator_membership_id = a.membership_id AND f.sha256 = a.sha256)))`
           : ''
       }`)
-      : 0) +
-    (attachments
-      ? await total(`SELECT COALESCE(sum(a.size),0) AS total FROM ${table(tx, 'tf_conversation_attachments')} a WHERE a.state <> 'abandoned'
+        : 0,
+    async () =>
+      attachments
+        ? total(`SELECT COALESCE(sum(a.size),0) AS total FROM ${table(tx, 'tf_conversation_attachments')} a WHERE a.state <> 'abandoned'
       ${files ? `AND NOT (a.state = 'bound' AND EXISTS (SELECT 1 FROM ${table(tx, 'tf_files')} f WHERE f.id = a.id AND f.creator_membership_id = a.membership_id AND f.sha256 = a.sha256))` : ''}`)
-      : 0) +
-    (packages ? await total(`SELECT COALESCE(sum(size),0) AS total FROM ${table(tx, 'tf_skill_package_objects')}`) : 0)
-  );
+        : 0,
+    async () =>
+      packages ? total(`SELECT COALESCE(sum(size),0) AS total FROM ${table(tx, 'tf_skill_package_objects')}`) : 0,
+  ]);
+  return totals.reduce((sum, value) => sum + value, 0);
 }
 /** Where a file's bytes live. A borrowed object stays in the chat attachment namespace under the attachment's key. */
 const objectPath = (workspaceId: string, item: Pick<FileItem, 'object_key' | 'object_owner'>) =>

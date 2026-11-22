@@ -8,6 +8,7 @@ import {
   type HumanActor,
 } from '@tulipfarm/access';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
+import { relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
 
 const installed = new WeakMap<AuthorizationTransaction, boolean>();
 const visiting = new WeakMap<AuthorizationTransaction, Set<string>>();
@@ -19,11 +20,7 @@ export async function requireSkillFileSources(
   read: (tx: AuthorizationTransaction, actor: HumanActor, fileId: string) => Promise<unknown>,
 ) {
   const table = qualified(tx.schema, 'tf_file_skill_sources');
-  if (!installed.has(tx))
-    installed.set(
-      tx,
-      Boolean((await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [table])).rows[0]?.installed),
-    );
+  if (!installed.has(tx)) installed.set(tx, Boolean(await relationInstalled(tx.client, table)));
   if (!installed.get(tx)) return;
   const row = (await tx.client.query(`SELECT sources FROM ${table} WHERE file_id=$1`, [fileId])).rows[0];
   if (!row) return;

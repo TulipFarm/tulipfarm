@@ -4,10 +4,10 @@ import { denyMcpEgress, requireNoMcpDerived } from '@tulipfarm/access';
 import {
   AccessDenied,
   canAccessAsset,
+  lockAndResolveActor,
   lockAuthorization,
   requireTeamAssignment,
   requirePersistedIssueCall,
-  resolveActor,
   unhandledActor,
   type Actor,
   type AuthorizationTransaction,
@@ -121,8 +121,7 @@ export function createIntegrationService(options: Options) {
       uuidSchema.parse(workspaceId),
       { ...integrationCompatibility, minimum },
       async tx => {
-        await lockAuthorization(tx, mode);
-        return operation(tx, await resolveActor(tx, principal));
+        return operation(tx, await lockAndResolveActor(tx, principal, mode));
       },
     );
   }

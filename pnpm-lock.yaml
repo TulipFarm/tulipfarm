@@ -745,6 +745,9 @@ importers:
       '@tulipfarm/observability':
         specifier: workspace:*
         version: link:../observability
+      '@tulipfarm/workspace-storage':
+        specifier: workspace:*
+        version: link:../workspace-storage
       pg:
         specifier: 8.23.0
         version: 8.23.0

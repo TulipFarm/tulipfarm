@@ -20,6 +20,7 @@ import { matchesSlackSnapshot, sameSlackPublicationText } from '@tulipfarm/slack
 import { requireOwnDefinitionSources } from './draft-sources.ts';
 import { SlackAdmissionDenied, slackReplyFailureNotices } from './slack-rejections.ts';
 import { requireNoMcpDerived } from '@tulipfarm/access';
+import { relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
 
 export const slackRootSchema = z.object({
   id: z.uuid(),
@@ -52,8 +53,7 @@ const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schem
 async function currentKnowledgeRevision(tx: AuthorizationTransaction, dependency: SourceDependency) {
   if (dependency.kind !== 'knowledge-document') return dependency;
   const documents = table(tx, 'tf_knowledge_documents');
-  const installed = (await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [documents])).rows[0]
-    ?.installed;
+  const installed = await relationInstalled(tx.client, documents);
   if (!installed) return dependency;
   const current = z
     .object({ observed_revision_id: z.uuid(), lexical_publication_id: z.uuid() })

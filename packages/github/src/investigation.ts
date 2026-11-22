@@ -1,13 +1,12 @@
 import { z } from 'zod';
 import {
   AccessDenied,
+  type AuthorizationTransaction,
   currentMember,
-  lockAuthorization,
-  resolveHuman,
+  type HumanActor,
+  lockAndResolvePrincipal,
   requireGitHubTaskExecution,
   requireNoMcpDerived,
-  type AuthorizationTransaction,
-  type HumanActor,
 } from '@tulipfarm/access';
 import {
   githubInvestigationPermissionSchema,
@@ -71,8 +70,7 @@ export function createGitHubInvestigation(
       z.uuid().parse(workspaceId),
       { ...commonCompatibility, minimum: 1 },
       async tx => {
-        await lockAuthorization(tx);
-        const actor = typeof principal === 'string' ? await resolveHuman(tx, principal) : principal;
+        const actor = await lockAndResolvePrincipal(tx, principal);
         await currentMember(tx, actor);
         await requireGitHubOrigin(tx, actor, context);
         return action(tx, actor);
