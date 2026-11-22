@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-export const appCss = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
+export const appCss = readFileSync(new URL('../src/app.css', import.meta.url), 'utf8');
 const presetUrl = import.meta.resolve('@tulipfarm/sprout/themes/tulipfarm.css');
 export const preset = readFileSync(new URL(presetUrl), 'utf8');
 const stylesDir = fileURLToPath(new URL('..', presetUrl));

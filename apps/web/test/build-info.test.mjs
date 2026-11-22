@@ -18,6 +18,7 @@ test('local builds and static serving do not require release metadata; release b
   await copyFile(new URL('../vite.config.ts', import.meta.url), join(root, 'vite.config.ts'));
   await mkdir(join(root, 'src/lib'), { recursive: true });
   await copyFile(new URL('../src/lib/api-origin.ts', import.meta.url), join(root, 'src/lib/api-origin.ts'));
+  await copyFile(new URL('../src/lib/sign-in-pages.ts', import.meta.url), join(root, 'src/lib/sign-in-pages.ts'));
   await symlink(fileURLToPath(new URL('../node_modules', import.meta.url)), join(root, 'node_modules'), 'dir');
   await writeFile(join(root, 'package.json'), '{"type":"module"}');
   await writeFile(join(root, 'index.html'), '<script type="module" src="/main.js"></script>');
@@ -76,6 +77,7 @@ test('the HTML preconnects to the credentialed API origin the client uses', asyn
   await copyFile(new URL('../vite.config.ts', import.meta.url), join(root, 'vite.config.ts'));
   await mkdir(join(root, 'src/lib'), { recursive: true });
   await copyFile(new URL('../src/lib/api-origin.ts', import.meta.url), join(root, 'src/lib/api-origin.ts'));
+  await copyFile(new URL('../src/lib/sign-in-pages.ts', import.meta.url), join(root, 'src/lib/sign-in-pages.ts'));
   await symlink(fileURLToPath(new URL('../node_modules', import.meta.url)), join(root, 'node_modules'), 'dir');
   await writeFile(join(root, 'package.json'), '{"type":"module"}');
   await writeFile(join(root, 'index.html'), '<head></head><script type="module" src="/main.js"></script>');

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { test } from 'node:test';
-import { appCss, appTokens, preset, sproutDefines } from './sprout-theme.ts';
+import { appTokens, preset, sproutDefines } from './sprout-theme.ts';
 
 // Third-party brand marks keep their owners' colors.
 const ownColors = new Set([
@@ -13,7 +13,7 @@ const ownColors = new Set([
 
 test('the app loads Sprout’s tulipfarm theme on the document root', () => {
   assert.match(
-    appCss,
+    readFileSync(new URL('../src/index.css', import.meta.url), 'utf8'),
     /@import '@tulipfarm\/sprout\/styles\.css';\n@import '@tulipfarm\/sprout\/themes\/tulipfarm\.css';/,
   );
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');

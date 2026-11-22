@@ -31,6 +31,7 @@ import {
 import { devAutoSignIn } from '@/lib/dev-auto-sign-in';
 import { forgetSession } from '@/lib/last-workspace';
 import { loadSignedInSession, requireProfile } from '@/lib/profile-guard';
+import { isSignInPage } from '@/lib/sign-in-pages';
 import { loadSessionLayer, useSessionLayer } from '@/lib/session-layer';
 import { pendingInvitationDestination } from '@/lib/pending-invitation';
 import { Spinner } from '@tulipfarm/sprout/spinner';
@@ -359,7 +360,12 @@ function RouteErrorPage({ error }: ErrorComponentProps) {
   );
 }
 
-const rootRoute = createRootRoute({ component: SessionLayout, notFoundComponent: NotFoundPage });
+const rootRoute = createRootRoute({
+  component: SessionLayout,
+  notFoundComponent: NotFoundPage,
+  // Sign-in pages first load a smaller stylesheet (vite.config.ts); other pages need the full one.
+  beforeLoad: ({ location }) => (isSignInPage(location.pathname) ? undefined : globalThis.window?.__tfStyles?.()),
+});
 const githubCallbackRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/github/callback',

@@ -14,6 +14,20 @@ const optionsSchema = z.object({
 });
 const PublicQueryContext = createContext<QueryClient | null>(null);
 
+declare global {
+  interface Window {
+    /** The sign-in options request the HTML starts on sign-in paths (vite.config.ts earlyRequests). */
+    __tfAuthOptions?: Promise<Response>;
+  }
+}
+
+/** The early request, once: later fetches, such as a retry, go to the network. */
+function takeEarlyOptions() {
+  const early = globalThis.window?.__tfAuthOptions;
+  delete globalThis.window?.__tfAuthOptions;
+  return early?.catch(() => undefined);
+}
+
 export function PublicAuthQueryProvider({ children }: { children: ReactNode }) {
   const [client] = useState(() => new QueryClient());
   useEffect(() => {
@@ -34,11 +48,14 @@ export function authOptionsQuery() {
     networkMode: 'always',
     queryFn: async ({ signal }) => {
       const deadline = AbortSignal.any([signal, AbortSignal.timeout(10_000)]);
-      const response = await fetch(`${apiOrigin}/v1/auth/options`, {
-        signal: deadline,
-        credentials: 'omit',
-        cache: 'no-store',
-      });
+      const early = await takeEarlyOptions();
+      const response =
+        early ??
+        (await fetch(`${apiOrigin}/v1/auth/options`, {
+          signal: deadline,
+          credentials: 'omit',
+          cache: 'no-store',
+        }));
       if (!response.ok) throw new Error('Options unavailable');
       const options = optionsSchema.parse(await response.json());
       deadline.throwIfAborted();

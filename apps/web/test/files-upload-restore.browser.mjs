@@ -475,7 +475,7 @@ test(
         'narrow screens move every action into one menu',
       );
       const content = await page.getByRole('region', { name: 'File content' }).boundingBox();
-      // The page scroller keeps a thin scrollbar gutter since cloud b774750f (src/index.css:193), so the full width is its client width.
+      // The page scroller keeps a thin scrollbar gutter since cloud b774750f (src/app.css), so the full width is its client width.
       const scroller = await page
         .locator('[data-slot=page-content]')
         .evaluate(element => element.parentElement.clientWidth);
