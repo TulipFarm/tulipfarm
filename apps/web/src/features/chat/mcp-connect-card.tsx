@@ -13,7 +13,7 @@ import { useMcpIntegration, useMcpIntegrations } from '@/features/workspace-mcp/
 import { markMcpConnected, takeMcpConnected } from '@/features/workspace-mcp/sign-in';
 import type { McpApi } from '@/features/workspace-mcp/api';
 import type { Capabilities, Integration } from '@/features/workspace-mcp/contracts';
-import { mcpPagePrefix } from '@/features/integrations/mcp-apps';
+import { mcpPagePrefix } from '@/features/integrations/mcp-page';
 import { useFlag } from '@/lib/feature-flags';
 import type { IntegrationCardView } from './conversation-api';
 

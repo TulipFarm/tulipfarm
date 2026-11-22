@@ -22,7 +22,8 @@ import {
 } from '@/features/integrations/catalog';
 import { connector } from '@/features/integrations/connect';
 import { actionFor, tabsFor } from '@/features/integrations/integration-state';
-import { mcpAppById, mcpAppForEndpoint, mcpApps, mcpPagePrefix, type McpApp } from '@/features/integrations/mcp-apps';
+import { mcpAppById, mcpAppForEndpoint, mcpApps, type McpApp } from '@/features/integrations/mcp-apps';
+import { mcpPagePrefix } from '@/features/integrations/mcp-page';
 import { useIntegrationChanges } from '@/features/integrations/queries';
 import {
   notSetUp,

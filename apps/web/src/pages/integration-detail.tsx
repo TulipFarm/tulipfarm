@@ -50,7 +50,8 @@ import { SlackAccount, SlackIntegration, SlackKnowledge } from '@/features/integ
 import { SlackBotChannels } from '@/features/integrations/slack-channels';
 import { SlackChannelContentPrototype } from '@/features/integrations/slack-channel-content-prototype';
 import { statusOf, useIntegrationStatus, type Status } from '@/features/integrations/status';
-import { mcpAppById, mcpPagePrefix } from '@/features/integrations/mcp-apps';
+import { mcpAppById } from '@/features/integrations/mcp-apps';
+import { mcpPagePrefix } from '@/features/integrations/mcp-page';
 import { ToolGroup } from '@/features/integrations/tools-list';
 import { McpAppPage } from '@/features/workspace-mcp/app-page';
 import { WorkspaceRefreshNotice } from '@/features/integrations/workspace-refresh';
