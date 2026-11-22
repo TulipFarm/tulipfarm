@@ -6,6 +6,7 @@ export const auth = () => import('@/pages/auth');
 export const password = () => import('@/pages/password');
 export const onboarding = () => import('@/pages/onboarding');
 export const tables = () => import('@/pages/tables');
+export const tableList = () => import('@/pages/table-list');
 export const agents = () => import('@/pages/agents');
 export const projects = () => import('@/pages/projects');
 export const skills = () => import('@/pages/skills');
