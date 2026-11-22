@@ -4,6 +4,83 @@ import { createServer } from 'vite';
 import { chromium } from 'playwright';
 
 test(
+  'options the page already fetched render on the first paint, once and only for the same URL',
+  { timeout: 90_000 },
+  async () => {
+    const server = await createServer({
+      cacheDir: 'node_modules/.vite-public-query-browser',
+      server: { port: 0 },
+      plugins: [
+        {
+          name: 'public-query-test',
+          configureServer(server) {
+            server.middlewares.use('/public-query-test', async (_request, response) => {
+              response.setHeader('Content-Type', 'text/html');
+              response.end(await server.transformIndexHtml('/public-query-test', '<html><body></body></html>'));
+            });
+          },
+        },
+      ],
+    });
+    await server.listen();
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      const errors = [];
+      page.on('pageerror', error => errors.push(error.message));
+      await page.goto(`${server.resolvedUrls.local[0]}public-query-test`);
+      const result = await page.evaluate(async () => {
+        const { React, createRoot, flushSync, PublicAuthQueryProvider, useAuthOptions, apiOrigin } =
+          await import('/test/public-query-fixture.tsx');
+        const calls = [];
+        window.fetch = async url => {
+          calls.push(new URL(url).pathname);
+          return Response.json({ turnstileSiteKey: 'network-key' });
+        };
+        const early =
+          data =>
+          (url = `${apiOrigin}/v1/auth/options`) => ({
+            url: new URL(url, location.href).href,
+            response: Promise.resolve(Response.json(data)),
+            data,
+          });
+        function Reader() {
+          const read = useAuthOptions();
+          return React.createElement('output', null, read.data?.turnstileSiteKey ?? read.status);
+        }
+        const firstPaint = async seed => {
+          window.__tfAuthOptions = seed;
+          const root = createRoot(document.body.appendChild(document.createElement('div')));
+          flushSync(() => root.render(React.createElement(PublicAuthQueryProvider, null, React.createElement(Reader))));
+          await new Promise(resolve => requestAnimationFrame(resolve));
+          const text = document.querySelector('output')?.textContent;
+          root.unmount();
+          document.body.replaceChildren();
+          return text;
+        };
+        const seeded = await firstPaint(early({ turnstileSiteKey: 'early-key', google: true })());
+        const seededCalls = calls.length;
+        const consumed = window.__tfAuthOptions === undefined;
+        const otherUrl = await firstPaint(
+          early({ turnstileSiteKey: 'early-key' })('https://elsewhere.test/v1/auth/options'),
+        );
+        const invalid = await firstPaint(early({ turnstileSiteKey: 42 })());
+        return { seeded, seededCalls, consumed, otherUrl, invalid };
+      });
+      assert.equal(result.seeded, 'early-key');
+      assert.equal(result.seededCalls, 0);
+      assert.equal(result.consumed, true);
+      assert.equal(result.otherUrl, 'pending', 'Options fetched for another API origin are not used');
+      assert.notEqual(result.invalid, '42', 'Options that fail the schema are not rendered');
+      assert.deepEqual(errors, []);
+    } finally {
+      await browser.close();
+      await server.close();
+    }
+  },
+);
+
+test(
   'public options share a memory-only client without session context or focus reads',
   { timeout: 90_000 },
   async () => {

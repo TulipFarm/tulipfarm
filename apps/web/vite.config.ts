@@ -99,7 +99,9 @@ function earlyRequests(): Plugin {
               `try{window.__tfSession=g('/v1/auth/get-session',{credentials:'include'})}catch(e){}` +
               `var f=${JSON.stringify(files)}[location.pathname.replace(/\\/+$/,'')];if(!f)return;` +
               `f.forEach(function(h){var l=document.createElement('link');l.rel='modulepreload';l.href=h;document.head.appendChild(l)});` +
-              `try{window.__tfAuthOptions=g('/v1/auth/options',{credentials:'omit',cache:'no-store'})}catch(e){}})()`,
+              `try{var a=g('/v1/auth/options',{credentials:'omit',cache:'no-store'});window.__tfAuthOptions=a;` +
+              // The parsed body lets the form render with its sign-in methods on the first paint.
+              `a.response.then(function(r){return r.ok?r.clone().json():null}).then(function(d){a.data=d},function(){})}catch(e){}})()`,
             injectTo: 'head',
           },
         ];
