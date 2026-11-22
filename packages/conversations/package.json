@@ -233,7 +233,7 @@
     "@tulipfarm/memory-keep": "workspace:*",
     "@tulipfarm/memory-postgres": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
-    "@tulipfarm/sprout": "0.19.1",
+    "@tulipfarm/sprout": "0.19.2",
     "@tulipfarm/workspace-storage": "workspace:*",
     "docx": "9.9.0",
     "exceljs": "4.4.0",
