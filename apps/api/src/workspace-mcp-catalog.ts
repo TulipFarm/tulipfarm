@@ -6,6 +6,36 @@ import { McpHttpError } from './workspace-mcp-http.ts';
 import { publicMcpSnapshotSchema, type workspaceMcpCatalogCache } from './workspace-mcp-catalog-cache.ts';
 import { z } from 'zod';
 
+type CatalogEntry = z.infer<typeof publicMcpSnapshotSchema>['entries'][number];
+
+function publicEntry({
+  id,
+  name,
+  title,
+  description,
+  version,
+  endpoint,
+  transport,
+  status,
+  compatibility,
+  authentication,
+  package: pkg,
+}: CatalogEntry) {
+  return {
+    id,
+    name,
+    title,
+    description,
+    version,
+    endpoint,
+    ...(transport ? { transport } : {}),
+    status,
+    compatibility,
+    authentication,
+    ...(pkg ? { package: pkg } : {}),
+  };
+}
+
 export function workspaceMcpCatalog(
   catalog = createRegistryCatalog(),
   cache?: ReturnType<typeof workspaceMcpCatalogCache>,
@@ -13,6 +43,21 @@ export function workspaceMcpCatalog(
   let restored: z.infer<typeof publicMcpSnapshotSchema> | null = null;
   let publishedAt: string | null = null;
   let loaded: Promise<void> | undefined;
+  // Hashing and sorting the whole catalog took about 200 ms per search, so both run once per catalog version.
+  type Index = { key: unknown; snapshotVersion: string; sorted: readonly CatalogEntry[] };
+  let searchIndex: Index | undefined;
+  function indexed(syncedAt: string | null, entries: readonly CatalogEntry[], key: unknown): Index {
+    if (searchIndex && searchIndex.key === key) return searchIndex;
+    // Streams the same bytes as JSON.stringify([syncedAt, entries]) without building the whole string.
+    const hash = createHash('sha256').update(`[${JSON.stringify(syncedAt)},[`);
+    entries.forEach((entry, position) => hash.update(`${position ? ',' : ''}${JSON.stringify(publicEntry(entry))}`));
+    searchIndex = {
+      key,
+      snapshotVersion: hash.update(']]').digest('hex'),
+      sorted: [...entries].sort((a, b) => a.id.localeCompare(b.id)),
+    };
+    return searchIndex;
+  }
   const load = () =>
     (loaded ??= (async () => {
       restored = (await cache?.read()) ?? null;
@@ -26,45 +71,20 @@ export function workspaceMcpCatalog(
       const snapshot = catalog.snapshot();
       // Search only serves the cached copy while it is newer than the live catalog, so drop it once that ends.
       if (restored && snapshot.syncedAt && snapshot.syncedAt >= restored.syncedAt) restored = null;
+      if (searchIndex && searchIndex.key !== restored && searchIndex.key !== snapshot.syncedAt) searchIndex = undefined;
       if (
         snapshot.syncedAt &&
         !snapshot.refreshFailed &&
         !snapshot.refreshInProgress &&
         (!publishedAt || snapshot.syncedAt > publishedAt)
       ) {
-        const publicSnapshot = publicMcpSnapshotSchema.parse({
+        // publish validates the snapshot itself; checking it here too held a second copy of the catalog.
+        await cache?.publish({
           policyVersion: 'latest-usable-v1',
           syncedAt: snapshot.syncedAt,
-          entries: snapshot.entries.map(
-            ({
-              id,
-              name,
-              title,
-              description,
-              version,
-              endpoint,
-              transport,
-              status,
-              compatibility,
-              authentication,
-              package: pkg,
-            }) => ({
-              id,
-              name,
-              title,
-              description,
-              version,
-              endpoint,
-              ...(transport ? { transport } : {}),
-              status,
-              compatibility,
-              authentication,
-              ...(pkg ? { package: pkg } : {}),
-            }),
-          ),
+          entries: snapshot.entries.map(publicEntry),
         });
-        await cache?.publish(publicSnapshot);
-        publishedAt = publicSnapshot.syncedAt;
+        publishedAt = snapshot.syncedAt;
       }
       return {
         refreshFailed: snapshot.refreshFailed,
@@ -78,38 +98,9 @@ export function workspaceMcpCatalog(
     },
     search(search: string, cursor?: string) {
       const live = catalog.snapshot();
-      const snapshot =
-        restored && (!live.syncedAt || restored.syncedAt > live.syncedAt) ? { ...restored, stale: true } : live;
-      const publicEntries = snapshot.entries.map(
-        ({
-          id,
-          name,
-          title,
-          description,
-          version,
-          endpoint,
-          transport,
-          status,
-          compatibility,
-          authentication,
-          package: pkg,
-        }) => ({
-          id,
-          name,
-          title,
-          description,
-          version,
-          endpoint,
-          ...(transport ? { transport } : {}),
-          status,
-          compatibility,
-          authentication,
-          ...(pkg ? { package: pkg } : {}),
-        }),
-      );
-      const snapshotVersion = createHash('sha256')
-        .update(JSON.stringify([snapshot.syncedAt, publicEntries]))
-        .digest('hex');
+      const source = restored && (!live.syncedAt || restored.syncedAt > live.syncedAt) ? restored : null;
+      const snapshot = source ? { ...source, stale: true } : live;
+      const { snapshotVersion, sorted } = indexed(snapshot.syncedAt, snapshot.entries, source ?? snapshot.syncedAt);
       let offset = 0;
       if (cursor) {
         const [revision, query, index, extra] = cursor.split('.');
@@ -125,11 +116,9 @@ export function workspaceMcpCatalog(
         offset = Number(index);
       }
       const words = search.toLowerCase().trim().split(/\s+/).filter(Boolean);
-      const matches = snapshot.entries
-        .filter(entry =>
-          words.every(word => `${entry.name} ${entry.title} ${entry.description}`.toLowerCase().includes(word)),
-        )
-        .sort((a, b) => a.id.localeCompare(b.id));
+      const matches = sorted.filter(entry =>
+        words.every(word => `${entry.name} ${entry.title} ${entry.description}`.toLowerCase().includes(word)),
+      );
       if (offset > matches.length) throw new McpHttpError('invalid-request', 400);
       const entries = matches.slice(offset, offset + 50).map(entry => ({
         id: entry.id,

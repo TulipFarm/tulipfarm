@@ -151,13 +151,14 @@ test('catalog rejects historical cache on restart and replaces it only with a co
 
 test('catalog HTTP adapter keeps a stale snapshot, reports unknown auth, and rejects mismatched cursors', async () => {
   let failed = false;
+  let servers = 55;
   let now = new Date('2026-10-02T00:00:00.000Z');
   const catalog = createRegistryCatalog({
     now: () => now,
     fetcher: async () => {
       if (failed) throw new Error('private-network-diagnostic');
       return Response.json({
-        servers: Array.from({ length: 55 }, (_, index) => ({
+        servers: Array.from({ length: servers }, (_, index) => ({
           server: {
             name: `org.example/server-${index.toString().padStart(2, '0')}`,
             version: '1.0',
@@ -204,6 +205,17 @@ test('catalog HTTP adapter keeps a stale snapshot, reports unknown auth, and rej
   assert.equal(stale.snapshotVersion, first.snapshotVersion);
   assert.deepEqual(stale.entries, first.entries);
   assert.equal(JSON.stringify(stale).includes('private-network-diagnostic'), false);
+  failed = false;
+  servers = 56;
+  now = new Date('2026-10-02T14:00:00.000Z');
+  await adapter.refresh();
+  const changed = adapter.search('example');
+  assert.notEqual(changed.snapshotVersion, first.snapshotVersion);
+  assert.equal(adapter.search('example', changed.nextCursor).entries.length, 6);
+  assert.throws(
+    () => adapter.search('example', first.nextCursor),
+    error => error.code === 'mcp-catalog-changed',
+  );
 });
 
 test('API startup runs actual catalog sync and publishes a restorable public snapshot', async () => {
