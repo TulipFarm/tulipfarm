@@ -1,11 +1,10 @@
 import { z } from 'zod';
 import {
   currentMember,
-  lockAuthorization,
-  resolveHuman,
+  type HumanActor,
+  lockAndResolvePrincipal,
   requireAgentGrant,
   requireTeamMember,
-  type HumanActor,
 } from '@tulipfarm/access';
 import { type AgentStorage, type AgentTransaction } from './store.ts';
 import { agentPermissionSchema } from './saved-contracts.ts';
@@ -21,8 +20,7 @@ export function withHuman<T>(
   operation: (transaction: AgentTransaction & { commonVersion: number }, actor: HumanActor) => Promise<T>,
 ) {
   return runtime.transaction(workspaceId, savedAgentCompatibility, async transaction => {
-    await lockAuthorization(transaction, mode);
-    const actor = typeof user === 'string' ? await resolveHuman(transaction, user) : user;
+    const actor = await lockAndResolvePrincipal(transaction, user, mode);
     await currentMember(transaction, actor);
     return operation(transaction, actor);
   });

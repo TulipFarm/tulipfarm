@@ -9,7 +9,14 @@ import {
 } from '@opentelemetry/sdk-metrics';
 import { fixture, connect } from '../../workspace-storage/test/integration/fixture.mjs';
 import { inTransaction } from '../../workspace-storage/src/provisioning.ts';
-import { lockAuthorization } from '../src/index.ts';
+import { closeTransactionMemos, openTransactionMemos } from '@tulipfarm/workspace-storage/transaction-reads';
+import {
+  forgetMembers,
+  lockAndPrefetchHuman,
+  lockAuthorization,
+  resolveHuman,
+  WorkspaceMembershipDenied,
+} from '../src/index.ts';
 
 // Counts lock acquisitions by mode and outcome, and retried waits, from the metrics the lock records.
 function captureLockMetrics(t) {
@@ -221,5 +228,41 @@ test('a read still waiting when its retry budget runs out fails and is counted a
     );
   } finally {
     await locks.close();
+  }
+});
+
+test('a member read with the lock is reused until this transaction changes memberships', async () => {
+  const setup = await fixture();
+  const workspace = await setup.create();
+  const connection = await connect(setup.login(workspace));
+  try {
+    await inTransaction(connection, async client => {
+      const memos = openTransactionMemos(client);
+      const tx = { client, schema: workspace.names.schema };
+      try {
+        await lockAndPrefetchHuman(tx, 'not-a-member');
+        await lockAndPrefetchHuman(tx, workspace.userId);
+        let queries = 0;
+        const query = client.query;
+        client.query = (...args) => (queries++, query.apply(client, args));
+        assert.deepEqual(await resolveHuman(tx, workspace.userId), {
+          kind: 'human',
+          userId: workspace.userId,
+          membershipId: workspace.membershipId,
+        });
+        assert.equal(queries, 0);
+        await assert.rejects(resolveHuman(tx, 'not-a-member'), WorkspaceMembershipDenied);
+        await client.query(`UPDATE ${workspace.names.schema}.tf_memberships SET removed_at = now() WHERE id = $1`, [
+          workspace.membershipId,
+        ]);
+        forgetMembers(tx);
+        await assert.rejects(resolveHuman(tx, workspace.userId), WorkspaceMembershipDenied);
+      } finally {
+        closeTransactionMemos(client, memos);
+      }
+    });
+  } finally {
+    await connection.end();
+    await setup.close();
   }
 });

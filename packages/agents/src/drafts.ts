@@ -2,16 +2,15 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import {
   AccessDenied,
-  SourceAuthorizationUnavailable,
   canAccessTable,
   currentMember,
-  lockAuthorization,
+  type HumanActor,
+  lockAndResolvePrincipal,
   requireNoMcpDerived,
   requireTablePermission,
-  resolveHuman,
+  SourceAuthorizationUnavailable,
   sourceDependenciesSchema,
   uuidSchema,
-  type HumanActor,
 } from '@tulipfarm/access';
 import { activeGeneration, readableGeneration, GenerationError, identity } from '@tulipfarm/tables/store';
 import { TableError } from '@tulipfarm/tables/service-contracts';
@@ -191,8 +190,7 @@ export function createAuthoringDrafts(
                 [write],
               )
             ).rows[0]?.kind?.startsWith('workflow') === true;
-      await lockAuthorization(tx, exclusive ? 'write' : 'read');
-      const actor = typeof user === 'string' ? await resolveHuman(tx, user) : user;
+      const actor = await lockAndResolvePrincipal(tx, user, exclusive ? 'write' : 'read');
       await currentMember(tx, actor);
       const bound: AgentStorage = {
         transaction: async (workspace, range, action) => {

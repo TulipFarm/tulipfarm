@@ -214,10 +214,18 @@ export function buildApp(
             ...(options.modelCatalog ?? { modelCatalogSnapshot: models.modelCatalogSnapshot }),
             ...(subscriptions && (chatGpt || tokenPlans.claude || tokenPlans.copilot)
               ? {
-                  planModels: async (workspaceId: string, userId: string, provider: PlanProvider) =>
-                    (provider === 'chatgpt' ? chatGpt : tokenPlans[provider])
-                      ? planUsage(workspaceId, provider, await subscriptions.models(workspaceId, userId, provider))
-                      : [],
+                  planModels: async (workspaceId: string, userId: string, providers: readonly PlanProvider[]) => {
+                    const on = providers.filter(provider => (provider === 'chatgpt' ? chatGpt : tokenPlans[provider]));
+                    const models = on.length ? await subscriptions.modelsFor(workspaceId, userId, on) : new Map();
+                    return new Map(
+                      await Promise.all(
+                        on.map(
+                          async provider =>
+                            [provider, await planUsage(workspaceId, provider, models.get(provider) ?? [])] as const,
+                        ),
+                      ),
+                    );
+                  },
                 }
               : {}),
           });

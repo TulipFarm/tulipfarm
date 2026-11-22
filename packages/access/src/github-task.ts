@@ -8,13 +8,12 @@ import {
   type AuthorizationTransaction,
   type HumanActor,
 } from './index.ts';
+import { relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
 
 const table = (tx: AuthorizationTransaction, name: string) =>
   `${escapeIdentifier(tx.schema)}.${escapeIdentifier(name)}`;
 export async function githubTaskContext(tx: AuthorizationTransaction, taskId: string) {
-  const installed = (
-    await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [table(tx, 'tf_github_task_selection')])
-  ).rows[0]?.installed;
+  const installed = await relationInstalled(tx.client, table(tx, 'tf_github_task_selection'));
   if (!installed) return { generation: 0, sequence: 0 };
   return z
     .object({ generation: z.number(), sequence: z.number() })

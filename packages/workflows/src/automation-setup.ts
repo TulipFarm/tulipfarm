@@ -69,10 +69,16 @@ export function createAutomationSetup(runtime: WorkflowRuntime, verification: Au
     userId: string,
     operation: (tx: WorkflowTransaction, actor: HumanActor) => Promise<T>,
   ) {
-    return workflowTransaction(runtime, workspaceId, async tx => {
-      if (tx.commonVersion < 1) throw new StorageUnavailableError('incompatible_version');
-      return operation(tx, await workflowMember(tx, userId));
-    });
+    return workflowTransaction(
+      runtime,
+      workspaceId,
+      async tx => {
+        if (tx.commonVersion < 1) throw new StorageUnavailableError('incompatible_version');
+        return operation(tx, await workflowMember(tx, userId));
+      },
+      'write',
+      userId,
+    );
   }
   async function source(tx: WorkflowTransaction, actor: HumanActor, setup: AutomationSetup, sharing = false) {
     const found = (

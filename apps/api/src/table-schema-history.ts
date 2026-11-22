@@ -12,6 +12,7 @@ import {
 import { pageArchiveVersion, pageRestoreVersion, type TableProposalOptions } from '@tulipfarm/tables/proposals';
 import { summarizeSchemaChange } from '@tulipfarm/tables/schema-summary';
 import { schemaRevertLinks } from './table-schema-revert.ts';
+import { pipelinedAll } from '@tulipfarm/workspace-storage/runtime';
 
 const phaseSchema = z.enum(['publishing', 'copying', 'reconciling', 'completed', 'blocked']);
 /** Why an entry's definition is not shown. Null when the definition is shown. */
@@ -184,8 +185,10 @@ export function createTableSchemaHistory(
   return {
     history(workspaceId: string, userId: string, tableId: string, query: { after?: string; limit: number }) {
       return authorized(workspaceId, userId, tableId, async (tx, actor) => {
-        const rows = await entries(tx, actor, tableId, { ...query, limit: query.limit + 1 });
-        const links = await schemaRevertLinks(tx, actor, tableId);
+        const [rows, links] = await pipelinedAll(tx.client, [
+          () => entries(tx, actor, tableId, { ...query, limit: query.limit + 1 }),
+          () => schemaRevertLinks(tx, actor, tableId),
+        ]);
         const page = rows.slice(0, query.limit).map(entry => ({
           ...entry,
           revert: links.revert(entry.id),
@@ -216,30 +219,35 @@ export function createTableSchemaHistory(
                 revertedChanges: links.revertedChanges(latest.id),
               }
             : null;
-        const applied = z
-          .object({ revision: z.string(), definition: definitionSchema, activated_at: z.date().nullable() })
-          .nullable()
-          .parse(
-            (
+        const [applied, create, update, remove, memberTable, tasks, archived] = await pipelinedAll(tx.client, [
+          async () =>
+            z
+              .object({ revision: z.string(), definition: definitionSchema, activated_at: z.date().nullable() })
+              .nullable()
+              .parse(
+                (
+                  await tx.client.query(
+                    `SELECT revision,definition,activated_at FROM "${tx.schema}".tf_table_generations WHERE table_id=$1 AND state='active'`,
+                    [tableId],
+                  )
+                ).rows[0] ?? null,
+              ),
+          () => canAccessTable(tx, actor, tableId, 'table.row.create'),
+          () => canAccessTable(tx, actor, tableId, 'table.row.update'),
+          () => canAccessTable(tx, actor, tableId, 'table.row.delete'),
+          () => workspaceMembersTable(tx),
+          () => tasksTable(tx),
+          async () =>
+            !!(
               await tx.client.query(
-                `SELECT revision,definition,activated_at FROM "${tx.schema}".tf_table_generations WHERE table_id=$1 AND state='active'`,
+                `SELECT 1 FROM "${tx.schema}".tf_table_catalog WHERE id=$1 AND archived_at IS NOT NULL`,
                 [tableId],
               )
-            ).rows[0] ?? null,
-          );
-        const rowPermissions = {
-          create: await canAccessTable(tx, actor, tableId, 'table.row.create'),
-          update: await canAccessTable(tx, actor, tableId, 'table.row.update'),
-          delete: await canAccessTable(tx, actor, tableId, 'table.row.delete'),
-        };
-        const memberTableId = (await workspaceMembersTable(tx))?.coreDefinition.id;
-        const tasksTableId = (await tasksTable(tx))?.coreDefinition.id;
-        const archived = !!(
-          await tx.client.query(
-            `SELECT 1 FROM "${tx.schema}".tf_table_catalog WHERE id=$1 AND archived_at IS NOT NULL`,
-            [tableId],
-          )
-        ).rowCount;
+            ).rowCount,
+        ]);
+        const rowPermissions = { create, update, delete: remove };
+        const memberTableId = memberTable?.coreDefinition.id;
+        const tasksTableId = tasks?.coreDefinition.id;
         const manages =
           applied !== null &&
           tableId !== memberTableId &&

@@ -13,6 +13,7 @@ import { KnowledgeParseError, type KnowledgeParseResult } from '../parser.ts';
 import { knowledgeGapLimit, knowledgeLocationOf, type KnowledgeGaps } from '../contracts.ts';
 import { knowledgeSettingsUpdateSchema, type KnowledgeSettings } from '../settings-contracts.ts';
 import type { KnowledgeOptions } from './store.ts';
+import { relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
 
 type Runtime = KnowledgeOptions['runtime'];
 type Tx = AuthorizationTransaction & { commonVersion?: number };
@@ -63,11 +64,7 @@ const digest = (value: string) => createHash('sha256').update(value).digest('hex
 
 export async function mediaInstalled(tx: Tx) {
   if (typeof tx.commonVersion === 'number') return tx.commonVersion >= mediaStorageVersion;
-  return z
-    .object({ installed: z.boolean() })
-    .parse(
-      (await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [table(tx, 'coverage_gaps')])).rows[0],
-    ).installed;
+  return await relationInstalled(tx.client, table(tx, 'coverage_gaps'));
 }
 
 export async function mediaRecognitionEnabled(tx: Tx) {

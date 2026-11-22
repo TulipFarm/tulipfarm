@@ -24,6 +24,14 @@ export {
   workspaceNames,
 } from './names.ts';
 export { afterCommit, afterCommitMark } from './transactions.ts';
+export {
+  forgetInTransaction,
+  knownInTransaction,
+  memoizeInTransaction,
+  pipelinedAll,
+  relationInstalled,
+  rememberInTransaction,
+} from './transaction-reads.ts';
 export type { WorkspaceId } from './names.ts';
 export type { SqlClient } from './transactions.ts';
 

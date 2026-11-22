@@ -1,20 +1,19 @@
 import { z } from 'zod';
 import {
   AccessDenied,
+  type Actor,
   actorSchema,
+  type AuthorizationTransaction,
   currentMember,
   denyMcpEgress,
-  lockAuthorization,
+  type HumanActor,
+  lockAndResolvePrincipal,
   protectedSourceClosure,
   requireNoMcpDerived,
   requireProtectedSource,
-  resolveHuman,
   sourceDependenciesSchema,
-  uuidSchema,
-  type Actor,
-  type AuthorizationTransaction,
-  type HumanActor,
   type SourceDependency,
+  uuidSchema,
 } from '@tulipfarm/access';
 import { requireReadableFile } from '@tulipfarm/files';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
@@ -22,6 +21,7 @@ import { requireAccess, type AccessDecision, type Authorizer } from '@tulipfarm/
 import { KnowledgeError, originalSchema } from '../internal/contracts.ts';
 import type { ExternalSource, KnowledgeDocument, KnowledgeOptions } from '../internal/store.ts';
 import { requireConversationReader, requireConversationRevision } from './conversation.ts';
+import { relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
 
 type Transaction = AuthorizationTransaction & { workspaceId: string; commonVersion: number };
 type Dependency = Extract<SourceDependency, { kind: 'knowledge-document' }>;
@@ -67,8 +67,11 @@ export function admitKnowledgePrincipal(
   mode: 'read' | 'write',
 ) {
   return decision(async () => {
-    await lockAuthorization(tx, mode);
-    const actor = typeof actorInput === 'string' ? await resolveHuman(tx, actorInput) : actorSchema.parse(actorInput);
+    const actor = await lockAndResolvePrincipal(
+      tx,
+      typeof actorInput === 'string' ? actorInput : actorSchema.parse(actorInput),
+      mode,
+    );
     if (actor.kind !== 'human') throw new AccessDenied();
     await currentMember(tx, actor);
     return actor;
@@ -77,12 +80,7 @@ export function admitKnowledgePrincipal(
 
 export async function requireTaskRun(tx: AuthorizationTransaction, actor: HumanActor, runId: string) {
   const runs = qualified(tx.schema, 'tf_agent_task_runs');
-  if (
-    !z
-      .object({ installed: z.boolean() })
-      .parse((await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [runs])).rows[0]).installed
-  )
-    throw new AccessDenied();
+  if (!(await relationInstalled(tx.client, runs))) throw new AccessDenied();
   const bound = await tx.client.query(
     `SELECT 1 FROM ${runs} b JOIN ${qualified(tx.schema, 'tf_agent_tasks')} t ON t.id=b.task_id AND t.generation=b.generation
     WHERE b.run_id=$1 AND t.owner_membership_id=$2 AND t.owner_user_id=$3`,

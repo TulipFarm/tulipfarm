@@ -4,6 +4,8 @@ import {
   AccessDenied,
   canAccessAsset,
   currentMember,
+  type HumanActor,
+  lockAndResolveHuman,
   lockAuthorization,
   protectedSourceClosure,
   requireCurrentActor,
@@ -11,7 +13,6 @@ import {
   requireTeamMember,
   resolveHuman,
   sourceDependenciesSchema,
-  type HumanActor,
 } from '@tulipfarm/access';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
 import { withMaintenanceTransaction } from '@tulipfarm/workspace-storage/provisioning';
@@ -942,8 +943,7 @@ export function createSlackActions(options: Options) {
       })
       .parse(value);
     return options.runtime.transaction(workspaceId, range, async tx => {
-      await lockAuthorization(tx, 'write');
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId, 'write');
       const installation = z
         .object({ id: z.uuid(), generation: z.number() })
         .optional()

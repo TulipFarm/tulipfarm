@@ -1,6 +1,7 @@
 import type { Client, PoolClient } from 'pg';
 import { z } from 'zod';
 import { observeChatDetail } from '@tulipfarm/observability';
+import { closeTransactionMemos, openTransactionMemos, pipelined } from './transaction-reads.ts';
 
 export type SqlClient = Pick<Client, 'query'>;
 export const transactionSettingsSchema = z.object({
@@ -70,28 +71,6 @@ export async function inTransaction<T>(
   return result;
 }
 
-/**
- * Sends every query `issue` starts without waiting for each reply, so they cost one network round trip, and settles
- * them all. Postgres still runs them one after another, each in its own statement. `issue` must start its queries
- * without awaiting them.
- */
-export async function pipelined(client: SqlClient, issue: () => Promise<unknown>[]) {
-  const connection = client as { pipeline?: boolean | undefined };
-  const previous = connection.pipeline;
-  connection.pipeline = true;
-  let pending: Promise<unknown>[];
-  try {
-    pending = issue();
-  } catch (error) {
-    connection.pipeline = previous;
-    throw error;
-  }
-  // pg keeps handing out replies only while the flag is on, so it stays on until the last one arrives.
-  const settled = await Promise.allSettled(pending);
-  connection.pipeline = previous;
-  return settled;
-}
-
 /** The value of a settled query, or its error. */
 export function settledValue<T>(result: PromiseSettledResult<unknown> | undefined): T {
   if (!result) throw new Error('Missing pipelined query result');
@@ -113,6 +92,7 @@ export async function inPipelinedTransaction<T>(
   const limits = transactionSettingsSchema.parse(settings);
   const callbacks: (() => void)[] = [];
   commitCallbacks.set(client, callbacks);
+  const memos = openTransactionMemos(client);
   let result: T;
   let reset: PromiseSettledResult<unknown> | undefined;
   try {
@@ -146,6 +126,7 @@ export async function inPipelinedTransaction<T>(
     throw error;
   } finally {
     if (commitCallbacks.get(client) === callbacks) commitCallbacks.delete(client);
+    closeTransactionMemos(client, memos);
   }
   for (const callback of callbacks) runCallback(callback);
   settledValue(reset);

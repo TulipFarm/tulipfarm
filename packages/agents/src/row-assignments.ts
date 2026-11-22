@@ -6,6 +6,7 @@ import { taskFields, type RunState } from '@tulipfarm/tables/tasks-table';
 import type { TableDefinition, TableValues } from '@tulipfarm/tables/definition';
 import { agentCompatibility, relation, type AgentStorage, type AgentTransaction } from './store.ts';
 import { lockTask } from './task-approval-gate.ts';
+import { relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
 
 /** Run limits for one wake: the agent's usual defaults. */
 const runLimits = { toolCalls: 100, activeMilliseconds: 300000, credits: 100 };
@@ -292,9 +293,7 @@ export function createRowAssignments(options: {
 
   async function settle(workspaceId: string) {
     return runtime.transaction(workspaceId, agentCompatibility, async tx => {
-      const installed = (
-        await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [relation(tx, 'tf_row_assignments')])
-      ).rows[0]?.installed;
+      const installed = await relationInstalled(tx.client, relation(tx, 'tf_row_assignments'));
       if (!installed) return { stops: [], installed: false };
       await tx.client.query(
         `UPDATE ${relation(tx, 'tf_row_assignments')} SET run_state='queued',pending_wakes=pending_wakes+1,wake_at=NULL,queued_at=clock_timestamp(),updated_at=clock_timestamp()

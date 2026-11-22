@@ -3,14 +3,14 @@ import { z } from 'zod';
 import {
   AccessDenied,
   currentMember,
+  type HumanActor,
+  lockAndResolvePrincipal,
   lockAuthorization,
   requireNoMcpDerived,
   requireSkillGrant,
-  resolveHuman,
   sourceDependenciesSchema,
-  uuidSchema,
-  type HumanActor,
   type SourceDependency,
+  uuidSchema,
 } from '@tulipfarm/access';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
 import { CreditsExhausted } from '@tulipfarm/workspace-storage/credits';
@@ -91,8 +91,7 @@ export function createSkillImports(
     operation: (tx: AgentTransaction, actor: HumanActor, bound: AgentStorage) => Promise<T>,
   ) {
     return runtime.transaction(uuidSchema.parse(workspaceId), skillPackageCompatibility, async tx => {
-      await lockAuthorization(tx, 'write');
-      const actor = typeof user === 'string' ? await resolveHuman(tx, user) : user;
+      const actor = await lockAndResolvePrincipal(tx, user, 'write');
       await currentMember(tx, actor);
       const bound: AgentStorage = {
         transaction: async (id, range, execute) => {

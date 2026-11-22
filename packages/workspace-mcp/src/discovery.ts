@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { lockAndResolveHuman, lockAuthorization, resolveHuman } from '@tulipfarm/access';
+import { lockAndResolveHuman } from '@tulipfarm/access';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import { McpError, workspaceMcpCompatibility, type WorkspaceMcpOptions } from './contracts.ts';
 import type { WorkspaceMcpService } from './domain.ts';
@@ -37,8 +37,7 @@ export function workspaceMcpDiscovery(runtime: WorkspaceMcpOptions['runtime'], s
     const before = await service.status(workspaceId, userId, integrationId);
     await service.discover(workspaceId, userId, integrationId, input);
     await runtime.transaction(workspaceId, workspaceMcpCompatibility, async tx => {
-      await lockAuthorization(tx, 'write');
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId, 'write');
       const markerId = mcpDiscoveryRequestId(input.requestId);
       if (
         (

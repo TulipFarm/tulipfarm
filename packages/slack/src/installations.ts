@@ -8,7 +8,6 @@ import {
   type HumanActor,
   lockAndResolveHuman,
   lockAuthorization,
-  resolveHuman,
 } from '@tulipfarm/access';
 import { qualified, type createWorkspaceRuntime, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { teamLabel } from '@tulipfarm/workspace-storage/team-labels';
@@ -430,8 +429,7 @@ export function createSlackInstallations(options: {
   }
   async function disconnect(workspaceId: string, userId: string) {
     await runtime.transaction(workspaceId, managementCompatibility, async tx => {
-      await lockAuthorization(tx, 'write');
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId, 'write');
       await requireManager(tx, actor);
       const recommendations = await watchIntegrationRecommendations(tx, 'slack', () => slackRecommendations(tx));
       await tx.client.query(
@@ -466,8 +464,7 @@ export function createSlackInstallations(options: {
   }
   async function grants(workspaceId: string, userId: string, input?: unknown) {
     return runtime.transaction(workspaceId, managementCompatibility, async tx => {
-      await lockAuthorization(tx, 'write');
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId, 'write');
       await requireManager(tx, actor);
       const { id } = z
         .object({ id: z.uuid() })

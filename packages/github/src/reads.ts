@@ -1,13 +1,11 @@
 import { z } from 'zod';
-import { denyMcpEgress, requireNoMcpDerived } from '@tulipfarm/access';
+import { denyMcpEgress, lockAndResolvePrincipal, requireNoMcpDerived } from '@tulipfarm/access';
 import {
   AccessDenied,
   currentMember,
-  lockAuthorization,
   requirePersonalGitHubSelection,
   requirePersonalGitHubSource,
   sourceDependenciesSchema,
-  resolveHuman,
   type AuthorizationTransaction,
   type HumanActor,
   type SourceDependency,
@@ -57,8 +55,7 @@ export function createGitHubReads(options: {
     action: (tx: AuthorizationTransaction, actor: HumanActor) => Promise<T>,
   ) {
     return options.runtime.transaction(z.uuid().parse(workspaceId), range, async tx => {
-      await lockAuthorization(tx);
-      const actor = typeof principal === 'string' ? await resolveHuman(tx, principal) : principal;
+      const actor = await lockAndResolvePrincipal(tx, principal);
       await currentMember(tx, actor);
       await requireGitHubOrigin(tx, actor, conversationId);
       return action(tx, actor);

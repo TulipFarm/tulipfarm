@@ -11,6 +11,7 @@ import {
 import { requireAgentPermission } from '@tulipfarm/agents/saved-service';
 import { isFeatureEnabled } from '@tulipfarm/observability';
 import { qualified, StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
+import { pipelinedAll } from '@tulipfarm/workspace-storage/transaction-reads';
 import { commonCompatibility, type WorkspaceStore } from '@tulipfarm/workspaces/storage';
 import {
   readSoulFile,
@@ -62,49 +63,49 @@ export function createSoulExplorerService(store: Store, storage: () => SoulStora
     return store.runtime.transaction(workspaceId, commonCompatibility, async tx => {
       const actor = await lockAndResolveHuman(tx, userId);
       if ((await currentMember(tx, actor)).role !== 'admin') throw new AccessDenied();
-      const raw = (
-        await store.pool.query(
-          `SELECT w.id,w.created_by,w.created_at,w.name,w.soul_commit,w.soul_bucket,w.soul_key,u.email
+      const table = (name: string) => qualified(tx.schema, name);
+      const [raw, current, candidates] = await pipelinedAll(tx.client, [
+        async () =>
+          (
+            await store.pool.query(
+              `SELECT w.id,w.created_by,w.created_at,w.name,w.soul_commit,w.soul_bucket,w.soul_key,u.email
         FROM app.workspaces w JOIN app.workspace_storage s ON s.workspace_id=w.id AND s.stage='ready'
         JOIN app.users u ON u.id=$2 WHERE w.id=$1`,
-          [workspaceId, userId],
-        )
-      ).rows[0];
-      if (!raw) throw new AccessDenied();
-      const workspace = workspaceSchema.parse(raw);
-      if (!(await enabled(workspace, userId))) throw new AccessDenied();
-      const table = (name: string) => qualified(tx.schema, name);
-      const head = z
-        .object({ revision: soulRevisionSchema.nullable() })
-        .parse((await tx.client.query(`SELECT revision FROM ${table('tf_soul_head')} WHERE id=1`)).rows[0]).revision;
-      if (!head || !workspace.soul_bucket || !workspace.soul_key || !workspace.soul_commit)
-        throw new SoulExplorerError('soul-not-ready', 503);
-      const receipt = z
-        .object({ bundle_key: z.string(), bundle_sha256: z.string().regex(/^[a-f0-9]{64}$/) })
-        .optional()
-        .parse(
-          (
-            await tx.client.query(
-              `SELECT bundle_key,bundle_sha256 FROM ${table('tf_soul_revisions')} WHERE revision=$1`,
-              [head],
+              [workspaceId, userId],
             )
           ).rows[0],
-        );
-      if (!receipt && head !== workspace.soul_commit) throw new SoulExplorerError('soul-unavailable', 503);
-      const files = new Map<string, string>();
-      const named = await tableIdentityStorageReady(tx);
-      const candidates = z
-        .array(
-          z.object({
-            id: z.uuid(),
-            kind: z.enum(['table', 'agent']),
-            projection: z.unknown(),
-            table_name: z.string().nullable(),
-          }),
-        )
-        .parse(
-          (
-            await tx.client.query(`
+        async () =>
+          z
+            .object({
+              revision: soulRevisionSchema.nullable(),
+              bundle_key: z.string().nullable(),
+              bundle_sha256: z
+                .string()
+                .regex(/^[a-f0-9]{64}$/)
+                .nullable(),
+            })
+            .parse(
+              (
+                await tx.client.query(
+                  `SELECT h.revision,r.bundle_key,r.bundle_sha256 FROM ${table('tf_soul_head')} h
+                  LEFT JOIN ${table('tf_soul_revisions')} r ON r.revision=h.revision WHERE h.id=1`,
+                )
+              ).rows[0],
+            ),
+        async () => {
+          const named = await tableIdentityStorageReady(tx);
+          return z
+            .array(
+              z.object({
+                id: z.uuid(),
+                kind: z.enum(['table', 'agent']),
+                projection: z.unknown(),
+                table_name: z.string().nullable(),
+              }),
+            )
+            .parse(
+              (
+                await tx.client.query(`
         SELECT a.id,'agent' AS kind,s.projection,NULL::text AS table_name FROM ${table('tf_agents')} a
           JOIN ${table('tf_agent_saved_revisions')} s ON s.agent_id=a.id AND s.soul_revision=a.saved_revision
           WHERE a.deleted_at IS NULL
@@ -125,40 +126,58 @@ export function createSoulExplorerService(store: Store, storage: () => SoulStora
           ORDER BY e.table_id,r.accepted_at DESC,r.revision DESC
         ) saved
         LIMIT 10001`)
-          ).rows,
-        );
+              ).rows,
+            );
+        },
+      ]);
+      if (!raw) throw new AccessDenied();
+      const workspace = workspaceSchema.parse(raw);
+      if (!(await enabled(workspace, userId))) throw new AccessDenied();
+      const head = current.revision;
+      if (!head || !workspace.soul_bucket || !workspace.soul_key || !workspace.soul_commit)
+        throw new SoulExplorerError('soul-not-ready', 503);
+      const receipt =
+        current.bundle_key !== null && current.bundle_sha256 !== null
+          ? { bundle_key: current.bundle_key, bundle_sha256: current.bundle_sha256 }
+          : undefined;
+      if (!receipt && head !== workspace.soul_commit) throw new SoulExplorerError('soul-unavailable', 503);
+      const files = new Map<string, string>();
       if (candidates.length > 10000) throw new SoulExplorerError('soul-unavailable', 503);
-      for (const candidate of candidates) {
-        try {
-          if (candidate.kind === 'agent') await requireAgentPermission(tx, actor, candidate.id, 'read');
-          else await requireTablePermission(tx, actor, candidate.id, 'table.schema.manage');
-        } catch (error) {
-          if (error instanceof AccessDenied) continue;
-          throw error;
-        }
-        const projection = projectionSchema.parse(candidate.projection);
-        const name = projection.tableNames?.[tableIdSchema.parse(candidate.id)];
-        if (projection.tableNames && (candidate.kind !== 'table' || !name || name !== candidate.table_name))
-          throw new SoulExplorerError('soul-unavailable', 503);
-        const path = `${candidate.kind === 'agent' ? 'agents' : 'tables'}/${name ?? candidate.id}.json`;
-        if (
-          projection.workspaceId !== workspaceId ||
-          projection.id !== candidate.id ||
-          projection.kind !== candidate.kind ||
-          projection.path !== path
-        ) {
-          throw new SoulExplorerError('soul-unavailable', 503);
-        }
-        try {
-          for (const id of Object.keys(projection.tableNames ?? {})) {
-            if (id !== candidate.id) await requireTablePermission(tx, actor, id, 'table.row.read');
+      const readable = await pipelinedAll(
+        tx.client,
+        candidates.map(candidate => async () => {
+          try {
+            if (candidate.kind === 'agent') await requireAgentPermission(tx, actor, candidate.id, 'read');
+            else await requireTablePermission(tx, actor, candidate.id, 'table.schema.manage');
+          } catch (error) {
+            if (error instanceof AccessDenied) return undefined;
+            throw error;
           }
-        } catch (error) {
-          if (error instanceof AccessDenied) continue;
-          throw error;
-        }
-        files.set(path, projection.sha256);
-      }
+          const projection = projectionSchema.parse(candidate.projection);
+          const name = projection.tableNames?.[tableIdSchema.parse(candidate.id)];
+          if (projection.tableNames && (candidate.kind !== 'table' || !name || name !== candidate.table_name))
+            throw new SoulExplorerError('soul-unavailable', 503);
+          const path = `${candidate.kind === 'agent' ? 'agents' : 'tables'}/${name ?? candidate.id}.json`;
+          if (
+            projection.workspaceId !== workspaceId ||
+            projection.id !== candidate.id ||
+            projection.kind !== candidate.kind ||
+            projection.path !== path
+          ) {
+            throw new SoulExplorerError('soul-unavailable', 503);
+          }
+          try {
+            for (const id of Object.keys(projection.tableNames ?? {})) {
+              if (id !== candidate.id) await requireTablePermission(tx, actor, id, 'table.row.read');
+            }
+          } catch (error) {
+            if (error instanceof AccessDenied) return undefined;
+            throw error;
+          }
+          return [path, projection.sha256] as const;
+        }),
+      );
+      for (const entry of readable) if (entry) files.set(...entry);
       return {
         seed: { workspaceId, createdBy: workspace.created_by, createdAt: workspace.created_at.toISOString() },
         pointer: receipt

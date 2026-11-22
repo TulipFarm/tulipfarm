@@ -3,16 +3,17 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   AccessDenied,
+  type AuthorizationTransaction,
   canAccessAsset,
-  definitionGrantPredicate,
   canAccessTable,
+  definitionGrantPredicate,
+  type HumanActor,
+  lockAndResolveHuman,
   lockAuthorization,
   requireAgentRunInvocation,
   resolveHuman,
   SourceAuthorizationUnavailable,
   sourceDependenciesSchema,
-  type AuthorizationTransaction,
-  type HumanActor,
 } from '@tulipfarm/access';
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { requireAgentPermission } from './saved-policy.ts';
@@ -334,8 +335,7 @@ export function createSlackChannelAgents(options: {
   }
   async function attachSetup(tx: AuthorizationTransaction, workspaceId: string, userId: string, value: unknown) {
     const input = attachmentInputSchema.extend({ replaceAgentId: z.uuid().nullable() }).parse(value);
-    await lockAuthorization(tx, 'write');
-    const actor = await resolveHuman(tx, userId),
+    const actor = await lockAndResolveHuman(tx, userId, 'write'),
       installed = await installation(tx);
     if (!options.publicDelivery) throw new Error('slack-channel-delivery-disabled');
     if (input.agentId) await requireAgentPermission(tx, actor, input.agentId, 'invoke');
@@ -391,8 +391,7 @@ export function createSlackChannelAgents(options: {
   }
   async function inspectSetup(tx: AuthorizationTransaction, workspaceId: string, userId: string, channel: string) {
     attachmentInputSchema.shape.channel.parse(channel);
-    await lockAuthorization(tx, 'write');
-    const actor = await resolveHuman(tx, userId),
+    const actor = await lockAndResolveHuman(tx, userId, 'write'),
       installed = await installation(tx);
     const observed = await provider.observe(
       tx,

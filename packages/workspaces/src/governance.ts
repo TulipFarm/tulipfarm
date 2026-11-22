@@ -9,6 +9,7 @@ import {
   type AuthorizationTransaction,
   currentMember,
   departureNeedsManagerHandoff,
+  forgetMembers,
   type HumanActor,
   lockAndResolveHuman,
   lockAuthorization,
@@ -17,6 +18,7 @@ import {
   tablePersonGrantsInstalled,
 } from '@tulipfarm/access';
 import { afterCommit, qualified, type createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
+import { pipelinedAll } from '@tulipfarm/workspace-storage/transaction-reads';
 import { emitHook } from '@tulipfarm/extensions';
 import { trackEvent } from '@tulipfarm/observability';
 import {
@@ -284,6 +286,7 @@ export function createGovernanceService(dependencies: {
       `UPDATE ${table(transaction, 'tf_memberships')} SET removed_at = clock_timestamp() WHERE id = $1`,
       [membershipId],
     );
+    forgetMembers(transaction);
     const registered = await workspaceMembersTable(transaction);
     const changedMembers = new Set<string>();
     if (registered) {
@@ -364,21 +367,25 @@ export function createGovernanceService(dependencies: {
   async function ownMembership(workspaceId: string, userId: string) {
     return withHuman(workspaceId, userId, 'read', false, async (transaction, actor) => {
       const member = await currentMember(transaction, actor);
-      const teams = await transaction.client.query(
-        `SELECT t.id, t.name, mt.role FROM ${table(transaction, 'tf_teams')} t JOIN ${table(transaction, 'tf_member_teams')} mt ON mt.team_id = t.id WHERE mt.membership_id = $1 AND ${notInternal('t')} ORDER BY t.name, t.id`,
-        [actor.membershipId],
-      );
-      const adminTeam = await transaction.client.query(
-        `SELECT t.id FROM ${table(transaction, 'tf_teams')} t JOIN ${table(transaction, 'tf_member_teams')} mt ON mt.team_id = t.id WHERE mt.membership_id = $1 AND t.name = '_admin'`,
-        [actor.membershipId],
-      );
-      const otherAdmin =
-        member.role === 'admin'
-          ? await transaction.client.query(
-              `SELECT id FROM ${table(transaction, 'tf_memberships')} WHERE role = 'admin' AND removed_at IS NULL AND id <> $1 LIMIT 1`,
-              [actor.membershipId],
-            )
-          : null;
+      const [teams, adminTeam, otherAdmin] = await pipelinedAll(transaction.client, [
+        () =>
+          transaction.client.query(
+            `SELECT t.id, t.name, mt.role FROM ${table(transaction, 'tf_teams')} t JOIN ${table(transaction, 'tf_member_teams')} mt ON mt.team_id = t.id WHERE mt.membership_id = $1 AND ${notInternal('t')} ORDER BY t.name, t.id`,
+            [actor.membershipId],
+          ),
+        () =>
+          transaction.client.query(
+            `SELECT t.id FROM ${table(transaction, 'tf_teams')} t JOIN ${table(transaction, 'tf_member_teams')} mt ON mt.team_id = t.id WHERE mt.membership_id = $1 AND t.name = '_admin'`,
+            [actor.membershipId],
+          ),
+        async () =>
+          member.role === 'admin'
+            ? transaction.client.query(
+                `SELECT id FROM ${table(transaction, 'tf_memberships')} WHERE role = 'admin' AND removed_at IS NULL AND id <> $1 LIMIT 1`,
+                [actor.membershipId],
+              )
+            : null,
+      ]);
       return ownMembershipSchema.parse({
         membershipId: actor.membershipId,
         role: member.role,
@@ -398,41 +405,47 @@ export function createGovernanceService(dependencies: {
   async function snapshot(workspaceId: string, userId: string) {
     return withHuman(workspaceId, userId, 'read', false, async (transaction, actor) => {
       const admin = (await currentMember(transaction, actor)).role === 'admin';
-      const members = z
-        .array(memberRowSchema)
-        .parse(
-          (
-            await transaction.client.query(
-              `SELECT id, user_id, role FROM ${table(transaction, 'tf_memberships')} WHERE removed_at IS NULL ORDER BY created_at, id`,
-            )
-          ).rows,
-        );
-      const profiles = z
-        .array(profileSchema)
-        .parse(
-          (
-            await dependencies.identity.query(
-              'SELECT id, name, email, email_verified FROM app.users WHERE id = ANY($1::uuid[])',
-              [members.map(member => member.user_id)],
-            )
-          ).rows,
-        );
-      const byId = new Map(profiles.map(profile => [profile.id, profile]));
-      const teams = z
-        .array(
-          z.object({
-            id: z.uuid(),
-            name: z.string(),
-            description: z.string(),
-            membership_ids: z.array(z.uuid()),
-            manager_ids: z.array(z.uuid()),
-            policy_count: z.coerce.number(),
-          }),
-        )
-        .parse(
-          (
-            await transaction.client.query(
-              `SELECT t.id, t.name, t.description,
+      const [{ members, profiles }, teams, grants, personGrants, tableTeams, directoryMembers] = await pipelinedAll(
+        transaction.client,
+        [
+          async () => {
+            const members = z
+              .array(memberRowSchema)
+              .parse(
+                (
+                  await transaction.client.query(
+                    `SELECT id, user_id, role FROM ${table(transaction, 'tf_memberships')} WHERE removed_at IS NULL ORDER BY created_at, id`,
+                  )
+                ).rows,
+              );
+            const profiles = z
+              .array(profileSchema)
+              .parse(
+                (
+                  await dependencies.identity.query(
+                    'SELECT id, name, email, email_verified FROM app.users WHERE id = ANY($1::uuid[])',
+                    [members.map(member => member.user_id)],
+                  )
+                ).rows,
+              );
+            return { members, profiles };
+          },
+          async () =>
+            z
+              .array(
+                z.object({
+                  id: z.uuid(),
+                  name: z.string(),
+                  description: z.string(),
+                  membership_ids: z.array(z.uuid()),
+                  manager_ids: z.array(z.uuid()),
+                  policy_count: z.coerce.number(),
+                }),
+              )
+              .parse(
+                (
+                  await transaction.client.query(
+                    `SELECT t.id, t.name, t.description,
         COALESCE(array_agg(mt.membership_id ORDER BY mt.membership_id) FILTER (WHERE m.id IS NOT NULL), '{}'::uuid[]) AS membership_ids,
         COALESCE(array_agg(mt.membership_id ORDER BY mt.membership_id) FILTER (WHERE m.id IS NOT NULL AND mt.role = 'manager'), '{}'::uuid[]) AS manager_ids,
         (SELECT count(DISTINCT g.asset_id) FROM ${table(transaction, 'tf_grants')} g WHERE g.team_id = t.id AND g.permission = ANY($3::text[])
@@ -441,77 +454,91 @@ export function createGovernanceService(dependencies: {
         LEFT JOIN ${table(transaction, 'tf_memberships')} m ON m.id = mt.membership_id AND m.removed_at IS NULL
         WHERE ${notInternal('t')} AND ($2::boolean OR EXISTS (SELECT 1 FROM ${table(transaction, 'tf_member_teams')} own WHERE own.team_id = t.id AND own.membership_id = $1))
         GROUP BY t.id ORDER BY t.name, t.id`,
-              [actor.membershipId, admin, policyPermissions],
-            )
-          ).rows,
-        );
-      // Members see their own teams' grants read-only; admins see every grant.
-      const grants = z
-        .array(z.object({ team_id: z.uuid(), asset_id: z.uuid(), permission: z.string(), owned: z.boolean() }))
-        .parse(
-          (
-            await transaction.client.query(
-              `SELECT g.team_id, g.asset_id, g.permission, ${ownedSql(table(transaction, 'tf_teams'), 'g')} FROM ${table(transaction, 'tf_grants')} g WHERE g.permission = ANY($1::text[])
+                    [actor.membershipId, admin, policyPermissions],
+                  )
+                ).rows,
+              ),
+          async () =>
+            z
+              .array(z.object({ team_id: z.uuid(), asset_id: z.uuid(), permission: z.string(), owned: z.boolean() }))
+              .parse(
+                (
+                  await transaction.client.query(
+                    `SELECT g.team_id, g.asset_id, g.permission, ${ownedSql(table(transaction, 'tf_teams'), 'g')} FROM ${table(transaction, 'tf_grants')} g WHERE g.permission = ANY($1::text[])
         AND NOT EXISTS (SELECT 1 FROM ${table(transaction, 'tf_table_catalog')} c WHERE c.id = g.asset_id AND c.archived_at IS NOT NULL)
         AND ($2::boolean OR EXISTS (SELECT 1 FROM ${table(transaction, 'tf_member_teams')} own WHERE own.team_id = g.team_id AND own.membership_id = $3))
         ORDER BY g.team_id, g.asset_id, g.permission`,
-              [policyPermissions, admin, actor.membershipId],
-            )
-          ).rows,
-        );
+                    [policyPermissions, admin, actor.membershipId],
+                  )
+                ).rows,
+              ),
+          async () =>
+            admin && (await tablePersonGrantsInstalled(transaction))
+              ? z
+                  .array(
+                    z.object({
+                      membership_id: z.uuid(),
+                      asset_id: z.uuid(),
+                      permission: z.string(),
+                      owned: z.boolean(),
+                    }),
+                  )
+                  .parse(
+                    (
+                      await transaction.client
+                        .query(`SELECT g.*, ${ownedSql(table(transaction, 'tf_teams'), 'g')} FROM ${table(transaction, 'tf_table_person_grants')} g
+        JOIN ${table(transaction, 'tf_memberships')} m ON m.id = g.membership_id AND m.removed_at IS NULL
+        WHERE NOT EXISTS (SELECT 1 FROM ${table(transaction, 'tf_table_catalog')} c WHERE c.id = g.asset_id AND c.archived_at IS NOT NULL)
+        ORDER BY g.membership_id, g.asset_id, g.permission`)
+                    ).rows,
+                  )
+              : [],
+          async () =>
+            z
+              .array(z.object({ id: z.uuid(), name: z.string() }))
+              .parse(
+                admin
+                  ? (
+                      await transaction.client.query(
+                        `SELECT t.id, t.name FROM ${table(transaction, 'tf_teams')} t WHERE ${notInternal('t')} OR t.name IN ('_admin', '_everyone') ORDER BY t.id`,
+                      )
+                    ).rows
+                  : [],
+              ),
+          async () => (await directory(transaction)).members,
+        ],
+      );
+      const byId = new Map(profiles.map(profile => [profile.id, profile]));
       const visibleTables = grants.filter(grant => grantKind(grant) === 'table').map(grant => grant.asset_id);
       const ownedTeams = grants.filter(grant => grantKind(grant) === 'owned').map(grant => grant.asset_id);
-      const resources = z
-        .array(z.object({ id: z.uuid(), display_name: z.string(), owning_team_id: z.uuid() }))
-        .parse(
-          (
-            await transaction.client.query(
-              `SELECT id, display_name, owning_team_id FROM ${table(transaction, 'tf_table_catalog')} WHERE archived_at IS NULL AND ($1::boolean OR id = ANY($2::uuid[]) OR owning_team_id = ANY($3::uuid[])) ORDER BY display_name, id`,
-              [admin, visibleTables, ownedTeams],
-            )
-          ).rows,
-        );
       const namedTeams = [
         ...teams.map(team => team.id),
         ...grants.filter(grant => grantKind(grant) !== 'table').map(grant => grant.asset_id),
       ];
-      const teamNames = z
-        .array(z.object({ id: z.uuid(), name: z.string() }))
-        .parse(
-          (
-            await transaction.client.query(
-              `SELECT t.id, t.name FROM ${table(transaction, 'tf_teams')} t WHERE ${notInternal('t')} AND ($1::boolean OR t.id = ANY($2::uuid[])) ORDER BY t.name, t.id`,
-              [admin, namedTeams],
-            )
-          ).rows,
-        );
-      const personGrants =
-        admin && (await tablePersonGrantsInstalled(transaction))
-          ? z
-              .array(
-                z.object({ membership_id: z.uuid(), asset_id: z.uuid(), permission: z.string(), owned: z.boolean() }),
-              )
-              .parse(
-                (
-                  await transaction.client
-                    .query(`SELECT g.*, ${ownedSql(table(transaction, 'tf_teams'), 'g')} FROM ${table(transaction, 'tf_table_person_grants')} g
-        JOIN ${table(transaction, 'tf_memberships')} m ON m.id = g.membership_id AND m.removed_at IS NULL
-        WHERE NOT EXISTS (SELECT 1 FROM ${table(transaction, 'tf_table_catalog')} c WHERE c.id = g.asset_id AND c.archived_at IS NOT NULL)
-        ORDER BY g.membership_id, g.asset_id, g.permission`)
-                ).rows,
-              )
-          : [];
-      const tableTeams = z
-        .array(z.object({ id: z.uuid(), name: z.string() }))
-        .parse(
-          admin
-            ? (
+      const [resources, teamNames] = await pipelinedAll(transaction.client, [
+        async () =>
+          z
+            .array(z.object({ id: z.uuid(), display_name: z.string(), owning_team_id: z.uuid() }))
+            .parse(
+              (
                 await transaction.client.query(
-                  `SELECT t.id, t.name FROM ${table(transaction, 'tf_teams')} t WHERE ${notInternal('t')} OR t.name IN ('_admin', '_everyone') ORDER BY t.id`,
+                  `SELECT id, display_name, owning_team_id FROM ${table(transaction, 'tf_table_catalog')} WHERE archived_at IS NULL AND ($1::boolean OR id = ANY($2::uuid[]) OR owning_team_id = ANY($3::uuid[])) ORDER BY display_name, id`,
+                  [admin, visibleTables, ownedTeams],
                 )
-              ).rows
-            : [],
-        );
+              ).rows,
+            ),
+        async () =>
+          z
+            .array(z.object({ id: z.uuid(), name: z.string() }))
+            .parse(
+              (
+                await transaction.client.query(
+                  `SELECT t.id, t.name FROM ${table(transaction, 'tf_teams')} t WHERE ${notInternal('t')} AND ($1::boolean OR t.id = ANY($2::uuid[])) ORDER BY t.name, t.id`,
+                  [admin, namedTeams],
+                )
+              ).rows,
+            ),
+      ]);
       return governanceSnapshotSchema.parse({
         actorMembershipId: actor.membershipId,
         members: admin
@@ -527,7 +554,7 @@ export function createGovernanceService(dependencies: {
               };
             })
           : [],
-        directory: (await directory(transaction)).members,
+        directory: directoryMembers,
         tableTeamIds: tableTeams.filter(team => !['_admin', '_everyone'].includes(team.name)).map(team => team.id),
         adminTeamId: tableTeams.find(team => team.name === '_admin')?.id ?? null,
         everyoneTeamId: tableTeams.find(team => team.name === '_everyone')?.id ?? null,
@@ -598,6 +625,7 @@ export function createGovernanceService(dependencies: {
         membershipId,
         role,
       ]);
+      forgetMembers(transaction);
       const adminTeam = `SELECT id FROM ${table(transaction, 'tf_teams')} WHERE name = '_admin'`;
       if (role === 'admin')
         await transaction.client.query(
@@ -1945,6 +1973,7 @@ export function createGovernanceService(dependencies: {
         `UPDATE ${table(transaction, 'tf_memberships')} SET role = 'admin' WHERE id = $1`,
         [membershipId],
       );
+      forgetMembers(transaction);
       await transaction.client.query(
         `INSERT INTO ${table(transaction, 'tf_member_teams')} (membership_id, team_id) SELECT $1, id FROM ${table(transaction, 'tf_teams')} WHERE name = '_admin' ON CONFLICT DO NOTHING`,
         [membershipId],
@@ -2033,11 +2062,13 @@ export function createGovernanceService(dependencies: {
       if (!row.workspace_member_id) throw new WorkspaceMemberError('member-selection-required');
       await bindWorkspaceMemberAccount(transaction, { memberId: row.workspace_member_id, userId, membershipId });
     }
-    if (!existing)
+    if (!existing) {
       await transaction.client.query(
         `INSERT INTO ${table(transaction, 'tf_memberships')} (id, user_id, role) VALUES ($1, $2, 'member')`,
         [membershipId, userId],
       );
+      forgetMembers(transaction);
+    }
     if (!existing && (await invitationChoicesInstalled(transaction)))
       await applyChoices(transaction, row, membershipId);
     if (registration && row.workspace_member_id) {

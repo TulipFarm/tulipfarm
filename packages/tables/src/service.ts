@@ -1,18 +1,19 @@
 import { z } from 'zod';
 import {
   AccessDenied,
+  type Actor,
+  type AppActor,
   appActorSchema,
   canAccessTable,
+  lockAndResolveActor,
   lockAuthorization,
   queryHumanContext,
   requireNoMcpDerived,
-  resolveActor,
   requireTablePermission,
-  uuidSchema,
-  type Actor,
-  type AppActor,
   type TablePermission,
+  uuidSchema,
 } from '@tulipfarm/access';
+import { pipelinedAll } from '@tulipfarm/workspace-storage/runtime';
 import type { TableRuntime, TableTransaction } from './service-store.ts';
 import { table } from './service-store.ts';
 import {
@@ -227,8 +228,7 @@ export function createTableService(
     action: (tx: TableTransaction, actor: Actor) => Promise<T>,
   ) {
     return runtime.transaction(workspaceId, compatibility, async tx => {
-      await lockAuthorization(tx);
-      const actor = await resolveActor(tx, principal);
+      const actor = await lockAndResolveActor(tx, principal);
       return action(tx, actor);
     });
   }
@@ -287,9 +287,7 @@ export function createTableService(
   ) {
     const request = baseSchema.parse(input);
     return authorized(workspaceId, principal, async (tx, actor) => {
-      await permit(tx, actor, request.tableId, 'table.row.read');
-      await store.lockCatalogs(tx, [request.tableId]);
-      const generation = await store.readableGeneration(tx, request.tableId);
+      const generation = await activeFor(tx, actor, request.tableId);
       if (generation.revision !== request.revision) throw new store.GenerationError('stale-generation');
       const record = await store.readRecord(tx, generation, request.recordId);
       if (!record) return null;
@@ -313,9 +311,7 @@ export function createTableService(
       })
       .parse(input);
     return authorized(workspaceId, principal, async (tx, actor) => {
-      await permit(tx, actor, request.tableId, 'table.row.read');
-      await store.lockCatalogs(tx, [request.tableId]);
-      const generation = await store.readableGeneration(tx, request.tableId);
+      const generation = await activeFor(tx, actor, request.tableId);
       if (generation.revision !== request.revision) throw new store.GenerationError('stale-generation');
       const records = await store.readRecords(tx, generation, {
         after: request.after ?? null,
@@ -416,8 +412,7 @@ export function createTableService(
   async function mutateMember(workspaceId: string, principal: string | Actor, input: unknown) {
     const mutation = workspaceMemberMutationSchema.parse(input);
     return runtime.transaction(workspaceId, compatibility, async tx => {
-      await lockAuthorization(tx, mutation.kind === 'member-repair' ? 'write' : 'read');
-      const actor = await resolveActor(tx, principal);
+      const actor = await lockAndResolveActor(tx, principal, mutation.kind === 'member-repair' ? 'write' : 'read');
       if (actor.kind !== 'human') throw new AccessDenied();
       await requireNoMcpDerived(tx, [], actor);
       if (mutation.kind === 'member-photo') return store.updateWorkspaceMemberPhoto(tx, actor, mutation);
@@ -482,9 +477,7 @@ export function createTableService(
       .object({ tableId: tableIdSchema, revision: revisionSchema, query: recordQuerySchema })
       .parse(input);
     return authorized(workspaceId, principal, async (tx, actor) => {
-      await permit(tx, actor, request.tableId, 'table.row.read');
-      await store.lockCatalogs(tx, [request.tableId]);
-      const generation = await store.readableGeneration(tx, request.tableId);
+      const generation = await activeFor(tx, actor, request.tableId);
       if (generation.revision !== request.revision) throw new store.GenerationError('stale-generation');
       const page = await queryPage(tx, generation, request.query, {
         fields: generation.definition.fields,
@@ -725,8 +718,6 @@ export function createTableService(
       .parse(input);
     const pattern = query.search ? likePattern(query.search) : null;
     return authorized(workspaceId, principal, async (tx, actor) => {
-      const memberTableId = (await store.workspaceMembersTable(tx))?.coreDefinition.id;
-      const tasksTableId = (await tasksTable(tx))?.coreDefinition.id;
       const select = `SELECT g.*,c.owning_team_id FROM ${table(tx, 'tf_table_generations')} g JOIN ${table(tx, 'tf_table_catalog')} c ON c.id=g.table_id WHERE g.state='active' AND (c.archived_at IS NOT NULL)=$1 AND ($2::text IS NULL OR g.definition->>'label' ILIKE $2)`;
       const entry = (row: Record<string, unknown>) => ({
         ...store.currentGeneration(row),
@@ -744,30 +735,51 @@ export function createTableService(
         ...(row.table_id === memberTableId ? { systemKind: 'workspace-members' as const } : {}),
         ...(row.table_id === tasksTableId ? { systemKind: 'tasks' as const } : {}),
       });
+      const after = query.sort ? undefined : tableIdSchema.optional().parse(query.after);
+      const offset = query.sort ? z.coerce.number().int().min(0).default(0).parse(query.after) : 0;
+      const [memberTable, tasks, listed] = await pipelinedAll(tx.client, [
+        () => store.workspaceMembersTable(tx),
+        () => tasksTable(tx),
+        () =>
+          query.sort
+            ? tx.client.query(`${select} ORDER BY g.table_id LIMIT ${sortedListLimit}`, [query.archived, pattern])
+            : tx.client.query(`${select} AND ($3::uuid IS NULL OR g.table_id>$3) ORDER BY g.table_id LIMIT $4`, [
+                query.archived,
+                pattern,
+                after ?? null,
+                query.limit,
+              ]),
+      ]);
+      const memberTableId = memberTable?.coreDefinition.id;
+      const tasksTableId = tasks?.coreDefinition.id;
       if (!query.sort) {
-        const after = tableIdSchema.optional().parse(query.after);
-        const rows = (
-          await tx.client.query(`${select} AND ($3::uuid IS NULL OR g.table_id>$3) ORDER BY g.table_id LIMIT $4`, [
-            query.archived,
-            pattern,
-            after ?? null,
-            query.limit,
-          ])
-        ).rows.map(entry);
-        const tables = [];
-        for (const row of rows)
-          if (await canAccessTable(tx, actor, row.table_id, 'table.row.read')) tables.push(await publish(row));
+        const rows = listed.rows.map(entry);
+        const tables = (
+          await pipelinedAll(
+            tx.client,
+            rows.map(
+              row => async () =>
+                (await canAccessTable(tx, actor, row.table_id, 'table.row.read')) ? publish(row) : null,
+            ),
+          )
+        ).filter(published => published !== null);
         return { tables, nextCursor: rows.length === query.limit ? (rows.at(-1)?.table_id ?? null) : null };
       }
-      const offset = z.coerce.number().int().min(0).default(0).parse(query.after);
-      const visible: ReturnType<typeof entry>[] = [];
-      for (const row of (
-        await tx.client.query(`${select} ORDER BY g.table_id LIMIT ${sortedListLimit}`, [query.archived, pattern])
-      ).rows.map(entry))
-        if (await canAccessTable(tx, actor, row.table_id, 'table.row.read')) visible.push(row);
+      const candidates = listed.rows.map(entry);
+      const readable = await pipelinedAll(
+        tx.client,
+        candidates.map(row => () => canAccessTable(tx, actor, row.table_id, 'table.row.read')),
+      );
+      const visible = candidates.filter((_, index) => readable[index]);
       const counts = new Map<string, string>();
       if (query.sort === 'records')
-        for (const row of visible) counts.set(row.table_id, await countUpTo(tx, table(tx, row.physical_table), []));
+        for (const [index, count] of (
+          await pipelinedAll(
+            tx.client,
+            visible.map(row => () => countUpTo(tx, table(tx, row.physical_table), [])),
+          )
+        ).entries())
+          counts.set(visible[index]!.table_id, count);
       const key = (row: (typeof visible)[number]) =>
         query.sort === 'records'
           ? Number.parseInt(counts.get(row.table_id) ?? '0', 10)
@@ -782,16 +794,22 @@ export function createTableService(
         query.sort === 'name' ? sign * byName(left, right) : sign * (key(left) - key(right)) || byName(left, right),
       );
       const page = visible.slice(offset, offset + query.limit);
-      const tables = [];
-      for (const row of page) tables.push(await publish(row, counts.get(row.table_id)));
+      const tables = await pipelinedAll(
+        tx.client,
+        page.map(row => () => publish(row, counts.get(row.table_id))),
+      );
       return { tables, nextCursor: visible.length > offset + query.limit ? String(offset + query.limit) : null };
     });
   }
   // Reads also reach an archived table's rows; `active` is for choosing rows to link, which an archived table can't offer.
   async function activeFor(tx: TableTransaction, actor: Actor, tableId: string, revision?: string, active = false) {
+    // The permission check runs first, so a reader without access never waits on the catalog lock. Postgres runs the
+    // lock and the read in the order sent, so the generation is read only once the lock is held.
     await permit(tx, actor, tableId, 'table.row.read');
-    await store.lockCatalogs(tx, [tableId]);
-    const generation = await (active ? store.activeGeneration : store.readableGeneration)(tx, tableId);
+    const [, generation] = await pipelinedAll(tx.client, [
+      () => store.lockCatalogs(tx, [tableId]),
+      () => (active ? store.activeGeneration : store.readableGeneration)(tx, tableId),
+    ]);
     if (revision !== undefined && generation.revision !== revision) throw new store.GenerationError('stale-generation');
     return generation;
   }
@@ -924,8 +942,10 @@ export function createTableService(
   async function capabilities(workspaceId: string, principal: string | Actor, input: { tableId: string }) {
     const request = z.object({ tableId: tableIdSchema }).parse(input);
     return authorized(workspaceId, principal, async (tx, actor) => {
-      const generation = await activeFor(tx, actor, request.tableId);
-      const registration = await store.workspaceMembersTable(tx);
+      const [generation, registration] = await pipelinedAll(tx.client, [
+        () => activeFor(tx, actor, request.tableId),
+        () => store.workspaceMembersTable(tx),
+      ]);
       const memberTableId =
         registration && (await queryHumanContext(tx, actor)) ? registration.coreDefinition.id : undefined;
       return {

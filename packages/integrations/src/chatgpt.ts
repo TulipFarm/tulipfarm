@@ -7,8 +7,6 @@ import {
   currentMember,
   type HumanActor,
   lockAndResolveHuman,
-  lockAuthorization,
-  resolveHuman,
 } from '@tulipfarm/access';
 import { commonCompatibility, qualified, type createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import type { IntegrationKeyring } from './credentials.ts';
@@ -554,8 +552,7 @@ export function createChatGptPlan(options: {
       const claimed = await options.runtime.transaction(workspaceId, commonCompatibility, async tx => {
         let membershipId: string | null = null;
         if (userId) {
-          await lockAuthorization(tx, 'write');
-          const actor = await resolveHuman(tx, userId);
+          const actor = await lockAndResolveHuman(tx, userId, 'write');
           await currentMember(tx, actor);
           membershipId = actor.membershipId;
         }

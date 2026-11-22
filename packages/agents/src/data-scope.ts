@@ -7,6 +7,7 @@ import {
   type HumanActor,
 } from '@tulipfarm/access';
 import { tablePermissionSchema } from '@tulipfarm/access/contracts';
+import { pipelinedAll } from '@tulipfarm/workspace-storage/transaction-reads';
 import { scopeSchema } from './contracts.ts';
 import { relation, type AgentTransaction } from './store.ts';
 import { AgentError } from './saved-contracts.ts';
@@ -15,41 +16,38 @@ type Scope = z.infer<typeof scopeSchema>;
 
 /** Only the caller's own teams are candidates; team-wide table policies expand to their current tables. */
 export async function tableAccessTeams(tx: AgentTransaction, actor: HumanActor) {
-  const teams = z
-    .array(z.object({ id: z.uuid(), name: z.string() }))
-    .parse(
-      (
-        await tx.client.query(
-          `SELECT t.id,t.name FROM ${relation(tx, 'tf_teams')} t JOIN ${relation(tx, 'tf_member_teams')} m ON m.team_id=t.id WHERE m.membership_id=$1 ORDER BY t.name,t.id`,
-          [actor.membershipId],
-        )
-      ).rows,
-    );
-  const grants = z
-    .array(z.object({ teamId: z.uuid(), assetId: z.uuid(), permissions: scopeSchema.element.shape.permissions }))
-    .parse(
-      (
-        await tx.client.query(
-          `SELECT g.team_id AS "teamId",c.id AS "assetId",array_agg(DISTINCT g.permission ORDER BY g.permission) AS permissions
+  // The table list is needed only for an admin, but reading it alongside the teams saves a round trip.
+  const [teamRows, grantRows, tableRows] = await pipelinedAll(tx.client, [
+    () =>
+      tx.client.query(
+        `SELECT t.id,t.name FROM ${relation(tx, 'tf_teams')} t JOIN ${relation(tx, 'tf_member_teams')} m ON m.team_id=t.id WHERE m.membership_id=$1 ORDER BY t.name,t.id`,
+        [actor.membershipId],
+      ),
+    () =>
+      tx.client.query(
+        `SELECT g.team_id AS "teamId",c.id AS "assetId",array_agg(DISTINCT g.permission ORDER BY g.permission) AS permissions
            FROM ${relation(tx, 'tf_grants')} g JOIN ${relation(tx, 'tf_member_teams')} m ON m.team_id=g.team_id
            JOIN ${relation(tx, 'tf_table_catalog')} c ON c.id=g.asset_id OR c.owning_team_id=g.asset_id
            WHERE m.membership_id=$1 AND c.archived_at IS NULL AND g.permission LIKE 'table.row.%'
            GROUP BY g.team_id,c.id`,
-          [actor.membershipId],
-        )
-      ).rows,
-    );
+        [actor.membershipId],
+      ),
+    () => tx.client.query(`SELECT id FROM ${relation(tx, 'tf_table_catalog')} WHERE archived_at IS NULL`),
+  ]);
+  const teams = z.array(z.object({ id: z.uuid(), name: z.string() })).parse(teamRows.rows);
+  const grants = z
+    .array(z.object({ teamId: z.uuid(), assetId: z.uuid(), permissions: scopeSchema.element.shape.permissions }))
+    .parse(grantRows.rows);
   const adminTables =
     teams.some(team => team.name === '_admin') && (await currentMember(tx, actor)).role === 'admin'
-      ? (
-          await tx.client.query(`SELECT id FROM ${relation(tx, 'tf_table_catalog')} WHERE archived_at IS NULL`)
-        ).rows.map(row => ({
+      ? tableRows.rows.map(row => ({
           assetId: z.uuid().parse(row.id),
           permissions: tablePermissionSchema.options.filter(permission => permission !== 'table.create'),
         }))
       : [];
-  return Promise.all(
-    teams.map(async team => ({
+  return pipelinedAll(
+    tx.client,
+    teams.map(team => async () => ({
       ...team,
       canAssign: await canAssignTeam(tx, actor, team.id),
       tableScope:

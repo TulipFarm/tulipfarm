@@ -3,12 +3,11 @@ import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import {
   AccessDenied,
-  currentMember,
-  lockAuthorization,
-  remoteSourceCheckDeadline,
-  resolveHuman,
   type AuthorizationTransaction,
+  currentMember,
   type HumanActor,
+  lockAndResolvePrincipal,
+  remoteSourceCheckDeadline,
 } from '@tulipfarm/access';
 import type { IntegrationKeyring } from '@tulipfarm/integrations';
 import { TokenPlanError } from '@tulipfarm/integrations/token-plans';
@@ -111,8 +110,7 @@ export function createGitHubAccounts(options: {
     mode: 'read' | 'write' = 'read',
   ) {
     return options.runtime.transaction(uuidSchema.parse(workspaceId), githubCompatibility, async tx => {
-      await lockAuthorization(tx, mode);
-      const actor = typeof principal === 'string' ? await resolveHuman(tx, principal) : principal;
+      const actor = await lockAndResolvePrincipal(tx, principal, mode);
       await currentMember(tx, actor);
       return operation(tx, actor);
     });

@@ -3,15 +3,14 @@ import { teamLabel } from '@tulipfarm/workspace-storage/team-labels';
 import { z } from 'zod';
 import {
   AccessDenied,
+  type Actor,
   agentRunOwner,
   canAccessTable,
-  lockAuthorization,
+  type HumanActor,
+  lockAndResolveActor,
   queryHumanContext,
   requireTablePermission,
-  resolveActor,
   unhandledActor,
-  type Actor,
-  type HumanActor,
 } from '@tulipfarm/access';
 import { TableError } from '@tulipfarm/tables/service-contracts';
 import { recordQuerySchema, validateRecord, valuesSchema } from '@tulipfarm/tables/definition';
@@ -222,8 +221,7 @@ export function createAgentRecordTools(runtime: AgentStorage, taskCapability?: o
     permission: 'read' | 'delete' | 'schema' = 'read',
   ) {
     return runtime.transaction(workspaceId, commonCompatibility, async tx => {
-      await lockAuthorization(tx);
-      const actor = await resolveActor(tx, principal);
+      const actor = await lockAndResolveActor(tx, principal);
       if (actor.kind === 'agent')
         await tx.client.query(`SELECT id FROM ${relation(tx, 'tf_agent_runs')} WHERE id=$1 FOR UPDATE`, [actor.runId]);
       if (permission !== 'schema' || !(await canAccessTable(tx, actor, tableId, 'table.schema.manage')))
@@ -484,8 +482,7 @@ export function createAgentRecordTools(runtime: AgentStorage, taskCapability?: o
     ) {
       const query = z.object({ after: z.uuid().optional(), limit: z.int().min(1).max(100).default(25) }).parse(input);
       return runtime.transaction(workspaceId, commonCompatibility, async tx => {
-        await lockAuthorization(tx);
-        await resolveActor(tx, actor);
+        await lockAndResolveActor(tx, actor);
         const metadata = agentTableStatusSchema.pick({
           id: true,
           name: true,
@@ -533,8 +530,7 @@ export function createAgentRecordTools(runtime: AgentStorage, taskCapability?: o
         })
         .parse(input);
       return runtime.transaction(workspaceId, commonCompatibility, async tx => {
-        await lockAuthorization(tx);
-        await resolveActor(tx, actor);
+        await lockAndResolveActor(tx, actor);
         const ids = await listedTableIds(tx, actor);
         const visible = [];
         const only = query.ids && new Set(query.ids);
@@ -568,8 +564,7 @@ export function createAgentRecordTools(runtime: AgentStorage, taskCapability?: o
     },
     async authoringContext(workspaceId: string, principal: string | Actor, tableId?: string) {
       return runtime.transaction(workspaceId, commonCompatibility, async tx => {
-        await lockAuthorization(tx);
-        const actor = await resolveActor(tx, principal);
+        const actor = await lockAndResolveActor(tx, principal);
         // Team names stay private to members. Table administrators receive other creatable teams as opaque ids.
         const [visible, subject] = teamVisibility(tx, actor);
         const teams = z

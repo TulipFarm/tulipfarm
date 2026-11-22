@@ -2,11 +2,11 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   AccessDenied,
-  currentMember,
-  lockAuthorization,
-  resolveHuman,
   type AuthorizationTransaction,
+  currentMember,
   type HumanActor,
+  lockAndResolvePrincipal,
+  lockAuthorization,
 } from '@tulipfarm/access';
 import type { IntegrationKeyring } from '@tulipfarm/integrations';
 import { validateIntegrationRecipients } from '@tulipfarm/integrations/authorization';
@@ -196,8 +196,7 @@ export function createSocialAccounts(options: {
     mode: 'read' | 'write' = 'read',
   ) {
     return transaction(workspaceId, async tx => {
-      await lockAuthorization(tx, mode);
-      const actor = typeof principal === 'string' ? await resolveHuman(tx, principal) : principal;
+      const actor = await lockAndResolvePrincipal(tx, principal, mode);
       const member = await currentMember(tx, actor);
       return operation(tx, actor, member.role);
     });

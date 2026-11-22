@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { pipelinedAll } from '@tulipfarm/workspace-storage/transaction-reads';
 import { randomUUID } from 'node:crypto';
 import {
   AccessDenied,
@@ -203,38 +204,30 @@ export function createSavedAgentService(runtime: AgentStorage, readProjection?: 
 
   async function context(workspaceId: string, user: string | HumanActor) {
     return withHuman(runtime, workspaceId, user, 'read', async (transaction, actor) => {
-      const teams = await tableAccessTeams(transaction, actor);
-      const currentSoulRevision = z
-        .string()
-        .parse(
-          (await transaction.client.query(`SELECT revision FROM ${relation(transaction, 'tf_soul_head')} WHERE id = 1`))
-            .rows[0]?.revision,
-        );
+      const [teams, head] = await pipelinedAll(transaction.client, [
+        () => tableAccessTeams(transaction, actor),
+        () => transaction.client.query(`SELECT revision FROM ${relation(transaction, 'tf_soul_head')} WHERE id = 1`),
+      ]);
+      const currentSoulRevision = z.string().parse(head.rows[0]?.revision);
       return { currentSoulRevision, teams, builtinSkills: listSkills().skills };
     });
   }
 
   async function sharingCandidates(workspaceId: string, user: string) {
     return withHuman(runtime, workspaceId, user, 'read', async (tx, actor) => {
-      const people = z
-        .array(z.object({ membershipId: z.uuid(), userId: z.string() }))
-        .parse(
-          (
-            await tx.client.query(
-              `SELECT id AS "membershipId",user_id AS "userId" FROM ${relation(tx, 'tf_memberships')} WHERE removed_at IS NULL ORDER BY id`,
-            )
-          ).rows,
-        );
-      const teams = z
-        .array(z.object({ id: z.uuid(), name: z.string() }))
-        .parse(
-          (
-            await tx.client.query(
-              `SELECT t.id,t.name FROM ${relation(tx, 'tf_teams')} t JOIN ${relation(tx, 'tf_member_teams')} m ON m.team_id=t.id WHERE m.membership_id=$1 AND m.role='manager' ORDER BY t.name,t.id`,
-              [actor.membershipId],
-            )
-          ).rows,
-        );
+      const [members, managed] = await pipelinedAll(tx.client, [
+        () =>
+          tx.client.query(
+            `SELECT id AS "membershipId",user_id AS "userId" FROM ${relation(tx, 'tf_memberships')} WHERE removed_at IS NULL ORDER BY id`,
+          ),
+        () =>
+          tx.client.query(
+            `SELECT t.id,t.name FROM ${relation(tx, 'tf_teams')} t JOIN ${relation(tx, 'tf_member_teams')} m ON m.team_id=t.id WHERE m.membership_id=$1 AND m.role='manager' ORDER BY t.name,t.id`,
+            [actor.membershipId],
+          ),
+      ]);
+      const people = z.array(z.object({ membershipId: z.uuid(), userId: z.string() })).parse(members.rows);
+      const teams = z.array(z.object({ id: z.uuid(), name: z.string() })).parse(managed.rows);
       return { membershipId: actor.membershipId, people, teams };
     });
   }

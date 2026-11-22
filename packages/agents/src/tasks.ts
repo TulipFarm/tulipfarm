@@ -51,6 +51,7 @@ import { recordsTaskFailure } from './task-pause.ts';
 import { visiblePage } from './visible-page.ts';
 import { delegatedRequestId, subagentLimits } from './subagent-contracts.ts';
 import { effectiveAgentScope, unavailableTableMessage } from './data-scope.ts';
+import { relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
 
 const columns = (tx: AgentTransaction) =>
   `id, agent_id AS "agentId", activation_id AS "activationId", definition_revision AS "definitionRevision", parent_task_id AS "parentTaskId", delegation_depth AS "delegationDepth", delegation_tools AS "delegationTools", skills, scope, limits, flow_id AS "flowId", generation, status, pause_reason AS "pauseReason", ${recordsTaskFailure(tx) ? 'failure_reason' : 'NULL::text'} AS "failureReason", active_milliseconds::text AS "activeMilliseconds", tool_calls AS "toolCalls", created_at::text AS "createdAt"`;
@@ -83,9 +84,7 @@ async function bindGoogleInputs(
 ): Promise<Sources> {
   if (!sources.some(source => source.kind === 'drive-file'))
     return sources.filter(source => source.kind !== 'drive-file');
-  const installed =
-    (await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [relation(tx, 'tf_google_integrations')]))
-      .rows[0]?.installed === true;
+  const installed = await relationInstalled(tx.client, relation(tx, 'tf_google_integrations'));
   const integration = installed
     ? googleIntegrationSchema.optional().parse(
         (

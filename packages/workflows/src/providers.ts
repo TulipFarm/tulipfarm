@@ -65,6 +65,15 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
   ) {
     return workflowTransaction(runtime, workspaceId, operation, mode);
   }
+  // `transaction` that also reads `user`'s membership while taking the lock, so their first `workflowMember` is free.
+  function memberTransaction<T>(
+    workspaceId: string,
+    user: string,
+    operation: (tx: WorkflowTransaction) => Promise<T>,
+    mode: 'read' | 'write' = 'write',
+  ) {
+    return workflowTransaction(runtime, workspaceId, operation, mode, user);
+  }
   async function integration(tx: AuthorizationTransaction, id: string) {
     const row = (
       await tx.client.query(
@@ -101,7 +110,7 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
   }
   async function check(workspaceId: string, user: string, value: unknown) {
     const trigger = z.union([providerTriggerSchema, identifiedProviderTriggerSchema]).parse(value);
-    return transaction(workspaceId, async tx => {
+    return memberTransaction(workspaceId, user, async tx => {
       const actor = await workflowMember(tx, user);
       const row = await authorize(tx, trigger, actor.membershipId);
       return { id: row.id, name: row.name, source: row.source };
@@ -132,8 +141,9 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
     ]);
   }
   async function list(workspaceId: string, user: string) {
-    return transaction(
+    return memberTransaction(
       workspaceId,
+      user,
       async tx => {
         const actor = await workflowMember(tx, user);
         const rows = (
@@ -173,7 +183,7 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
       if (counts.member >= workflowLimits.member) throw new WorkflowLimitReached('member');
       if (counts.workspace >= workflowLimits.workspace) throw new WorkflowLimitReached('workspace');
     }
-    const preflight = await transaction(workspaceId, async tx => {
+    const preflight = await memberTransaction(workspaceId, user, async tx => {
       const actor = await workflowMember(tx, user);
       const existing = (
         await tx.client.query(
@@ -192,7 +202,7 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
     });
     if (preflight.replay) return { saved: true };
     await discovery.test({ source: value.source, token: value.token });
-    return transaction(workspaceId, async tx => {
+    return memberTransaction(workspaceId, user, async tx => {
       const actor = await workflowMember(tx, user);
       if (actor.membershipId !== preflight.membershipId) throw new AccessDenied();
       const existing = (
@@ -221,7 +231,7 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
   async function update(workspaceId: string, user: string, id: string, input: unknown) {
     const value = providerUpdateSchema.parse(input);
     if (value.token) {
-      const preflight = await transaction(workspaceId, async tx => {
+      const preflight = await memberTransaction(workspaceId, user, async tx => {
         const actor = await workflowMember(tx, user);
         await requireGrant(tx, actor.membershipId, id, 'manage', 'provider');
         const row = await integration(tx, id);
@@ -239,7 +249,7 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
       if (preflight.replay) return { saved: true };
       await discovery.test({ source: preflight.source, token: value.token });
     }
-    return transaction(workspaceId, async tx => {
+    return memberTransaction(workspaceId, user, async tx => {
       const actor = await workflowMember(tx, user);
       await requireGrant(tx, actor.membershipId, id, 'manage', 'provider');
       const row = await integration(tx, id);
@@ -289,7 +299,7 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
     });
   }
   async function status(workspaceId: string, user: string, workflowId: string) {
-    return transaction(workspaceId, async tx => {
+    return memberTransaction(workspaceId, user, async tx => {
       const actor = await workflowMember(tx, user);
       await requireGrant(tx, actor.membershipId, workflowId, 'manage');
       const row = (
@@ -446,19 +456,19 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
     }
   }
   const grants = (workspaceId: string, user: string, id: string) =>
-    transaction(workspaceId, tx => listGrants(tx, user, id, 'provider'));
+    memberTransaction(workspaceId, user, tx => listGrants(tx, user, id, 'provider'));
   const share = (workspaceId: string, user: string, id: string, value: unknown) =>
-    transaction(workspaceId, tx => changeGrant(tx, user, id, value, 'provider'));
+    memberTransaction(workspaceId, user, tx => changeGrant(tx, user, id, value, 'provider'));
   async function test(workspaceId: string, user: string, input: unknown) {
-    await transaction(workspaceId, tx => workflowMember(tx, user));
+    await memberTransaction(workspaceId, user, tx => workflowMember(tx, user));
     const result = await discovery.test(input);
-    await transaction(workspaceId, tx => workflowMember(tx, user));
+    await memberTransaction(workspaceId, user, tx => workflowMember(tx, user));
     return result;
   }
   async function resources(workspaceId: string, user: string, input: unknown) {
-    await transaction(workspaceId, tx => workflowMember(tx, user));
+    await memberTransaction(workspaceId, user, tx => workflowMember(tx, user));
     const result = await discovery.resources(input);
-    await transaction(workspaceId, tx => workflowMember(tx, user));
+    await memberTransaction(workspaceId, user, tx => workflowMember(tx, user));
     return result;
   }
   return {

@@ -625,15 +625,18 @@ test('plan models carry the usage status of the plan each runs on; models the wo
     premiumRequests: { remaining: 212, entitlement: 300 },
   };
   const { request } = fixture(t, undefined, null, modelCatalogSnapshot, {
-    planModels: async (id, user, provider) => {
-      assert.deepEqual([id, user], [workspaceId, userId]);
-      if (provider === 'chatgpt')
-        return [
-          { slug: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', usage: limited },
-          { slug: 'gpt-7', label: 'GPT-7', usage: limited },
-        ];
-      if (provider === 'copilot') return [{ slug: 'gpt-6-luna', label: 'GPT-6 Luna', usage: counted }];
-      return [];
+    planModels: async (id, user, providers) => {
+      assert.deepEqual([id, user, providers], [workspaceId, userId, ['chatgpt', 'claude', 'copilot']]);
+      return new Map([
+        [
+          'chatgpt',
+          [
+            { slug: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', usage: limited },
+            { slug: 'gpt-7', label: 'GPT-7', usage: limited },
+          ],
+        ],
+        ['copilot', [{ slug: 'gpt-6-luna', label: 'GPT-6 Luna', usage: counted }]],
+      ]);
     },
   });
   const response = await request();

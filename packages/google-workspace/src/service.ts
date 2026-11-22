@@ -2,11 +2,10 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   AccessDenied,
-  currentMember,
-  lockAuthorization,
-  resolveHuman,
-  type HumanActor,
   type AuthorizationTransaction,
+  currentMember,
+  type HumanActor,
+  lockAndResolvePrincipal,
 } from '@tulipfarm/access';
 import { uuidSchema } from '@tulipfarm/access/contracts';
 import { qualified, type createWorkspaceRuntime, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
@@ -117,8 +116,7 @@ export function createGoogleWorkspaceService(options: {
     operation: (tx: AuthorizationTransaction, actor: HumanActor) => Promise<T>,
   ) {
     return options.runtime.transaction(uuidSchema.parse(workspaceId), compatibility, async tx => {
-      await lockAuthorization(tx);
-      const actor = typeof principal === 'string' ? await resolveHuman(tx, principal) : principal;
+      const actor = await lockAndResolvePrincipal(tx, principal);
       await currentMember(tx, actor);
       return operation(tx, actor);
     });
