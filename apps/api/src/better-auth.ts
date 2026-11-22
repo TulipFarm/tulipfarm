@@ -138,7 +138,10 @@ export function createAuth(
     database: pool,
     logger: { disabled: true },
     trustedOrigins: [config.webOrigin, ...publicGuideOrigins()],
-    advanced: { database: { generateId: 'uuid' }, ipAddress: { ipAddressHeaders: ['x-tulipfarm-client-ip'] } },
+    advanced: {
+      database: { generateId: 'uuid', joins: true },
+      ipAddress: { ipAddressHeaders: ['x-tulipfarm-client-ip'] },
+    },
     emailAndPassword: config.emailPassword
       ? {
           enabled: true,

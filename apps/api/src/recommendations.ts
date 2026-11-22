@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { AccessDenied, WorkspaceMembershipDenied, lockAuthorization, resolveHuman } from '@tulipfarm/access';
+import { AccessDenied, lockAndResolveHuman, WorkspaceMembershipDenied } from '@tulipfarm/access';
 import { StorageUnavailableError, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import type { registerAuth } from './auth.ts';
@@ -46,8 +46,7 @@ export function registerRecommendations(
       if (!params.success) return reply.code(400).send({ error: 'invalid-request' });
       try {
         return await dependencies.runtime.transaction(params.data.workspaceId, commonCompatibility, async tx => {
-          await lockAuthorization(tx);
-          const actor = await resolveHuman(tx, session.user.id);
+          const actor = await lockAndResolveHuman(tx, session.user.id);
           return readSavedRecommendations(tx, actor.membershipId);
         });
       } catch (cause) {

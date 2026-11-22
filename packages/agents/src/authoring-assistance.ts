@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { currentMember, lockAuthorization, resolveHuman, uuidSchema, type HumanActor } from '@tulipfarm/access';
+import { currentMember, type HumanActor, lockAndResolveHuman, uuidSchema } from '@tulipfarm/access';
 import {
   calculateUsageCost,
   estimateInputTokens,
@@ -89,8 +89,7 @@ export function createAgentAuthoringAssistance(dependencies: {
     runtime.transaction(workspaceId, commonCompatibility, operation);
 
   async function authorize(workspaceId: string, tx: AgentTransaction, user: string, familyId: string, input: Input) {
-    await lockAuthorization(tx);
-    const actor = await resolveHuman(tx, user);
+    const actor = await lockAndResolveHuman(tx, user);
     await currentMember(tx, actor);
     if (!environment || !(await dependencies.eligible({ workspaceId, modelFamilyId: familyId })))
       throw new AgentAuthoringError('model-family-unavailable');

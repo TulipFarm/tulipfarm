@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { currentMember, lockAuthorization, resolveHuman } from '@tulipfarm/access';
+import { currentMember, lockAndResolveHuman } from '@tulipfarm/access';
 import {
   mcpSelectionSubjectSchema,
   workspaceMcpCompatibility,
@@ -36,8 +36,7 @@ export function workspaceMcpSelections(options: {
     });
   async function authority(params: z.infer<typeof mcpSelectionParams>, userId: string, agentId?: string) {
     return options.runtime.transaction(params.workspaceId, workspaceMcpCompatibility, async transaction => {
-      await lockAuthorization(transaction);
-      const actor = await resolveHuman(transaction, userId);
+      const actor = await lockAndResolveHuman(transaction, userId);
       await currentMember(transaction, actor);
       const result = await options.authorizeSelection({ transaction, actor, subject: subject(params, agentId) });
       await options.authorizeSources({ transaction, actor, sources: result.sources });

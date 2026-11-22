@@ -1,12 +1,6 @@
 import type { Pool } from 'pg';
 import { z } from 'zod';
-import {
-  AccessDenied,
-  canAccessTable,
-  lockAuthorization,
-  requireTablePermission,
-  resolveHuman,
-} from '@tulipfarm/access';
+import { AccessDenied, canAccessTable, lockAndResolveHuman, requireTablePermission } from '@tulipfarm/access';
 import { definitionSchema } from '@tulipfarm/tables/definition';
 import { executionCompatibility } from '@tulipfarm/tables/execution';
 import { tasksTable, workspaceMembersTable } from '@tulipfarm/tables/store';
@@ -96,8 +90,7 @@ export function createTableSchemaHistory(
     ) => Promise<T>,
   ) {
     return options.runtime.transaction(workspaceId, executionCompatibility, async tx => {
-      await lockAuthorization(tx);
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId);
       await requireTablePermission(tx, actor, tableId, 'table.row.read');
       return action(tx, actor);
     });

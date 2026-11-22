@@ -1,12 +1,6 @@
 import { createPrivateKey } from 'node:crypto';
 import { z } from 'zod';
-import {
-  AccessDenied,
-  currentMember,
-  lockAuthorization,
-  resolveHuman,
-  type AuthorizationTransaction,
-} from '@tulipfarm/access';
+import { AccessDenied, type AuthorizationTransaction, currentMember, lockAndResolveHuman } from '@tulipfarm/access';
 import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
 import { createGitHubAppProvider } from './app-provider.ts';
 import type { AccountRuntime, GitHubCredential } from './accounts.ts';
@@ -84,8 +78,7 @@ export function createGitHubBotGrants(runtime: AccountRuntime, env: NodeJS.Proce
     operation: (tx: AuthorizationTransaction, membershipId: string, admin: boolean) => Promise<T>,
   ) =>
     runtime.transaction(z.uuid().parse(workspaceId).toLowerCase(), commonCompatibility, async tx => {
-      await lockAuthorization(tx, manage ? 'write' : 'read');
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId, manage ? 'write' : 'read');
       const admin = (await currentMember(tx, actor)).role === 'admin';
       if (manage && !admin) throw new AccessDenied();
       return operation(tx, actor.membershipId, admin);

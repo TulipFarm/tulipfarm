@@ -6,14 +6,13 @@ import { activityReceiptSchema } from '@tulipfarm/conversations/tool-activity';
 import { storedToolPresentation, storedToolStatus } from '@tulipfarm/conversations/tool-activity-history';
 import {
   AccessDenied,
-  githubTaskContext,
   canAccessAsset,
-  lockAuthorization,
+  githubTaskContext,
+  type HumanActor,
+  lockAndResolveHuman,
   requireCurrentActor,
   requireTaskInvocation,
-  resolveHuman,
   uuidSchema,
-  type HumanActor,
 } from '@tulipfarm/access';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
 import { agentDefinitionSchema, maximumTaskLimits, scopeSchema, toolNameSchema } from './contracts.ts';
@@ -131,8 +130,7 @@ export function createAgentTasks(
     mode: 'read' | 'write' = 'read',
   ) {
     return runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async tx => {
-      await lockAuthorization(tx, mode);
-      return operation(tx, await resolveHuman(tx, user));
+      return operation(tx, await lockAndResolveHuman(tx, user, mode));
     });
   }
   async function owned(tx: AgentTransaction, actor: HumanActor, id: string) {

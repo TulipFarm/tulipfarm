@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { AccessDenied, lockAuthorization, resolveHuman } from '@tulipfarm/access';
+import { AccessDenied, lockAndResolveHuman } from '@tulipfarm/access';
 import { GoogleWorkspaceError } from '@tulipfarm/google-workspace/contracts';
 import { GoogleOperationError } from '@tulipfarm/google-workspace/operation-contracts';
 import {
@@ -224,8 +224,7 @@ export function registerGoogleOperations(
       async request => {
         const workspaceId = workspace.parse(request.params).workspaceId;
         await dependencies.runtime.transaction(workspaceId, commonCompatibility, async tx => {
-          await lockAuthorization(tx);
-          await resolveHuman(tx, user(request));
+          await lockAndResolveHuman(tx, user(request));
         });
         return { operations: googleOperationCatalog };
       },

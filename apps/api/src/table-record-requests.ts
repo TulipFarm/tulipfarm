@@ -1,11 +1,5 @@
 import { z } from 'zod';
-import {
-  AccessDenied,
-  lockAuthorization,
-  resolveHuman,
-  requireTablePermission,
-  type HumanActor,
-} from '@tulipfarm/access';
+import { AccessDenied, type HumanActor, lockAndResolveHuman, requireTablePermission } from '@tulipfarm/access';
 import { tableProposalDigest } from '@tulipfarm/tables/proposals';
 import { executionCompatibility } from '@tulipfarm/tables/execution';
 import { createTableService, mutationSchema } from '@tulipfarm/tables/service';
@@ -59,8 +53,7 @@ export function createRecordRequests(runtime: Runtime) {
     z.uuid().parse(tableId);
     z.uuid().parse(requestId);
     return runtime.transaction(workspaceId, executionCompatibility, async tx => {
-      await lockAuthorization(tx, lock);
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId, lock);
       await requireTablePermission(tx, actor, tableId, 'table.row.read');
       await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,81001))', [
         JSON.stringify([tx.schema, actor.membershipId, tableId, requestId]),

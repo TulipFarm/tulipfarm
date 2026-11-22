@@ -3,10 +3,9 @@ import {
   AccessDenied,
   canAccessTable,
   currentMember,
-  lockAuthorization,
-  requireTablePermission,
-  resolveHuman,
   type HumanActor,
+  lockAndResolveHuman,
+  requireTablePermission,
 } from '@tulipfarm/access';
 import { activeGeneration, workspaceMembersTable } from '@tulipfarm/tables/store';
 import {
@@ -33,8 +32,7 @@ export function createWorkspaceMembers(runtime: Pick<WorkspaceRuntime, 'transact
     operation: (tx: Transaction, actor: HumanActor, tableId: string) => Promise<T>,
   ) {
     return runtime.transaction(z.uuid().parse(workspaceId), commonCompatibility, async tx => {
-      await lockAuthorization(tx);
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId);
       const registration = await workspaceMembersTable(tx);
       if (!registration) throw new WorkspaceMemberError('member-unavailable');
       await requireTablePermission(tx, actor, registration.coreDefinition.id, 'table.row.read');

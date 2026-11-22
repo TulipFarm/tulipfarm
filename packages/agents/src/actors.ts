@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { definitionGrantPredicate, lockAuthorization, resolveHuman, type HumanActor } from '@tulipfarm/access';
+import { definitionGrantPredicate, type HumanActor, lockAndResolveHuman } from '@tulipfarm/access';
 import { activeMembers } from './members.ts';
 import { relation, type AgentTransaction } from './store.ts';
 
@@ -49,8 +49,7 @@ export function createActorDirectory(runtime: {
   return {
     async read(workspaceId: string, userId: string, compatibility: unknown) {
       return runtime.transaction(z.uuid().parse(workspaceId), compatibility, async tx => {
-        await lockAuthorization(tx);
-        return actorDirectory(tx, await resolveHuman(tx, userId));
+        return actorDirectory(tx, await lockAndResolveHuman(tx, userId));
       });
     },
   };

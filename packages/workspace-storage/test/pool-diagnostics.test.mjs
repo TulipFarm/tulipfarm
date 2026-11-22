@@ -144,7 +144,13 @@ for (const stage of ['callback', 'COMMIT', 'ROLLBACK', 'DISCARD ALL']) {
     );
     assert.deepEqual(fixture.timings(), [
       ['workspace.connection.wait', 'success', 250, 1],
-      ['workspace.connection.hold', 'error', stage === 'callback' || stage === 'ROLLBACK' ? 1150 : 1250, 1],
+      [
+        'workspace.connection.hold',
+        'error',
+        // DISCARD ALL is sent with COMMIT, so a failed COMMIT still counts its reset before the ROLLBACK.
+        { callback: 1150, ROLLBACK: 1150, COMMIT: 1350, 'DISCARD ALL': 1250 }[stage],
+        1,
+      ],
     ]);
     assert.deepEqual(fixture.releases, [true]);
     assert.equal(fixture.client.listenerCount('error'), 0);

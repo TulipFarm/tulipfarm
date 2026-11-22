@@ -2,13 +2,13 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   AccessDenied,
+  type AuthorizationTransaction,
   currentMember,
   denyMcpEgress,
-  lockAuthorization,
-  resolveHuman,
-  uuidSchema,
-  type AuthorizationTransaction,
   type HumanActor,
+  lockAndResolveHuman,
+  lockAuthorization,
+  uuidSchema,
 } from '@tulipfarm/access';
 import { qualified, type createWorkspaceRuntime, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import {
@@ -669,8 +669,7 @@ export function createFiles(
     range: { minimum: number; maximum: number } = compatibility,
   ) {
     return runtime.transaction(uuidSchema.parse(workspaceId), range, async tx => {
-      await lockAuthorization(tx, write ? 'write' : 'read');
-      return operation(tx, await resolveHuman(tx, userId));
+      return operation(tx, await lockAndResolveHuman(tx, userId, write ? 'write' : 'read'));
     });
   }
   async function destination(

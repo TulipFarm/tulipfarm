@@ -2,13 +2,12 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   AccessDenied,
-  WorkspaceMembershipDenied,
+  type AuthorizationTransaction,
   currentMember,
   definitionGrantPredicate,
-  lockAuthorization,
-  resolveHuman,
-  type AuthorizationTransaction,
   type HumanActor,
+  lockAndResolveHuman,
+  WorkspaceMembershipDenied,
 } from '@tulipfarm/access';
 import { isFeatureEnabled } from '@tulipfarm/observability';
 import { creditSummary } from '@tulipfarm/workspace-storage/credits';
@@ -133,8 +132,7 @@ export function registerCredits(
       try {
         const images = await isFeatureEnabled('images', null, { id: workspaceId });
         return await dependencies.runtime.transaction(workspaceId, commonCompatibility, async tx => {
-          await lockAuthorization(tx);
-          const actor = await resolveHuman(tx, session.user.id);
+          const actor = await lockAndResolveHuman(tx, session.user.id);
           if ((await currentMember(tx, actor)).role === 'admin')
             return namedUsage(tx, await creditSummary(tx, { kind: 'workspace', images }));
           return namedUsage(

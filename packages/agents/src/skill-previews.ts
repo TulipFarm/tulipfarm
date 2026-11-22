@@ -1,4 +1,4 @@
-import { AccessDenied, currentMember, lockAuthorization, resolveHuman, uuidSchema } from '@tulipfarm/access';
+import { AccessDenied, currentMember, lockAndResolveHuman, uuidSchema } from '@tulipfarm/access';
 import type { FileBytes } from '@tulipfarm/files';
 import { createWorkspaceSkills } from './workspace-skills.ts';
 import { createSkillImports } from './skill-imports.ts';
@@ -34,8 +34,7 @@ export function createSkillPreviews(runtime: AgentStorage, bytes: FileBytes) {
     installed(workspaceId: string, user: string, skillId: string, revision: string, value: unknown) {
       return preview(workspaceId, value, async () => {
         const actor = await runtime.transaction(workspaceId, skillPackageCompatibility, async tx => {
-          await lockAuthorization(tx);
-          const actor = await resolveHuman(tx, user);
+          const actor = await lockAndResolveHuman(tx, user);
           await currentMember(tx, actor);
           return actor;
         });

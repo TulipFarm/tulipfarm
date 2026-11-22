@@ -2,12 +2,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   AccessDenied,
+  type AuthorizationTransaction,
   currentMember,
   denyMcpEgress,
-  lockAuthorization,
-  resolveHuman,
-  type AuthorizationTransaction,
   type HumanActor,
+  lockAndResolveHuman,
 } from '@tulipfarm/access';
 import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
 import { notifyConversationChange } from './event-publisher.ts';
@@ -116,8 +115,7 @@ export function createBudAssistant(runtime: ConversationRuntime) {
   ) {
     denyMcpEgress();
     return runtime.transaction(z.uuid().parse(workspaceId), budCompatibility, async tx => {
-      await lockAuthorization(tx, 'read');
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId);
       if (write)
         await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 648299))', [
           `${tx.schema}:${actor.membershipId}`,

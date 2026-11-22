@@ -1,11 +1,10 @@
 import { z } from 'zod';
 import {
   AccessDenied,
-  currentMember,
-  lockAuthorization,
-  resolveHuman,
   type AuthorizationTransaction,
+  currentMember,
   type HumanActor,
+  lockAndResolveHuman,
 } from '@tulipfarm/access';
 import { commonCompatibility, qualified, type createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import { hasPlanAccounts, setUses, useColumn, type PlanUse } from './plan-accounts.ts';
@@ -174,8 +173,7 @@ export function createSubscriptions(options: { runtime: Runtime }) {
     operation: (tx: AuthorizationTransaction, actor: HumanActor, admin: boolean) => Promise<T>,
   ) {
     return runtime.transaction(uuid.parse(workspaceId), commonCompatibility, async tx => {
-      await lockAuthorization(tx, mode);
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId, mode);
       const member = await currentMember(tx, actor);
       return operation(tx, actor, member.role === 'admin');
     });

@@ -2,14 +2,13 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   AccessDenied,
-  currentMember,
   canAccessAsset,
+  currentMember,
+  type HumanActor,
+  lockAndResolveHuman,
   requireSharedMcpSlots,
-  lockAuthorization,
-  resolveHuman,
   requireTableCreation,
   requireTablePermission,
-  type HumanActor,
 } from '@tulipfarm/access';
 import { chatAccess } from '@tulipfarm/conversations/chat-access';
 import { withMaintenanceTransaction } from '@tulipfarm/workspace-storage/provisioning';
@@ -158,8 +157,7 @@ export function createSystemPackages(options: Options) {
     mode: 'read' | 'write' = 'write',
   ) {
     return runtime.transaction(z.uuid().parse(workspaceId), systemPackageCompatibility, async tx => {
-      await lockAuthorization(tx, mode);
-      const actor = await resolveHuman(tx, user);
+      const actor = await lockAndResolveHuman(tx, user, mode);
       await currentMember(tx, actor);
       return action(tx, actor);
     });

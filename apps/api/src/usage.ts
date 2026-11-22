@@ -2,12 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   AccessDenied,
-  WorkspaceMembershipDenied,
+  type AuthorizationTransaction,
   currentMember,
   definitionGrantPredicate,
-  lockAuthorization,
-  resolveHuman,
-  type AuthorizationTransaction,
+  lockAndResolveHuman,
+  WorkspaceMembershipDenied,
 } from '@tulipfarm/access';
 import {
   comparableProviderModel,
@@ -199,8 +198,7 @@ export function registerUsage(
         return reply.code(400).send({ error: 'invalid-usage-query' });
       try {
         const read = await dependencies.runtime.transaction(workspaceId, commonCompatibility, async tx => {
-          await lockAuthorization(tx);
-          const actor = await resolveHuman(tx, session.user.id);
+          const actor = await lockAndResolveHuman(tx, session.user.id);
           const admin = (await currentMember(tx, actor)).role === 'admin';
           const report = await modelUsageReport(
             tx,

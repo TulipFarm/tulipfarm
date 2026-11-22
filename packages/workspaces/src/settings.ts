@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AccessDenied, currentMember, lockAuthorization, resolveHuman } from '@tulipfarm/access';
+import { AccessDenied, currentMember, lockAndResolveHuman } from '@tulipfarm/access';
 import { qualified, StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import type { WorkspaceStore } from './storage.ts';
 import { commonCompatibility } from './storage.ts';
@@ -55,8 +55,7 @@ export function createWorkspaceSettingsService(store: WorkspaceStore) {
         z.uuid().parse(workspaceId).toLowerCase(),
         { ...commonCompatibility, ...(command?.kind === 'delete' ? { access: 'exclusive' as const } : {}) },
         async transaction => {
-          await lockAuthorization(transaction, command ? 'write' : 'read');
-          const actor = await resolveHuman(transaction, z.uuid().parse(userId));
+          const actor = await lockAndResolveHuman(transaction, z.uuid().parse(userId), command ? 'write' : 'read');
           const member = await currentMember(transaction, actor);
           if (command && member.role !== 'admin') throw new AccessDenied();
           const result = await transaction.client.query(

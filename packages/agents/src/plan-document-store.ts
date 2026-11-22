@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { AccessDenied, lockAuthorization, resolveHuman, uuidSchema, type HumanActor } from '@tulipfarm/access';
+import { AccessDenied, type HumanActor, lockAndResolveHuman, lockAuthorization, uuidSchema } from '@tulipfarm/access';
 import { authorizeChat } from '@tulipfarm/conversations/chat-access';
 import {
   ensureSystemFolder,
@@ -213,8 +213,7 @@ export function createPlanDocumentStore(runtime: AgentStorage) {
     operation: (tx: PlanTransaction, actor: HumanActor) => Promise<T>,
   ) =>
     transaction(workspaceId, async tx => {
-      await lockAuthorization(tx);
-      return operation(tx, await resolveHuman(tx, user));
+      return operation(tx, await lockAndResolveHuman(tx, user));
     });
   async function readablePlan(tx: PlanTransaction, actor: HumanActor, planId: string, lock = false) {
     const plan = await loadPlan(tx, uuidSchema.parse(planId), lock);

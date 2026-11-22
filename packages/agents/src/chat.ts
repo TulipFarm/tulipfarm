@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { imageGenerationOffered } from './image-generation.ts';
 import { storedToolPresentation, storedToolStatus } from '@tulipfarm/conversations/tool-activity-history';
 import { settleCredits } from '@tulipfarm/workspace-storage/credits';
-import { AccessDenied, canAccessAsset, currentMember, lockAuthorization, resolveHuman } from '@tulipfarm/access';
+import { AccessDenied, canAccessAsset, currentMember, lockAndResolveHuman, lockAuthorization } from '@tulipfarm/access';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
 import { createAgentExecutor } from './executor.ts';
 import {
@@ -160,8 +160,7 @@ export function createAgentChat(
     const input = chatInputSchema.parse(value);
     if (!model) throw new AgentError('model-not-configured', 503);
     return runtime.transaction(workspaceId, compatibility, async tx => {
-      await lockAuthorization(tx);
-      const actor = await resolveHuman(tx, user);
+      const actor = await lockAndResolveHuman(tx, user);
       await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 648293))', [
         `${tx.schema}:${actor.membershipId}`,
       ]);
@@ -230,8 +229,7 @@ export function createAgentChat(
   }
   async function read(workspaceId: string, user: string, agentId: string, id: string) {
     return runtime.transaction(workspaceId, compatibility, async tx => {
-      await lockAuthorization(tx);
-      const actor = await resolveHuman(tx, user);
+      const actor = await lockAndResolveHuman(tx, user);
       await requireHumanRun(tx, z.uuid().parse(id));
       await requireExternalRun(tx, workspaceId, id, externalGuard);
       await requireChatInvocation(tx, workspaceId, actor, agentId, id, externalGuard);
@@ -335,8 +333,7 @@ export function createAgentChat(
     const input = retryModelSchema.parse(value);
     if (!model) throw new AgentError('model-not-configured', 503);
     return runtime.transaction(workspaceId, compatibility, async tx => {
-      await lockAuthorization(tx);
-      const actor = await resolveHuman(tx, user);
+      const actor = await lockAndResolveHuman(tx, user);
       const raw = (
         await tx.client.query(
           `SELECT r.*,t.prompt,t.status,t.decision FROM ${relation(tx, 'tf_agent_chat_turns')} t JOIN ${relation(tx, 'tf_agent_runs')} r ON r.id=t.id WHERE t.id=$1 FOR UPDATE OF t`,

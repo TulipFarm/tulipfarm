@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { Pool } from 'pg';
+import { Pool, type QueryResult } from 'pg';
 import { z } from 'zod';
 import {
   inBackgroundJob,
@@ -13,7 +13,7 @@ import {
   transientStorageFailure,
 } from '@tulipfarm/observability';
 import { commonTables, qualified, workspaceIdSchema, workspaceNames } from './names.ts';
-import { inTransaction, resetClient, type SqlClient } from './transactions.ts';
+import { inPipelinedTransaction, settledValue, type SqlClient } from './transactions.ts';
 
 export {
   commonTables,
@@ -106,14 +106,17 @@ export function transientStorageError(error: unknown): boolean {
   return transientStorageFailure(error);
 }
 
-const callerSignals = new AsyncLocalStorage<AbortSignal>();
+type CallerScope = { signal: AbortSignal };
+const callerScopes = new AsyncLocalStorage<CallerScope>();
+const credentialReuseMs = 1000;
 
 /**
  * Runs `call` for a caller that can leave, such as an HTTP request. When `signal` aborts, its transactions that still
- * wait for a turn or a connection give up their place; a transaction that already started runs to its end.
+ * wait for a turn or a connection give up their place; a transaction that already started runs to its end. Within one
+ * caller, a workspace credential read is reused for a moment, so a request's transactions don't each reread it.
  */
 export function withCallerSignal<T>(signal: AbortSignal, call: () => T): T {
-  return callerSignals.run(signal, call);
+  return callerScopes.run({ signal }, call);
 }
 
 function unavailable(reason: unknown) {
@@ -125,7 +128,7 @@ class TransactionDeadline {
   readonly signal = this.controller.signal;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private readonly deadlineAt: number | undefined;
-  private readonly caller = callerSignals.getStore();
+  private readonly caller = callerScopes.getStore()?.signal;
   private readonly callerLeft = () => this.controller.abort(new StorageUnavailableError('caller_left'));
 
   constructor(deadlineAt?: number) {
@@ -259,6 +262,11 @@ export function createWorkspaceRuntime(
   const connectionReserve = Math.min(reserve, config.connectionsPerPool - 1);
   const entries = new Map<string, Entry>();
   const generations = new Map<string, number>();
+  let fenceSeen = false;
+  const callerCredentials = new WeakMap<
+    CallerScope,
+    Map<string, { pending: Promise<RuntimeCredential | undefined>; at: number }>
+  >();
   const queue: Waiter[] = [];
   const backgroundQueue: Waiter[] = [];
   const closing = new Set<Promise<void>>();
@@ -410,6 +418,33 @@ export function createWorkspaceRuntime(
   }
 
   async function credentialFor(workspaceId: string, deadline: TransactionDeadline) {
+    // Every transaction still checks the workspace's kill switch itself, so a just-read credential is safe to reuse.
+    const scope = callerScopes.getStore();
+    const shared = scope && callerCredentials.get(scope)?.get(workspaceId);
+    if (shared && Date.now() - shared.at < credentialReuseMs) {
+      const credential = await deadline.wait(() => shared.pending);
+      if (credential && credential.generation === generations.get(workspaceId)) return credential;
+    }
+    const read = readCredential(workspaceId, deadline);
+    if (scope) {
+      let credentials = callerCredentials.get(scope);
+      if (!credentials) callerCredentials.set(scope, (credentials = new Map()));
+      credentials.set(workspaceId, { pending: read.catch(() => undefined), at: Date.now() });
+    }
+    return read;
+  }
+
+  /** Starts reading a workspace's credential early, so the request's later storage calls share that one read. */
+  function prefetchCredential(workspaceIdInput: string) {
+    const parsed = workspaceIdSchema.safeParse(workspaceIdInput);
+    if (!parsed.success || closed) return;
+    const deadline = new TransactionDeadline();
+    void credentialFor(parsed.data, deadline)
+      .catch(() => undefined)
+      .finally(() => deadline.dispose());
+  }
+
+  async function readCredential(workspaceId: string, deadline: TransactionDeadline) {
     const controller = new AbortController();
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -598,40 +633,52 @@ export function createWorkspaceRuntime(
         const onError = () => undefined;
         client.on('error', onError);
         try {
-          if (versions.deadlineAt !== undefined) {
-            const remaining = Math.min(2_147_483_647, Math.max(1, versions.deadlineAt - Date.now()));
-            await observeChatDetail('storage-settings', () =>
-              deadline.wait(() =>
-                client.query("SELECT set_config('transaction_timeout', $1, false)", [String(remaining)]),
-              ),
-            );
-          }
+          const names = workspaceNames(workspaceId);
+          const exclusive = compatibility.access === 'exclusive';
+          const versionQuery = `SELECT count(*)::integer AS version FROM ${qualified(names.schema, commonTables.migrations)}`;
+          // The fence function never goes away once installed, so after one sighting the fence and the version
+          // check join the setup round trip. Postgres still runs them in order, the version count after the fence.
+          const fenceKnown = fenceSeen;
           const result = await deadline.wait(() =>
-            inTransaction(
+            inPipelinedTransaction(
               client,
-              async connection => {
-                const identity = identitySchema.parse(
-                  (
-                    await observeChatDetail('storage-identity', () =>
-                      connection.query(`SELECT session_user, current_user, ${fenceInstalled} AS fenced`),
-                    )
-                  ).rows[0],
-                );
-                const names = workspaceNames(workspaceId);
+              connection => [
+                connection.query(`SELECT session_user, current_user, ${fenceInstalled} AS fenced`),
+                ...(fenceKnown
+                  ? [
+                      connection.query('SELECT app.workspace_access($1::uuid, $2::boolean) AS allowed', [
+                        workspaceId,
+                        exclusive,
+                      ]),
+                      connection.query(versionQuery),
+                    ]
+                  : []),
+              ],
+              async (connection, [identityResult, accessResult, versionResult]) => {
+                const identity = identitySchema.parse(settledValue<QueryResult>(identityResult).rows[0]);
                 if (identity.session_user !== names.runtime || identity.current_user !== names.runtime)
                   throw new Error('Runtime login identity mismatch');
-                await observeChatDetail('storage-fence', () =>
-                  fenceWorkspaceAccess(connection, workspaceId, compatibility.access === 'exclusive', identity.fenced),
-                );
-                const version = versionSchema.parse(
-                  (
-                    await observeChatDetail('storage-version', () =>
-                      connection.query(
-                        `SELECT count(*)::integer AS version FROM ${qualified(names.schema, commonTables.migrations)}`,
-                      ),
-                    )
-                  ).rows[0],
-                ).version;
+                let versionRow: unknown;
+                if (fenceKnown) {
+                  let access: QueryResult;
+                  try {
+                    access = settledValue<QueryResult>(accessResult);
+                  } catch (error) {
+                    if (error instanceof Error && 'code' in error && error.code === '42883') fenceSeen = false;
+                    throw error;
+                  }
+                  if (!workspaceAccessSchema.parse(access.rows[0]).allowed)
+                    throw new StorageUnavailableError('disabled');
+                  versionRow = settledValue<QueryResult>(versionResult).rows[0];
+                } else {
+                  await observeChatDetail('storage-fence', () =>
+                    fenceWorkspaceAccess(connection, workspaceId, exclusive, identity.fenced),
+                  );
+                  if (identity.fenced) fenceSeen = true;
+                  versionRow = (await observeChatDetail('storage-version', () => connection.query(versionQuery)))
+                    .rows[0];
+                }
+                const version = versionSchema.parse(versionRow).version;
                 if (version < versions.minimum || version > versions.maximum)
                   throw new StorageUnavailableError('incompatible_version');
                 deadline.check();
@@ -657,10 +704,14 @@ export function createWorkspaceRuntime(
                   throw error;
                 }
               },
-              { statementTimeoutMs: config.statementTimeoutMs },
+              {
+                statementTimeoutMs: config.statementTimeoutMs,
+                ...(versions.deadlineAt !== undefined && {
+                  transactionTimeoutMs: Math.min(2_147_483_647, Math.max(1, versions.deadlineAt - Date.now())),
+                }),
+              },
             ),
           );
-          await deadline.wait(() => resetClient(client));
           return result;
         } catch (error) {
           destroy = true;
@@ -668,6 +719,8 @@ export function createWorkspaceRuntime(
             throw new StorageUnavailableError('wait_timeout');
           throw error;
         } finally {
+          // Without the flag, pg drops a connection that still runs a query instead of waiting for it to finish.
+          if (destroy) (client as { pipeline?: boolean }).pipeline = false;
           client.release(destroy);
           client.removeListener('error', onError);
         }
@@ -710,6 +763,7 @@ export function createWorkspaceRuntime(
 
   return {
     hasCurrentMember,
+    prefetchCredential,
     transaction,
     close,
     stats: () => ({

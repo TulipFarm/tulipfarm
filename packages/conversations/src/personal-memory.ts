@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import {
+  type AuthorizationTransaction,
   currentMember,
   denyMcpEgress,
-  lockAuthorization,
-  resolveHuman,
-  uuidSchema,
-  type AuthorizationTransaction,
   type HumanActor,
+  lockAndResolveHuman,
+  lockAuthorization,
+  uuidSchema,
 } from '@tulipfarm/access';
 import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
 import { recordRecommendationChange } from '@tulipfarm/workspace-storage/recommendations';
@@ -316,8 +316,7 @@ export function createPersonalMemoryService(
   ) {
     denyMcpEgress();
     return runtime.transaction(uuidSchema.parse(workspaceId), compatibility, async tx => {
-      await lockAuthorization(tx, 'read');
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId);
       await currentMember(tx, actor);
       return operation(tx, actor);
     });
