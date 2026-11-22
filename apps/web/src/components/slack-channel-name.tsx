@@ -1,4 +1,4 @@
-import { HashIcon, LockIcon } from 'lucide-react';
+import { HashIcon, LockIcon } from '@tulipfarm/sprout/icons';
 
 /** Slack titles arrive as `#name`; the leading icon carries the `#`, so the text drops it. */
 export function slackChannelLabel(title: string) {
@@ -19,11 +19,7 @@ export function SlackChannelName({ title, private: isPrivate }: { title: string;
   return (
     <span className="inline-flex min-w-0 items-center gap-2">
       <span className="inline-flex shrink-0 text-muted-foreground">
-        {isPrivate ? (
-          <LockIcon aria-hidden="true" className="size-4" />
-        ) : (
-          <HashIcon aria-hidden="true" className="size-4" />
-        )}
+        {isPrivate ? <LockIcon size="md" aria-hidden="true" /> : <HashIcon size="md" aria-hidden="true" />}
       </span>
       <span className="min-w-0 break-words">{slackChannelLabel(title)}</span>
       {isPrivate && <span className="sr-only">(private channel)</span>}

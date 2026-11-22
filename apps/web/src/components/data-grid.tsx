@@ -1,9 +1,7 @@
 /** Hand-assembled table parts for the records grid, which needs page-scoped selection, disabled sorting and fixed loading rows that sprout's config-driven Table does not offer yet. */
 import * as React from 'react';
 import { cn } from 'cn';
-import { ArrowDown } from 'reicon-react/icons/ArrowDown';
-import { ArrowUp } from 'reicon-react/icons/ArrowUp';
-import { ArrowUpDown } from 'lucide-react';
+import { ArrowDownIcon, ArrowUpIcon, SortIcon } from '@tulipfarm/sprout/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import { ScrollArea } from '@tulipfarm/sprout/scroll-area';
 
@@ -101,7 +99,7 @@ function TableSortHead({
   disabled?: boolean;
   children: string;
 }) {
-  const Icon = sorted === 'asc' ? ArrowUp : sorted === 'desc' ? ArrowDown : ArrowUpDown;
+  const Icon = sorted === 'asc' ? ArrowUpIcon : sorted === 'desc' ? ArrowDownIcon : SortIcon;
   const hint =
     sorted === 'asc'
       ? ', ascending. Select for descending'
@@ -120,7 +118,7 @@ function TableSortHead({
         onClick={onSort}
       >
         {children}
-        <Icon size={14} aria-hidden="true" />
+        <Icon size="sm" aria-hidden="true" />
       </Button>
     </TableHead>
   );

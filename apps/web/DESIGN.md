@@ -442,11 +442,13 @@ avatars, and glass chips can be pill-shaped. Glass banners use 20px corners.
 
 ## Components
 
-Sprout's built-in icons use Hugeicons through `@tulipfarm/sprout/icons`, with
-named sizes such as `md` (16px) and `sm` (14px). App-owned icons still come from
-`reicon-react` (per-icon imports such as `reicon-react/icons/Add`), sized 16px in controls and navigation and 14px in
-dense rows; some older screens still use `lucide-react`. Third-party marks use
-`BrandIcon`.
+Sprout's built-in icons and shared app widgets use Hugeicons through
+`@tulipfarm/sprout/icons`, with named sizes such as `md` (16px) and `sm` (14px).
+Private marks, Slack channel names, record sorting, list hints, recent-item pins,
+nudge dismissals, and suggestion arrows use these shared icons. Other app-owned
+icons still come from `reicon-react` (per-icon imports such as
+`reicon-react/icons/Add`), sized 16px in controls and navigation and 14px in dense
+rows; some older screens still use `lucide-react`. Third-party marks use `BrandIcon`.
 
 Dropdowns are Sprout's searchable `Combobox` (`@tulipfarm/sprout/combobox`):
 `ComboboxInput`, `ComboboxContent`, `ComboboxEmpty` and a `ComboboxList` of
