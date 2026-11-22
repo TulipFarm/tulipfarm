@@ -1283,10 +1283,14 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
             )
           ).rows,
         );
+        const prefetch = await prefetchConversationSources(
+          tx,
+          rows.map(chat => chat.id),
+        );
         for (const chat of rows) {
           if (chats.length === 20) break;
           try {
-            await requireConversationMcpSources(tx, actor, chat.id);
+            await requireConversationMcpSources(tx, actor, chat.id, prefetch);
             chats.push(chat);
           } catch (error) {
             if (!(error instanceof AccessDenied)) throw error;
