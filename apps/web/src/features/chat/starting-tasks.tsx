@@ -1,15 +1,17 @@
 import type { ReactNode } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { Book } from 'reicon-react/icons/Book';
-import { CalendarSearch } from 'reicon-react/icons/CalendarSearch';
-import { Checklist } from 'reicon-react/icons/Checklist';
-import { Clock } from 'reicon-react/icons/Clock';
-import { Database } from 'reicon-react/icons/Database';
-import { MessageEdit } from 'reicon-react/icons/MessageEdit';
-import { Note } from 'reicon-react/icons/Note';
-import { Plug } from 'reicon-react/icons/Plug';
-import { Repeat } from 'reicon-react/icons/Repeat';
-import { UserAdd } from 'reicon-react/icons/UserAdd';
+import {
+  BookIcon,
+  CalendarSearchIcon,
+  ClockIcon,
+  DatabaseIcon,
+  MessageEditIcon,
+  NoteIcon,
+  PlugIcon,
+  RepeatIcon,
+  TasksIcon,
+  UserAddIcon,
+} from '@tulipfarm/icons';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { BrandStack, type Brand } from '@tulipfarm/sprout/brand-icon';
@@ -19,24 +21,24 @@ import { fillTasks, prioritizeTasks } from './starting-task-priority';
 import { fallbackRecommendations, useRecommendations, sourcePickerHash, type Recommendation } from './recommendations';
 
 const icons: Record<string, ReactNode> = {
-  'personalize-bud': <MessageEdit size={16} />,
-  'connect-apps': <Plug size={16} />,
-  'create-table': <Database size={16} />,
-  'create-workflow': <Repeat size={16} />,
-  'add-knowledge': <Book size={16} />,
-  'invite-teammate': <UserAdd size={16} />,
-  meetings: <CalendarSearch size={16} />,
-  inbox: <MessageEdit size={16} />,
-  'table-review': <Database size={16} />,
-  github: <Checklist size={16} />,
-  'slack-update': <MessageEdit size={16} />,
-  knowledge: <Book size={16} />,
-  workflows: <Repeat size={16} />,
-  'follow-ups': <Checklist size={16} />,
-  support: <MessageEdit size={16} />,
-  week: <CalendarSearch size={16} />,
-  standup: <Clock size={16} />,
-  process: <Note size={16} />,
+  'personalize-bud': <MessageEditIcon size="md" />,
+  'connect-apps': <PlugIcon size="md" />,
+  'create-table': <DatabaseIcon size="md" />,
+  'create-workflow': <RepeatIcon size="md" />,
+  'add-knowledge': <BookIcon size="md" />,
+  'invite-teammate': <UserAddIcon size="md" />,
+  meetings: <CalendarSearchIcon size="md" />,
+  inbox: <MessageEditIcon size="md" />,
+  'table-review': <DatabaseIcon size="md" />,
+  github: <TasksIcon size="md" />,
+  'slack-update': <MessageEditIcon size="md" />,
+  knowledge: <BookIcon size="md" />,
+  workflows: <RepeatIcon size="md" />,
+  'follow-ups': <TasksIcon size="md" />,
+  support: <MessageEditIcon size="md" />,
+  week: <CalendarSearchIcon size="md" />,
+  standup: <ClockIcon size="md" />,
+  process: <NoteIcon size="md" />,
 };
 const brandNames: Record<Recommendation['brands'][number], string> = {
   gmail: 'Gmail',
@@ -50,9 +52,9 @@ const destinations = {
   members: '/$workspaceSlug/members',
 } as const;
 const destinationIcons = {
-  integrations: <Plug size={16} />,
-  files: <Book size={16} />,
-  members: <UserAdd size={16} />,
+  integrations: <PlugIcon size="md" />,
+  files: <BookIcon size="md" />,
+  members: <UserAddIcon size="md" />,
 };
 const tones: SuggestionTone[] = ['primary', 'info', 'success', 'warning'];
 const sourceNames = { google: 'Google', github: 'GitHub', slack: 'Slack' };
@@ -86,12 +88,12 @@ export function StartingTasks({ onChoose, disabled }: { onChoose: (prompt: strin
         icon:
           action.kind === 'open' ? (
             source ? (
-              <Book size={16} />
+              <BookIcon size="md" />
             ) : (
               destinationIcons[action.destination]
             )
           ) : (
-            (icons[item.id] ?? <MessageEdit size={16} />)
+            (icons[item.id] ?? <MessageEditIcon size="md" />)
           ),
         brands: source
           ? [{ brand: source satisfies Brand, name: sourceNames[source] }]

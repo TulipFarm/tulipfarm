@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ChevronLeft } from 'reicon-react/icons/ChevronLeft';
-import { Download } from 'reicon-react/icons/Download';
-import { History } from 'reicon-react/icons/History';
-import { InfoCircle } from 'reicon-react/icons/InfoCircle';
-import { Link as LinkIcon } from 'reicon-react/icons/Link';
-import { MoreH } from 'reicon-react/icons/MoreH';
-import { Share } from 'reicon-react/icons/Share';
-import { ChatRound } from 'reicon-react/icons/ChatRound';
-import { Book } from 'reicon-react/icons/Book';
-import { Briefcase } from 'reicon-react/icons/Briefcase';
+import {
+  BookIcon,
+  BriefcaseIcon,
+  ChatIcon,
+  ChevronLeftIcon,
+  DownloadIcon,
+  HistoryIcon,
+  InfoIcon,
+  LinkIcon,
+  MoreIcon,
+  ShareIcon,
+} from '@tulipfarm/icons';
 import { fileRoute, workspaceRoute } from '@/router';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
@@ -39,7 +41,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { deniedStatus } from '@/lib/query/policy';
 
 type Content = { kind: 'loading' } | { kind: 'ready'; bytes: ArrayBuffer; url: string } | { kind: 'failed' };
-type Download = { kind: 'idle' } | { kind: 'sending' } | { kind: 'failed' };
+type DownloadIcon = { kind: 'idle' } | { kind: 'sending' } | { kind: 'failed' };
 
 export function FilePage() {
   const scope = useFeatureScope();
@@ -76,7 +78,7 @@ function Viewer({
   const [attempt, setAttempt] = useState(0);
   const [content, setContent] = useState<Content>({ kind: 'loading' });
   const [recentUse, setRecentUse] = useState<'idle' | 'recording' | 'done' | 'failed'>('idle');
-  const [download, setDownload] = useState<Download>({ kind: 'idle' });
+  const [download, setDownload] = useState<DownloadIcon>({ kind: 'idle' });
   const saving = useRef<AbortController | null>(null);
   const [dialog, setDialog] = useState<'details' | 'versions' | 'share' | 'chat' | 'knowledge' | 'project' | null>(
     null,
@@ -147,7 +149,7 @@ function Viewer({
   const back = <Link to="/$workspaceSlug/files" params={{ workspaceSlug }} search={search} />;
   const backLink = (
     <Button variant="ghost" size="sm" nativeButton={false} role="link" render={back}>
-      <ChevronLeft size={16} aria-hidden="true" />
+      <ChevronLeftIcon size="md" aria-hidden="true" />
       Files
     </Button>
   );
@@ -222,11 +224,11 @@ function Viewer({
             {!narrow && (
               <>
                 <Button onClick={() => setDialog('chat')}>
-                  <ChatRound size={16} aria-hidden="true" />
+                  <ChatIcon size="md" aria-hidden="true" />
                   Use in chat
                 </Button>
                 <Button variant="outline" disabled={sending} aria-busy={sending} onClick={() => void save(item)}>
-                  <Download size={16} aria-hidden="true" />
+                  <DownloadIcon size="md" aria-hidden="true" />
                   {downloadLabel}
                 </Button>
               </>
@@ -237,44 +239,44 @@ function Viewer({
                   <Button variant="outline" size="icon" aria-label={narrow ? 'File actions' : 'More file actions'} />
                 }
               >
-                <MoreH size={16} aria-hidden="true" />
+                <MoreIcon size="md" aria-hidden="true" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" size="menu">
                 {narrow && (
                   <>
                     <DropdownMenuItem onClick={() => setDialog('chat')}>
-                      <ChatRound size={14} aria-hidden="true" />
+                      <ChatIcon size="sm" aria-hidden="true" />
                       Use in chat
                     </DropdownMenuItem>
                     <DropdownMenuItem disabled={sending} onClick={() => void save(item)}>
-                      <Download size={14} aria-hidden="true" />
+                      <DownloadIcon size="sm" aria-hidden="true" />
                       {downloadLabel}
                     </DropdownMenuItem>
                   </>
                 )}
                 <DropdownMenuItem onClick={() => setDialog('knowledge')}>
-                  <Book size={14} aria-hidden="true" />
+                  <BookIcon size="sm" aria-hidden="true" />
                   Add to Knowledge
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setDialog('project')}>
-                  <Briefcase size={14} aria-hidden="true" />
+                  <BriefcaseIcon size="sm" aria-hidden="true" />
                   Add to project
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setDialog('details')}>
-                  <InfoCircle size={14} aria-hidden="true" />
+                  <InfoIcon size="sm" aria-hidden="true" />
                   Details
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setDialog('versions')}>
-                  <History size={14} aria-hidden="true" />
+                  <HistoryIcon size="sm" aria-hidden="true" />
                   Versions
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => void copyLink(workspaceSlug, item).then(setCopied)}>
-                  <LinkIcon size={14} aria-hidden="true" />
+                  <LinkIcon size="sm" aria-hidden="true" />
                   Copy link
                 </DropdownMenuItem>
                 {item.role === 'manager' && (
                   <DropdownMenuItem onClick={() => setDialog('share')}>
-                    <Share size={14} aria-hidden="true" />
+                    <ShareIcon size="sm" aria-hidden="true" />
                     Share
                   </DropdownMenuItem>
                 )}

@@ -1,6 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react';
-import { ArrowRight } from 'reicon-react/icons/ArrowRight';
-import { ArrowUpRight } from 'reicon-react/icons/ArrowUpRight';
+import { ArrowRightIcon, ArrowUpRightIcon } from '@tulipfarm/icons';
 
 export type SuggestionTone = 'primary' | 'info' | 'success' | 'warning';
 
@@ -104,8 +103,8 @@ export function SuggestionCard({
           <span className="flex items-center gap-2">
             {trailing}
             {!featured && (
-              <ArrowUpRight
-                size={16}
+              <ArrowUpRightIcon
+                size="md"
                 aria-hidden="true"
                 className="-translate-x-1 translate-y-1 text-muted-foreground opacity-0 transition-[transform,opacity] duration-300 group-hover:translate-x-0 group-hover:translate-y-0 group-hover:opacity-100"
               />
@@ -122,8 +121,8 @@ export function SuggestionCard({
           {featured && (
             <span className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-primary-text">
               Start this
-              <ArrowRight
-                size={14}
+              <ArrowRightIcon
+                size="sm"
                 aria-hidden="true"
                 className="transition-transform duration-300 group-hover:translate-x-1"
               />

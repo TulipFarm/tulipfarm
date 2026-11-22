@@ -6,6 +6,7 @@ test('Turbo forwards model credentials only to API and ordinary worker developme
   const result = spawnSync('pnpm', ['exec', 'turbo', 'run', 'dev', '--dry=json'], {
     cwd: new URL('..', import.meta.url),
     encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
     env: { ...process.env, AZURE_FOUNDRY_API_KEY: 'synthetic-not-secret', MODEL_CATALOG_FILE: 'catalog.json' },
   });
   assert.equal(result.status, 0, result.stderr);
@@ -39,6 +40,7 @@ test('model credentials never enter Turbo build environments', () => {
   const result = spawnSync('pnpm', ['exec', 'turbo', 'run', 'build', '--dry=json'], {
     cwd: new URL('..', import.meta.url),
     encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
     env: { ...process.env, AZURE_FOUNDRY_API_KEY: 'synthetic-not-secret', MODEL_CATALOG_FILE: 'catalog.json' },
   });
   assert.equal(result.status, 0, result.stderr);

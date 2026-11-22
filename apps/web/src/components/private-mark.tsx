@@ -1,4 +1,4 @@
-import { LockIcon } from 'lucide-react';
+import { LockIcon } from '@tulipfarm/icons';
 
 /** Marks a private or restricted item, such as a repository or channel, beside its name. */
 export function PrivateMark({ label = 'Private' }: { label?: string }) {

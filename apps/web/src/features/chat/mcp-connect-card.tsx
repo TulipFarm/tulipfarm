@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Plug } from 'reicon-react/icons/Plug';
+import { PlugIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import { ReviewCard, ReviewRow, ReviewRows } from '@tulipfarm/sprout/review-card';
 import { Input } from '@tulipfarm/sprout/input';
@@ -69,7 +69,7 @@ function Connect({
   return (
     <ReviewCard
       label={`Connect ${card.name}`}
-      icon={<Plug size={14} />}
+      icon={<PlugIcon size="sm" />}
       title={`Connect ${card.name}`}
       badge={{ label: registration ? 'One more step' : 'Suggested', variant: 'secondary' }}
       actions={
@@ -227,7 +227,7 @@ function Connected({
   return (
     <ReviewCard
       label={`${name} connection`}
-      icon={<Plug size={14} />}
+      icon={<PlugIcon size="sm" />}
       title={name}
       badge={
         ready
@@ -336,7 +336,7 @@ function ConnectPackage({
   return (
     <ReviewCard
       label={`Run ${card.name}`}
-      icon={<Plug size={14} />}
+      icon={<PlugIcon size="sm" />}
       title={`Run ${card.name}`}
       badge={{ label: 'Suggested', variant: 'secondary' }}
       actions={

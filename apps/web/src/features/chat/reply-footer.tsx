@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router';
-import { Danger } from 'reicon-react/icons/Danger';
+import { DangerIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import { MessageFooter } from '@tulipfarm/sprout/message';
 import type { ConversationMessage } from './conversation-api';
@@ -53,7 +53,7 @@ export function ReplyFooter({
             </p>
           ) : turn.status === 'failed' ? (
             <p role="status" className="flex items-center gap-1.5 text-sm text-destructive">
-              <Danger size={14} aria-hidden="true" />
+              <DangerIcon size="sm" aria-hidden="true" />
               {turnLabels.failed}
             </p>
           ) : (

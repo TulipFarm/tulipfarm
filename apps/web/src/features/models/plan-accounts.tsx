@@ -19,7 +19,7 @@ import {
   DropdownMenuTrigger,
 } from '@tulipfarm/sprout/dropdown-menu';
 import { Switch } from '@tulipfarm/sprout/switch';
-import { MoreH } from 'reicon-react/icons/MoreH';
+import { MoreIcon } from '@tulipfarm/icons';
 import { useFeatureChanges } from '@/lib/query';
 import { TableRequestError } from '@/features/tables/request-state';
 import { modelKeys } from './queries';
@@ -274,7 +274,7 @@ export function PlanAccounts({ workspaceId, connector }: { workspaceId: string; 
                       <Button variant="ghost" size="icon-sm" disabled={locked} aria-label={`More for ${label}`} />
                     }
                   >
-                    <MoreH size={16} aria-hidden="true" />
+                    <MoreIcon size="md" aria-hidden="true" />
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
                     <DropdownMenuGroup>

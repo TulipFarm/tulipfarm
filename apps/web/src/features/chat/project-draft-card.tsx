@@ -1,8 +1,6 @@
 import type { ReactNode, RefObject } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Archive } from 'reicon-react/icons/Archive';
-import { ArchiveUp } from 'reicon-react/icons/ArchiveUp';
-import { Folder } from 'reicon-react/icons/Folder';
+import { ArchiveIcon, ArchiveUpIcon, FolderIcon } from '@tulipfarm/icons';
 import { ReviewCard, ReviewRow, ReviewRows } from '@tulipfarm/sprout/review-card';
 import { Button } from '@tulipfarm/sprout/button';
 import { Disclosure } from '@/components/disclosure';
@@ -13,12 +11,12 @@ import { TechnicalDetail } from './row-draft-card';
 
 function changeOf(proposal: ProjectProposal) {
   const { current, settings } = proposal.input;
-  if (!current) return { verb: 'Create', done: 'created', doing: 'Creating…', icon: <Folder size={16} /> } as const;
+  if (!current) return { verb: 'Create', done: 'created', doing: 'Creating…', icon: <FolderIcon size="md" /> } as const;
   if (settings.archived && !current.archived)
-    return { verb: 'Archive', done: 'archived', doing: 'Archiving…', icon: <Archive size={16} /> } as const;
+    return { verb: 'Archive', done: 'archived', doing: 'Archiving…', icon: <ArchiveIcon size="md" /> } as const;
   if (!settings.archived && current.archived)
-    return { verb: 'Restore', done: 'restored', doing: 'Restoring…', icon: <ArchiveUp size={16} /> } as const;
-  return { verb: 'Update', done: 'updated', doing: 'Updating…', icon: <Folder size={16} /> } as const;
+    return { verb: 'Restore', done: 'restored', doing: 'Restoring…', icon: <ArchiveUpIcon size="md" /> } as const;
+  return { verb: 'Update', done: 'updated', doing: 'Updating…', icon: <FolderIcon size="md" /> } as const;
 }
 
 function Instructions({ text }: { text: string }) {

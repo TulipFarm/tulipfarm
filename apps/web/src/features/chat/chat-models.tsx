@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import type { ModelCatalogFamily } from '@tulipfarm/config/model-catalog';
 import { Button } from '@tulipfarm/sprout/button';
-import { ArrowUpRight } from 'reicon-react/icons/ArrowUpRight';
+import { ArrowUpRightIcon } from '@tulipfarm/icons';
 import { useModelCatalog } from '@/features/models/use-model-catalog';
 import { authClient } from '@/lib/auth';
 import type { ComposerModel } from './composer';
@@ -215,7 +215,7 @@ export function ChatModelStatus({
             render={<a href={usage.manageUrl} target="_blank" rel="noopener noreferrer" />}
           >
             Manage usage
-            <ArrowUpRight size={14} aria-hidden="true" />
+            <ArrowUpRightIcon size="sm" aria-hidden="true" />
           </Button>
         </div>
       )}

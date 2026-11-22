@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Compress } from 'reicon-react/icons/Compress';
+import { MinimizeIcon } from '@tulipfarm/icons';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import {
@@ -27,7 +27,7 @@ export function SentCompact({ prompt, compactionId }: { prompt: string | null; c
   return (
     <div className="flex flex-col items-end gap-1 text-right">
       <p className="flex items-center gap-1.5 text-sm font-medium">
-        <Compress size={14} aria-hidden="true" />
+        <MinimizeIcon size="sm" aria-hidden="true" />
         {compactionId ? 'Retry handoff' : '/compact'}
       </p>
       {prompt && <p className="max-w-prose whitespace-pre-wrap text-sm break-words text-muted-foreground">{prompt}</p>}
@@ -62,7 +62,7 @@ export function CompactionStatus({
       className="flex flex-wrap items-start gap-3 rounded-xl border border-border bg-card px-4 py-3"
     >
       <span aria-hidden="true" className={failed ? 'mt-0.5 text-destructive' : 'mt-0.5 text-muted-foreground'}>
-        <Compress size={16} />
+        <MinimizeIcon size="md" />
       </span>
       <div className="min-w-0 flex-1 basis-56 space-y-1">
         <p className={failed ? 'text-sm font-medium text-destructive' : 'text-sm font-medium'}>
@@ -117,7 +117,7 @@ function AutomaticRecap({
   return (
     <section aria-label="Automatic chat recap" className="space-y-3 rounded-xl border border-border bg-card px-4 py-3">
       <p className="flex items-center gap-2 text-sm font-medium">
-        <Compress size={16} aria-hidden="true" />
+        <MinimizeIcon size="md" aria-hidden="true" />
         Automatic chat recap
       </p>
       <p className="text-sm text-muted-foreground">

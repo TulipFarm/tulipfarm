@@ -14,7 +14,7 @@ import { FileAttachment, FileTypeIcon } from '@tulipfarm/sprout/attachment';
 import { Button } from '@tulipfarm/sprout/button';
 import { BrandIcon } from '@tulipfarm/sprout/brand-icon';
 import { ResultCard } from '@tulipfarm/sprout/result-card';
-import { FileText } from 'reicon-react/icons/FileText';
+import { DocumentTextIcon } from '@tulipfarm/icons';
 import { MentionGroup, MentionList, MentionOption, MentionStatus } from '@tulipfarm/sprout/mention-list';
 import { formatFileSize } from '@/lib/file-viewer';
 import { useFeatureRead, useFeatureScope } from '@/lib/query';
@@ -756,7 +756,7 @@ export function ConversationFileReference({
       title={file.name}
       kind="File"
       apps={[]}
-      icon={<FileText size={18} />}
+      icon={<DocumentTextIcon size="lg" />}
       status="Saved in Files"
       state="success"
       action={{ label: 'View file', onClick: open }}

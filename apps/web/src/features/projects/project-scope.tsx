@@ -1,8 +1,5 @@
 import { useRef, useState } from 'react';
-import { Add } from 'reicon-react/icons/Add';
-import { Folder } from 'reicon-react/icons/Folder';
-import { Lock } from 'reicon-react/icons/Lock';
-import { ChevronDown } from 'reicon-react/icons/ChevronDown';
+import { AddIcon, ChevronDownIcon, FolderIcon, LockIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import {
   Command,
@@ -80,7 +77,7 @@ export function ProjectScopeSelect({
         ? 'Loading project…'
         : 'Project unavailable'
     : 'Personal chats';
-  const Icon = value ? Folder : Lock;
+  const Icon = value ? FolderIcon : LockIcon;
   const privateBadge = badge && !value;
   const failed = state.kind !== 'loading' && (state.kind !== 'ready' || !!state.error);
   const pick = (projectId: string | null) => {
@@ -112,7 +109,7 @@ export function ProjectScopeSelect({
       >
         <Icon size={16} aria-hidden="true" />
         <span className="truncate">{privateBadge ? 'Personal chat' : name}</span>
-        <ChevronDown size={12} aria-hidden="true" />
+        <ChevronDownIcon size="xs" aria-hidden="true" />
       </PopoverTrigger>
       <PopoverContent size="picker" side={badge ? 'top' : 'bottom'} align="start" sideOffset={8}>
         <Command filter={projectFilter}>
@@ -149,7 +146,7 @@ export function ProjectScopeSelect({
                 data-checked={!value}
                 onSelect={() => pick(null)}
               >
-                <Lock size={16} aria-hidden="true" />
+                <LockIcon size="md" aria-hidden="true" />
                 Personal chats
               </CommandItem>
             </CommandGroup>
@@ -163,7 +160,7 @@ export function ProjectScopeSelect({
                     data-checked={project.id === value}
                     onSelect={() => pick(project.id)}
                   >
-                    <Folder size={16} aria-hidden="true" />
+                    <FolderIcon size="md" aria-hidden="true" />
                     <span className="min-w-0 break-words">
                       {project.name}
                       {project.archived ? ' (archived)' : ''}
@@ -211,7 +208,7 @@ export function ProjectScopeSelect({
                 onNewProject();
               }}
             >
-              <Add size={16} aria-hidden="true" />
+              <AddIcon size="md" aria-hidden="true" />
               <span className="flex-1 text-start">New project</span>
             </Button>
           </div>

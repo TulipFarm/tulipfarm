@@ -4,16 +4,16 @@ import {
   ChevronRightIcon,
   ClockIcon,
   GitPullRequestIcon,
+  type IconComponent,
   LayersIcon,
   PlayIcon,
   PlugIcon,
   RepeatIcon,
-  Rows3Icon,
+  RowsIcon,
   TableIcon,
   WebhookIcon,
   ZapIcon,
-  type LucideIcon,
-} from 'lucide-react';
+} from '@tulipfarm/icons';
 import { Status, type StatusState } from '@tulipfarm/sprout/status';
 import type { DisabledReason, TriggerKind, workflowSchema } from '@tulipfarm/workflows/contracts';
 import type { z } from 'zod';
@@ -24,7 +24,7 @@ export { triggerLine } from './triggers';
 type Workflow = z.infer<typeof workflowSchema>;
 export type WorkflowState = { mark: StatusState; label: string; detail?: string | undefined };
 
-export const triggerIcons: Record<TriggerKind, LucideIcon> = {
+export const triggerIcons: Record<TriggerKind, IconComponent> = {
   webhook: WebhookIcon,
   event: ZapIcon,
   provider: PlugIcon,
@@ -33,7 +33,7 @@ export const triggerIcons: Record<TriggerKind, LucideIcon> = {
   interval: RepeatIcon,
   cron: CalendarClockIcon,
   record: TableIcon,
-  row: Rows3Icon,
+  row: RowsIcon,
 };
 
 /** One trigger's icon, a play icon for a Workflow started only by hand, or a stack for several triggers. */

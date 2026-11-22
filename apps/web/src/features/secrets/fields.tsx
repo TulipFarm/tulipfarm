@@ -1,7 +1,5 @@
 import { useId, useState, type ReactNode, type Ref } from 'react';
-import { Eye } from 'reicon-react/icons/Eye';
-import { EyeOff } from 'reicon-react/icons/EyeOff';
-import { X } from 'reicon-react/icons/X';
+import { CloseIcon, EyeIcon, EyeOffIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import { Input } from '@tulipfarm/sprout/input';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@tulipfarm/sprout/input-group';
@@ -124,7 +122,7 @@ export function SecretInput({
             disabled={disabled}
             onClick={() => setShown(!shown)}
           >
-            {shown ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
+            {shown ? <EyeOffIcon size="md" aria-hidden="true" /> : <EyeIcon size="md" aria-hidden="true" />}
           </InputGroupButton>
         </InputGroupAddon>
       )}
@@ -396,7 +394,7 @@ export function DestinationsEditor({
                 disabled={disabled}
                 onClick={() => onChange(value.filter((_, position) => position !== index))}
               >
-                <X size={16} aria-hidden="true" />
+                <CloseIcon size="md" aria-hidden="true" />
               </Button>
             )}
           </div>

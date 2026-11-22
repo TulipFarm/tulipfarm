@@ -1,6 +1,5 @@
 import { Link, useNavigate } from '@tanstack/react-router';
-import { Add } from 'reicon-react/icons/Add';
-import { Window } from 'reicon-react/icons/Window';
+import { AddIcon, WindowIcon } from '@tulipfarm/icons';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
 import { PageContent } from '@tulipfarm/sprout/page-content';
@@ -21,7 +20,7 @@ export function AppsPage() {
       nativeButton={false}
       render={<Link to="/$workspaceSlug/apps/new" params={{ workspaceSlug: workspace.slug }} />}
     >
-      <Add size={16} aria-hidden="true" />
+      <AddIcon size="md" aria-hidden="true" />
       New app
     </Button>
   );
@@ -81,7 +80,7 @@ export function AppsPage() {
           <StatePanel
             kind="empty"
             heading="h2"
-            icon={Window}
+            icon={WindowIcon}
             title="No apps yet"
             description="Create an app here, then describe what it should do in chat. TulipFarm builds it for you."
           >

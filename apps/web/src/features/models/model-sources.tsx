@@ -4,10 +4,7 @@ import { workspaceModelsRoute } from '@/router';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { BrandIcon, type Brand } from '@tulipfarm/sprout/brand-icon';
 import { Button } from '@tulipfarm/sprout/button';
-import { ArrowUpRight } from 'reicon-react/icons/ArrowUpRight';
-import { Compress } from 'reicon-react/icons/Compress';
-import { Image } from 'reicon-react/icons/Image';
-import { Key } from 'reicon-react/icons/Key';
+import { ArrowUpRightIcon, ImageIcon, KeyIcon, MinimizeIcon } from '@tulipfarm/icons';
 import { useChatGptConnection, useTokenConnection } from './plan-connections';
 import type { TokenConnection } from './token-plan-api';
 import {
@@ -198,7 +195,7 @@ export function ModelSources({
           {item(
             'keys',
             <Tile muted>
-              <Key size={14} aria-hidden="true" />
+              <KeyIcon size="sm" aria-hidden="true" />
             </Tile>,
             'Add API key',
             'Coming soon',
@@ -208,7 +205,7 @@ export function ModelSources({
           {item(
             'compaction',
             <Tile>
-              <Compress size={14} aria-hidden="true" />
+              <MinimizeIcon size="sm" aria-hidden="true" />
             </Tile>,
             'Compaction',
             'Summarize long chats',
@@ -217,7 +214,7 @@ export function ModelSources({
             item(
               'images',
               <Tile>
-                <Image size={14} aria-hidden="true" />
+                <ImageIcon size="sm" aria-hidden="true" />
               </Tile>,
               'Images',
               'Image models and limits',
@@ -299,7 +296,7 @@ export function ApiKeysPane() {
               <BrandIcon brand={provider.brand} size="inline" />
             ) : (
               <span className="text-muted-foreground">
-                <Key size={14} aria-hidden="true" />
+                <KeyIcon size="sm" aria-hidden="true" />
               </span>
             )}
             <span className="flex-1">{provider.name}</span>
@@ -310,7 +307,7 @@ export function ApiKeysPane() {
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline"
               >
-                Get a key <ArrowUpRight size={12} aria-hidden="true" />
+                Get a key <ArrowUpRightIcon size="xs" aria-hidden="true" />
               </a>
             )}
           </li>

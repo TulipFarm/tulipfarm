@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Check } from 'reicon-react/icons/Check';
+import { CheckIcon } from '@tulipfarm/icons';
 import type { MovePreview } from '@tulipfarm/files/contracts';
 import { Button } from '@tulipfarm/sprout/button';
 import {
@@ -297,7 +297,7 @@ function ItemStatus({ status, names, retry }: { status: Status; names: Names; re
   if (status.kind === 'moved')
     return (
       <p className="flex items-center gap-1.5 text-sm text-foreground">
-        <Check size={14} aria-hidden="true" />
+        <CheckIcon size="sm" aria-hidden="true" />
         Moved
       </p>
     );

@@ -1,5 +1,5 @@
 import type { ReactNode, RefObject } from 'react';
-import { Database } from 'reicon-react/icons/Database';
+import { DatabaseIcon } from '@tulipfarm/icons';
 import { ReviewCard, ReviewRow, ReviewRows } from '@tulipfarm/sprout/review-card';
 import { Button } from '@tulipfarm/sprout/button';
 import { Disclosure } from '@/components/disclosure';
@@ -88,7 +88,7 @@ export function RowDraftCard({
       id={rowDraftElementId(id)}
       tabIndex={-1}
       label="Review row change"
-      icon={<Database size={16} />}
+      icon={<DatabaseIcon size="md" />}
       title={`${verbs[kind]} ${count === 1 ? 'a row' : `${count} rows`} in ${tableName}`}
       badge={badges[draft.status]}
       settled={draft.status === 'saved' || draft.status === 'dismissed' || draft.status === 'failed'}

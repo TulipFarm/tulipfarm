@@ -1,5 +1,5 @@
 import { type KeyboardEvent, useId, useMemo, useState } from 'react';
-import { ChevronRight, HashIcon, LockIcon, Plus, X } from 'lucide-react';
+import { AddIcon, ChevronRightIcon, CloseIcon, HashIcon, LockIcon } from '@tulipfarm/icons';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import {
   AlertDialog,
@@ -345,7 +345,7 @@ export function SlackChannelSettingsTab({ workspaceId }: { workspaceId: string }
                     aria-label={`Edit ${row.channel}`}
                     onClick={() => edit(row)}
                   >
-                    <ChevronRight aria-hidden="true" />
+                    <ChevronRightIcon aria-hidden="true" />
                   </Button>
                 </span>
               )}
@@ -591,7 +591,7 @@ function ChannelEditor({
                                   }))
                                 }
                               >
-                                <X aria-hidden="true" />
+                                <CloseIcon aria-hidden="true" />
                               </Button>
                             </div>
                             <Field
@@ -626,7 +626,7 @@ function ChannelEditor({
                         }));
                       }}
                     >
-                      <Plus aria-hidden="true" />
+                      <AddIcon aria-hidden="true" />
                       Add reaction
                     </Button>
                   )}

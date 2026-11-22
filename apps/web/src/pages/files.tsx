@@ -8,20 +8,22 @@ import {
 } from '@/components/data-list';
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { Link, useElementScrollRestoration } from '@tanstack/react-router';
-import { Edit } from 'reicon-react/icons/Edit';
-import { FolderMove } from 'reicon-react/icons/FolderMove';
-import { InfoCircle } from 'reicon-react/icons/InfoCircle';
-import { Link as LinkIcon } from 'reicon-react/icons/Link';
-import { Share } from 'reicon-react/icons/Share';
-import { ChatRound } from 'reicon-react/icons/ChatRound';
-import { Book } from 'reicon-react/icons/Book';
-import { Briefcase } from 'reicon-react/icons/Briefcase';
-import { Files } from 'reicon-react/icons/Files';
-import { Folder } from 'reicon-react/icons/Folder';
-import { FolderAdd } from 'reicon-react/icons/FolderAdd';
-import { MoreH } from 'reicon-react/icons/MoreH';
-import { Trash } from 'reicon-react/icons/Trash';
-import { Upload } from 'reicon-react/icons/Upload';
+import {
+  BookIcon,
+  BriefcaseIcon,
+  ChatIcon,
+  DeleteIcon,
+  EditIcon,
+  FilesIcon,
+  FolderAddIcon,
+  FolderIcon,
+  FolderMoveIcon,
+  InfoIcon,
+  LinkIcon,
+  MoreIcon,
+  ShareIcon,
+  UploadIcon,
+} from '@tulipfarm/icons';
 import type { LibraryItem, LibraryPage, LibraryQuery } from '@tulipfarm/files/contracts';
 import { filesRoute, workspaceRoute } from '@/router';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
@@ -382,11 +384,11 @@ function Library({
   const actions = destination && (
     <>
       <Button onClick={() => chooser.current?.click()}>
-        <Upload size={16} aria-hidden="true" />
+        <UploadIcon size="md" aria-hidden="true" />
         Upload
       </Button>
       <Button variant="outline" onClick={() => setDialog({ kind: 'folder', destination })}>
-        <FolderAdd size={16} aria-hidden="true" />
+        <FolderAddIcon size="md" aria-hidden="true" />
         New folder
       </Button>
     </>
@@ -555,7 +557,7 @@ function Library({
                                 disabled={pending !== null}
                                 onClick={() => setDialog({ kind: 'chat', items: selection })}
                               >
-                                <ChatRound size={14} aria-hidden="true" />
+                                <ChatIcon size="sm" aria-hidden="true" />
                                 Use in chat
                               </Button>
                               <Button
@@ -564,7 +566,7 @@ function Library({
                                 disabled={pending !== null}
                                 onClick={() => setDialog({ kind: 'knowledge', items: selection })}
                               >
-                                <Book size={14} aria-hidden="true" />
+                                <BookIcon size="sm" aria-hidden="true" />
                                 Add to Knowledge
                               </Button>
                               <Button
@@ -573,7 +575,7 @@ function Library({
                                 disabled={pending !== null}
                                 onClick={() => setDialog({ kind: 'project', items: selection })}
                               >
-                                <Briefcase size={14} aria-hidden="true" />
+                                <BriefcaseIcon size="sm" aria-hidden="true" />
                                 Add to project
                               </Button>
                             </>
@@ -584,7 +586,7 @@ function Library({
                             disabled={pending !== null}
                             onClick={() => setDialog({ kind: 'move', items: selection })}
                           >
-                            <FolderMove size={14} aria-hidden="true" />
+                            <FolderMoveIcon size="sm" aria-hidden="true" />
                             Move
                           </Button>
                           <Button
@@ -594,7 +596,7 @@ function Library({
                             aria-busy={pending === 'selection'}
                             onClick={() => void trashSelected(selection)}
                           >
-                            <Trash size={14} aria-hidden="true" />
+                            <DeleteIcon size="sm" aria-hidden="true" />
                             {pending === 'selection' ? 'Moving to Trash…' : 'Move to trash'}
                           </Button>
                         </div>
@@ -735,7 +737,7 @@ function Library({
                       return (
                         <StatePanel
                           kind="empty"
-                          icon={Files}
+                          icon={FilesIcon}
                           title="No files match these filters"
                           description={`Filters apply to ${query ? 'search results' : 'this location'} in ${views[view]}. Files added before modified times were recorded don’t match a date filter.`}
                         >
@@ -748,7 +750,7 @@ function Library({
                       return (
                         <StatePanel
                           kind="empty"
-                          icon={Files}
+                          icon={FilesIcon}
                           title={`No files match “${query}”`}
                           description={`Search checks names in ${views[view]}, including items inside folders.`}
                         >
@@ -761,7 +763,7 @@ function Library({
                       return (
                         <StatePanel
                           kind="empty"
-                          icon={Files}
+                          icon={FilesIcon}
                           title="No more files"
                           description="Items may have moved since this page loaded."
                         >
@@ -785,7 +787,7 @@ function Library({
                       return (
                         <StatePanel
                           kind="empty"
-                          icon={Folder}
+                          icon={FolderIcon}
                           title="This folder is empty"
                           description={
                             destination
@@ -800,7 +802,7 @@ function Library({
                       return (
                         <StatePanel
                           kind="empty"
-                          icon={Files}
+                          icon={FilesIcon}
                           title="Nothing shared with you yet"
                           description="Files and folders that other people share with you appear here. A workspace role alone does not open someone else's files."
                         />
@@ -809,7 +811,7 @@ function Library({
                       return (
                         <StatePanel
                           kind="empty"
-                          icon={Trash}
+                          icon={DeleteIcon}
                           title="Trash is empty"
                           description="Items you move to Trash appear here until you restore them or delete them forever. So do items you own inside a folder someone else moved to Trash."
                         />
@@ -817,7 +819,7 @@ function Library({
                     return (
                       <StatePanel
                         kind="empty"
-                        icon={Files}
+                        icon={FilesIcon}
                         title="No files yet"
                         description="Upload the documents your work depends on, like price lists, contracts, and policies. Files stay private until you share them."
                         sample={<FilesSample />}
@@ -1347,7 +1349,7 @@ function Row({
         )}
         <span aria-hidden="true" className="flex w-6 shrink-0 justify-center text-muted-foreground">
           {item.kind === 'folder' ? (
-            <Folder size={20} />
+            <FolderIcon size="xl" />
           ) : (
             <FileTypeIcon name={item.name} mediaType={item.mediaType ?? 'application/octet-stream'} />
           )}
@@ -1395,51 +1397,51 @@ function Row({
               disabled={busy}
               render={<Button variant="ghost" size="icon-sm" aria-label={`More actions for ${item.name}`} />}
             >
-              <MoreH size={16} aria-hidden="true" />
+              <MoreIcon size="md" aria-hidden="true" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" size="menu">
               {item.kind === 'file' && (
                 <>
                   <DropdownMenuItem onClick={() => promote('chat')}>
-                    <ChatRound size={14} aria-hidden="true" />
+                    <ChatIcon size="sm" aria-hidden="true" />
                     Use in chat
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => promote('knowledge')}>
-                    <Book size={14} aria-hidden="true" />
+                    <BookIcon size="sm" aria-hidden="true" />
                     Add to Knowledge
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => promote('project')}>
-                    <Briefcase size={14} aria-hidden="true" />
+                    <BriefcaseIcon size="sm" aria-hidden="true" />
                     Add to project
                   </DropdownMenuItem>
                 </>
               )}
               <DropdownMenuItem onClick={() => open('details')}>
-                <InfoCircle size={14} aria-hidden="true" />
+                <InfoIcon size="sm" aria-hidden="true" />
                 Details
               </DropdownMenuItem>
               <DropdownMenuItem onClick={copy}>
-                <LinkIcon size={14} aria-hidden="true" />
+                <LinkIcon size="sm" aria-hidden="true" />
                 Copy link
               </DropdownMenuItem>
               {manager && (
                 <>
                   <DropdownMenuItem onClick={() => open('share')}>
-                    <Share size={14} aria-hidden="true" />
+                    <ShareIcon size="sm" aria-hidden="true" />
                     Share
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => open('rename')}>
-                    <Edit size={14} aria-hidden="true" />
+                    <EditIcon size="sm" aria-hidden="true" />
                     Rename
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={move}>
-                    <FolderMove size={14} aria-hidden="true" />
+                    <FolderMoveIcon size="sm" aria-hidden="true" />
                     Move
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem variant="destructive" onClick={() => setTrashed(true)}>
-                    <Trash size={14} aria-hidden="true" />
+                    <DeleteIcon size="sm" aria-hidden="true" />
                     Move to trash
                   </DropdownMenuItem>
                 </>

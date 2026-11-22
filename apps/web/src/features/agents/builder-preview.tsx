@@ -1,5 +1,12 @@
 import type { ReactNode } from 'react';
-import { CalendarClock, Database, MessageSquare, ScrollText, ShieldCheck, Wrench } from 'lucide-react';
+import {
+  CalendarClockIcon,
+  DatabaseIcon,
+  MessageIcon,
+  ScrollTextIcon,
+  ShieldCheckIcon,
+  WrenchIcon,
+} from '@tulipfarm/icons';
 import { AgentMark } from '@/components/agent-mark';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
@@ -54,7 +61,7 @@ export function AgentDraftSummary({
           [
             {
               step: 'skills',
-              Icon: ScrollText,
+              Icon: ScrollTextIcon,
               term: 'Skills',
               value: skills.length
                 ? `${skills.length} procedure${skills.length === 1 ? '' : 's'}`
@@ -62,16 +69,16 @@ export function AgentDraftSummary({
             },
             {
               step: 'access',
-              Icon: Wrench,
+              Icon: WrenchIcon,
               term: 'Actions',
               value: tools.length
                 ? `${tools.length} permitted action${tools.length === 1 ? '' : 's'}`
                 : 'No actions selected',
             },
-            { step: 'basics', Icon: ShieldCheck, term: 'Team placement', value: team ?? 'Personal agent' },
+            { step: 'basics', Icon: ShieldCheckIcon, term: 'Team placement', value: team ?? 'Personal agent' },
             {
               step: 'triggers',
-              Icon: MessageSquare,
+              Icon: MessageIcon,
               term: 'Slack',
               value:
                 [
@@ -85,7 +92,7 @@ export function AgentDraftSummary({
             },
             {
               step: 'triggers',
-              Icon: CalendarClock,
+              Icon: CalendarClockIcon,
               term: 'Triggers',
               value: triggerLabels.length ? triggerLabels.join('; ') : 'No triggers',
             },
@@ -109,7 +116,7 @@ export function AgentDraftSummary({
       </dl>
       {dataAccess && (
         <div className="flex min-w-0 items-start gap-3 text-sm">
-          <Database aria-hidden="true" size={16} className="mt-0.5 shrink-0 text-muted-foreground" />
+          <DatabaseIcon aria-hidden="true" size="md" className="mt-0.5 shrink-0 text-muted-foreground" />
           <div className="grid min-w-0 flex-1 gap-0.5">
             <p className="text-muted-foreground">{hasSlackAccess ? 'Data access' : 'Table access'}</p>
             <div className="wrap-anywhere">{dataAccess}</div>

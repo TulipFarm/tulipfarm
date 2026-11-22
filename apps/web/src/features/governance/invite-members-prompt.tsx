@@ -1,5 +1,5 @@
 import { useNavigate } from '@tanstack/react-router';
-import { UserAdd } from 'reicon-react/icons/UserAdd';
+import { UserAddIcon } from '@tulipfarm/icons';
 import { ActionNudge, useNudge } from '@/components/action-nudge';
 import { useFeatureRead } from '@/lib/query';
 import { loadGovernance } from '@/lib/governance';
@@ -41,7 +41,7 @@ function ActivePrompt({
   if (!admin || !data || data.members.length !== 1) return null;
   return (
     <ActionNudge
-      icon={UserAdd}
+      icon={UserAddIcon}
       label="Invite members"
       onAction={() => void navigate({ to: '/$workspaceSlug/members/invite', params: { workspaceSlug } })}
       onDismiss={onDismiss}

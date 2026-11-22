@@ -1,16 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import type { RowView } from '@tulipfarm/conversations/row-view';
-import { AddCircle } from 'reicon-react/icons/AddCircle';
-import { ArrowUpRight } from 'reicon-react/icons/ArrowUpRight';
-import { Edit2 } from 'reicon-react/icons/Edit2';
-import { Refresh } from 'reicon-react/icons/Refresh';
+import { AddCircleIcon, ArrowUpRightIcon, DatabaseIcon, EditIcon, RefreshIcon } from '@tulipfarm/icons';
 import { Disclosure } from '@/components/disclosure';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
 import { ResultCard } from '@tulipfarm/sprout/result-card';
-import { Database } from 'reicon-react/icons/Database';
 import { CanvasSection } from '@tulipfarm/sprout/canvas';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Table, type TableColumn } from '@tulipfarm/sprout/table';
@@ -41,7 +37,7 @@ export function RowViewCard({ reference }: { reference: RowView }) {
         title={title}
         kind="Table"
         apps={[]}
-        icon={<Database size={18} />}
+        icon={<DatabaseIcon size="lg" />}
         state="success"
         status={
           reference.recordIds
@@ -194,7 +190,7 @@ export function RecordChangesCard({ change }: { change: RecordChanges }) {
         title={title}
         kind="Table"
         apps={[]}
-        icon={<Database size={18} />}
+        icon={<DatabaseIcon size="lg" />}
         state="success"
         status={`${recordChangesSummary(change)} in ${title}.`}
         action={{ label: 'View changed rows', onClick: open }}
@@ -298,10 +294,10 @@ function ChangedRows({
             aria-busy={busy}
             onClick={() => void read.refresh()}
           >
-            <Refresh size={16} />
+            <RefreshIcon size="md" />
           </Button>
           <Button variant="outline" size="sm" nativeButton={false} render={tableLink}>
-            <ArrowUpRight size={14} aria-hidden="true" />
+            <ArrowUpRightIcon size="sm" aria-hidden="true" />
             Open current table
           </Button>
         </>
@@ -312,7 +308,7 @@ function ChangedRows({
           {change.created.length > 0 && (
             <li>
               <Badge variant="success">
-                <AddCircle size={12} />
+                <AddCircleIcon size="xs" />
                 {change.created.length} added
               </Badge>
             </li>
@@ -320,7 +316,7 @@ function ChangedRows({
           {change.updated.length > 0 && (
             <li>
               <Badge variant="info">
-                <Edit2 size={12} />
+                <EditIcon size="xs" />
                 {change.updated.length} updated
               </Badge>
             </li>
@@ -409,7 +405,7 @@ function ChangedRows({
                       />
                     }
                   >
-                    <ArrowUpRight size={14} />
+                    <ArrowUpRightIcon size="sm" />
                   </Button>
                 )}
               />

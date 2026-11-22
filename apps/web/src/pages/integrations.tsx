@@ -1,8 +1,6 @@
 import { cloneElement, useEffect, useId, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { Link, Navigate, useLinkProps, useLocation, useNavigate } from '@tanstack/react-router';
-import { Add } from 'reicon-react/icons/Add';
-import { InfoCircle } from 'reicon-react/icons/InfoCircle';
-import { Plug } from 'reicon-react/icons/Plug';
+import { AddIcon, InfoIcon, PlugIcon } from '@tulipfarm/icons';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
@@ -268,7 +266,7 @@ function IntegrationsContent({ workspaceId, slug }: { workspaceId: string; slug:
                 disabled={!mcp.capabilities.integrationsEnabled}
                 onClick={() => setSetup({})}
               >
-                <Add aria-hidden="true" />
+                <AddIcon aria-hidden="true" />
                 <span className="hidden sm:inline">Add custom app</span>
               </Button>
             ) : undefined
@@ -377,7 +375,7 @@ function IntegrationsContent({ workspaceId, slug }: { workspaceId: string; slug:
                       <StatePanel
                         kind="empty"
                         heading="h3"
-                        icon={Plug}
+                        icon={PlugIcon}
                         title={`None of your apps match ${searched}`}
                         description="Try Browse to find apps you haven’t connected."
                       >
@@ -429,7 +427,7 @@ function IntegrationsContent({ workspaceId, slug }: { workspaceId: string; slug:
                           <StatePanel
                             kind="empty"
                             heading="h3"
-                            icon={Plug}
+                            icon={PlugIcon}
                             title={`No apps match ${searched}`}
                             description="Try another name or clear your search."
                           >
@@ -538,7 +536,7 @@ function Registry({
       <StatePanel
         kind="empty"
         heading="h3"
-        icon={Plug}
+        icon={PlugIcon}
         title={`No apps match “${search}”`}
         description="Try another name, or add the server by its URL below."
       >
@@ -835,7 +833,7 @@ function Unavailable({ label, reason }: { label: string; reason: string }) {
             />
           }
         >
-          <InfoCircle aria-hidden="true" size={14} />
+          <InfoIcon aria-hidden="true" size="sm" />
           {label}
         </TooltipTrigger>
         <TooltipContent>{reason}</TooltipContent>

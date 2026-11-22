@@ -1,8 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useRouter } from '@tanstack/react-router';
-import { Monitor } from 'reicon-react/icons/Monitor';
-import { Moon } from 'reicon-react/icons/Moon';
-import { Sun } from 'reicon-react/icons/Sun';
+import { MonitorIcon, MoonIcon, SunIcon } from '@tulipfarm/icons';
 import { workspaceRoute } from '@/router';
 import { authClient } from '@/lib/auth';
 import { analytics } from '@/lib/analytics';
@@ -421,10 +419,10 @@ function SaveStatus({ state, saving, saved }: { state: Save; saving?: string; sa
   return null;
 }
 
-const themeOptions: Record<Theme, { label: string; icon: typeof Sun }> = {
-  system: { label: 'System', icon: Monitor },
-  light: { label: 'Light', icon: Sun },
-  dark: { label: 'Dark', icon: Moon },
+const themeOptions: Record<Theme, { label: string; icon: typeof SunIcon }> = {
+  system: { label: 'System', icon: MonitorIcon },
+  light: { label: 'Light', icon: SunIcon },
+  dark: { label: 'Dark', icon: MoonIcon },
 };
 
 function ThemePreference() {

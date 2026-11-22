@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { layoutPreviewHasRoot } from './layout-preview-ready.ts';
 import { A2uiSurface, sproutAdapters, type A2uiAdapterProps, type A2uiOutgoingMessage } from '@tulipfarm/sprout/a2ui';
 import { sproutCatalog } from '@tulipfarm/sprout/a2ui/catalog';
-import { PanelRightIcon } from 'lucide-react';
+import { PanelRightIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import { MessageBubble } from '@tulipfarm/sprout/message';
 import { ResultCard, type ResultCardKind } from '@tulipfarm/sprout/result-card';

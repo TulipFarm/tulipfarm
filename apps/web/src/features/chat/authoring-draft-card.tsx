@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
-import { BookOpen } from 'reicon-react/icons/BookOpen';
-import { Users } from 'reicon-react/icons/Users';
-import { BranchDown } from 'reicon-react/icons/BranchDown';
-import { CheckCircle } from 'reicon-react/icons/CheckCircle';
+import { BookOpenIcon, BranchIcon, CheckCircleIcon, UsersIcon } from '@tulipfarm/icons';
 import { BrandStack, type Brand } from '@tulipfarm/sprout/brand-icon';
 import { ReviewCard, ReviewRow, ReviewRows } from '@tulipfarm/sprout/review-card';
 import { Button } from '@tulipfarm/sprout/button';
@@ -114,7 +111,7 @@ export function AuthoringDraftCard({
     return (
       <StatePanel
         kind="empty"
-        icon={BranchDown}
+        icon={BranchIcon}
         title={`Replaced: ${draft.proposal.kind === 'workflow' || draft.proposal.kind === 'workflow-activation' ? draft.proposal.input.definition.name : 'workflow draft'}`}
         description="Chat revised this workflow in a newer draft further down. Review that one. This version can no longer be saved."
       />
@@ -342,7 +339,13 @@ export function AuthoringDraftCard({
     <ReviewCard
       label={`Review ${noun} draft`}
       icon={
-        workflow ? <BranchDown size={16} /> : proposal.kind === 'agent' ? <Users size={16} /> : <BookOpen size={16} />
+        workflow ? (
+          <BranchIcon size="md" />
+        ) : proposal.kind === 'agent' ? (
+          <UsersIcon size="md" />
+        ) : (
+          <BookOpenIcon size="md" />
+        )
       }
       title={definition.name}
       badge={activeWorkflow ? { label: 'Active', variant: 'success' } : badges[draft.status]}
@@ -407,7 +410,7 @@ export function AuthoringDraftCard({
               <div role="status" className="flex items-start gap-2">
                 {activeWorkflow && (
                   <span aria-hidden="true" className="mt-0.5 shrink-0 text-success">
-                    <CheckCircle size={18} />
+                    <CheckCircleIcon size="lg" />
                   </span>
                 )}
                 <p>

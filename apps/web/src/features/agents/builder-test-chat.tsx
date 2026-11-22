@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { RotateCcw, Send, ShieldCheck } from 'lucide-react';
+import { SendIcon, ShieldCheckIcon, UndoIcon } from '@tulipfarm/icons';
 import {
   agentAuthoringLimits,
   isAgentAuthoringSourceCurrent,
@@ -96,7 +96,7 @@ export function BuilderTestChat({
   return (
     <div className="grid gap-4">
       <div className="flex items-start gap-2 text-sm text-muted-foreground">
-        <ShieldCheck aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+        <ShieldCheckIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
         <p>
           Test instructions and tone only. No tools, private data, memory, or real actions. Each reply uses workspace
           credits.
@@ -148,7 +148,7 @@ export function BuilderTestChat({
           </Field>
           <div className="flex flex-wrap items-center gap-2">
             <Button type="submit" disabled={disabled || chat.busy || chat.stale || !chat.text.trim()}>
-              <Send aria-hidden="true" />
+              <SendIcon aria-hidden="true" />
               {chat.busy ? 'Testing…' : 'Send test'}
             </Button>
             {chat.busy ? (
@@ -158,7 +158,7 @@ export function BuilderTestChat({
             ) : (
               (chat.messages.length > 0 || chat.error) && (
                 <Button variant="ghost" onClick={chat.reset}>
-                  <RotateCcw aria-hidden="true" />
+                  <UndoIcon aria-hidden="true" />
                   Reset test
                 </Button>
               )

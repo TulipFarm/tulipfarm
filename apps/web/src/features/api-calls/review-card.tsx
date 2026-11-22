@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { Globe } from 'reicon-react/icons/Globe';
+import { GlobeIcon } from '@tulipfarm/icons';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@tulipfarm/sprout/collapsible';
@@ -17,7 +17,7 @@ function StatusLine({ call, title, children }: { call: ApiCallView; title: strin
       className="flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-xl border border-border bg-card px-3 py-2 text-sm text-card-foreground"
     >
       <span className="text-muted-foreground">
-        <Globe size={14} aria-hidden="true" />
+        <GlobeIcon size="sm" aria-hidden="true" />
       </span>
       <h4 id={`${id}-title`} className="min-w-0 font-medium break-all">
         {call.method} {target(call)}
@@ -147,7 +147,7 @@ export function ApiCallReview({
     >
       <div className="space-y-0.5">
         <h4 id={`${id}-title`} className="flex items-center gap-2 text-sm font-medium">
-          <Globe size={16} aria-hidden="true" />
+          <GlobeIcon size="md" aria-hidden="true" />
           <span className="min-w-0 break-all">
             {call.method} {target(call)}
           </span>

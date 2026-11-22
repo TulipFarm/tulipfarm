@@ -1,9 +1,6 @@
 import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ArrowUpRight } from 'reicon-react/icons/ArrowUpRight';
-import { Danger } from 'reicon-react/icons/Danger';
-import { InfoCircle } from 'reicon-react/icons/InfoCircle';
-import { Key } from 'reicon-react/icons/Key';
+import { ArrowUpRightIcon, DangerIcon, InfoIcon, KeyIcon } from '@tulipfarm/icons';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
 import {
@@ -26,9 +23,9 @@ import {
 const badgeVariants = { warning: 'warning', info: 'info', action: 'default' } as const;
 
 function ReasonIcon({ summary }: { summary: FallbackSummary }) {
-  if (summary.reason === 'sign-in') return <Key size={12} aria-hidden="true" />;
-  if (summary.tone === 'warning') return <Danger size={12} aria-hidden="true" />;
-  return <InfoCircle size={12} aria-hidden="true" />;
+  if (summary.reason === 'sign-in') return <KeyIcon size="xs" aria-hidden="true" />;
+  if (summary.tone === 'warning') return <DangerIcon size="xs" aria-hidden="true" />;
+  return <InfoIcon size="xs" aria-hidden="true" />;
 }
 
 /** A compact note above the first reply another model wrote, with why and how to switch back in its details. */
@@ -107,7 +104,7 @@ export function FallbackChip({
                 render={<a href={planUsageUrls[plan]} target="_blank" rel="noopener noreferrer" />}
               >
                 Manage usage
-                <ArrowUpRight size={14} aria-hidden="true" />
+                <ArrowUpRightIcon size="sm" aria-hidden="true" />
               </Button>
             )}
           </div>
@@ -137,7 +134,7 @@ function PlanSwitchChip({
         aria-label={`Using ${summary.to}. ${summary.short}. Show details`}
         render={<Badge variant="info" size="chip" />}
       >
-        <InfoCircle size={12} aria-hidden="true" />
+        <InfoIcon size="xs" aria-hidden="true" />
         <span className="text-foreground">
           Using <span className="font-semibold">{summary.to}</span>
           <span className="text-muted-foreground"> · {summary.short}</span>

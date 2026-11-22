@@ -18,7 +18,7 @@ import {
   isCalendarAction,
 } from './calendar-action';
 import { useFlag } from '@/lib/feature-flags';
-import { Refresh } from 'reicon-react/icons/Refresh';
+import { RefreshIcon } from '@tulipfarm/icons';
 import { CalendarActionVisual } from './calendar-action-canvas';
 import {
   googleActionState,
@@ -46,7 +46,7 @@ export function GoogleProposals({ workspaceId, available }: { workspaceId: strin
         </h2>
         <Button variant="outline" disabled={read.busy} aria-busy={read.busy} onClick={() => void read.refresh()}>
           <span aria-hidden="true" className={read.busy ? 'animate-spin motion-reduce:animate-none' : undefined}>
-            <Refresh size={16} />
+            <RefreshIcon size="md" />
           </span>
           Refresh Google proposals
         </Button>
@@ -315,7 +315,7 @@ export function GoogleProposalReview({
             aria-busy={read.busy || checking}
             onClick={() => void check()}
           >
-            <Refresh size={16} />
+            <RefreshIcon size="md" />
           </Button>
         </header>
         {read.error && (
@@ -476,7 +476,7 @@ export function GoogleProposalReview({
             aria-busy={read.busy}
             onClick={() => void check()}
           >
-            <Refresh size={16} />
+            <RefreshIcon size="md" />
           </Button>
         </header>
         {read.error && <GoogleReadFeedback busy={false} error={read.error} hasData title="Google action" />}
@@ -508,7 +508,7 @@ export function GoogleProposalReview({
         {proposal.receipt?.status === 'succeeded' && calendarEnabled && currentEventId && !showCurrent && (
           <div>
             <Button variant="outline" size="sm" onClick={() => setShowCurrent(true)}>
-              <Refresh size={14} />
+              <RefreshIcon size="sm" />
               Check event and Meet link
             </Button>
           </div>
@@ -619,7 +619,7 @@ export function GoogleProposalReview({
           onClick={() => void check()}
         >
           <span aria-hidden="true" className={read.busy ? 'animate-spin motion-reduce:animate-none' : undefined}>
-            <Refresh size={16} />
+            <RefreshIcon size="md" />
           </span>
           Check Google action status
         </Button>

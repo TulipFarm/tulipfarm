@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Users } from 'reicon-react/icons/Users';
+import { UsersIcon } from '@tulipfarm/icons';
 import { ResultCard } from '@tulipfarm/sprout/result-card';
 import { CanvasSection } from '@tulipfarm/sprout/canvas';
 import { workspaceRoute } from '@/router';
@@ -187,7 +187,7 @@ export function AgentDraftLink({
         title={name}
         kind="Agent"
         apps={[]}
-        icon={<Users size={18} />}
+        icon={<UsersIcon size="lg" />}
         status={status}
         action={
           noAgent

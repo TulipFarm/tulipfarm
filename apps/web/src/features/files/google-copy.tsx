@@ -1,6 +1,6 @@
 import { useRef, useState, type RefObject } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Check } from 'reicon-react/icons/Check';
+import { CheckIcon } from '@tulipfarm/icons';
 import { googleExportFormats, type GoogleExportFormat } from '@tulipfarm/google-workspace/public-contracts';
 import { workspaceRoute } from '@/router';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
@@ -207,7 +207,7 @@ export function SaveCopyDialog({
                 />
                 {destination ? (
                   <p className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
-                    <Check size={14} aria-hidden="true" />
+                    <CheckIcon size="sm" aria-hidden="true" />
                     <span className="min-w-0 truncate">Saving to {destination.label}</span>
                   </p>
                 ) : place.folder === null ? (

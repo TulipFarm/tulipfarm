@@ -3,7 +3,7 @@ import { mergeProps } from '@base-ui/react/merge-props';
 import { useRender } from '@base-ui/react/use-render';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from 'cn';
-import { InfoCircle } from 'reicon-react/icons/InfoCircle';
+import { InfoIcon } from '@tulipfarm/icons';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@tulipfarm/sprout/tooltip';
 
 /** A heading with a `hint` shows an info icon whose tooltip explains the column. */
@@ -74,7 +74,7 @@ function DataList({
                       />
                     }
                   >
-                    <InfoCircle size={14} aria-hidden="true" />
+                    <InfoIcon size="sm" aria-hidden="true" />
                   </TooltipTrigger>
                   <TooltipContent>{heading.hint}</TooltipContent>
                 </Tooltip>

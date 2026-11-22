@@ -1,6 +1,5 @@
 import type { ReactNode, RefObject } from 'react';
-import { Edit } from 'reicon-react/icons/Edit';
-import { Trash } from 'reicon-react/icons/Trash';
+import { DeleteIcon, EditIcon } from '@tulipfarm/icons';
 import { ReviewCard } from '@tulipfarm/sprout/review-card';
 import { Button } from '@tulipfarm/sprout/button';
 import { Disclosure } from '@/components/disclosure';
@@ -162,7 +161,7 @@ export function MemoryDraftCard({
   return (
     <ReviewCard
       label={copy.label}
-      icon={restore || forget ? <Trash size={16} /> : <Edit size={16} />}
+      icon={restore || forget ? <DeleteIcon size="md" /> : <EditIcon size="md" />}
       title={copy.title}
       badge={badge[draft.status]}
       settled={draft.status === 'saved' || draft.status === 'dismissed' || draft.status === 'failed'}

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Sparkles } from 'lucide-react';
+import { SparklesIcon } from '@tulipfarm/icons';
 import {
   isAgentAuthoringSourceCurrent,
   type AgentAuthoringSource,
@@ -71,7 +71,7 @@ export function InstructionImprovement({
     <section aria-label="Improve instructions" className="grid gap-3">
       <div className="flex flex-wrap items-center gap-3">
         <Button variant="outline" disabled={disabled || busy || !instructions.trim()} onClick={() => void improve()}>
-          <Sparkles aria-hidden="true" />
+          <SparklesIcon aria-hidden="true" />
           {busy ? 'Improving instructions…' : 'Improve instructions'}
         </Button>
         {busy && (

@@ -1,12 +1,18 @@
 import { useEffect, useState, type ComponentType } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ArrowUpRight } from 'reicon-react/icons/ArrowUpRight';
-import { ChartBar } from 'reicon-react/icons/ChartBar';
-import { Code } from 'reicon-react/icons/Code';
-import { FileText } from 'reicon-react/icons/FileText';
-import { Globe } from 'reicon-react/icons/Globe';
-import { Database } from 'reicon-react/icons/Database';
-import { Tasks } from 'reicon-react/icons/Tasks';
+import {
+  ArrowUpRightIcon,
+  BranchIcon,
+  CalendarIcon,
+  ChartBarIcon,
+  CodeIcon,
+  DatabaseIcon,
+  DocumentTextIcon,
+  GlobeIcon,
+  SparkleIcon,
+  TasksIcon,
+  UsersIcon,
+} from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import { CanvasFrame, CanvasPanel, CanvasSection, CanvasToggle, ChatSplit } from '@tulipfarm/sprout/canvas';
 import { ChatPlan } from '@tulipfarm/sprout/chat-plan';
@@ -19,12 +25,8 @@ import { fileRenderers } from '@/features/files/viewer/renderers';
 import { renderableType } from '@/lib/file-viewer';
 import { useCanvas, type CanvasContent, type CanvasItem } from './canvas-state';
 import { PlanCanvas } from './plans';
-import { Calendar } from 'reicon-react/icons/Calendar';
-import { Users } from 'reicon-react/icons/Users';
-import { BranchDown } from 'reicon-react/icons/BranchDown';
 import { workspaceRoute } from '@/router';
 import { ActivityResultDetails } from './activity-result-card';
-import { Sparkle } from 'reicon-react/icons/Sparkle';
 
 import { lazyCard } from '@/components/lazy-card';
 
@@ -55,29 +57,29 @@ const SlackActionCanvas = lazyCard(() =>
 );
 
 const icons: Record<CanvasContent['kind'], ComponentType<{ size?: number }>> = {
-  'package-plan': Tasks,
-  'package-installation': Tasks,
-  layout: Sparkle,
-  'activity-result': Tasks,
-  'github-batch': Code,
-  'slack-action': Tasks,
-  'google-action': FileText,
-  'google-file': FileText,
-  workflow: BranchDown,
-  'agent-draft': Users,
-  records: Database,
-  'record-changes': Database,
-  table: Database,
-  schema: Database,
-  chart: ChartBar,
-  todo: Tasks,
-  plan: Tasks,
-  code: Code,
-  browser: Globe,
-  file: FileText,
-  'workspace-file': FileText,
-  'calendar-read': Calendar,
-  'calendar-action': Calendar,
+  'package-plan': TasksIcon,
+  'package-installation': TasksIcon,
+  layout: SparkleIcon,
+  'activity-result': TasksIcon,
+  'github-batch': CodeIcon,
+  'slack-action': TasksIcon,
+  'google-action': DocumentTextIcon,
+  'google-file': DocumentTextIcon,
+  workflow: BranchIcon,
+  'agent-draft': UsersIcon,
+  records: DatabaseIcon,
+  'record-changes': DatabaseIcon,
+  table: DatabaseIcon,
+  schema: DatabaseIcon,
+  chart: ChartBarIcon,
+  todo: TasksIcon,
+  plan: TasksIcon,
+  code: CodeIcon,
+  browser: GlobeIcon,
+  file: DocumentTextIcon,
+  'workspace-file': DocumentTextIcon,
+  'calendar-read': CalendarIcon,
+  'calendar-action': CalendarIcon,
 };
 
 export function ChatWithCanvas({
@@ -309,7 +311,7 @@ export function CanvasItemView({
               nativeButton={false}
               render={<a href={content.url} target="_blank" rel="noopener noreferrer" />}
             >
-              <ArrowUpRight size={14} aria-hidden="true" />
+              <ArrowUpRightIcon size="sm" aria-hidden="true" />
               Open in new tab
             </Button>
           }

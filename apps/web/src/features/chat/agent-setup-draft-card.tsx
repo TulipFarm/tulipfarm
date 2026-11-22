@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode, type RefObject } from 'react';
 import { Link } from '@tanstack/react-router';
 import type { AuthoringProposal, DraftView } from '@tulipfarm/agents/draft-contracts';
 import { unattendedTrigger, type PublishAgentSetup } from '@tulipfarm/agents/setup-contracts';
-import { Users } from 'reicon-react/icons/Users';
+import { MoreIcon, UsersIcon } from '@tulipfarm/icons';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { CheckboxField } from '@tulipfarm/sprout/field';
@@ -12,7 +12,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@tulipfarm/sprout/dropdown-menu';
-import { MoreH } from 'reicon-react/icons/MoreH';
 import { ReviewCard } from '@tulipfarm/sprout/review-card';
 import { UnsavedChanges } from '@/features/tables/feedback';
 import { agentApi } from '@/features/agents/api';
@@ -111,7 +110,7 @@ export function AgentSetupDraftCard({
   return (
     <ReviewCard
       label="Review agent draft"
-      icon={<Users size={16} />}
+      icon={<UsersIcon size="md" />}
       title={setup.definition.name}
       badge={badge}
       settled={!['pending', 'preparing'].includes(draft.status)}
@@ -279,7 +278,7 @@ export function AgentSetupDraftCard({
                 />
               }
             >
-              <MoreH size={16} aria-hidden="true" />
+              <MoreIcon size="md" aria-hidden="true" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
               <DropdownMenuItem

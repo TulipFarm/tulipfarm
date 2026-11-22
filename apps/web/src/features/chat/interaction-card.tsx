@@ -1,8 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Check } from 'reicon-react/icons/Check';
-import { HelpCircle } from 'reicon-react/icons/HelpCircle';
+import { CheckIcon, HelpCircleIcon } from '@tulipfarm/icons';
 import { useRegisterPendingQuestion } from './pending-question';
 import { useResultAttention } from './canvas-state';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
@@ -360,14 +359,14 @@ function InformationCard({
           className="relative flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pl-6 text-sm"
         >
           <span className="absolute top-0.5 left-0 text-muted-foreground">
-            <HelpCircle size={16} aria-hidden="true" />
+            <HelpCircleIcon size="md" aria-hidden="true" />
           </span>
           <h4 id={`${id}-title`} className="min-w-0 text-muted-foreground">
             <QuestionPrompt>{request.prompt}</QuestionPrompt>
           </h4>
           {recordedAnswer && (
             <Badge variant="secondary">
-              <Check aria-hidden="true" />
+              <CheckIcon aria-hidden="true" />
               <span className="min-w-0 whitespace-pre-wrap break-words">{recordedAnswer}</span>
             </Badge>
           )}

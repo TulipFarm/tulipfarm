@@ -4,15 +4,17 @@ import { editorDocument, type ChatDraft } from './editor-document';
 import { packageReferenceExtension } from './package-reference';
 import { keepFocusExtension } from './editor-extensions';
 import { usePendingQuestion } from './pending-question';
-import { ArrowUp } from 'reicon-react/icons/ArrowUp';
-import { Stop3 } from 'reicon-react/icons/Stop3';
-import { ChevronDown } from 'reicon-react/icons/ChevronDown';
-import { Map as MapIcon } from 'reicon-react/icons/Map';
-import { Paperclip } from 'reicon-react/icons/Paperclip';
-import { Plus } from 'reicon-react/icons/Plus';
-import { Sliders } from 'reicon-react/icons/Sliders';
-import { Sparkle } from 'reicon-react/icons/Sparkle';
-import { X } from 'reicon-react/icons/X';
+import {
+  AddIcon,
+  ArrowUpIcon,
+  ChevronDownIcon,
+  CloseIcon,
+  MapIcon,
+  PaperclipIcon,
+  SlidersIcon,
+  SparkleIcon,
+  StopIcon,
+} from '@tulipfarm/icons';
 import {
   Command,
   CommandEmpty,
@@ -271,7 +273,7 @@ export function Composer({
                           />
                         }
                       >
-                        <Stop3 size={16} aria-hidden="true" />
+                        <StopIcon size="md" aria-hidden="true" />
                       </TooltipTrigger>
                       <TooltipContent>Stop reply</TooltipContent>
                     </Tooltip>
@@ -289,7 +291,7 @@ export function Composer({
                           />
                         }
                       >
-                        <ArrowUp size={16} aria-hidden="true" />
+                        <ArrowUpIcon size="md" aria-hidden="true" />
                       </TooltipTrigger>
                       <TooltipContent>Send · Enter</TooltipContent>
                     </Tooltip>
@@ -340,7 +342,7 @@ function PersonaPicker({
     onChange(personaKey(next) === selected ? null : next);
     setOpen(false);
   };
-  const Icon = value ? (value.kind === 'mode' ? value.mode.icon : value.agent.icon) : Sparkle;
+  const Icon = value ? (value.kind === 'mode' ? value.mode.icon : value.agent.icon) : SparkleIcon;
   const tone = value?.kind === 'mode' ? value.mode.tone : '';
   const label = value ? (value.kind === 'mode' ? value.mode.label : value.agent.label) : 'Mode';
 
@@ -355,7 +357,7 @@ function PersonaPicker({
           <Icon size={16} aria-hidden="true" />
         </span>
         {label}
-        <ChevronDown size={12} aria-hidden="true" />
+        <ChevronDownIcon size="xs" aria-hidden="true" />
       </PopoverTrigger>
       <PopoverContent size="menu" side="top" align="start" sideOffset={8}>
         <Command>
@@ -414,13 +416,13 @@ function AddMenu({ disabled, upload }: { disabled: boolean; upload: () => void }
             />
           }
         >
-          <Plus size={16} aria-hidden="true" />
+          <AddIcon size="md" aria-hidden="true" />
         </TooltipTrigger>
         <TooltipContent>Add files and more</TooltipContent>
       </Tooltip>
       <DropdownMenuContent size="menu" side="top" align="start">
         <DropdownMenuItem onClick={upload}>
-          <Paperclip size={16} aria-hidden="true" />
+          <PaperclipIcon size="md" aria-hidden="true" />
           Upload from computer
         </DropdownMenuItem>
       </DropdownMenuContent>
@@ -458,7 +460,7 @@ function ModeMenu({
               />
             }
           >
-            <Sliders size={16} aria-hidden="true" />
+            <SlidersIcon size="md" aria-hidden="true" />
           </TooltipTrigger>
           <TooltipContent>Mode</TooltipContent>
         </Tooltip>
@@ -469,7 +471,7 @@ function ModeMenu({
               <DropdownMenuRadioItem value="normal" closeOnClick>
                 <span className="flex items-start gap-2 py-0.5">
                   <span className="mt-0.5 flex shrink-0">
-                    <Sparkle size={16} aria-hidden="true" />
+                    <SparkleIcon size="md" aria-hidden="true" />
                   </span>
                   <span className="flex min-w-0 flex-col gap-0.5">
                     <span>Default</span>
@@ -480,7 +482,7 @@ function ModeMenu({
               <DropdownMenuRadioItem value="plan" closeOnClick>
                 <span className="flex items-start gap-2 py-0.5">
                   <span className="mt-0.5 flex shrink-0 text-info">
-                    <MapIcon size={16} aria-hidden="true" />
+                    <MapIcon size="md" aria-hidden="true" />
                   </span>
                   <span className="flex min-w-0 flex-col gap-0.5">
                     <span>Plan</span>
@@ -507,10 +509,10 @@ function ModeMenu({
             }
           >
             <span className="flex text-info">
-              <MapIcon size={16} aria-hidden="true" />
+              <MapIcon size="md" aria-hidden="true" />
             </span>
             <span className="hidden sm:inline">Plan</span>
-            <X size={12} aria-hidden="true" />
+            <CloseIcon size="xs" aria-hidden="true" />
           </TooltipTrigger>
           <TooltipContent>Plan proposes steps before it acts. Select to turn off.</TooltipContent>
         </Tooltip>

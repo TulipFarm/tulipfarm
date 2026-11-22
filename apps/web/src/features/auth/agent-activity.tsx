@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle } from 'reicon-react/icons/CheckCircle';
+import { CheckCircleIcon } from '@tulipfarm/icons';
 import { AgentMark } from '@/components/agent-mark';
 import {
   GradientBanner,
@@ -102,14 +102,14 @@ export function AgentActivity() {
                         : 'flex -translate-x-2 items-center gap-2 opacity-0 transition duration-500'
                     }
                   >
-                    {index < current ? <CheckCircle size={16} /> : <Spinner />}
+                    {index < current ? <CheckCircleIcon size="md" /> : <Spinner />}
                     <span className="truncate">{step}</span>
                   </li>
                 ))}
               </ol>
               <div className={done ? 'transition duration-500' : 'scale-95 opacity-0 transition duration-500'}>
                 <GradientBannerBadge>
-                  <CheckCircle size={14} />
+                  <CheckCircleIcon size="sm" />
                   {agent.result}
                 </GradientBannerBadge>
               </div>

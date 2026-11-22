@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { CalendarDays, CheckSquare, ChevronDown, Clock3, GitBranch } from 'lucide-react';
+import { CalendarDaysIcon, CheckSquareIcon, ChevronDownIcon, ClockIcon, GitBranchIcon } from '@tulipfarm/icons';
 import { useIsMobile } from '@/hooks/use-mobile';
 import {
   calendarDays,
@@ -22,7 +22,7 @@ import './calendar-board.css';
 
 const minuteHeight = 1.2;
 export function CalendarKindIcon({ kind, marked = false }: { kind: CalendarKind; marked?: boolean }) {
-  const Icon = { meeting: CalendarDays, task: CheckSquare, workflow: GitBranch }[kind];
+  const Icon = { meeting: CalendarDaysIcon, task: CheckSquareIcon, workflow: GitBranchIcon }[kind];
   return marked ? (
     <span className="calendar-kind-mark" data-kind={kind}>
       <Icon size={14} aria-hidden="true" />
@@ -125,7 +125,7 @@ function OverlapGroup({
           <PopoverTrigger className="calendar-overlap-trigger" aria-label={`View all ${rows.length} events on ${day}`}>
             <span className="calendar-overlap-count">
               {rows.length} events
-              <ChevronDown size={12} aria-hidden="true" />
+              <ChevronDownIcon size="xs" aria-hidden="true" />
             </span>
             <span className="calendar-overlap-touch-titles">
               {rows.slice(0, 2).map(row => (
@@ -321,7 +321,7 @@ export function CalendarBoard({
                         aria-label={`View all ${runs} runs on ${value}`}
                         onClick={() => onAgenda(value)}
                       >
-                        <Clock3 size={11} aria-hidden="true" />
+                        <ClockIcon size="xs" aria-hidden="true" />
                         {runs} {runs === 1 ? 'run' : 'runs'}
                       </button>
                     )}
@@ -340,13 +340,13 @@ export function CalendarBoard({
                   <span>
                     {events.length > 0 && (
                       <span>
-                        <CalendarDays size={10} aria-hidden="true" />
+                        <CalendarDaysIcon size="xs" aria-hidden="true" />
                         {events.length}
                       </span>
                     )}
                     {runs > 0 && (
                       <span>
-                        <Clock3 size={10} aria-hidden="true" />
+                        <ClockIcon size="xs" aria-hidden="true" />
                         {runs}
                       </span>
                     )}
@@ -495,9 +495,9 @@ export function CalendarBoard({
                         aria-label={`View all ${runs.length} runs on ${value}`}
                         onClick={() => onAgenda(value)}
                       >
-                        <Clock3 size={12} aria-hidden="true" />
+                        <ClockIcon size="xs" aria-hidden="true" />
                         {runs.length} {runs.length === 1 ? 'run' : 'runs'}
-                        <ChevronDown size={12} aria-hidden="true" />
+                        <ChevronDownIcon size="xs" aria-hidden="true" />
                       </button>
                     )}
                   </div>

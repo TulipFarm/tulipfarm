@@ -13,7 +13,7 @@ import {
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { Maximize2Icon, MinusIcon } from 'lucide-react';
+import { MaximizeIcon, MinusIcon } from '@tulipfarm/icons';
 import { useLocation, useNavigate, useRouter } from '@tanstack/react-router';
 import { budStateSchema, type BudState } from '@tulipfarm/conversations/bud-contracts';
 import { apiOrigin } from '@/lib/auth';
@@ -453,7 +453,7 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
                     })
                   }
                 >
-                  <Maximize2Icon />
+                  <MaximizeIcon />
                 </Button>
               )}
               <PopoverClose aria-label="Minimize chat" title="Minimize chat">

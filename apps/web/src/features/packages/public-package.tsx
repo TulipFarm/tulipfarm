@@ -12,42 +12,44 @@ import { Skeleton, SkeletonGroup } from '@tulipfarm/sprout/skeleton';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Table } from '@tulipfarm/sprout/table';
 import { RecordList } from '@tulipfarm/sprout/record-list';
-import { BookOpen } from 'reicon-react/icons/BookOpen';
-import { BranchDown } from 'reicon-react/icons/BranchDown';
-import { Database } from 'reicon-react/icons/Database';
-import { Files } from 'reicon-react/icons/Files';
-import { Plug } from 'reicon-react/icons/Plug';
-import { Users } from 'reicon-react/icons/Users';
-import { User } from 'reicon-react/icons/User';
-import { Code } from 'reicon-react/icons/Code';
-import { Clock } from 'reicon-react/icons/Clock';
+import {
+  BookOpenIcon,
+  BranchIcon,
+  ClockIcon,
+  CodeIcon,
+  DatabaseIcon,
+  FilesIcon,
+  PlugIcon,
+  UserIcon,
+  UsersIcon,
+} from '@tulipfarm/icons';
 import { ReadError, ReadFeedback } from '@/components/read-feedback';
 import { useFeatureRead } from '@/lib/query';
 import { publicPackageRoute } from '@/router';
 import { loadPublicPackage, type PublicPackageDetails } from './public-catalog';
 
 const resourceIcons = {
-  table: Database,
-  'seed-row': Database,
-  skill: BookOpen,
-  agent: Users,
-  workflow: BranchDown,
-  integration: Plug,
-  file: Files,
+  table: DatabaseIcon,
+  'seed-row': DatabaseIcon,
+  skill: BookOpenIcon,
+  agent: UsersIcon,
+  workflow: BranchIcon,
+  integration: PlugIcon,
+  file: FilesIcon,
 };
 
 const inputIcons = {
-  team: Users,
-  member: User,
-  integration: Plug,
-  timezone: Clock,
-  file: Files,
-  asset: Files,
-  skill: BookOpen,
-  agent: Users,
-  connection: Plug,
-  'slack-destination': Plug,
-  'slack-channel': Plug,
+  team: UsersIcon,
+  member: UserIcon,
+  integration: PlugIcon,
+  timezone: ClockIcon,
+  file: FilesIcon,
+  asset: FilesIcon,
+  skill: BookOpenIcon,
+  agent: UsersIcon,
+  connection: PlugIcon,
+  'slack-destination': PlugIcon,
+  'slack-channel': PlugIcon,
 };
 
 const resourceGroups = [
@@ -183,7 +185,7 @@ function PackageDetails({ details, install }: { details: PublicPackageDetails; i
     <div className="grid items-start gap-8 lg:grid-cols-3 lg:gap-x-6">
       <div className="min-w-0 space-y-4 lg:col-span-2">
         <div className="flex items-center gap-3">
-          <Files size={24} aria-hidden="true" />
+          <FilesIcon size="2xl" aria-hidden="true" />
           <p className="min-w-0 break-words text-2xl font-medium">{document.package.title}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -344,7 +346,7 @@ function PackageDetails({ details, install }: { details: PublicPackageDetails; i
           <AccordionItem value="definition">
             <AccordionTrigger>
               <span className="flex items-center gap-2">
-                <Code size={18} aria-hidden="true" />
+                <CodeIcon size="lg" aria-hidden="true" />
                 Full package definition
               </span>
             </AccordionTrigger>
@@ -435,7 +437,7 @@ function ResourceDetails({ resource, document }: { resource: PackageResource; do
                   : null;
               return (
                 <Badge key={index} variant="secondary">
-                  <BookOpen size={14} aria-hidden="true" />
+                  <BookOpenIcon size="sm" aria-hidden="true" />
                   {linked
                     ? resourceTitle(linked)
                     : skill.kind === 'input'

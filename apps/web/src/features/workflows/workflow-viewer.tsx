@@ -1,9 +1,7 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import type { Definition } from '@tulipfarm/workflows/contracts';
-import { ArrowUpRight } from 'reicon-react/icons/ArrowUpRight';
-import { Refresh } from 'reicon-react/icons/Refresh';
+import { ArrowUpRightIcon, BranchIcon, RefreshIcon } from '@tulipfarm/icons';
 import { ResultCard, type ResultAppAction } from '@tulipfarm/sprout/result-card';
-import { BranchDown } from 'reicon-react/icons/BranchDown';
 import { brandNames } from '@tulipfarm/sprout/brand-icon';
 import { Button } from '@tulipfarm/sprout/button';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
@@ -76,12 +74,12 @@ export function WorkflowViewer({
   const actions = (
     <div className="flex shrink-0 items-center gap-1">
       <Button variant="ghost" size="icon-sm" aria-label="Refresh workflow" title="Refresh workflow" onClick={onRefresh}>
-        <Refresh size={15} aria-hidden="true" />
+        <RefreshIcon size="md" aria-hidden="true" />
       </Button>
       {onEdit && (
         <Button variant="outline" size="sm" onClick={onEdit}>
           Edit in chat
-          <ArrowUpRight size={14} aria-hidden="true" />
+          <ArrowUpRightIcon size="sm" aria-hidden="true" />
         </Button>
       )}
     </div>
@@ -104,7 +102,7 @@ export function WorkflowViewer({
                       ? 'running'
                       : 'default'
               }
-              icon={<BranchDown size={18} />}
+              icon={<BranchIcon size="lg" />}
               apps={graph.nodes.flatMap(node =>
                 node.identity?.kind === 'app'
                   ? [

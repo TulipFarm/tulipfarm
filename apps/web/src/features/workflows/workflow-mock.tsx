@@ -1,8 +1,6 @@
 import { useContext, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { BranchDown } from 'reicon-react/icons/BranchDown';
-import { ArrowLeft } from 'reicon-react/icons/ArrowLeft';
-import { ArrowUpRight } from 'reicon-react/icons/ArrowUpRight';
+import { ArrowLeftIcon, ArrowUpRightIcon, BranchIcon } from '@tulipfarm/icons';
 import { chatDocumentText } from '@tulipfarm/conversations/rich-content';
 import { Button } from '@tulipfarm/sprout/button';
 import { Badge } from '@tulipfarm/sprout/badge';
@@ -198,7 +196,7 @@ export default function WorkflowMock({ surface = 'page' }: { surface?: 'page' | 
     ) : phase === 'empty' ? (
       <StatePanel
         kind="empty"
-        icon={BranchDown}
+        icon={BranchIcon}
         title="No workflows yet"
         description="Describe the work you want to repeat. Chat will prepare a workflow for your review."
       >
@@ -260,7 +258,7 @@ export default function WorkflowMock({ surface = 'page' }: { surface?: 'page' | 
           actions={
             <Button variant="outline" size="sm" nativeButton={false} render={<a href={chatUrl} />}>
               Open in chat
-              <ArrowUpRight size={14} aria-hidden="true" />
+              <ArrowUpRightIcon size="sm" aria-hidden="true" />
             </Button>
           }
         />
@@ -281,7 +279,7 @@ export default function WorkflowMock({ surface = 'page' }: { surface?: 'page' | 
               render={<a href="/workflow-mock/workflows" />}
               aria-label="Back to workflows"
             >
-              <ArrowLeft size={16} aria-hidden="true" />
+              <ArrowLeftIcon size="md" aria-hidden="true" />
             </Button>
             <h1 className="min-w-0 flex-1 truncate text-sm font-medium">Review a workflow</h1>
             <CanvasToggle open={open} count={tabOpen ? 1 : 0} onToggle={() => setOpen(value => !value)} />
@@ -311,7 +309,7 @@ export default function WorkflowMock({ surface = 'page' }: { surface?: 'page' | 
                 </p>
                 <div className="flex items-start gap-3 rounded-xl border border-input p-4">
                   <span className="mt-1 text-primary-text">
-                    <BranchDown size={20} aria-hidden="true" />
+                    <BranchIcon size="xl" aria-hidden="true" />
                   </span>
                   <div className="min-w-0 flex-1 space-y-2">
                     <p className="wrap-anywhere text-sm font-medium text-foreground">{view.definition.name}</p>
@@ -321,7 +319,7 @@ export default function WorkflowMock({ surface = 'page' }: { surface?: 'page' | 
                     </div>
                     <Button variant="link" size="sm" onClick={show}>
                       View workflow
-                      <ArrowUpRight size={14} aria-hidden="true" />
+                      <ArrowUpRightIcon size="sm" aria-hidden="true" />
                     </Button>
                   </div>
                 </div>
@@ -377,7 +375,7 @@ export default function WorkflowMock({ surface = 'page' }: { surface?: 'page' | 
         }
         canvas={
           <CanvasPanel
-            tabs={tabOpen ? [{ id: 'workflow', title: 'Workflow', icon: BranchDown }] : []}
+            tabs={tabOpen ? [{ id: 'workflow', title: 'Workflow', icon: BranchIcon }] : []}
             activeId={tabOpen ? 'workflow' : null}
             onSelect={show}
             onCloseTab={() => setTabOpen(false)}

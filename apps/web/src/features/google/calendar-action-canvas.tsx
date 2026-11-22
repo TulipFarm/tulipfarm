@@ -1,16 +1,18 @@
 import type { ReactNode } from 'react';
 import { parseCalendarRead, type CalendarEvent } from '@tulipfarm/google-workspace/calendar-events';
-import { ArrowRight } from 'reicon-react/icons/ArrowRight';
-import { Bell } from 'reicon-react/icons/Bell';
-import { BellOff } from 'reicon-react/icons/BellOff';
-import { Calendar } from 'reicon-react/icons/Calendar';
-import { Clock } from 'reicon-react/icons/Clock';
-import { Eye } from 'reicon-react/icons/Eye';
-import { Location } from 'reicon-react/icons/Location';
-import { Repeat } from 'reicon-react/icons/Repeat';
-import { TextalignLeft } from 'reicon-react/icons/TextalignLeft';
-import { Trash } from 'reicon-react/icons/Trash';
-import { Video } from 'reicon-react/icons/Video';
+import {
+  ArrowRightIcon,
+  BellIcon,
+  BellOffIcon,
+  CalendarIcon,
+  ClockIcon,
+  DeleteIcon,
+  EyeIcon,
+  LocationIcon,
+  RepeatIcon,
+  TextAlignLeftIcon,
+  VideoIcon,
+} from '@tulipfarm/icons';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { eventDate } from '@/components/calendar-event-list';
@@ -77,7 +79,7 @@ function DateTile({
         {start ? start.value.toLocaleDateString(undefined, { timeZone, month: 'short' }) : '—'}
       </span>
       <span className="pt-1 text-2xl leading-none font-semibold tabular-nums text-foreground">
-        {start ? start.value.toLocaleDateString(undefined, { timeZone, day: 'numeric' }) : <Calendar size={20} />}
+        {start ? start.value.toLocaleDateString(undefined, { timeZone, day: 'numeric' }) : <CalendarIcon size="xl" />}
       </span>
       <span className="pb-1.5 text-xs text-muted-foreground">
         {start ? start.value.toLocaleDateString(undefined, { timeZone, weekday: 'short' }) : ''}
@@ -113,7 +115,7 @@ function Change({ before, after }: { before: string | null; after: string }) {
         <span className="sr-only">Was </span>
         {before}
       </span>
-      <ArrowRight size={14} aria-hidden="true" />
+      <ArrowRightIcon size="sm" aria-hidden="true" />
       <span className="break-words font-medium text-primary-text">
         <span className="sr-only">Now </span>
         {after}
@@ -216,17 +218,17 @@ function CalendarActionHero({
           </p>
           {removing && (
             <Badge variant="destructive">
-              <Trash size={12} />
+              <DeleteIcon size="xs" />
               Will be deleted
             </Badge>
           )}
         </div>
-        <Row icon={<Clock size={14} />} label="Time">
+        <Row icon={<ClockIcon size="sm" />} label="Time">
           <Change before={compared ? timeLabel(current, zone) : null} after={timeLabel(event, zone)} />
           {event.time.kind === 'timed' && <span className="text-xs text-muted-foreground">{zone}</span>}
         </Row>
         {(event.location || (compared && current.location)) && (
-          <Row icon={<Location size={14} />} label="Location">
+          <Row icon={<LocationIcon size="sm" />} label="Location">
             <Change
               before={compared && input?.location !== undefined ? (current.location ?? '') : null}
               after={event.location ?? current?.location ?? ''}
@@ -234,11 +236,11 @@ function CalendarActionHero({
           </Row>
         )}
         {input?.description ? (
-          <Row icon={<TextalignLeft size={14} />} label="Description">
+          <Row icon={<TextAlignLeftIcon size="sm" />} label="Description">
             <span className="line-clamp-2 break-words text-muted-foreground">{input.description}</span>
           </Row>
         ) : input?.description === '' ? (
-          <Row icon={<TextalignLeft size={14} />} label="Description">
+          <Row icon={<TextAlignLeftIcon size="sm" />} label="Description">
             <span className="text-muted-foreground line-through">Description cleared</span>
           </Row>
         ) : null}
@@ -312,7 +314,7 @@ export function CalendarActionVisual({
         {input?.conferenceData && (
           <li>
             <Badge variant="info">
-              <Video size={12} />
+              <VideoIcon size="xs" />
               Adds Google Meet
             </Badge>
           </li>
@@ -320,9 +322,9 @@ export function CalendarActionVisual({
         <li>
           <Badge variant="secondary">
             {operation.sendUpdates === 'all' || operation.sendUpdates === 'externalOnly' ? (
-              <Bell size={12} />
+              <BellIcon size="xs" />
             ) : (
-              <BellOff size={12} />
+              <BellOffIcon size="xs" />
             )}
             {notify}
           </Badge>
@@ -330,7 +332,7 @@ export function CalendarActionVisual({
         {input?.recurrence && (
           <li>
             <Badge variant="secondary">
-              <Repeat size={12} />
+              <RepeatIcon size="xs" />
               {input.recurrence.length ? 'Repeats' : 'Stops repeating'}
             </Badge>
           </li>
@@ -338,7 +340,7 @@ export function CalendarActionVisual({
         {input?.visibility && (
           <li>
             <Badge variant="secondary">
-              <Eye size={12} />
+              <EyeIcon size="xs" />
               {input.visibility[0]?.toUpperCase()}
               {input.visibility.slice(1)}
             </Badge>
@@ -346,7 +348,7 @@ export function CalendarActionVisual({
         )}
         <li className="min-w-0 max-w-full">
           <Badge variant="secondary" size="chip">
-            <Calendar size={12} />
+            <CalendarIcon size="xs" />
             <span className="min-w-0 break-all">{operation.calendarId}</span>
           </Badge>
         </li>

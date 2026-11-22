@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
-import { Add } from 'reicon-react/icons/Add';
+import { AddIcon } from '@tulipfarm/icons';
 import { useChatGptPlan } from './chatgpt-plan';
 import { useTokenPlan } from './token-plan';
 import { PlanAccounts, maxPlanAccounts, type PlanConnector, type PlanProvider } from './plan-accounts';
@@ -121,7 +121,7 @@ function ConnectorPanel({
       }}
       disabled={connector.busy || connector.signingIn}
     >
-      {variant === 'outline' && <Add size={14} aria-hidden="true" />}
+      {variant === 'outline' && <AddIcon size="sm" aria-hidden="true" />}
       {variant === 'outline' ? 'Add another account' : connector.startLabel}
     </Button>
   );

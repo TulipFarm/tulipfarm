@@ -7,8 +7,7 @@ import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { toast } from '@tulipfarm/sprout/toast';
-import { ChevronDown } from 'reicon-react/icons/ChevronDown';
-import { Database } from 'reicon-react/icons/Database';
+import { ChevronDownIcon, DatabaseIcon } from '@tulipfarm/icons';
 import { useConfirmation } from '@/features/access/confirm';
 import { useMemberDirectory } from '@/features/secrets/queries';
 import { tableApi } from '@/features/tables/api';
@@ -45,7 +44,7 @@ const notFound = (
   <StatePanel
     kind="unavailable"
     heading="h2"
-    icon={Database}
+    icon={DatabaseIcon}
     title="App not found"
     description="This app doesn’t exist, or you no longer have access to it. Check the link, or ask an editor of the app."
   />
@@ -55,7 +54,7 @@ const noEdit = (
   <StatePanel
     kind="unavailable"
     heading="h2"
-    icon={Database}
+    icon={DatabaseIcon}
     title="Only editors can manage data access"
     description="Ask an editor of this app for edit access."
   />
@@ -106,7 +105,7 @@ function DataAccess({ app }: { app: AppDetail }) {
         <StatePanel
           kind="empty"
           heading="h2"
-          icon={Database}
+          icon={DatabaseIcon}
           title="No data views yet"
           description="This app can’t use any workspace data. Create a data view to let it read or change rows in one table."
         >
@@ -316,7 +315,7 @@ function ViewCard({
             <Button variant="ghost" size="sm" aria-label={`${open ? 'Hide' : 'Show'} details for ${name} data view`} />
           }
         >
-          <ChevronDown aria-hidden />
+          <ChevronDownIcon aria-hidden />
           {open ? 'Hide details' : 'Show details'}
         </CollapsibleTrigger>
         <CollapsibleContent>

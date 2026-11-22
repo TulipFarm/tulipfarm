@@ -12,13 +12,7 @@ import { chatDocumentText, type ChatDocument } from '@tulipfarm/conversations/ri
 import { parseChatDraft, type ChatDraft } from '@/features/chat/editor-document';
 import { flushSync } from 'react-dom';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { Add } from 'reicon-react/icons/Add';
-import { DocumentText } from 'reicon-react/icons/DocumentText';
-import { Folder } from 'reicon-react/icons/Folder';
-import { MoreH } from 'reicon-react/icons/MoreH';
-import { People } from 'reicon-react/icons/People';
-import { Settings } from 'reicon-react/icons/Settings';
-import { Upload as UploadIcon } from 'reicon-react/icons/Upload';
+import { AddIcon, DocumentTextIcon, FolderIcon, MoreIcon, SettingsIcon, UploadIcon, UsersIcon } from '@tulipfarm/icons';
 import { workspaceRoute, workspaceProjectsRoute, projectDetailRoute, projectSettingsRoute } from '@/router';
 import { Alert, AlertDescription, AlertTitle } from '@tulipfarm/sprout/alert';
 import { AttachmentDropzone, FileTypeIcon } from '@tulipfarm/sprout/attachment';
@@ -200,7 +194,7 @@ export function ProjectsPage() {
   };
   const create = (
     <Button onClick={() => setCreating(true)}>
-      <Add size={16} aria-hidden="true" />
+      <AddIcon size="md" aria-hidden="true" />
       New project
     </Button>
   );
@@ -218,7 +212,7 @@ export function ProjectsPage() {
             return (
               <StatePanel
                 kind="empty"
-                icon={Folder}
+                icon={FolderIcon}
                 title="No projects yet"
                 description="Create a project for work that several people share, like a product launch. Add the people, files, and instructions every chat in it should use."
                 sample={<ProjectsSample />}
@@ -311,7 +305,7 @@ function ProjectCatalog({
       {query && !matches.length ? (
         <StatePanel
           kind="empty"
-          icon={Folder}
+          icon={FolderIcon}
           title={`No ${archived ? 'archived' : 'active'} projects match “${query}”`}
           description={
             otherMatches
@@ -542,7 +536,7 @@ function ProjectView({
         title={project.name}
         actions={
           <Button variant="ghost" size="sm" nativeButton={false} render={settings}>
-            <Settings size={16} aria-hidden="true" />
+            <SettingsIcon size="md" aria-hidden="true" />
             {project.manager ? 'Edit project' : 'Project details'}
           </Button>
         }
@@ -1026,16 +1020,16 @@ function ProjectFiles({
         {canEdit && files.length > 0 && (
           <DropdownMenu>
             <DropdownMenuTrigger disabled={busy} render={<Button variant="ghost" size="sm" />}>
-              <Add size={16} aria-hidden="true" />
+              <AddIcon size="md" aria-hidden="true" />
               Add
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" size="menu">
               <DropdownMenuItem onClick={() => picker.current?.click()}>
-                <UploadIcon size={14} aria-hidden="true" />
+                <UploadIcon size="sm" aria-hidden="true" />
                 Upload files
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setPasting(true)}>
-                <DocumentText size={14} aria-hidden="true" />
+                <DocumentTextIcon size="sm" aria-hidden="true" />
                 Paste text
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -1064,7 +1058,7 @@ function ProjectFiles({
         <div className="space-y-2 pt-1">
           <AttachmentDropzone accept={knowledgeAccept} disabled={busy} onFiles={add} />
           <Button variant="ghost" size="sm" disabled={busy} onClick={() => setPasting(true)}>
-            <DocumentText size={16} aria-hidden="true" />
+            <DocumentTextIcon size="md" aria-hidden="true" />
             Paste text instead
           </Button>
         </div>
@@ -1136,7 +1130,7 @@ function ProjectFiles({
                   disabled={busy}
                   render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${file.title}`} />}
                 >
-                  <MoreH size={16} aria-hidden="true" />
+                  <MoreIcon size="md" aria-hidden="true" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" size="menu">
                   <DropdownMenuItem disabled={file.source?.available === false} onClick={() => setViewing(file)}>
@@ -1816,7 +1810,7 @@ function ProjectMembers({
                     </Select>
                   </div>
                   <Button type="submit" disabled={busy || !adding}>
-                    <People size={16} aria-hidden="true" />
+                    <UsersIcon size="md" aria-hidden="true" />
                     Add member
                   </Button>
                 </div>

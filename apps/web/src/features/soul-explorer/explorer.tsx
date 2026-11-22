@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshIcon } from '@tulipfarm/icons';
 import type { SoulFile } from '@tulipfarm/workspaces/soul-explorer-contracts';
 import { Button } from '@tulipfarm/sprout/button';
 import { FileExplorer, type FileExplorerFile } from '@tulipfarm/sprout/file-explorer';
@@ -105,7 +105,7 @@ function ExplorerSession({
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={refresh}>
-            <RefreshCw size={14} aria-hidden="true" />
+            <RefreshIcon size="sm" aria-hidden="true" />
             Refresh
           </Button>
         </div>

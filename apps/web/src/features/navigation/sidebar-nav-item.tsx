@@ -79,7 +79,7 @@ export function SidebarNavItem({
   return (
     <SidebarRecentItem
       label={page.label}
-      icon={Icon && <Icon size={16} aria-hidden="true" />}
+      icon={Icon && <Icon size="lg" aria-hidden="true" />}
       link={
         <Link
           to={page.to}

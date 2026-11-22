@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Add } from 'reicon-react/icons/Add';
-import { Page as PageIcon } from 'reicon-react/icons/Page';
+import { AddIcon, DocumentIcon } from '@tulipfarm/icons';
 import type { WorkspacePath } from '@/pages/workspace';
 import { Button } from '@tulipfarm/sprout/button';
 import {
@@ -16,17 +15,17 @@ import {
 } from '@tulipfarm/sprout/search-dialog';
 
 export type SearchPath = WorkspacePath | '/$workspaceSlug/agents/new' | '/$workspaceSlug/tables/new';
-type SearchEntry = { id: string; title: string; to: SearchPath; icon?: typeof Add | undefined };
-type NavPage = { label: string; to: WorkspacePath; icon?: typeof Add };
+type SearchEntry = { id: string; title: string; to: SearchPath; icon?: typeof AddIcon | undefined };
+type NavPage = { label: string; to: WorkspacePath; icon?: typeof AddIcon };
 
 const quickActions: SearchEntry[] = [
-  { id: 'action-chat', title: 'New chat', to: '/$workspaceSlug', icon: Add },
-  { id: 'action-agent', title: 'Create agent', to: '/$workspaceSlug/agents/new', icon: Add },
-  { id: 'action-resource', title: 'Create table', to: '/$workspaceSlug/tables/new', icon: Add },
+  { id: 'action-chat', title: 'New chat', to: '/$workspaceSlug', icon: AddIcon },
+  { id: 'action-agent', title: 'Create agent', to: '/$workspaceSlug/agents/new', icon: AddIcon },
+  { id: 'action-resource', title: 'Create table', to: '/$workspaceSlug/tables/new', icon: AddIcon },
 ];
 
 function EntryMedia({ entry }: { entry: SearchEntry }) {
-  const Icon = entry.icon ?? PageIcon;
+  const Icon = entry.icon ?? DocumentIcon;
   return (
     <SearchItemIcon>
       <Icon size={18} aria-hidden="true" />

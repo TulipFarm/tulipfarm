@@ -442,9 +442,13 @@ avatars, and glass chips can be pill-shaped. Glass banners use 20px corners.
 
 ## Components
 
-Icons come from `reicon-react` (per-icon imports such as
-`reicon-react/icons/Add`), sized 16px in controls and navigation and 14px in
-dense rows; some older screens still use `lucide-react`. Third-party marks use
+Icons come from `@tulipfarm/icons`, which wraps Hugeicons (Stroke Rounded).
+Import a named icon such as `AddIcon` and size it with a token: `xs` 12px,
+`sm` 14px, `md` 16px, `lg` 18px, `xl` 20px or `2xl` 24px. Sidebar navigation
+uses `lg`, controls `md` and dense rows `sm`. Each icon has its own module in
+`packages/icons/src/icons/`, so a page loads only the icons it uses. To change
+an icon everywhere, edit its module, such as `icons/chat.tsx`. Sizes and stroke
+width live in `icons/create-icon.tsx`. Third-party marks use
 `BrandIcon`.
 
 Dropdowns are Sprout's searchable `Combobox` (`@tulipfarm/sprout/combobox`):

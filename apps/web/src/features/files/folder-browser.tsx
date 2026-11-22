@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode } from 'react';
-import { Folder } from 'reicon-react/icons/Folder';
+import { FolderIcon } from '@tulipfarm/icons';
 import type { LibraryQuery } from '@tulipfarm/files/contracts';
 import {
   Breadcrumb,
@@ -104,7 +104,7 @@ export function FolderBrowser({
         {folders.map(folder => (
           <li key={folder.id} className="grid">
             <Button variant="ghost" size="md" disabled={disabled} onClick={() => open(folder.id)}>
-              <Folder size={16} aria-hidden="true" />
+              <FolderIcon size="md" aria-hidden="true" />
               <span className="min-w-0 flex-1 truncate text-start" title={folder.name}>
                 {folder.name}
               </span>

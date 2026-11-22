@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Database } from 'reicon-react/icons/Database';
+import { DatabaseIcon } from '@tulipfarm/icons';
 import { Label } from '@tulipfarm/sprout/label';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Table } from '@tulipfarm/sprout/table';
@@ -181,7 +181,7 @@ export function TableAccess({ page }: { page: AccessPage }) {
         <StatePanel
           kind="empty"
           heading="h3"
-          icon={Database}
+          icon={DatabaseIcon}
           title="No tables yet"
           description="Once there are tables, you’ll see here who can use each one."
         />

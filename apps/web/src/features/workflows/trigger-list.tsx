@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { z } from 'zod';
-import { ArrowDownIcon, ArrowUpIcon, PlusIcon, Trash2Icon } from 'lucide-react';
+import { AddIcon, ArrowDownIcon, ArrowUpIcon, DeleteIcon } from '@tulipfarm/icons';
 import {
   githubTriggerEvents,
   maxTriggers,
@@ -290,7 +290,7 @@ export function TriggerList({
                 />
               }
             >
-              <PlusIcon data-icon="inline-start" aria-hidden="true" />
+              <AddIcon data-icon="inline-start" aria-hidden="true" />
               Add trigger
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -382,7 +382,7 @@ export function TriggerList({
                         disabled={locked}
                         onClick={() => setRemoving(item)}
                       >
-                        <Trash2Icon aria-hidden="true" />
+                        <DeleteIcon aria-hidden="true" />
                       </Button>
                       <Button
                         variant="outline"

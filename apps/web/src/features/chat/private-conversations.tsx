@@ -19,9 +19,7 @@ import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { createPortal, flushSync } from 'react-dom';
 import { newChatSearch, workspaceChatRoute, workspaceRoute } from '@/router';
 import { publicPackageInstallPrompt } from '@/features/packages/public-catalog';
-import { ArrowDown } from 'reicon-react/icons/ArrowDown';
-import { Folder } from 'reicon-react/icons/Folder';
-import { ChevronDown } from 'reicon-react/icons/ChevronDown';
+import { ArrowDownIcon, ChevronDownIcon, FolderIcon } from '@tulipfarm/icons';
 import { Alert, AlertDescription, AlertTitle } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { ChatCanvasToggle, ChatWithCanvas } from './canvas-items';
@@ -980,7 +978,7 @@ function ConversationDetail({
               />
             }
           >
-            <Folder size={16} aria-hidden="true" />
+            <FolderIcon size="md" aria-hidden="true" />
             <span className="truncate">
               {project?.name ?? 'Project unavailable'}
               {projectArchived ? ' (archived)' : ''}
@@ -1224,7 +1222,7 @@ function ConversationDetail({
                           <Button size="icon-sm" variant="ghost" aria-label="Chat actions" title="Chat actions" />
                         }
                       >
-                        <ChevronDown size={16} aria-hidden="true" />
+                        <ChevronDownIcon size="md" aria-hidden="true" />
                       </DropdownMenuTrigger>
                       <DropdownMenuContent size="menu" align="end">
                         <DropdownMenuItem
@@ -1798,7 +1796,7 @@ function ConversationDetail({
                   setUnseenUpdates(false);
                 }}
               >
-                <ArrowDown size={14} aria-hidden="true" />
+                <ArrowDownIcon size="sm" aria-hidden="true" />
                 {unseenUpdates && 'New updates'}
               </Button>
             </div>

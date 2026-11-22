@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CodeIcon, PencilIcon, PlusIcon, Trash2Icon } from 'lucide-react';
+import { AddIcon, CodeIcon, DeleteIcon, EditIcon } from '@tulipfarm/icons';
 import type { z } from 'zod';
 import { stepValues, workflowSchema, type Definition } from '@tulipfarm/workflows/contracts';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
@@ -167,7 +167,7 @@ export function CodeSteps({
                 />
               }
             >
-              <PlusIcon data-icon="inline-start" aria-hidden="true" />
+              <AddIcon data-icon="inline-start" aria-hidden="true" />
               Add code step
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -226,7 +226,7 @@ export function CodeSteps({
                         });
                       }}
                     >
-                      <PencilIcon aria-hidden="true" />
+                      <EditIcon aria-hidden="true" />
                     </Button>
                     <Button
                       variant="ghost"
@@ -252,7 +252,7 @@ export function CodeSteps({
                         setRemoving(step);
                       }}
                     >
-                      <Trash2Icon aria-hidden="true" />
+                      <DeleteIcon aria-hidden="true" />
                     </Button>
                   </div>
                 )}

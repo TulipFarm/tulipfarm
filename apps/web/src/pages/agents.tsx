@@ -15,13 +15,11 @@ import {
   DataListRow,
   DataListSecondary,
 } from '@/components/data-list';
-import { Add } from 'reicon-react/icons/Add';
-import { Users } from 'reicon-react/icons/Users';
+import { AddIcon, ArchiveUpIcon, UsersIcon } from '@tulipfarm/icons';
 import { agentApi, type AgentCommand, type AgentContext, type AgentDetail } from '@/features/agents/api';
 import { AgentRead } from '@/features/agents/feedback';
 import { KeepsEditsContext, samePage, WriteFeedback } from '@/features/tables/feedback';
 import { ToggleGroup, ToggleGroupItem } from '@tulipfarm/sprout/toggle-group';
-import { ArchiveUp } from 'reicon-react/icons/ArchiveUp';
 import { AgentEditor } from '@/features/agents/editor';
 import { AgentPolicy } from '@/features/agents/policy';
 import { AgentTriggerWorkflows } from '@/features/agents/agent-workflows';
@@ -118,7 +116,7 @@ export function AgentsPage() {
                 />
               }
             >
-              <Add size={16} aria-hidden="true" />
+              <AddIcon size="md" aria-hidden="true" />
               New agent
             </Button>
           </div>
@@ -134,14 +132,14 @@ export function AgentsPage() {
               archived && !search ? (
                 <StatePanel
                   kind="empty"
-                  icon={Users}
+                  icon={UsersIcon}
                   title="No archived agents"
                   description="Agents you archive appear here, ready to restore."
                 />
               ) : search ? (
                 <StatePanel
                   kind="empty"
-                  icon={Users}
+                  icon={UsersIcon}
                   title="No matching agents"
                   description="Try a different name or clear your search."
                 >
@@ -152,7 +150,7 @@ export function AgentsPage() {
               ) : (
                 <StatePanel
                   kind="empty"
-                  icon={Users}
+                  icon={UsersIcon}
                   title="No agents yet"
                   description="Describe the agent's job in chat, or configure it manually above. Review its tools and access before activation."
                   sample={<AgentsSample />}
@@ -258,7 +256,7 @@ function ArchivedAgentRow({
                 : { kind: 'ready' }
           }
         >
-          <ArchiveUp size={16} aria-hidden="true" />
+          <ArchiveUpIcon size="md" aria-hidden="true" />
           Restore
         </Button>
         <WriteFeedback state={state} checkStatus={() => void refresh()} retry={restore} />

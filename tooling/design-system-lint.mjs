@@ -115,7 +115,7 @@ export default {
         const icons = new Set();
         return {
           ImportDeclaration(node) {
-            if (node.source.value === 'lucide-react') {
+            if (node.source.value === '@tulipfarm/icons') {
               for (const specifier of node.specifiers) icons.add(specifier.local.name);
             }
           },

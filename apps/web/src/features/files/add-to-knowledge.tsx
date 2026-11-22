@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Book } from 'reicon-react/icons/Book';
-import { Check } from 'reicon-react/icons/Check';
+import { BookIcon, CheckIcon } from '@tulipfarm/icons';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { FileTypeIcon } from '@tulipfarm/sprout/attachment';
 import { Button } from '@tulipfarm/sprout/button';
@@ -244,7 +243,7 @@ export function AddToKnowledgeDialog({
         <PromotionSummary
           destination={
             <>
-              <Book size={14} aria-hidden="true" />
+              <BookIcon size="sm" aria-hidden="true" />
               Your Knowledge
             </>
           }
@@ -294,7 +293,7 @@ export function AddToKnowledgeDialog({
             Cancel
           </Button>
           <Button onClick={() => void addAll()}>
-            <Book size={16} aria-hidden="true" />
+            <BookIcon size="md" aria-hidden="true" />
             {pending.length === files.length ? 'Add to Knowledge' : `Add ${plural(pending.length, 'file')}`}
           </Button>
         </>
@@ -372,7 +371,7 @@ function RowStatus({
   if (entry.parsing === 'ready') {
     const gaps = knowledgeGapSummary(entry.gaps);
     return line(
-      <Check size={14} aria-hidden="true" />,
+      <CheckIcon size="sm" aria-hidden="true" />,
       [
         row.existing ? 'Already in your Knowledge. Chats can use it.' : 'Ready. Chats can use it from your Knowledge.',
         gaps,

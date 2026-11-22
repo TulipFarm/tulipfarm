@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Download } from 'reicon-react/icons/Download';
-import { Edit } from 'reicon-react/icons/Edit';
-import { Image as ImageIcon } from 'reicon-react/icons/Image';
+import { DownloadIcon, EditIcon, ImageIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import { Spinner } from '@tulipfarm/sprout/spinner';
 import { fileKeys, fileUrl, useFilesApi } from '@/features/files/api';
@@ -43,7 +41,7 @@ export function ImageCards({
               </div>
             ) : (
               <div className="flex aspect-square flex-col items-center justify-center gap-2 rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">
-                <ImageIcon size={20} aria-hidden="true" />
+                <ImageIcon size="xl" aria-hidden="true" />
                 {settled[image.state]}
               </div>
             )}
@@ -175,7 +173,7 @@ function SavedImage({ workspaceId, slug, fileId }: { workspaceId: string; slug: 
             aria-label={`Download ${file.name}`}
             onClick={() => void save()}
           >
-            <Download size={14} aria-hidden="true" />
+            <DownloadIcon size="sm" aria-hidden="true" />
             {download === 'sending' ? 'Downloading…' : 'Download'}
           </Button>
           {canvas && (
@@ -195,7 +193,7 @@ function SavedImage({ workspaceId, slug, fileId }: { workspaceId: string; slug: 
                 ])
               }
             >
-              <Edit size={14} aria-hidden="true" />
+              <EditIcon size="sm" aria-hidden="true" />
               Edit
             </Button>
           )}

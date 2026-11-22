@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, ChevronsLeft } from 'lucide-react';
+import { ChevronLeftIcon, ChevronRightIcon, ChevronsLeftIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 
@@ -78,7 +78,7 @@ export function TablePagination({
             disabled={disabled || loading || page === 1}
             onClick={onFirst}
           >
-            <ChevronsLeft aria-hidden="true" />
+            <ChevronsLeftIcon aria-hidden="true" />
           </Button>
           <Button
             variant="outline"
@@ -87,7 +87,7 @@ export function TablePagination({
             disabled={disabled || loading || page === 1}
             onClick={onPrevious}
           >
-            <ChevronLeft aria-hidden="true" />
+            <ChevronLeftIcon aria-hidden="true" />
           </Button>
           <Button
             variant="outline"
@@ -96,7 +96,7 @@ export function TablePagination({
             disabled={disabled || loading || !hasNext}
             onClick={onNext}
           >
-            <ChevronRight aria-hidden="true" />
+            <ChevronRightIcon aria-hidden="true" />
           </Button>
         </div>
       </div>

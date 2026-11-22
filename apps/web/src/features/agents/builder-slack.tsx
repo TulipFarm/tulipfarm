@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Plus, X } from 'lucide-react';
+import { AddIcon, CloseIcon } from '@tulipfarm/icons';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
@@ -194,7 +194,7 @@ export function BuilderSlack({
                       disabled={disabled || checking || !channel}
                       onClick={() => void check(channel, channel)}
                     >
-                      <Plus aria-hidden="true" />
+                      <AddIcon aria-hidden="true" />
                       Check and add channel
                     </Button>
                   </div>
@@ -257,7 +257,7 @@ export function BuilderSlack({
                     disabled={disabled || checking}
                     onClick={() => onChange(value.filter(channel => channel.channel !== item.channel))}
                   >
-                    <X aria-hidden="true" />
+                    <CloseIcon aria-hidden="true" />
                   </Button>
                 </div>
                 {!item.detach && item.channelResponses === null && (

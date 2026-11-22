@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Share } from 'reicon-react/icons/Share';
+import { ShareIcon } from '@tulipfarm/icons';
 import { Alert, AlertDescription, AlertTitle } from '@tulipfarm/sprout/alert';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
@@ -205,7 +205,7 @@ export function PlanDocument({
               variant="outline"
               onClick={() => requestComposer('Share this plan with ', [], { caretAtPrompt: true })}
             >
-              <Share size={14} aria-hidden="true" />
+              <ShareIcon size="sm" aria-hidden="true" />
               Share
             </Button>
           )}

@@ -1,9 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check } from 'reicon-react/icons/Check';
-import { Database } from 'reicon-react/icons/Database';
-import { Refresh } from 'reicon-react/icons/Refresh';
-import { SidebarRight } from 'reicon-react/icons/SidebarRight';
+import { CheckIcon, DatabaseIcon, RefreshIcon, SidebarRightIcon } from '@tulipfarm/icons';
 import { Link } from '@tanstack/react-router';
 import { workspaceRoute } from '@/router';
 import { Button } from '@tulipfarm/sprout/button';
@@ -498,14 +495,14 @@ function ValidTableProposalCard({ workspaceId, chatId, id, userId, membershipId,
               disabled={refreshing}
               onClick={() => void read.refresh()}
             >
-              <Refresh size={16} aria-hidden="true" />
+              <RefreshIcon size="md" aria-hidden="true" />
             </Button>
           );
           if (view.content === 'redacted')
             return (
               <div className="max-h-64 overflow-y-auto">
                 <ReviewCard
-                  icon={<Database size={14} />}
+                  icon={<DatabaseIcon size="sm" />}
                   title="Table changes"
                   badge={{ label: statusLabels[view.status], variant: badgeVariant(view.status) }}
                   status={
@@ -731,9 +728,9 @@ function ValidTableProposalCard({ workspaceId, chatId, id, userId, membershipId,
                   {sending || (progressing(view) && !read.delayed) ? (
                     <Spinner aria-hidden="true" />
                   ) : done ? (
-                    <Check size={20} aria-hidden="true" />
+                    <CheckIcon size="xl" aria-hidden="true" />
                   ) : (
-                    <Database size={20} aria-hidden="true" />
+                    <DatabaseIcon size="xl" aria-hidden="true" />
                   )}
                 </span>
                 <div className="min-w-0 flex-1" role="status">
@@ -823,7 +820,7 @@ function ValidTableProposalCard({ workspaceId, chatId, id, userId, membershipId,
                     size="sm"
                     onClick={() => canvas.show(schemaCanvasItem(workspaceId, chatId, id, title))}
                   >
-                    <SidebarRight size={14} aria-hidden="true" />
+                    <SidebarRightIcon size="sm" aria-hidden="true" />
                     Open schema
                   </Button>
                 )}
@@ -913,7 +910,7 @@ function ValidTableProposalCard({ workspaceId, chatId, id, userId, membershipId,
     <>
       <div className="my-3 flex items-center gap-3 py-2">
         <span className="shrink-0 text-muted-foreground">
-          <Database size={18} aria-hidden="true" />
+          <DatabaseIcon size="lg" aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium wrap-anywhere">{title}</p>

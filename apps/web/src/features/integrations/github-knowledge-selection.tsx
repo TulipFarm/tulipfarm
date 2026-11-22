@@ -1,6 +1,6 @@
 import { useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { XIcon } from 'lucide-react';
+import { CloseIcon } from '@tulipfarm/icons';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@tulipfarm/sprout/accordion';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
@@ -575,7 +575,7 @@ export function GitHubSelectionForm({
                             searchRegion.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus();
                           }}
                         >
-                          <XIcon aria-hidden="true" />
+                          <CloseIcon aria-hidden="true" />
                         </Button>
                       </li>
                     ))}

@@ -1,14 +1,18 @@
 import { DataList, DataListActions, DataListCell, DataListLink, DataListRow } from '@/components/data-list';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
-import { Add } from 'reicon-react/icons/Add';
-import { ChatRound } from 'reicon-react/icons/ChatRound';
-import { Search3 } from 'reicon-react/icons/Search3';
-import { MoreH } from 'reicon-react/icons/MoreH';
-import { Edit } from 'reicon-react/icons/Edit';
-import { Archive } from 'reicon-react/icons/Archive';
-import { Trash } from 'reicon-react/icons/Trash';
-import { Pin, PinOff, XIcon } from 'lucide-react';
+import {
+  AddIcon,
+  ArchiveIcon,
+  ChatIcon,
+  CloseIcon,
+  DeleteIcon,
+  EditIcon,
+  MoreIcon,
+  PinIcon,
+  PinOffIcon,
+  SearchIcon,
+} from '@tulipfarm/icons';
 import { workspaceRoute } from '@/router';
 import { Button } from '@tulipfarm/sprout/button';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
@@ -288,7 +292,7 @@ function ConversationList({ api, projectId }: { api: ConversationApi; projectId:
       <DataListActions>
         {chat.pinned && !chat.archived && (
           <span className="flex shrink-0 text-muted-foreground">
-            <Pin size={14} aria-label="Pinned" role="img" />
+            <PinIcon size="sm" aria-label="Pinned" role="img" />
           </span>
         )}
         <DropdownMenu>
@@ -296,26 +300,26 @@ function ConversationList({ api, projectId }: { api: ConversationApi; projectId:
             disabled={pending === chat.id}
             render={<Button variant="ghost" size="icon-sm" aria-label={`More actions for ${chat.title}`} />}
           >
-            <MoreH size={16} aria-hidden="true" />
+            <MoreIcon size="md" aria-hidden="true" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" size="menu">
             {!chat.archived && (
               <DropdownMenuItem onClick={() => void pin(chat, !chat.pinned)}>
-                {chat.pinned ? <PinOff size={14} aria-hidden="true" /> : <Pin size={14} aria-hidden="true" />}
+                {chat.pinned ? <PinOffIcon size="sm" aria-hidden="true" /> : <PinIcon size="sm" aria-hidden="true" />}
                 {chat.pinned ? 'Unpin' : 'Pin'}
               </DropdownMenuItem>
             )}
             <DropdownMenuItem onClick={() => startEditing(chat)}>
-              <Edit size={14} aria-hidden="true" />
+              <EditIcon size="sm" aria-hidden="true" />
               Rename
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => void archive(chat, !chat.archived)}>
-              <Archive size={14} aria-hidden="true" />
+              <ArchiveIcon size="sm" aria-hidden="true" />
               {chat.archived ? 'Restore' : 'Archive'}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onClick={() => setDeleting(chat)}>
-              <Trash size={14} aria-hidden="true" />
+              <DeleteIcon size="sm" aria-hidden="true" />
               Delete
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -363,7 +367,7 @@ function ConversationList({ api, projectId }: { api: ConversationApi; projectId:
           >
             <InputGroup>
               <InputGroupAddon>
-                <Search3 size={14} aria-hidden="true" />
+                <SearchIcon size="sm" aria-hidden="true" />
               </InputGroupAddon>
               <InputGroupInput
                 ref={searchInput}
@@ -386,7 +390,7 @@ function ConversationList({ api, projectId }: { api: ConversationApi; projectId:
                       searchInput.current?.focus();
                     }}
                   >
-                    <XIcon aria-hidden="true" />
+                    <CloseIcon aria-hidden="true" />
                   </InputGroupButton>
                 )}
               </InputGroupAddon>
@@ -433,7 +437,7 @@ function ConversationList({ api, projectId }: { api: ConversationApi; projectId:
         {list.state.kind === 'unavailable' && (
           <StatePanel
             kind="unavailable"
-            icon={ChatRound}
+            icon={ChatIcon}
             title="Project unavailable"
             description="This project is missing, or you are no longer a member. Your personal chats are still here."
           >
@@ -484,7 +488,7 @@ function ConversationList({ api, projectId }: { api: ConversationApi; projectId:
                     search ? (
                       <StatePanel
                         kind="empty"
-                        icon={ChatRound}
+                        icon={ChatIcon}
                         title="No matching chats"
                         description="Try another title or clear your search."
                       >
@@ -502,7 +506,7 @@ function ConversationList({ api, projectId }: { api: ConversationApi; projectId:
                     ) : archived ? (
                       <StatePanel
                         kind="empty"
-                        icon={ChatRound}
+                        icon={ChatIcon}
                         title="No archived chats"
                         description="Chats you archive will appear here. Open one to restore it."
                       >
@@ -519,7 +523,7 @@ function ConversationList({ api, projectId }: { api: ConversationApi; projectId:
                     ) : projectId ? (
                       <StatePanel
                         kind="empty"
-                        icon={ChatRound}
+                        icon={ChatIcon}
                         title="No chats in this project yet"
                         description="Start a chat that everyone in this project can read, or move a personal chat here from its chat menu."
                       >
@@ -530,7 +534,7 @@ function ConversationList({ api, projectId }: { api: ConversationApi; projectId:
                               <Link to="/$workspaceSlug" params={{ workspaceSlug }} search={{ project: projectId }} />
                             }
                           >
-                            <Add size={16} aria-hidden="true" />
+                            <AddIcon size="md" aria-hidden="true" />
                             Start a project chat
                           </Button>
                         )}
@@ -538,13 +542,13 @@ function ConversationList({ api, projectId }: { api: ConversationApi; projectId:
                     ) : (
                       <StatePanel
                         kind="empty"
-                        icon={ChatRound}
+                        icon={ChatIcon}
                         title="No chats yet"
                         description="Ask about your customers, orders, or invoices in plain language. Every private conversation is saved here so you can pick it up later."
                         sample={<ChatsSample />}
                       >
                         <Button nativeButton={false} render={<Link to="/$workspaceSlug" params={{ workspaceSlug }} />}>
-                          <Add size={16} aria-hidden="true" />
+                          <AddIcon size="md" aria-hidden="true" />
                           Start a chat
                         </Button>
                       </StatePanel>

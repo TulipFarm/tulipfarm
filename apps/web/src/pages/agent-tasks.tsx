@@ -8,11 +8,10 @@ import { Textarea } from '@tulipfarm/sprout/textarea';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Status } from '@tulipfarm/sprout/status';
 import { Disclosure } from '@/components/disclosure';
-import { ChevronLeftIcon } from 'lucide-react';
+import { ChevronLeftIcon, TasksIcon } from '@tulipfarm/icons';
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SearchField } from '@tulipfarm/sprout/search-field';
-import { Checklist } from 'reicon-react/icons/Checklist';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { AgentTasksSample, StatePanel } from '@tulipfarm/sprout/state-panel';
 import { ReadFeedback, ReadError } from '@/components/read-feedback';
@@ -168,7 +167,7 @@ export function AgentTasksPage() {
             ) : search ? (
               <StatePanel
                 kind="empty"
-                icon={Checklist}
+                icon={TasksIcon}
                 title="No matching task requests"
                 description="Try another phrase or clear the search. Only requests you can still access are included."
               >
@@ -179,7 +178,7 @@ export function AgentTasksPage() {
             ) : (
               <StatePanel
                 kind="empty"
-                icon={Checklist}
+                icon={TasksIcon}
                 title="No agent tasks yet"
                 description="Hand a piece of work to an activated agent and follow it here. You review every proposed row change before it runs."
                 sample={<AgentTasksSample />}

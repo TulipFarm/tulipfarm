@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Plus, X } from 'lucide-react';
+import { AddIcon, CloseIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { ChoiceGroup, Field } from '@tulipfarm/sprout/field';
@@ -331,7 +331,7 @@ export function AgentDataScope({
                 setPending(noPendingTable);
               }}
             >
-              <Plus aria-hidden="true" />
+              <AddIcon aria-hidden="true" />
               Add table access
             </Button>
           </div>
@@ -354,7 +354,7 @@ export function AgentDataScope({
                 disabled={disabled}
                 onClick={() => onRemove(limit.assetId)}
               >
-                <X aria-hidden="true" />
+                <CloseIcon aria-hidden="true" />
               </Button>
             </li>
           ))}

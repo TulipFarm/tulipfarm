@@ -1,5 +1,14 @@
 import { useState } from 'react';
-import { BookOpen, Bot, ChevronDown, Database, Plug, ScrollText, Wrench } from 'lucide-react';
+import {
+  BookOpenIcon,
+  BotIcon,
+  ChevronDownIcon,
+  DatabaseIcon,
+  MoreIcon,
+  PlugIcon,
+  ScrollTextIcon,
+  WrenchIcon,
+} from '@tulipfarm/icons';
 import { agentToolRuntimeDescription, toolNameSchema } from '@tulipfarm/agents/contracts';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
@@ -7,7 +16,6 @@ import { ChoiceGroup } from '@tulipfarm/sprout/field';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@tulipfarm/sprout/collapsible';
 import { BrandIcon } from '@tulipfarm/sprout/brand-icon';
 import { SearchField } from '@tulipfarm/sprout/search-field';
-import { MoreH } from 'reicon-react/icons/MoreH';
 import { useFlag } from '@/lib/feature-flags';
 import { toolLabels } from './labels';
 
@@ -71,16 +79,16 @@ function ToolAppIcon({ app }: { app: string }) {
   if (app === 'slack' || app === 'google' || app === 'github') return <BrandIcon brand={app} size="inline" />;
   const Icon =
     app === 'tables'
-      ? Database
+      ? DatabaseIcon
       : app === 'knowledge'
-        ? BookOpen
+        ? BookOpenIcon
         : app === 'skills'
-          ? ScrollText
+          ? ScrollTextIcon
           : app === 'agents'
-            ? Bot
+            ? BotIcon
             : app === 'mcp'
-              ? Plug
-              : Wrench;
+              ? PlugIcon
+              : WrenchIcon;
   return (
     <span className="shrink-0">
       <Icon aria-hidden="true" size={16} />
@@ -180,7 +188,7 @@ export function AgentToolPicker({
       <Collapsible open={catalogOpen} onOpenChange={setAdding}>
         <div>
           <CollapsibleTrigger render={<Button variant="outline" disabled={!!error} />}>
-            <MoreH size={16} aria-hidden="true" />
+            <MoreIcon size="md" aria-hidden="true" />
             {catalogOpen ? 'Hide more actions' : 'More actions'}
           </CollapsibleTrigger>
         </div>
@@ -268,7 +276,10 @@ export function AgentToolPicker({
                                   ? `${selected.length} of ${tools.length} selected${changing ? `, ${changing} change data` : ''}`
                                   : `${tools.length} available`}
                               </span>
-                              <ChevronDown aria-hidden="true" className={expanded ? 'size-4 rotate-180' : 'size-4'} />
+                              <ChevronDownIcon
+                                aria-hidden="true"
+                                className={expanded ? 'size-4 rotate-180' : 'size-4'}
+                              />
                             </span>
                           </CollapsibleTrigger>
                         </h3>
