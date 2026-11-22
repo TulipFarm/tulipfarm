@@ -175,6 +175,9 @@ test(
       await waitFor(async () => log.includes('PUT /v1/workspaces/northstar/last-used'), 'The held write is sent');
       await composer.waitFor();
       assert.equal(log.filter(entry => entry === 'GET /v1/workspaces/northstar').length, 1);
+      // Workspace extras load lazily and may read membership after the composer shows.
+      await waitFor(async () => membershipReads() >= firstVisitMembershipReads, 'Membership reads settle');
+      await new Promise(resolve => setTimeout(resolve, 300));
       assert.equal(membershipReads(), firstVisitMembershipReads, 'The early membership read is reused');
 
       // A different user signs in: the remembered reads are discarded and the old user's cache cleared.

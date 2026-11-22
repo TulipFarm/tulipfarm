@@ -99,6 +99,7 @@ import { setFlagWorkspace, useFlag } from '@/lib/feature-flags';
 import { useWorkspaceSettings } from '@/features/settings/queries';
 import { useSecretsCapabilities } from '@/features/secrets/queries';
 import type { RecentSection } from '@/features/navigation/recent-queries';
+import { ReauthorizationBanner } from '@/features/integrations/reauthorization-banner';
 import { ReconnectBanner } from '@/features/workspaces/reconnect-banner';
 import { InboxCount, InboxList } from '@/features/inbox/inbox';
 
@@ -139,9 +140,6 @@ const SearchPalette = lazy(() =>
 );
 const InviteMembersPrompt = lazy(() =>
   import('@/features/governance/invite-members-prompt').then(module => ({ default: module.InviteMembersPrompt })),
-);
-const ReauthorizationBanner = lazy(() =>
-  import('@/features/integrations/reauthorization-banner').then(module => ({ default: module.ReauthorizationBanner })),
 );
 const SidebarNavItem = lazy(() =>
   import('@/features/navigation/sidebar-nav-item').then(module => ({ default: module.SidebarNavItem })),
@@ -864,9 +862,7 @@ function WorkspaceShellContent() {
           <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
             {workspaceStale && <ReconnectBanner showMessage={!onIntegrations} />}
             {workspace.status === 'ready' && (
-              <Suspense fallback={null}>
-                <ReauthorizationBanner key={workspace.id} workspaceId={workspace.id} slug={workspace.slug} />
-              </Suspense>
+              <ReauthorizationBanner key={workspace.id} workspaceId={workspace.id} slug={workspace.slug} />
             )}
             <header
               aria-label="Workspace header"
