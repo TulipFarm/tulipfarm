@@ -152,17 +152,32 @@ try {
   const lane = async title => columns[await columnOf(title)];
   const cell = column => page.locator('[data-task-board] .sprout-board-cell').nth(columns.indexOf(column));
   // Drops a card on a column and returns whether the column took it while dragging, then its drop hint.
+  // A reread after the previous drop can remount the cards and cancel a drag that starts at that moment, so retry
+  // until the board shows a drag in progress.
+  const dragging = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('[data-task-board] .sprout-board-cell')].some(cell =>
+        cell.hasAttribute('data-drop'),
+      ),
+    );
   const drag = async (title, column) => {
-    const from = await card(title).boundingBox();
-    const to = await cell(column).boundingBox();
-    await page.mouse.move(from.x + 20, from.y + 10);
-    await page.mouse.down();
-    await page.mouse.move(from.x + 40, from.y + 20, { steps: 4 });
-    await page.mouse.move(to.x + to.width / 2, to.y + 40, { steps: 12 });
-    const drop = await cell(column).getAttribute('data-drop');
-    const hint = await cell(column).locator('.sprout-board-drop-text').allInnerTexts();
-    await page.mouse.up();
-    return [drop, ...hint];
+    for (let attempt = 0; ; attempt++) {
+      const from = await card(title).boundingBox();
+      const to = await cell(column).boundingBox();
+      await page.mouse.move(from.x + 20, from.y + 10);
+      await page.mouse.down();
+      await page.mouse.move(from.x + 40, from.y + 20, { steps: 4 });
+      await page.mouse.move(to.x + to.width / 2, to.y + 40, { steps: 12 });
+      if (!(await dragging()) && attempt < 10) {
+        await page.mouse.up();
+        await page.waitForTimeout(250);
+        continue;
+      }
+      const drop = await cell(column).getAttribute('data-drop');
+      const hint = await cell(column).locator('.sprout-board-drop-text').allInnerTexts();
+      await page.mouse.up();
+      return [drop, ...hint];
+    }
   };
 
   assert.equal(await lane('Order new labels'), 'To do');
@@ -187,8 +202,15 @@ try {
   assert.equal(await lane('Write the pricing FAQ'), 'To do', 'A task without an agent has nothing to run');
   assert.equal(moves.length, 3, 'Refused drops change nothing');
 
-  await card('Order new labels').click();
-  await page.getByRole('dialog', { name: 'Order new labels' }).waitFor();
+  const details = page.getByRole('dialog', { name: 'Order new labels' });
+  await until(async () => {
+    if (await details.isVisible()) return true;
+    await card('Order new labels').click();
+    return details.waitFor({ timeout: 2000 }).then(
+      () => true,
+      () => false,
+    );
+  }, 'Opening a card shows its details');
   assert.deepEqual(errors, [], 'No browser runtime errors');
   console.log('Tasks board moves cards by meaning and refuses the rest.');
 } catch (error) {
