@@ -150,6 +150,8 @@ test('sign-in methods without server credentials stay hidden', { timeout: 120000
     for (const expected of cases) {
       const { context, page, errors } = await open(browser, 'light', { turnstileSiteKey: null, ...expected.options });
       await page.goto(`${origin}/login`);
+      // The early page index.html paints shows the default methods until the app takes over.
+      await page.locator('#tf-sign-in').waitFor({ state: 'detached' });
       await page.getByText(expected.subtitle).waitFor();
       assert.equal(await page.getByRole('button', google).count(), expected.google, JSON.stringify(expected));
       assert.equal(await page.getByRole('button', emailLink).count(), expected.emailLink, JSON.stringify(expected));
