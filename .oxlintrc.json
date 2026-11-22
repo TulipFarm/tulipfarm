@@ -28,6 +28,10 @@
               {
                 "group": ["**/secrets/src/send*", "**/secrets/dist/send*"],
                 "message": "Only the worker may decrypt secrets. The API encrypts but never decrypts."
+              },
+              {
+                "group": ["reicon-react", "reicon-react/*", "lucide-react", "@radix-ui/react-icons", "@hugeicons/*"],
+                "message": "Import icons from @tulipfarm/icons so sizes and glyphs change in one place."
               }
             ]
           }
