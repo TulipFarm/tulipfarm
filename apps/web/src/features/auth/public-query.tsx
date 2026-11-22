@@ -17,7 +17,7 @@ const PublicQueryContext = createContext<QueryClient | null>(null);
 declare global {
   interface Window {
     /** The sign-in options request the HTML starts on sign-in paths (vite.config.ts earlyRequests). */
-    __tfAuthOptions?: { url: string; response: Promise<Response> };
+    __tfAuthOptions?: { url: string; response: Promise<Response>; data?: unknown };
   }
 }
 
@@ -30,7 +30,17 @@ function takeEarlyOptions(url: string) {
 }
 
 export function PublicAuthQueryProvider({ children }: { children: ReactNode }) {
-  const [client] = useState(() => new QueryClient());
+  const [client] = useState(() => {
+    const created = new QueryClient();
+    // Options that already arrived seed the query, so the form doesn't grow when they land.
+    const early = globalThis.window?.__tfAuthOptions;
+    const parsed = optionsSchema.safeParse(early?.data);
+    if (early?.url === new URL(`${apiOrigin}/v1/auth/options`, location.href).href && parsed.success) {
+      delete globalThis.window?.__tfAuthOptions;
+      created.setQueryData(authOptionsQuery().queryKey, parsed.data);
+    }
+    return created;
+  });
   useEffect(() => {
     client.mount();
     return () => client.unmount();
