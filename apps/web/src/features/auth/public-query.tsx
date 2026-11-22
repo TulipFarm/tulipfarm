@@ -17,15 +17,16 @@ const PublicQueryContext = createContext<QueryClient | null>(null);
 declare global {
   interface Window {
     /** The sign-in options request the HTML starts on sign-in paths (vite.config.ts earlyRequests). */
-    __tfAuthOptions?: Promise<Response>;
+    __tfAuthOptions?: { url: string; response: Promise<Response> };
   }
 }
 
-/** The early request, once: later fetches, such as a retry, go to the network. */
-function takeEarlyOptions() {
+/** The early request, once and only for the same URL: later fetches, such as a retry, go to the network. */
+function takeEarlyOptions(url: string) {
   const early = globalThis.window?.__tfAuthOptions;
   delete globalThis.window?.__tfAuthOptions;
-  return early?.catch(() => undefined);
+  if (!early || early.url !== new URL(url, location.href).href) return undefined;
+  return early.response.catch(() => undefined);
 }
 
 export function PublicAuthQueryProvider({ children }: { children: ReactNode }) {
@@ -48,10 +49,11 @@ export function authOptionsQuery() {
     networkMode: 'always',
     queryFn: async ({ signal }) => {
       const deadline = AbortSignal.any([signal, AbortSignal.timeout(10_000)]);
-      const early = await takeEarlyOptions();
+      const url = `${apiOrigin}/v1/auth/options`;
+      const early = await takeEarlyOptions(url);
       const response =
         early ??
-        (await fetch(`${apiOrigin}/v1/auth/options`, {
+        (await fetch(url, {
           signal: deadline,
           credentials: 'omit',
           cache: 'no-store',

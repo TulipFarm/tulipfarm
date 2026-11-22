@@ -95,10 +95,11 @@ function earlyRequests(): Plugin {
             tag: 'script',
             children:
               `(function(){var o=${JSON.stringify(origin)};` +
-              `try{window.__tfSession=fetch(o+'/v1/auth/get-session',{credentials:'include'})}catch(e){}` +
+              `function g(p,i){var u=new URL(o+p,location.href).href;return{url:u,response:fetch(u,i)}}` +
+              `try{window.__tfSession=g('/v1/auth/get-session',{credentials:'include'})}catch(e){}` +
               `var f=${JSON.stringify(files)}[location.pathname.replace(/\\/+$/,'')];if(!f)return;` +
               `f.forEach(function(h){var l=document.createElement('link');l.rel='modulepreload';l.href=h;document.head.appendChild(l)});` +
-              `try{window.__tfAuthOptions=fetch(o+'/v1/auth/options',{credentials:'omit',cache:'no-store'})}catch(e){}})()`,
+              `try{window.__tfAuthOptions=g('/v1/auth/options',{credentials:'omit',cache:'no-store'})}catch(e){}})()`,
             injectTo: 'head',
           },
         ];

@@ -25,18 +25,18 @@ export const authClient = createAuthClient({
 
 declare global {
   interface Window {
-    __tfSession?: Promise<Response>;
+    __tfSession?: { url: string; response: Promise<Response> };
   }
 }
 
 function takeEarlySession(input: RequestInfo | URL, init: RequestInit | undefined) {
   const early = globalThis.window?.__tfSession;
   if (!early || (init?.method ?? 'GET').toUpperCase() !== 'GET') return undefined;
-  const url = new URL(input instanceof Request ? input.url : String(input), location.href);
-  if (url.pathname !== '/v1/auth/get-session' || url.search) return undefined;
+  // The HTML's API origin comes from the build env; a client built with another origin asks again.
+  if (new URL(input instanceof Request ? input.url : String(input), location.href).href !== early.url) return undefined;
   delete globalThis.window?.__tfSession;
   // A failed early request retries once on the network, so it fails no differently than a normal check.
-  return early.catch(() => fetch(input, init));
+  return early.response.catch(() => fetch(input, init));
 }
 
 function hasUnsafeCharacters(value: string) {
