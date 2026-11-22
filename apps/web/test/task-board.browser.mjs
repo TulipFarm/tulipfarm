@@ -152,32 +152,20 @@ try {
   const lane = async title => columns[await columnOf(title)];
   const cell = column => page.locator('[data-task-board] .sprout-board-cell').nth(columns.indexOf(column));
   // Drops a card on a column and returns whether the column took it while dragging, then its drop hint.
-  // A reread after the previous drop can remount the cards and cancel a drag that starts at that moment, so retry
-  // until the board shows a drag in progress.
-  const dragging = () =>
-    page.evaluate(() =>
-      [...document.querySelectorAll('[data-task-board] .sprout-board-cell')].some(cell =>
-        cell.hasAttribute('data-drop'),
-      ),
-    );
+  // An earlier drag can leave the board scrolled sideways, so bring both ends into view before grabbing the card.
   const drag = async (title, column) => {
-    for (let attempt = 0; ; attempt++) {
-      const from = await card(title).boundingBox();
-      const to = await cell(column).boundingBox();
-      await page.mouse.move(from.x + 20, from.y + 10);
-      await page.mouse.down();
-      await page.mouse.move(from.x + 40, from.y + 20, { steps: 4 });
-      await page.mouse.move(to.x + to.width / 2, to.y + 40, { steps: 12 });
-      if (!(await dragging()) && attempt < 10) {
-        await page.mouse.up();
-        await page.waitForTimeout(250);
-        continue;
-      }
-      const drop = await cell(column).getAttribute('data-drop');
-      const hint = await cell(column).locator('.sprout-board-drop-text').allInnerTexts();
-      await page.mouse.up();
-      return [drop, ...hint];
-    }
+    await cell(column).scrollIntoViewIfNeeded();
+    await card(title).scrollIntoViewIfNeeded();
+    const from = await card(title).boundingBox();
+    const to = await cell(column).boundingBox();
+    await page.mouse.move(from.x + 20, from.y + 10);
+    await page.mouse.down();
+    await page.mouse.move(from.x + 40, from.y + 20, { steps: 4 });
+    await page.mouse.move(to.x + to.width / 2, to.y + 40, { steps: 12 });
+    const drop = await cell(column).getAttribute('data-drop');
+    const hint = await cell(column).locator('.sprout-board-drop-text').allInnerTexts();
+    await page.mouse.up();
+    return [drop, ...hint];
   };
 
   assert.equal(await lane('Order new labels'), 'To do');
@@ -202,6 +190,7 @@ try {
   assert.equal(await lane('Write the pricing FAQ'), 'To do', 'A task without an agent has nothing to run');
   assert.equal(moves.length, 3, 'Refused drops change nothing');
 
+  // The board ignores the first click straight after a drag ends, so click until the details open.
   const details = page.getByRole('dialog', { name: 'Order new labels' });
   await until(async () => {
     if (await details.isVisible()) return true;
