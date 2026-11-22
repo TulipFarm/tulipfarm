@@ -11,10 +11,12 @@ export function workspaceMcpCatalog(
   cache?: ReturnType<typeof workspaceMcpCatalogCache>,
 ) {
   let restored: z.infer<typeof publicMcpSnapshotSchema> | null = null;
+  let publishedAt: string | null = null;
   let loaded: Promise<void> | undefined;
   const load = () =>
     (loaded ??= (async () => {
       restored = (await cache?.read()) ?? null;
+      publishedAt = restored?.syncedAt ?? null;
     })().catch(() => undefined));
   return {
     load,
@@ -22,11 +24,13 @@ export function workspaceMcpCatalog(
       await load();
       await catalog.refreshIfDue();
       const snapshot = catalog.snapshot();
+      // Search only serves the cached copy while it is newer than the live catalog, so drop it once that ends.
+      if (restored && snapshot.syncedAt && snapshot.syncedAt >= restored.syncedAt) restored = null;
       if (
         snapshot.syncedAt &&
         !snapshot.refreshFailed &&
         !snapshot.refreshInProgress &&
-        (!restored || snapshot.syncedAt > restored.syncedAt)
+        (!publishedAt || snapshot.syncedAt > publishedAt)
       ) {
         const publicSnapshot = publicMcpSnapshotSchema.parse({
           policyVersion: 'latest-usable-v1',
@@ -60,7 +64,7 @@ export function workspaceMcpCatalog(
           ),
         });
         await cache?.publish(publicSnapshot);
-        restored = publicSnapshot;
+        publishedAt = publicSnapshot.syncedAt;
       }
       return {
         refreshFailed: snapshot.refreshFailed,
