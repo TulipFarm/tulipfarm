@@ -15,9 +15,29 @@ export const authClient = createAuthClient({
     inferAdditionalFields({ user: { lastModelFamilyId: { type: 'string', required: false } } }),
   ],
   // Look fetch up per call so the dev mocks, which patch it after this module loads, also answer auth.
-  fetchOptions: { credentials: 'include', customFetchImpl: (input, init) => fetch(input, init) },
+  // The first session check takes the request index.html started (vite.config.ts earlyRequests).
+  fetchOptions: {
+    credentials: 'include',
+    customFetchImpl: (input, init) => takeEarlySession(input, init) ?? fetch(input, init),
+  },
   sessionOptions: { refetchInterval: 300, refetchOnWindowFocus: true },
 });
+
+declare global {
+  interface Window {
+    __tfSession?: { url: string; response: Promise<Response> };
+  }
+}
+
+function takeEarlySession(input: RequestInfo | URL, init: RequestInit | undefined) {
+  const early = globalThis.window?.__tfSession;
+  if (!early || (init?.method ?? 'GET').toUpperCase() !== 'GET') return undefined;
+  // The HTML's API origin comes from the build env; a client built with another origin asks again.
+  if (new URL(input instanceof Request ? input.url : String(input), location.href).href !== early.url) return undefined;
+  delete globalThis.window?.__tfSession;
+  // A failed early request retries once on the network, so it fails no differently than a normal check.
+  return early.response.catch(() => fetch(input, init));
+}
 
 function hasUnsafeCharacters(value: string) {
   return /[\\\s]/.test(value) || Array.from(value).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127);

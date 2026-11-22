@@ -61,7 +61,13 @@ function GoogleLogo() {
   );
 }
 
-const AgentActivity = lazy(() => import('./agent-activity').then(module => ({ default: module.AgentActivity })));
+// Sign-in pages start with a stylesheet that covers only the form (vite.config.ts), so the
+// showcase also waits for the full one.
+const AgentActivity = lazy(() =>
+  Promise.all([import('./agent-activity'), globalThis.window?.__tfStyles?.()]).then(([module]) => ({
+    default: module.AgentActivity,
+  })),
+);
 const wideScreen = '(min-width: 64rem)';
 
 // The showcase only appears on wide screens, so narrow screens never download it.

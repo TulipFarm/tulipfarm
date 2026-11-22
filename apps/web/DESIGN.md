@@ -234,7 +234,7 @@ The owner confirmed this description and the name "Action green" on
 snapshot was refreshed from code on 25 October 2026 and checked against Sprout 0.15.4 on 6 November 2026. Every color, the font, the type scale,
 motion and shadows come from Sprout's `tulipfarm` theme
 (`@tulipfarm/sprout/themes/tulipfarm.css`), which is the source of truth shared
-with tulipfarm.ai. [`src/index.css`](src/index.css) only maps app token names
+with tulipfarm.ai. [`src/app.css`](src/app.css) only maps app token names
 onto `--sprout-*` tokens, and `test/sprout-theme.test.ts` fails if it keeps its
 own color values. Change colors in Sprout, not here. Component details come from
 the sprout library (`@tulipfarm/sprout`) and app-local
@@ -427,7 +427,7 @@ content scrolling beneath it, such as sticky headers, pinned columns and floatin
 controls, layers the overlay on an opaque base:
 `linear-gradient(var(--muted) 0 0) var(--card)`. Mixing an overlay into a base
 with `color-mix` stays translucent. Shadows come from Sprout's
-`--sprout-shadow-control` and `--sprout-shadow-overlay`, mapped in `src/index.css`
+`--sprout-shadow-control` and `--sprout-shadow-overlay`, mapped in `src/app.css`
 to `--elevation-control`, `--elevation-popover`, and `--elevation-dialog`.
 
 Transitions default to 150ms with `ease`; dialogs also use 150ms. Sidebar movement

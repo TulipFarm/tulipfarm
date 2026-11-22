@@ -1,0 +1,25 @@
+/* index.css for sign-in pages: the same stylesheet with only the Sprout components they use.
+   vite.config.ts serves it on those pages, then loads index.css, and checks this list. Keep
+   Sprout's files in Sprout's order (its styles/index.css), with base.css last. */
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+@import '@fontsource-variable/inter';
+@import '@tulipfarm/sprout/styles/alert.css';
+@import '@tulipfarm/sprout/styles/alert-dialog.css';
+@import '@tulipfarm/sprout/styles/avatar.css';
+@import '@tulipfarm/sprout/styles/badge.css';
+@import '@tulipfarm/sprout/styles/button.css';
+@import '@tulipfarm/sprout/styles/field.css';
+@import '@tulipfarm/sprout/styles/form.css';
+@import '@tulipfarm/sprout/styles/input.css';
+@import '@tulipfarm/sprout/styles/input-group.css';
+@import '@tulipfarm/sprout/styles/label.css';
+@import '@tulipfarm/sprout/styles/radio-group.css';
+@import '@tulipfarm/sprout/styles/rich-text-editor.css';
+@import '@tulipfarm/sprout/styles/separator.css';
+@import '@tulipfarm/sprout/styles/spinner.css';
+@import '@tulipfarm/sprout/styles/state-panel.css';
+@import '@tulipfarm/sprout/styles/base.css';
+@import '@tulipfarm/sprout/themes/tulipfarm.css';
+@import './app.css';

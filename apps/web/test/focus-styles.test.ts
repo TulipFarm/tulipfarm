@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
-const stylesheet = await readFile(new URL('../src/index.css', import.meta.url), 'utf8');
+const stylesheet = await readFile(new URL('../src/app.css', import.meta.url), 'utf8');
 
 test('global focus ring is limited to interactive controls', () => {
   const focusRing = stylesheet.match(
