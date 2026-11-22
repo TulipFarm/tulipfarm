@@ -8,6 +8,7 @@ import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import type { RecommendationStreamEvent } from '@tulipfarm/recommendations/contracts';
 import type { registerAuth } from './auth.ts';
 import type { ConversationEventHub } from './conversation-events.ts';
+import { requestSession } from './request-session.ts';
 
 export function registerRecommendationEvents(
   app: FastifyInstance,
@@ -45,7 +46,7 @@ export function registerRecommendationEvents(
     },
     async (request, reply) => {
       reply.header('Cache-Control', 'no-store');
-      const session = await dependencies.auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+      const session = await requestSession(request, dependencies.auth);
       if (!session) return reply.code(401).send({ error: 'sign-in-required' });
       const userId = session.user.id;
       const { workspaceId } = z.object({ workspaceId: z.uuid() }).parse(request.params);

@@ -1,7 +1,7 @@
-import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { registerAuth } from './auth.ts';
+import { requestSession } from './request-session.ts';
 
 export function registerUserVisits(
   app: FastifyInstance,
@@ -11,7 +11,7 @@ export function registerUserVisits(
   app.post('/user/visit', { schema: { hide: true } }, async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
     if (request.headers.origin !== origin) return reply.code(403).send({ error: 'untrusted-origin' });
-    const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+    const session = await requestSession(request, auth);
     if (!session) return reply.code(401).send({ error: 'sign-in-required' });
     const result = await pool.query(
       `

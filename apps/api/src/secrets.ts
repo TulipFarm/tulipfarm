@@ -1,4 +1,3 @@
-import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied } from '@tulipfarm/access';
@@ -34,6 +33,7 @@ import {
   taskSecretRequestParams,
   taskSecretRequestsSchema,
 } from './secrets-contracts.ts';
+import { requestSession } from './request-session.ts';
 
 export type SecretsHttpAuth = { api: Pick<ReturnType<typeof registerAuth>['auth']['api'], 'getSession'> };
 type Status = 400 | 404 | 409 | 410 | 503;
@@ -87,7 +87,7 @@ export function registerSecrets(
       reply.header('Referrer-Policy', 'no-referrer');
       if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && request.headers.origin !== authConfig().webOrigin)
         return reply.code(403).send({ error: 'untrusted-origin' });
-      const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+      const session = await requestSession(request, auth);
       if (!session) return reply.code(401).send({ error: 'sign-in-required' });
       sessions.set(request, session.user.id);
     });

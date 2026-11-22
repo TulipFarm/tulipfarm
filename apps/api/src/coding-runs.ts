@@ -1,4 +1,3 @@
-import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied, resolveHuman } from '@tulipfarm/access';
@@ -12,6 +11,7 @@ import { authConfig } from './auth.ts';
 import type { ApiCallsHttpAuth } from './api-calls.ts';
 import { routeValidation } from './route-validation.ts';
 import { requestBoundaryError } from './security.ts';
+import { requestSession } from './request-session.ts';
 
 const params = z.strictObject({ workspaceId: z.uuid(), runId: z.uuid() });
 
@@ -72,7 +72,7 @@ export function registerCodingRuns(app: FastifyInstance, auth: ApiCallsHttpAuth,
       reply.header('Referrer-Policy', 'no-referrer');
       if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && request.headers.origin !== authConfig().webOrigin)
         return reply.code(403).send({ error: 'untrusted-origin' });
-      const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+      const session = await requestSession(request, auth);
       if (!session) return reply.code(401).send({ error: 'sign-in-required' });
       sessions.set(request, session.user.id);
     });

@@ -1,4 +1,3 @@
-import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyError, FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied } from '@tulipfarm/access';
@@ -9,6 +8,7 @@ import { GitHubAccountError } from '@tulipfarm/github';
 import { authConfig, type registerAuth } from './auth.ts';
 import { routeValidation } from './route-validation.ts';
 import { workspaceUpdatingError } from './security.ts';
+import { requestSession } from './request-session.ts';
 
 export function registerGitHubInvestigation(
   app: FastifyInstance,
@@ -36,7 +36,7 @@ export function registerGitHubInvestigation(
       reply.header('Referrer-Policy', 'no-referrer');
       if (request.method !== 'GET' && request.headers.origin !== authConfig().webOrigin)
         return reply.code(403).send({ error: 'untrusted-origin' });
-      const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+      const session = await requestSession(request, auth);
       if (!session) return reply.code(401).send({ error: 'sign-in-required' });
       sessions.set(request, session.user.id);
     });

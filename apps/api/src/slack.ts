@@ -1,5 +1,4 @@
 import type { FastifyError, FastifyInstance, FastifyReply } from 'fastify';
-import { fromNodeHeaders } from 'better-auth/node';
 import { AccessDenied } from '@tulipfarm/access';
 import { log } from '@tulipfarm/observability';
 import { z } from 'zod';
@@ -22,6 +21,7 @@ import {
 import { SlackSignatureError, verifySlackRequest } from './slack-request.ts';
 import { authConfig, type registerAuth } from './auth.ts';
 import { workspaceUpdatingError } from './security.ts';
+import { requestSession } from './request-session.ts';
 
 export type SlackDependencies = {
   config: SlackConfiguration;
@@ -87,7 +87,7 @@ export function registerSlack(
         handler: async (request, reply) => {
           if (method === 'PUT' && request.headers.origin !== authConfig().webOrigin)
             return reply.code(403).send({ error: 'untrusted-origin' });
-          const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+          const session = await requestSession(request, auth);
           if (!session) return reply.code(401).send({ error: 'sign-in-required' });
           if (!dependencies) return reply.code(503).send({ error: 'slack-release-disabled' });
           return dependencies.installations.grants(
@@ -111,7 +111,7 @@ export function registerSlack(
         },
       },
       async (request, reply) => {
-        const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+        const session = await requestSession(request, auth);
         if (!session) return reply.code(401).send({ error: 'sign-in-required' });
         if (!dependencies) return reply.code(503).send({ error: 'slack-release-disabled' });
         return dependencies.installations.channels(
@@ -145,7 +145,7 @@ export function registerSlack(
         handler: async (request, reply) => {
           if (method === 'PUT' && request.headers.origin !== authConfig().webOrigin)
             return reply.code(403).send({ error: 'untrusted-origin' });
-          const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+          const session = await requestSession(request, auth);
           if (!session) return reply.code(401).send({ error: 'sign-in-required' });
           if (!dependencies?.channels) return reply.code(503).send({ error: 'slack-channels-disabled' });
           const p = z.object({ workspaceId: z.uuid(), channel: z.string() }).parse(request.params);
@@ -171,7 +171,7 @@ export function registerSlack(
         },
       },
       async (request, reply) => {
-        const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+        const session = await requestSession(request, auth);
         if (!session) return reply.code(401).send({ error: 'sign-in-required' });
         if (!dependencies?.channels) return reply.code(503).send({ error: 'slack-channels-disabled' });
         const { workspaceId } = z.object({ workspaceId: z.uuid() }).parse(request.params);
@@ -216,7 +216,7 @@ export function registerSlack(
       async (request, reply) => {
         if (request.headers.origin !== authConfig().webOrigin)
           return reply.code(403).send({ error: 'untrusted-origin' });
-        const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+        const session = await requestSession(request, auth);
         if (!session) return reply.code(401).send({ error: 'sign-in-required' });
         if (!dependencies?.channels) return reply.code(503).send({ error: 'slack-channels-disabled' });
         const p = z.object({ workspaceId: z.uuid(), channel: z.string() }).parse(request.params);
@@ -232,7 +232,7 @@ export function registerSlack(
         },
       },
       async (request, reply) => {
-        const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+        const session = await requestSession(request, auth);
         if (!session) return reply.code(401).send({ error: 'sign-in-required' });
         if (!dependencies) return reply.code(503).send({ error: 'slack-release-disabled' });
         return dependencies.installations.emoji(
@@ -278,7 +278,7 @@ export function registerSlack(
         },
       },
       async (request, reply) => {
-        const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+        const session = await requestSession(request, auth);
         if (!session) return reply.code(401).send({ error: 'sign-in-required' });
         if (!dependencies?.memberLinking || !dependencies.config.memberLinking)
           return reply.code(503).send({ error: 'slack-linking-disabled' });
@@ -308,7 +308,7 @@ export function registerSlack(
       async (request, reply) => {
         if (request.headers.origin !== authConfig().webOrigin)
           return reply.code(403).send({ error: 'untrusted-origin' });
-        const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+        const session = await requestSession(request, auth);
         if (!session) return reply.code(401).send({ error: 'sign-in-required' });
         if (!dependencies?.memberLinking || !dependencies.config.memberLinking)
           return reply.code(503).send({ error: 'slack-linking-disabled' });
@@ -343,7 +343,7 @@ export function registerSlack(
       async (request, reply) => {
         if (request.headers.origin !== authConfig().webOrigin)
           return reply.code(403).send({ error: 'untrusted-origin' });
-        const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+        const session = await requestSession(request, auth);
         if (!session) return reply.code(401).send({ error: 'sign-in-required' });
         if (!dependencies?.memberLinking) return reply.code(503).send({ error: 'slack-linking-disabled' });
         return dependencies.memberLinking.unlink(
@@ -421,7 +421,7 @@ export function registerSlack(
           },
         },
         async (request, reply) => {
-          const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+          const session = await requestSession(request, auth);
           if (!dependencies?.memberLinking) return reply.code(503).send({ error: 'slack-linking-disabled' });
           const query = callbackInput.parse(request.query);
           const browser = browserProof(request.headers.cookie);
@@ -486,7 +486,7 @@ export function registerSlack(
         handler: async (request, reply) => {
           if (action !== 'status' && request.headers.origin !== authConfig().webOrigin)
             return reply.code(403).send({ error: 'untrusted-origin' });
-          const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+          const session = await requestSession(request, auth);
           if (!session) return reply.code(401).send({ error: 'sign-in-required' });
           if (!dependencies) return reply.code(503).send({ error: 'slack-release-disabled' });
           const { workspaceId } = z.object({ workspaceId: z.uuid() }).parse(request.params);
@@ -514,7 +514,7 @@ export function registerSlack(
         },
       },
       async (request, reply) => {
-        const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+        const session = await requestSession(request, auth);
         if (!session) return reply.code(401).send({ error: 'sign-in-required' });
         if (!dependencies) return reply.code(503).send({ error: 'slack-release-disabled' });
         const query = z.object({ code: z.string(), state: z.string() }).parse(request.query);

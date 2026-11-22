@@ -17,6 +17,7 @@ import type { createGitHubBatchDecision } from '@tulipfarm/github/batch-approval
 import { authConfig, type registerAuth } from './auth.ts';
 import { routeValidation } from './route-validation.ts';
 import { workspaceUpdatingError } from './security.ts';
+import { requestSession } from './request-session.ts';
 
 export function registerGitHubTasks(
   app: FastifyInstance,
@@ -57,8 +58,7 @@ export function registerGitHubTasks(
       reply.header('Cache-Control', 'no-store');
       if (request.method !== 'GET' && request.headers.origin !== authConfig().webOrigin)
         return reply.code(403).send({ error: 'untrusted-origin' });
-      if (!(await options.auth.api.getSession({ headers: fromNodeHeaders(request.headers) })))
-        return reply.code(401).send({ error: 'sign-in-required' });
+      if (!(await requestSession(request, options.auth))) return reply.code(401).send({ error: 'sign-in-required' });
     });
     routes.setErrorHandler((failure, _request, reply) => {
       if (workspaceUpdatingError(failure, reply)) return;

@@ -99,7 +99,7 @@ test('expected-session admission stops legacy reads and writes before validation
     const response = await app.inject({ url: `/workspaces/${id}/secrets`, headers });
     assert.equal(response.statusCode, 200, response.body);
     assert.deepEqual(response.json(), { secrets: [] });
-    assert.equal(sessionReads, before + (Object.keys(headers).length ? 2 : 1));
+    assert.equal(sessionReads, before + 1);
   }
 });
 

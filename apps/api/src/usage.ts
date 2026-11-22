@@ -1,4 +1,3 @@
-import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
@@ -32,6 +31,7 @@ import { qualified, StorageUnavailableError, commonCompatibility } from '@tulipf
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import type { registerAuth } from './auth.ts';
 import type { createPlanUsage } from './plan-usage.ts';
+import { requestSession } from './request-session.ts';
 
 const maxRangeMs = 400 * 24 * 60 * 60_000;
 
@@ -174,7 +174,7 @@ export function registerUsage(
     },
     async (request, reply) => {
       reply.header('Cache-Control', 'no-store');
-      const session = await dependencies.auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+      const session = await requestSession(request, dependencies.auth);
       if (!session) return reply.code(401).send({ error: 'sign-in-required' });
       const { workspaceId } = z.object({ workspaceId: z.uuid() }).parse(request.params);
       const raw = usageRequestSchema.safeParse(request.query);

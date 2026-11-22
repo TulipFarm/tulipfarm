@@ -1,4 +1,3 @@
-import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied } from '@tulipfarm/access';
@@ -6,6 +5,7 @@ import { isLoopbackRedirectUri } from '@tulipfarm/workspace-mcp-transport';
 import { authConfig, type registerAuth } from './auth.ts';
 import { requestBoundaryError } from './security.ts';
 import { routeValidation } from './route-validation.ts';
+import { requestSession } from './request-session.ts';
 
 export type McpHttpAuth = { api: Pick<ReturnType<typeof registerAuth>['auth']['api'], 'getSession'> };
 export class McpHttpError extends Error {
@@ -90,7 +90,7 @@ export function workspaceMcpHttp(
     reply.header('Referrer-Policy', 'no-referrer');
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && request.headers.origin !== authConfig().webOrigin)
       return reply.code(403).send({ error: 'untrusted-origin' });
-    const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+    const session = await requestSession(request, auth);
     if (!session)
       return isCallback(request)
         ? mcpCallbackRedirect(reply, { outcome: 'sign-in-required' })

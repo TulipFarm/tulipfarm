@@ -1,4 +1,3 @@
-import { fromNodeHeaders } from 'better-auth/node';
 import { APIError } from 'better-auth/api';
 import { createBackgroundJob, log } from '@tulipfarm/observability';
 import type { FastifyInstance } from 'fastify';
@@ -25,6 +24,7 @@ import { authConfig, type registerAuth } from './auth.ts';
 import { createTurnstileVerifier, turnstileConfig } from './turnstile.ts';
 import type { createTemporalClient } from './temporal.ts';
 import { registerOnboarding } from './onboarding.ts';
+import { requestSession } from './request-session.ts';
 
 const errorSchema = { type: 'object', properties: { error: { type: 'string' } }, required: ['error'] };
 
@@ -130,7 +130,7 @@ export function registerWorkspaces(
         },
       },
       async (request, reply) => {
-        const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+        const session = await requestSession(request, auth);
         if (!session) return reply.code(401).send({ error: 'Sign in to create a workspace' });
         const parsed = creationRequest.safeParse(request.body);
         if (!parsed.success)
@@ -172,7 +172,7 @@ export function registerWorkspaces(
         },
       },
       async (request, reply) => {
-        const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+        const session = await requestSession(request, auth);
         if (!session) return reply.code(401).send({ error: 'Sign in to list workspaces' });
         if (!store) return reply.code(503).send({ error: 'Workspace storage is unavailable' });
         try {
@@ -203,7 +203,7 @@ export function registerWorkspaces(
         },
       },
       async (request, reply) => {
-        const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+        const session = await requestSession(request, auth);
         if (!session) return reply.code(401).send({ error: 'Sign in to check workspace setup' });
         return (
           (await getWorkspaceSetup(pool, session.user.id, request.params.id)) ??
@@ -220,7 +220,7 @@ export function registerWorkspaces(
         },
       },
       async (request, reply) => {
-        const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+        const session = await requestSession(request, auth);
         if (!session) return reply.code(401).send({ error: 'Sign in to remember a workspace' });
         if (!store) return reply.code(503).send({ error: 'Workspace storage is unavailable' });
         try {
@@ -244,7 +244,7 @@ export function registerWorkspaces(
         },
       },
       async (request, reply) => {
-        const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+        const session = await requestSession(request, auth);
         if (!session) return reply.code(401).send({ error: 'Sign in to open a workspace' });
         if (!store) return reply.code(503).send({ error: 'Workspace storage is unavailable' });
         try {

@@ -1,4 +1,3 @@
-import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied, WorkspaceMembershipDenied, lockAuthorization, resolveHuman } from '@tulipfarm/access';
@@ -6,6 +5,7 @@ import { StorageUnavailableError, commonCompatibility } from '@tulipfarm/workspa
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import type { registerAuth } from './auth.ts';
 import { recommendationListSchema, readSavedRecommendations } from '@tulipfarm/recommendations';
+import { requestSession } from './request-session.ts';
 
 export function registerRecommendations(
   app: FastifyInstance,
@@ -40,7 +40,7 @@ export function registerRecommendations(
     },
     async (request, reply) => {
       reply.header('Cache-Control', 'no-store');
-      const session = await dependencies.auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+      const session = await requestSession(request, dependencies.auth);
       if (!session) return reply.code(401).send({ error: 'sign-in-required' });
       const params = z.object({ workspaceId: z.uuid() }).safeParse(request.params);
       if (!params.success) return reply.code(400).send({ error: 'invalid-request' });
