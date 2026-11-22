@@ -3,10 +3,9 @@ import { z } from 'zod';
 import {
   AccessDenied,
   canAccessTable,
-  lockAuthorization,
-  requireTablePermission,
-  resolveHuman,
   type HumanActor,
+  lockAndResolveHuman,
+  requireTablePermission,
 } from '@tulipfarm/access';
 import { recordConversationActivity } from '@tulipfarm/conversations/activity';
 import { notifyConversationChange } from '@tulipfarm/conversations/event-publisher';
@@ -287,8 +286,7 @@ export function createTableSchemaRevert(options: TableProposalOptions) {
         proposal: derivedId(chatId, 'proposal'),
       };
       const started = await options.runtime.transaction(workspaceId, executionCompatibility, async tx => {
-        await lockAuthorization(tx);
-        const actor = await resolveHuman(tx, userId);
+        const actor = await lockAndResolveHuman(tx, userId);
         await requireTablePermission(tx, actor, tableId, 'table.row.read');
         const existing = z
           .object({ owned: z.boolean(), status: z.string().nullable() })

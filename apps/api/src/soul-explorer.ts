@@ -4,8 +4,7 @@ import { z } from 'zod';
 import {
   AccessDenied,
   currentMember,
-  lockAuthorization,
-  resolveHuman,
+  lockAndResolveHuman,
   requireTablePermission,
   SourceAuthorizationUnavailable,
 } from '@tulipfarm/access';
@@ -61,8 +60,7 @@ type Store = { pool: Pick<Pool, 'query'>; runtime: WorkspaceStore['runtime'] };
 export function createSoulExplorerService(store: Store, storage: () => SoulStorage, enabled: Eligibility) {
   async function snapshot(workspaceId: string, userId: string): Promise<SoulExplorerSnapshot> {
     return store.runtime.transaction(workspaceId, commonCompatibility, async tx => {
-      await lockAuthorization(tx, 'read');
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId);
       if ((await currentMember(tx, actor)).role !== 'admin') throw new AccessDenied();
       const raw = (
         await store.pool.query(

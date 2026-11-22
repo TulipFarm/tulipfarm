@@ -1,11 +1,10 @@
 import { z } from 'zod';
 import {
   AccessDenied,
-  currentMember,
-  lockAuthorization,
-  resolveHuman,
   type AuthorizationTransaction,
+  currentMember,
   type HumanActor,
+  lockAndResolveHuman,
 } from '@tulipfarm/access';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import {
@@ -49,8 +48,7 @@ export function workspaceMcpActions(options: {
     operation: (tx: AuthorizationTransaction, actor: HumanActor) => Promise<T>,
   ) {
     return runtime.transaction(workspaceId, workspaceMcpCompatibility, async tx => {
-      await lockAuthorization(tx, 'read');
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId);
       await currentMember(tx, actor);
       return operation(tx, actor);
     });

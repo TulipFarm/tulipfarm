@@ -30,14 +30,13 @@ import { recordFileUse } from '@tulipfarm/files';
 import { observeChatDetail, trackEvent } from '@tulipfarm/observability';
 import {
   AccessDenied,
-  SourceAuthorizationUnavailable,
-  currentMember,
-  lockAuthorization,
-  prefetchConversationSources,
-  resolveHuman,
-  uuidSchema,
-  type HumanActor,
   type AuthorizationTransaction,
+  currentMember,
+  type HumanActor,
+  lockAndResolveHuman,
+  prefetchConversationSources,
+  SourceAuthorizationUnavailable,
+  uuidSchema,
 } from '@tulipfarm/access';
 import {
   afterCommit,
@@ -329,8 +328,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
   ) {
     return runtime.transaction(workspaceId, commonCompatibility, async tx => {
       const actor = await observeChatDetail('actor', async () => {
-        await lockAuthorization(tx);
-        return resolveHuman(tx, userId);
+        return lockAndResolveHuman(tx, userId);
       });
       return operation(bindFileSources(tx), actor);
     });

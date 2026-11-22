@@ -2,13 +2,13 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   AccessDenied,
+  type AuthorizationTransaction,
   currentMember,
+  type HumanActor,
+  lockAndResolveHuman,
   lockAuthorization,
-  resolveHuman,
   requireTablePermission,
   uuidSchema,
-  type AuthorizationTransaction,
-  type HumanActor,
 } from '@tulipfarm/access';
 import { withMaintenanceTransaction } from '@tulipfarm/workspace-storage/provisioning';
 import { internalFenceSchema, lockInternalFence } from '@tulipfarm/conversations/internal';
@@ -201,8 +201,7 @@ export function createTableApprovalRequests(runtime: TableRuntime) {
 
   async function read(workspaceId: string, userId: string, chatId: string, requestId: string) {
     return runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async tx => {
-      await lockAuthorization(tx);
-      const actor = await resolveHuman(tx, userId),
+      const actor = await lockAndResolveHuman(tx, userId),
         row = await load(tx, uuidSchema.parse(requestId));
       if (row.conversation_id !== uuidSchema.parse(chatId)) throw new AccessDenied();
       await requireTablePermission(tx, actor, row.table_id, 'table.schema.manage');
@@ -274,8 +273,7 @@ export function createTableApprovalResolver(options: {
     requestId = uuidSchema.parse(requestId);
     const actor = human
       ? await options.runtime.transaction(workspaceId, commonCompatibility, async tx => {
-          await lockAuthorization(tx);
-          return resolveHuman(tx, human.userId);
+          return lockAndResolveHuman(tx, human.userId);
         })
       : null;
     const connectionString = await options.resolveConfirmationCredential(workspaceId);

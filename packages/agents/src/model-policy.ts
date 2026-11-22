@@ -1,13 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import {
-  AccessDenied,
-  currentMember,
-  lockAuthorization,
-  resolveHuman,
-  uuidSchema,
-  type HumanActor,
-} from '@tulipfarm/access';
+import { AccessDenied, currentMember, type HumanActor, lockAndResolveHuman, uuidSchema } from '@tulipfarm/access';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
 import { relation, type AgentStorage, type AgentTransaction } from './store.ts';
 import { AgentError } from './saved-contracts.ts';
@@ -35,8 +28,7 @@ export function createModelPolicyService(runtime: AgentStorage, eligible: ModelF
     operation: (tx: AgentTransaction, actor: HumanActor) => Promise<T>,
   ) {
     return runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async tx => {
-      await lockAuthorization(tx, write ? 'write' : 'read');
-      const actor = await resolveHuman(tx, user);
+      const actor = await lockAndResolveHuman(tx, user, write ? 'write' : 'read');
       const member = await currentMember(tx, actor);
       if (write && member.role !== 'admin') throw new AccessDenied();
       return operation(tx, actor);

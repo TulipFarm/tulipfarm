@@ -2,7 +2,7 @@ import { PassThrough } from 'node:stream';
 import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { AccessDenied, WorkspaceMembershipDenied, lockAuthorization, resolveHuman } from '@tulipfarm/access';
+import { AccessDenied, lockAndResolveHuman, WorkspaceMembershipDenied } from '@tulipfarm/access';
 import { commonCompatibility, StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import type { RecommendationStreamEvent } from '@tulipfarm/recommendations/contracts';
@@ -52,8 +52,7 @@ export function registerRecommendationEvents(
       const { workspaceId } = z.object({ workspaceId: z.uuid() }).parse(request.params);
       const authorize = () =>
         dependencies.runtime.transaction(workspaceId, commonCompatibility, async tx => {
-          await lockAuthorization(tx);
-          return (await resolveHuman(tx, userId)).membershipId;
+          return (await lockAndResolveHuman(tx, userId)).membershipId;
         });
       let membershipId: string;
       try {

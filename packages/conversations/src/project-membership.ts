@@ -3,13 +3,12 @@ import { randomUUID } from 'node:crypto';
 import { recordRecommendationChange } from '@tulipfarm/workspace-storage/recommendations';
 import {
   AccessDenied,
+  type AuthorizationTransaction,
   currentMember,
   denyMcpEgress,
-  lockAuthorization,
-  resolveHuman,
-  uuidSchema,
-  type AuthorizationTransaction,
   type HumanActor,
+  lockAndResolveHuman,
+  uuidSchema,
 } from '@tulipfarm/access';
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import type { ConversationRuntime } from './runtime.ts';
@@ -101,8 +100,7 @@ export function createProjectMembership(runtime: ConversationRuntime, compatibil
     operation: (tx: AuthorizationTransaction, actor: HumanActor) => Promise<T>,
   ) {
     return runtime.transaction(uuidSchema.parse(workspaceId), compatibility, async tx => {
-      await lockAuthorization(tx, write ? 'write' : 'read');
-      return operation(tx, await resolveHuman(tx, userId));
+      return operation(tx, await lockAndResolveHuman(tx, userId, write ? 'write' : 'read'));
     });
   }
   async function create(workspaceId: string, userId: string, value: unknown) {

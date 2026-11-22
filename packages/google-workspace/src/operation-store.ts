@@ -1,11 +1,5 @@
 import { z } from 'zod';
-import {
-  AccessDenied,
-  lockAuthorization,
-  resolveHuman,
-  type AuthorizationTransaction,
-  type HumanActor,
-} from '@tulipfarm/access';
+import { AccessDenied, type AuthorizationTransaction, type HumanActor, lockAndResolveHuman } from '@tulipfarm/access';
 import { uuidSchema } from '@tulipfarm/access/contracts';
 import { qualified, type createWorkspaceRuntime, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { GoogleWorkspaceError } from './contracts.ts';
@@ -44,8 +38,7 @@ export function authorized(runtime: GoogleOperationRuntime) {
     operation: (tx: AuthorizationTransaction, actor: HumanActor) => Promise<T>,
   ) =>
     runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async tx => {
-      await lockAuthorization(tx);
-      return operation(tx, await resolveHuman(tx, userId));
+      return operation(tx, await lockAndResolveHuman(tx, userId));
     });
 }
 export async function loadIntegration(tx: AuthorizationTransaction, actor: HumanActor, scopes: readonly string[]) {

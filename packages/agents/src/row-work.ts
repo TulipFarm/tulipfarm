@@ -4,10 +4,9 @@ import {
   AccessDenied,
   currentMember,
   definitionGrantPredicate,
-  lockAuthorization,
-  requireTablePermission,
-  resolveHuman,
   type HumanActor,
+  lockAndResolveHuman,
+  requireTablePermission,
 } from '@tulipfarm/access';
 import { writeRunState } from '@tulipfarm/tables/store';
 import { TaskTableError } from '@tulipfarm/tables/tasks-table';
@@ -294,8 +293,7 @@ export function createRowWork(runtime: Runtime, compatibility: unknown) {
     operation: (tx: AgentTransaction, actor: HumanActor) => Promise<T>,
   ) =>
     runtime.transaction(z.uuid().parse(workspaceId), compatibility, async tx => {
-      await lockAuthorization(tx);
-      return operation(tx, await resolveHuman(tx, userId));
+      return operation(tx, await lockAndResolveHuman(tx, userId));
     });
 
   async function ownComment(tx: AgentTransaction, actor: HumanActor, tableId: string, rowId: string, itemId: string) {

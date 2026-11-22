@@ -4,11 +4,10 @@ import type { Pool } from 'pg';
 import { z } from 'zod';
 import {
   AccessDenied,
-  SkillUnavailable,
   currentMember,
   definitionGrantPredicate,
-  lockAuthorization,
-  resolveHuman,
+  lockAndResolveHuman,
+  SkillUnavailable,
 } from '@tulipfarm/access';
 import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
 import {
@@ -104,8 +103,7 @@ export function registerTableChanges(
     }
     if (agentIds.length) {
       const agents = await dependencies.runtime.transaction(workspaceId, commonCompatibility, async tx => {
-        await lockAuthorization(tx, 'read');
-        const reader = await resolveHuman(tx, userId);
+        const reader = await lockAndResolveHuman(tx, userId);
         const admin = (await currentMember(tx, reader)).role === 'admin';
         const predicate = admin ? '' : `AND ${definitionGrantPredicate(tx, 'agent', 'a.id', '$2', "'read'")}`;
         return z
@@ -227,8 +225,7 @@ export function registerTableChanges(
         const p = params.parse(request.params),
           body = createBody.parse(request.body);
         const actor = await dependencies.runtime.transaction(p.workspaceId, executionCompatibility, async tx => {
-          await lockAuthorization(tx);
-          return resolveHuman(tx, user(request));
+          return lockAndResolveHuman(tx, user(request));
         });
         return reply.code(202).send(
           await proposals.propose(
@@ -784,8 +781,7 @@ export function registerTableChanges(
           const p = requestParams.parse(request.params),
             body = archiveBody.parse(request.body);
           const actor = await dependencies.runtime.transaction(p.workspaceId, executionCompatibility, async tx => {
-            await lockAuthorization(tx);
-            return resolveHuman(tx, user(request));
+            return lockAndResolveHuman(tx, user(request));
           });
           // The change runs as a proposal the person approves in the same request, so it keeps the chat
           // version's checks and storage-worker execution. Retrying with the same request id is safe.

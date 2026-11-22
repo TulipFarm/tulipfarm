@@ -1,12 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import {
-  AccessDenied,
-  lockAuthorization,
-  requireTablePermission,
-  resolveHuman,
-  type HumanActor,
-} from '@tulipfarm/access';
+import { AccessDenied, type HumanActor, lockAndResolveHuman, requireTablePermission } from '@tulipfarm/access';
 import {
   calculateUsageCost,
   initialModelMapping,
@@ -862,8 +856,7 @@ export function createTableQueryTranslations(options: {
     action: (tx: Tx, actor: HumanActor) => Promise<T>,
   ) =>
     runtime.transaction(workspaceId, compatibility, async tx => {
-      await lockAuthorization(tx);
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId);
       await requireTablePermission(tx, actor, tableId, 'table.row.read');
       return action(tx, actor);
     });

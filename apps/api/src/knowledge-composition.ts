@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { createKnowledgeAgentTools, createKnowledgeSourceFailures, KnowledgeError } from '@tulipfarm/knowledge';
 import { defaultKnowledgeFlagEnabled } from '@tulipfarm/knowledge';
-import { AccessDenied, lockAuthorization, resolveHuman, uuidSchema } from '@tulipfarm/access';
+import { AccessDenied, lockAndResolveHuman, uuidSchema } from '@tulipfarm/access';
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { z } from 'zod';
 import { registerKnowledge } from './knowledge.ts';
@@ -49,8 +49,7 @@ export function registerKnowledgeRoutes(
       uuidSchema.parse(workspaceId),
       commonCompatibility,
       async tx => {
-        await lockAuthorization(tx);
-        await resolveHuman(tx, userId);
+        await lockAndResolveHuman(tx, userId);
         const row = z
           .object({
             provider: z.enum(['note', 'file', 'google', 'slack', 'github', 'confluence', 'jira', 'conversation']),
@@ -82,8 +81,7 @@ export function registerKnowledgeRoutes(
   }
   const members = (workspaceId: string, userId: string) =>
     dependencies.runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async tx => {
-      await lockAuthorization(tx);
-      await resolveHuman(tx, userId);
+      await lockAndResolveHuman(tx, userId);
       if (!dependencies.pool) throw new KnowledgeError('adapter-required');
       const members = z
         .array(z.object({ id: z.uuid(), user_id: z.string() }))
@@ -127,8 +125,7 @@ export function registerKnowledgeRoutes(
     documents: async (workspaceId, userId, sourceId, cursor) => {
       const result = await google.listDocuments(workspaceId, userId, sourceId, cursor);
       return dependencies.runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async tx => {
-        await lockAuthorization(tx);
-        const actor = await resolveHuman(tx, userId);
+        const actor = await lockAndResolveHuman(tx, userId);
         const proofs = z
           .array(z.object({ document_id: z.uuid(), revision_id: z.uuid(), expires_at: z.date() }))
           .parse(
@@ -160,8 +157,7 @@ export function registerKnowledgeRoutes(
     documents: async (workspaceId, userId, sourceId, cursor) => {
       const result = await slack.listDocuments(workspaceId, userId, sourceId, cursor);
       return dependencies.runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async tx => {
-        await lockAuthorization(tx);
-        const actor = await resolveHuman(tx, userId);
+        const actor = await lockAndResolveHuman(tx, userId);
         const proofs = z
           .array(z.object({ document_id: z.uuid(), revision_id: z.uuid(), expires_at: z.date() }))
           .parse(
@@ -192,8 +188,7 @@ export function registerKnowledgeRoutes(
     documents: async (workspaceId, userId, sourceId, cursor) => {
       const result = await github.listDocuments(workspaceId, userId, sourceId, cursor);
       return dependencies.runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async tx => {
-        await lockAuthorization(tx);
-        const actor = await resolveHuman(tx, userId);
+        const actor = await lockAndResolveHuman(tx, userId);
         const proofs = z
           .array(z.object({ document_id: z.uuid(), revision_id: z.uuid(), expires_at: z.date() }))
           .parse(
@@ -224,8 +219,7 @@ export function registerKnowledgeRoutes(
     documents: async (workspaceId, userId, sourceId, cursor) => {
       const result = await atlassian.listDocuments(workspaceId, userId, sourceId, cursor);
       return dependencies.runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async tx => {
-        await lockAuthorization(tx);
-        const actor = await resolveHuman(tx, userId);
+        const actor = await lockAndResolveHuman(tx, userId);
         const proofs = z
           .array(z.object({ document_id: z.uuid(), revision_id: z.uuid(), expires_at: z.date() }))
           .parse(

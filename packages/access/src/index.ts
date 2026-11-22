@@ -117,23 +117,13 @@ export async function lockAuthorization(
   mode: 'read' | 'write' = 'read',
   { retry = true, budgetMs = lockBudgetMs }: { retry?: boolean; budgetMs?: number } = {},
 ) {
-  const lockTable = table(transaction, 'tf_authorization_lock');
-  // The row is locked only after the join has produced it, so the queue is always joined first.
-  const take = () =>
-    transaction.client.query(
-      `SELECT authorization_lock.id FROM (SELECT ${mode === 'write' ? 'pg_advisory_xact_lock' : 'pg_advisory_xact_lock_shared'}(hashtextextended($1, 518204))) queue, ${lockTable} authorization_lock WHERE authorization_lock.id = 1 FOR ${mode === 'write' ? 'UPDATE' : 'SHARE'} OF authorization_lock`,
-      [transaction.schema],
-    );
+  const take = waitForLock(transaction, mode);
   if (!retry) {
     if ((await take()).rowCount !== 1) throw new AccessDenied();
     return;
   }
   if (mode === 'read') {
-    // Neither lock waits here, and a busy lock returns no row instead of an error that would abort the transaction.
-    const free = await transaction.client.query(
-      `SELECT authorization_lock.id FROM (SELECT pg_try_advisory_xact_lock_shared(hashtextextended($1, 518204)) AS taken) queue, ${lockTable} authorization_lock WHERE queue.taken AND authorization_lock.id = 1 FOR SHARE OF authorization_lock SKIP LOCKED`,
-      [transaction.schema],
-    );
+    const free = await tryReadLock(transaction);
     if (free.rowCount === 1) {
       recordAuthorizationLock(mode, 'acquired', 0, 0);
       return;
@@ -141,6 +131,20 @@ export async function lockAuthorization(
   }
   if ((await retryLockWait(transaction, mode, budgetMs, take)).rowCount !== 1) throw new AccessDenied();
 }
+
+// The row is locked only after the join has produced it, so the queue is always joined first.
+const waitForLock = (transaction: AuthorizationTransaction, mode: 'read' | 'write') => () =>
+  transaction.client.query(
+    `SELECT authorization_lock.id FROM (SELECT ${mode === 'write' ? 'pg_advisory_xact_lock' : 'pg_advisory_xact_lock_shared'}(hashtextextended($1, 518204))) queue, ${table(transaction, 'tf_authorization_lock')} authorization_lock WHERE authorization_lock.id = 1 FOR ${mode === 'write' ? 'UPDATE' : 'SHARE'} OF authorization_lock`,
+    [transaction.schema],
+  );
+
+// Neither lock waits here, and a busy lock returns no row instead of an error that would abort the transaction.
+const tryReadLock = (transaction: AuthorizationTransaction) =>
+  transaction.client.query(
+    `SELECT authorization_lock.id FROM (SELECT pg_try_advisory_xact_lock_shared(hashtextextended($1, 518204)) AS taken) queue, ${table(transaction, 'tf_authorization_lock')} authorization_lock WHERE queue.taken AND authorization_lock.id = 1 FOR SHARE OF authorization_lock SKIP LOCKED`,
+    [transaction.schema],
+  );
 
 function lockWaitFailed(error: unknown) {
   const code = (error as { code?: unknown } | null)?.code;
@@ -177,13 +181,57 @@ async function retryLockWait<T extends { rowCount: number | null }>(
 }
 
 export async function resolveHuman(transaction: AuthorizationTransaction, userId: string): Promise<HumanActor> {
-  const result = await transaction.client.query(
-    `SELECT id, user_id, role FROM ${table(transaction, 'tf_memberships')} WHERE user_id = $1 AND removed_at IS NULL`,
-    [userId],
+  return humanFrom(
+    await transaction.client.query(
+      `SELECT id, user_id, role FROM ${table(transaction, 'tf_memberships')} WHERE user_id = $1 AND removed_at IS NULL`,
+      [userId],
+    ),
+    userId,
   );
+}
+
+function humanFrom(result: { rows: unknown[] }, userId: string): HumanActor {
   const member = membershipSchema.optional().parse(result.rows[0]);
   if (!member) throw new WorkspaceMembershipDenied(userId);
   return { kind: 'human', userId: member.user_id, membershipId: member.id };
+}
+
+/**
+ * `lockAuthorization(transaction, mode)` then `resolveHuman(transaction, userId)`. For a read, in one round trip when
+ * the lock is free. Both statements go out together and Postgres runs them in order, so the member is still read after the lock is
+ * held. A busy lock discards that read and waits as `lockAuthorization` does, then reads the member again.
+ */
+export async function lockAndResolveHuman(
+  transaction: AuthorizationTransaction,
+  userId: string,
+  mode: 'read' | 'write' = 'read',
+) {
+  if (mode === 'write') {
+    await lockAuthorization(transaction, 'write');
+    return resolveHuman(transaction, userId);
+  }
+  const connection = transaction.client as { pipeline?: boolean | undefined };
+  const previous = connection.pipeline;
+  // pg sends queries without waiting for earlier replies while this is on; it stays on until both replies arrive.
+  connection.pipeline = true;
+  const [lock, member] = await Promise.allSettled([
+    tryReadLock(transaction),
+    transaction.client.query(
+      `SELECT id, user_id, role FROM ${table(transaction, 'tf_memberships')} WHERE user_id = $1 AND removed_at IS NULL`,
+      [userId],
+    ),
+  ]);
+  connection.pipeline = previous;
+  if (lock.status === 'rejected') throw lock.reason;
+  // A failed read aborted the transaction, so report it as resolveHuman would have after the wait.
+  if (member.status === 'rejected') throw member.reason;
+  if (lock.value.rowCount !== 1) {
+    if ((await retryLockWait(transaction, 'read', lockBudgetMs, waitForLock(transaction, 'read'))).rowCount !== 1)
+      throw new AccessDenied();
+    return resolveHuman(transaction, userId);
+  }
+  recordAuthorizationLock('read', 'acquired', 0, 0);
+  return humanFrom(member.value, userId);
 }
 
 export async function currentMember(transaction: AuthorizationTransaction, actor: HumanActor) {

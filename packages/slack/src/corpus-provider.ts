@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { observeFetch } from '@tulipfarm/observability';
 import { z } from 'zod';
-import { AccessDenied, currentMember, lockAuthorization, resolveHuman } from '@tulipfarm/access';
+import { AccessDenied, currentMember, lockAndResolveHuman } from '@tulipfarm/access';
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import {
   SlackCorpusError,
@@ -192,8 +192,7 @@ export function slackCorpusCredentials(options: {
 }): SlackCorpusCredentials {
   return (workspaceId, userId) =>
     options.runtime.transaction(workspaceId, commonCompatibility, async tx => {
-      await lockAuthorization(tx, 'read');
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId);
       await currentMember(tx, actor);
       const table = (name: string) => qualified(tx.schema, name);
       const row = z

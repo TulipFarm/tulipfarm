@@ -2,13 +2,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { applySectionsUpdate } from '@tulipfarm/plan-documents';
 import {
-  deferRemoteSourceChecks,
-  lockAuthorization,
-  requireTaskInvocation,
-  resolveHuman,
-  uuidSchema,
   AccessDenied,
+  deferRemoteSourceChecks,
   type HumanActor,
+  lockAndResolveHuman,
+  requireTaskInvocation,
+  uuidSchema,
 } from '@tulipfarm/access';
 import { sourceDependencySchema } from '@tulipfarm/access/source-dependencies';
 import { authorizeChat, type ChatAccessRule } from '@tulipfarm/conversations/chat-access';
@@ -518,8 +517,7 @@ export function createAgentPlans(
     compatibility: { minimum: number; maximum: number } = planCompatibility,
   ) {
     return runtime.transaction(uuidSchema.parse(workspaceId), compatibility, async tx => {
-      await lockAuthorization(tx);
-      return operation(tx, await resolveHuman(tx, user));
+      return operation(tx, await lockAndResolveHuman(tx, user));
     });
   }
   async function requireChat(tx: AgentTransaction, actor: HumanActor, chatId: string, rule: ChatAccessRule) {

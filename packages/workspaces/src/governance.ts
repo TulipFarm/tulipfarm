@@ -6,15 +6,15 @@ import { encryptEmailDelivery, type EmailDeliveryKeys } from './email-delivery.t
 import { decryptInvitationCopy, encryptInvitationCopy } from './invitation-copy.ts';
 import {
   AccessDenied,
+  type AuthorizationTransaction,
   currentMember,
   departureNeedsManagerHandoff,
+  type HumanActor,
+  lockAndResolveHuman,
   lockAuthorization,
-  resolveHuman,
+  type ManagerDeparture,
   requireTeamManager,
   tablePersonGrantsInstalled,
-  type AuthorizationTransaction,
-  type HumanActor,
-  type ManagerDeparture,
 } from '@tulipfarm/access';
 import { afterCommit, qualified, type createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import { emitHook } from '@tulipfarm/extensions';
@@ -146,8 +146,7 @@ export function createGovernanceService(dependencies: {
       z.uuid().parse(workspaceId).toLowerCase(),
       dependencies.compatibility,
       async transaction => {
-        await lockAuthorization(transaction, mode);
-        const actor = await resolveHuman(transaction, userId);
+        const actor = await lockAndResolveHuman(transaction, userId, mode);
         const member = await currentMember(transaction, actor);
         if (admin && member.role !== 'admin') throw new AccessDenied();
         try {

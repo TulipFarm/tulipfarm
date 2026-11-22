@@ -3,11 +3,10 @@ import { z } from 'zod';
 import { createConversations } from '@tulipfarm/conversations';
 import {
   AccessDenied,
-  currentMember,
-  lockAuthorization,
-  resolveHuman,
   type AuthorizationTransaction,
+  currentMember,
   type HumanActor,
+  lockAndResolveHuman,
 } from '@tulipfarm/access';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import {
@@ -69,8 +68,7 @@ export function createWorkspaceMcpApi(options: Options) {
     operation: (tx: AuthorizationTransaction, actor: HumanActor) => Promise<T>,
   ) {
     return runtime.transaction(workspaceId, workspaceMcpCompatibility, async tx => {
-      await lockAuthorization(tx);
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId);
       await currentMember(tx, actor);
       return operation(tx, actor);
     });
@@ -289,8 +287,7 @@ export function createWorkspaceMcpApi(options: Options) {
     ...workspaceMcpSelections({ ...options, integration: readyIntegration }),
     async capabilities(workspaceId: string, userId: string) {
       return runtime.transaction(workspaceId, workspaceMcpCompatibility, async tx => {
-        await lockAuthorization(tx);
-        const actor = await resolveHuman(tx, userId);
+        const actor = await lockAndResolveHuman(tx, userId);
         await currentMember(tx, actor);
         return {
           enabled: true as const,

@@ -3,11 +3,12 @@ import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose';
 import { z } from 'zod';
 import {
   AccessDenied,
+  type AuthorizationTransaction,
   currentMember,
+  type HumanActor,
+  lockAndResolveHuman,
   lockAuthorization,
   resolveHuman,
-  type AuthorizationTransaction,
-  type HumanActor,
 } from '@tulipfarm/access';
 import { commonCompatibility, qualified, type createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import type { IntegrationKeyring } from './credentials.ts';
@@ -284,8 +285,7 @@ export function createChatGptPlan(options: {
     mode: 'read' | 'write' = 'read',
   ) {
     return options.runtime.transaction(uuid.parse(workspaceId), commonCompatibility, async tx => {
-      await lockAuthorization(tx, mode);
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId, mode);
       await currentMember(tx, actor);
       return operation(tx, actor);
     });

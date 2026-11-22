@@ -2,12 +2,13 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { Pool } from 'pg';
 import {
-  currentMember,
-  lockAuthorization,
-  resolveHuman,
   AccessDenied,
   type AuthorizationTransaction,
+  currentMember,
   type HumanActor,
+  lockAndResolveHuman,
+  lockAuthorization,
+  resolveHuman,
 } from '@tulipfarm/access';
 import { qualified, type createWorkspaceRuntime, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { teamLabel } from '@tulipfarm/workspace-storage/team-labels';
@@ -103,8 +104,7 @@ export function createSlackInstallations(options: {
   async function manager(workspaceId: string, userId: string) {
     const link = await installer(workspaceId);
     return runtime.transaction(workspaceId, managementCompatibility, async tx => {
-      await lockAuthorization(tx);
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId);
       await adoptInstaller(tx, actor, link);
       await requireManager(tx, actor, true);
       return actor;
@@ -122,8 +122,7 @@ export function createSlackInstallations(options: {
     const evidence = await installer(workspaceId);
     const required = await botScopes(workspaceId);
     const access = await runtime.transaction(workspaceId, managementCompatibility, async tx => {
-      await lockAuthorization(tx);
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId);
       const member = await currentMember(tx, actor);
       await adoptInstaller(tx, actor, evidence);
       const local = z
@@ -591,8 +590,7 @@ export function createSlackInstallations(options: {
   async function botReader(workspaceId: string, userId: string) {
     const link = await installer(workspaceId);
     const local = await runtime.transaction(workspaceId, managementCompatibility, async tx => {
-      await lockAuthorization(tx);
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId);
       await currentMember(tx, actor);
       const row = z
         .object({

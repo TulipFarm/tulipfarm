@@ -1,11 +1,10 @@
 import { z } from 'zod';
 import {
   AccessDenied,
-  lockAuthorization,
-  resolveHuman,
-  uuidSchema,
   type AuthorizationTransaction,
   type HumanActor,
+  lockAndResolveHuman,
+  uuidSchema,
 } from '@tulipfarm/access';
 import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
 import {
@@ -111,8 +110,7 @@ export function createChatExecution(
       uuidSchema.parse(workspaceId),
       { ...commonCompatibility, minimum: chatExecutionVersion },
       async tx => {
-        await lockAuthorization(tx);
-        const actor = await resolveHuman(tx, userId);
+        const actor = await lockAndResolveHuman(tx, userId);
         await chatAccess(tx, actor, conversationId, rule, true);
         await requireConversationMcpSources(tx, actor, conversationId);
         return operation(tx, actor);

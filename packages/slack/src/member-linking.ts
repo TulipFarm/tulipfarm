@@ -3,10 +3,10 @@ import { z } from 'zod';
 import {
   AccessDenied,
   currentMember,
-  humanActorSchema,
-  lockAuthorization,
-  resolveHuman,
   type HumanActor,
+  humanActorSchema,
+  lockAndResolveHuman,
+  lockAuthorization,
 } from '@tulipfarm/access';
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { slackId, type SlackConfiguration } from './contracts.ts';
@@ -147,8 +147,7 @@ export function createSlackMemberLinking(options: {
     const browser = randomBytes(32).toString('base64url');
     const nonce = randomBytes(32).toString('base64url');
     const challenge = await runtime.transaction(workspaceId, compatibility, async tx => {
-      await lockAuthorization(tx);
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId);
       const event = z
         .object({
           installation_id: z.uuid(),
@@ -366,8 +365,7 @@ export function createSlackMemberLinking(options: {
   }
   async function unlink(workspaceId: string, userId: string) {
     await runtime.transaction(workspaceId, compatibility, async tx => {
-      await lockAuthorization(tx);
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId);
       await tx.client.query(`SELECT id FROM ${qualified(tx.schema, 'tf_slack_installations')} FOR UPDATE`);
       const recommendations = await watchIntegrationRecommendations(tx, 'slack', () => slackRecommendations(tx));
       await tx.client.query(
@@ -389,8 +387,7 @@ export function createSlackMemberLinking(options: {
   }
   async function status(workspaceId: string, eventId: string, userId: string) {
     return runtime.transaction(workspaceId, compatibility, async tx => {
-      await lockAuthorization(tx);
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId);
       const row = z
         .object({
           state: z.enum(['consent-required', 'dispatch-held', 'cancelled']),

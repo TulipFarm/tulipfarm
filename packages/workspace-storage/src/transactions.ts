@@ -70,6 +70,88 @@ export async function inTransaction<T>(
   return result;
 }
 
+/**
+ * Sends every query `issue` starts without waiting for each reply, so they cost one network round trip, and settles
+ * them all. Postgres still runs them one after another, each in its own statement. `issue` must start its queries
+ * without awaiting them.
+ */
+export async function pipelined(client: SqlClient, issue: () => Promise<unknown>[]) {
+  const connection = client as { pipeline?: boolean | undefined };
+  const previous = connection.pipeline;
+  connection.pipeline = true;
+  let pending: Promise<unknown>[];
+  try {
+    pending = issue();
+  } catch (error) {
+    connection.pipeline = previous;
+    throw error;
+  }
+  // pg keeps handing out replies only while the flag is on, so it stays on until the last one arrives.
+  const settled = await Promise.allSettled(pending);
+  connection.pipeline = previous;
+  return settled;
+}
+
+/** The value of a settled query, or its error. */
+export function settledValue<T>(result: PromiseSettledResult<unknown> | undefined): T {
+  if (!result) throw new Error('Missing pipelined query result');
+  if (result.status === 'rejected') throw result.reason;
+  return result.value as T;
+}
+
+/**
+ * Same as `inTransaction` followed by `resetClient`, in fewer round trips: BEGIN, the settings and the queries `setup`
+ * starts go out together, then COMMIT and DISCARD ALL go out together. `operation` gets the settled `setup` results in
+ * order and checks them before it does any work.
+ */
+export async function inPipelinedTransaction<T>(
+  client: SqlClient,
+  setup: (client: SqlClient) => Promise<unknown>[],
+  operation: (client: SqlClient, setup: PromiseSettledResult<unknown>[]) => Promise<T>,
+  settings: z.input<typeof transactionSettingsSchema> & { transactionTimeoutMs?: number } = {},
+) {
+  const limits = transactionSettingsSchema.parse(settings);
+  const callbacks: (() => void)[] = [];
+  commitCallbacks.set(client, callbacks);
+  let result: T;
+  let reset: PromiseSettledResult<unknown> | undefined;
+  try {
+    const started = await observeChatDetail('storage-begin', () =>
+      pipelined(client, () => [
+        ...(settings.transactionTimeoutMs === undefined
+          ? []
+          : [
+              client.query("SELECT set_config('transaction_timeout', $1, false)", [
+                String(settings.transactionTimeoutMs),
+              ]),
+            ]),
+        client.query('BEGIN ISOLATION LEVEL READ COMMITTED'),
+        client.query(
+          "SELECT set_config('search_path', 'pg_catalog', true), set_config('statement_timeout', $1, true), set_config('lock_timeout', $2, true), set_config('idle_in_transaction_session_timeout', $3, true)",
+          [String(limits.statementTimeoutMs), String(limits.lockTimeoutMs), String(limits.idleTransactionTimeoutMs)],
+        ),
+        ...setup(client),
+      ]),
+    );
+    const prepared = started.splice(settings.transactionTimeoutMs === undefined ? 2 : 3);
+    for (const step of started) settledValue(step);
+    result = await operation(client, prepared);
+    const [commit, discard] = await observeChatDetail('storage-commit', () =>
+      pipelined(client, () => [client.query('COMMIT'), client.query('DISCARD ALL')]),
+    );
+    settledValue(commit);
+    reset = discard;
+  } catch (error) {
+    await observeChatDetail('storage-rollback', () => client.query('ROLLBACK')).catch(() => undefined);
+    throw error;
+  } finally {
+    if (commitCallbacks.get(client) === callbacks) commitCallbacks.delete(client);
+  }
+  for (const callback of callbacks) runCallback(callback);
+  settledValue(reset);
+  return result;
+}
+
 export async function resetClient(client: PoolClient) {
   await observeChatDetail('storage-reset', () => client.query('DISCARD ALL'));
 }

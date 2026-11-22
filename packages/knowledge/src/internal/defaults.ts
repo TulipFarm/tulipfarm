@@ -2,13 +2,13 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   AccessDenied,
+  type AuthorizationTransaction,
   currentMember,
   denyMcpEgress,
-  lockAuthorization,
-  resolveHuman,
-  uuidSchema,
-  type AuthorizationTransaction,
   type HumanActor,
+  lockAndResolveHuman,
+  lockAuthorization,
+  uuidSchema,
 } from '@tulipfarm/access';
 import type { Clock, FeatureFlags } from '@tulipfarm/memory-core/ports/runtime';
 import { knowledgeFeatureFlags, systemClock } from '../host-ports.ts';
@@ -843,8 +843,7 @@ export function createDefaultKnowledge({
     mode: 'read' | 'write' = 'write',
   ) {
     return runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async tx => {
-      await lockAuthorization(tx, mode);
-      const actor = await resolveHuman(tx, userId);
+      const actor = await lockAndResolveHuman(tx, userId, mode);
       return operation(tx, actor);
     });
   }

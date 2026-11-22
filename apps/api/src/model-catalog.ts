@@ -1,7 +1,7 @@
 import { authenticateRoutes } from './authenticated-routes.ts';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { AccessDenied, currentMember, lockAuthorization, resolveHuman, uuidSchema } from '@tulipfarm/access';
+import { AccessDenied, currentMember, lockAndResolveHuman, uuidSchema } from '@tulipfarm/access';
 import {
   isPlanProvider,
   loadModelCatalog,
@@ -301,8 +301,7 @@ export function registerModelCatalog(app: FastifyInstance, dependencies: ModelCa
             : [],
         );
         return dependencies.runtime.transaction(workspaceId, dependencies.compatibility, async transaction => {
-          await lockAuthorization(transaction, 'read');
-          const actor = await resolveHuman(transaction, userId);
+          const actor = await lockAndResolveHuman(transaction, userId);
           await currentMember(transaction, actor);
           const snapshot = dependencies.modelCatalogSnapshot
             ? await dependencies.modelCatalogSnapshot(workspaceId)

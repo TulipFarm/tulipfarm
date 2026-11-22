@@ -14,7 +14,8 @@ const workspaceParams = z.object({ workspaceId: z.uuid() });
 export function protectWorkspaceRequests(
   app: FastifyInstance,
   auth: Parameters<typeof authenticateRoutes>[1],
-  runtime: Pick<ReturnType<typeof createWorkspaceRuntime>, 'hasCurrentMember' | 'transaction'>,
+  runtime: Pick<ReturnType<typeof createWorkspaceRuntime>, 'hasCurrentMember' | 'transaction'> &
+    Partial<Pick<ReturnType<typeof createWorkspaceRuntime>, 'prefetchCredential'>>,
 ) {
   const protectedRequest = (request: FastifyRequest) =>
     request.routeOptions.url?.includes('/workspaces/:workspaceId') &&
@@ -40,10 +41,12 @@ export function protectWorkspaceRequests(
   app.addHook('onRequest', async (request, reply) => {
     if (!protectedRequest(request)) return;
     reply.header('Cache-Control', 'no-store');
+    // Signed-in requests read the workspace credential alongside the session instead of after it.
+    const params = workspaceParams.safeParse(request.params);
+    if (params.success && request.headers.cookie) runtime.prefetchCredential?.(params.data.workspaceId.toLowerCase());
     const session = await requestSession(request, auth);
     if (!session) return reply.code(401).send({ error: 'sign-in-required' });
     if (rejectChangedSession(request, reply, session)) return reply;
-    const params = workspaceParams.safeParse(request.params);
     if (!params.success) return reply.code(404).send({ error: 'not-found' });
     try {
       const workspaceId = params.data.workspaceId.toLowerCase();

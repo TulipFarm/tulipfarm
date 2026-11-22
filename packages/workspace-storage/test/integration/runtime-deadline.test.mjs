@@ -27,19 +27,17 @@ test(
       return true;
     });
     assert.equal(await withChatMeasurements(read), 42);
+    // Settings and identity share the begin round trip, and the connection reset shares the commit round trip.
     for (const phase of [
       'admission',
       'credentials',
       'pool',
       'connect',
-      'settings',
       'begin',
-      'identity',
       'fence',
       'version',
       'operation',
       'commit',
-      'reset',
     ]) {
       assert.ok(phases.includes(`chat.detail.storage-${phase}`), `missing ${phase}`);
     }

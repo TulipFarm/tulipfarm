@@ -3,12 +3,11 @@ import { recordRecommendationChange } from '@tulipfarm/workspace-storage/recomme
 import { z } from 'zod';
 import {
   AccessDenied,
-  denyMcpEgress,
-  lockAuthorization,
-  resolveHuman,
-  uuidSchema,
   type AuthorizationTransaction,
+  denyMcpEgress,
   type HumanActor,
+  lockAndResolveHuman,
+  uuidSchema,
 } from '@tulipfarm/access';
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { knowledgeGapsSchema, type KnowledgeGaps } from '@tulipfarm/memory-core/contracts';
@@ -131,8 +130,7 @@ export function createProjects(
     operation: (tx: ProjectTransaction, actor: HumanActor) => Promise<T>,
   ) {
     return runtime.transaction(uuidSchema.parse(workspaceId), projectCompatibility, async tx => {
-      await lockAuthorization(tx, write ? 'write' : 'read');
-      return operation(tx, await resolveHuman(tx, userId));
+      return operation(tx, await lockAndResolveHuman(tx, userId, write ? 'write' : 'read'));
     });
   }
   async function editable(tx: AuthorizationTransaction, actor: HumanActor, projectId: string) {
