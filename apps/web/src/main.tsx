@@ -21,6 +21,7 @@ import './index.css';
 import { RouterProvider } from '@tanstack/react-router';
 import { router, workspaceHomeRoute } from './router';
 import { takeEarlyComposer } from './lib/early-composer';
+import { takeEarlySignIn } from './lib/early-sign-in';
 import { applyTheme, readTheme } from './lib/theme';
 import { reportBuild } from './build-info';
 import { trackAssetLoadErrors } from './lib/asset-recovery';
@@ -37,6 +38,14 @@ router.subscribe('onResolved', () => {
     !matches.some(match => match.routeId === workspaceHomeRoute.id && match.status === 'success')
   )
     takeEarlyComposer();
+});
+// The login form takes over the early login page; anywhere else, such as a signed-in redirect, drops it.
+router.subscribe('onResolved', ({ toLocation }) => {
+  if (
+    toLocation.pathname.replace(/\/+$/, '') !== '/login' ||
+    router.state.matches.some(match => match.status === 'error')
+  )
+    takeEarlySignIn();
 });
 trackAssetLoadErrors();
 applyTheme(readTheme());
