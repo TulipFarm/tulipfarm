@@ -112,73 +112,31 @@ function AutomaticRecap({
   });
   const state = read.state;
   const detail = state.kind === 'ready' && !state.error ? state.data : null;
-  if (detail?.state === 'compacted' && detail.handoff?.status === 'completed')
-    return <Separator variant="fade">Auto compacted</Separator>;
-  return (
-    <section aria-label="Automatic chat recap" className="space-y-3 rounded-xl border border-border bg-card px-4 py-3">
-      <p className="flex items-center gap-2 text-sm font-medium">
-        <MinimizeIcon size="md" aria-hidden="true" />
-        Automatic chat recap
-      </p>
-      <p className="text-sm text-muted-foreground">
-        Saved after this chat became inactive. Your original messages stay here.
-      </p>
-      {state.kind === 'loading' && (
-        <p role="status" className="text-sm text-muted-foreground">
-          Loading recap...
+  const loadFailed = state.kind === 'error' || (state.kind === 'ready' && !!state.error);
+  const recapFailed = detail?.handoff?.status === 'failed' || detail?.state === 'failed';
+  if (loadFailed || recapFailed)
+    return (
+      <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+        <p role="status">
+          {loadFailed
+            ? 'Could not load the automatic recap. Your messages are unchanged.'
+            : 'The automatic recap could not be completed. Your messages are unchanged.'}
         </p>
-      )}
-      {state.kind === 'unavailable' && (
-        <p className="text-sm text-muted-foreground">This recap is no longer available with your current access.</p>
-      )}
-      {(state.kind === 'error' || (state.kind === 'ready' && state.error)) && (
-        <div className="space-y-2">
-          <Alert variant="destructive">
-            <AlertDescription>Could not load this recap. Your original messages are unchanged.</AlertDescription>
-          </Alert>
+        {loadFailed && (
           <Button
-            variant="outline"
+            variant="link"
             size="sm"
             disabled={state.kind === 'ready' && state.refreshing}
             onClick={() => void read.refresh()}
           >
             Retry loading recap
           </Button>
-        </div>
-      )}
-      {detail && (
-        <>
-          {detail.coveredThrough !== null && (
-            <p className="text-xs text-muted-foreground">Covers chat turns through {detail.coveredThrough}.</p>
-          )}
-          {detail.handoff?.status === 'pending' && (
-            <p role="status" className="text-sm text-muted-foreground">
-              {read.delayed
-                ? 'The recap is still being prepared. It continues when you leave this page.'
-                : 'Preparing recap...'}
-            </p>
-          )}
-          {(detail.handoff?.status === 'failed' || detail.state === 'failed') && (
-            <Alert variant="destructive">
-              <AlertDescription>
-                The recap could not be completed. Check the chat Knowledge status to resume it.
-              </AlertDescription>
-            </Alert>
-          )}
-          {!detail.handoff && detail.state !== 'failed' && (
-            <p className="text-sm text-muted-foreground">
-              No readable recap was saved for this attempt. Your original messages are unchanged.
-            </p>
-          )}
-        </>
-      )}
-      {read.delayed && (
-        <Button variant="outline" size="sm" onClick={() => void read.refresh()}>
-          Check recap status
-        </Button>
-      )}
-    </section>
-  );
+        )}
+      </div>
+    );
+  // Loading and in-progress recaps stay silent; the chat's closing status reports anything stuck.
+  if (state.kind === 'loading' || detail?.handoff?.status === 'pending') return null;
+  return <Separator variant="fade">Auto compacted</Separator>;
 }
 
 function CompactionDialog({

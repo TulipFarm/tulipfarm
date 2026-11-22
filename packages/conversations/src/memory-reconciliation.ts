@@ -25,7 +25,7 @@ const learningEdits = 5;
 
 export const learningSystemPrompt = [
   "Update the current user's personal memory from what they said in this chat, so Bud knows them better next time.",
-  'The edits apply at once, without review. Save only durable facts the user stated about themselves, how they want Bud to respond, their work, recurring subjects, ongoing responsibilities and the people they work with.',
+  'The edits apply at once, without review. Save only durable facts the user stated about themselves, including their personal interests, likes and hobbies, how they want Bud to respond, their work, recurring subjects, ongoing responsibilities and the people they work with.',
   'Do not save one-off requests, task details, completed work, chat summaries, quoted or pasted third-party text, or anything only the assistant said.',
   memoryEditFormat,
   'Every edit must also have "messageId" (UUID of the requester message) and "quote" (exact wording from that message). Never cite assistant or tool output.',
