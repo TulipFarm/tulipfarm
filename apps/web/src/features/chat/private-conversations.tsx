@@ -1317,12 +1317,6 @@ function ConversationDetail({
                 This chat is archived. Messages remain saved and reply work continues.
               </p>
             )}
-            {!draft &&
-              data &&
-              (data.chat.isClosed ||
-                data.messages.some(message =>
-                  message.parts.some(part => part.kind === 'compaction' && part.trigger === 'inactivity'),
-                )) && <ChatMaintenance api={api} chatId={chatId} isClosed={data.chat.isClosed} disabled={locked} />}
             {editing && (
               <form
                 className="space-y-2 rounded-lg border p-4"
@@ -1704,6 +1698,9 @@ function ConversationDetail({
                         )}
                       </ol>
                     </PackageChatProvider>
+                  )}
+                  {!draft && !empty && history.chat.isClosed && (
+                    <ChatMaintenance api={api} chatId={chatId} disabled={locked} />
                   )}
                   {!draft && (
                     <ChatPackages

@@ -1,48 +1,48 @@
-import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
+import { Separator } from '@tulipfarm/sprout/separator';
 import { useFeatureRead } from '@/lib/query';
 import { CommandFeedback } from './conversation-feedback';
 import { useConversationCommand } from './conversation-state';
 import { conversationKeys } from './queries';
 import type { ConversationApi, MaintenanceView } from './conversation-api';
 
+type Maintenance = NonNullable<MaintenanceView['maintenance']>;
+
 const embeddingPending = (status: string | null) =>
   status !== null && ['pending', 'queued', 'running'].includes(status);
 const embeddingBlocked = (status: string | null) =>
   status !== null && ['credits-blocked', 'capacity-blocked', 'failed', 'unknown'].includes(status);
 
-export function maintenanceCopy(maintenance: MaintenanceView['maintenance'], isClosed: boolean) {
-  if (!isClosed)
-    return 'This chat is active. Its earlier recap is kept here, but hidden from Knowledge until the next update.';
-  if (!maintenance)
-    return 'You can keep replying here. Since this chat has been quiet, TulipFarm will save a short recap of it to Knowledge automatically, so agents can reuse what was decided.';
+/** The quiet line for a recap that needs attention, or null when the recap is routine. */
+export function maintenanceProblem(maintenance: Maintenance) {
+  if (maintenance.errorCode) return maintenanceReason(maintenance.errorCode);
   switch (maintenance.state) {
-    case 'queued':
-      return 'The recap is queued. It will run in the background using workspace credits.';
-    case 'running':
-      return 'Preparing a recap. Your original messages are unchanged.';
-    case 'publishing':
-      return 'The recap is saved. Adding it to Knowledge...';
-    case 'ready':
-      return 'The recap is ready in Knowledge, with the same chat and source access checks.';
     case 'blocked':
-      return 'The Knowledge update is blocked. Your original messages are unchanged.';
+      return 'Saving this chat to Knowledge is blocked. Your messages are unchanged.';
     case 'failed':
-      return 'The Knowledge update could not finish. It will retry in the background.';
+      return 'Could not save this chat to Knowledge yet. It will retry in the background.';
     case 'stale':
-      return 'This recap no longer covers the current chat. A fresh update is needed before it can be used in Knowledge.';
+      return 'The Knowledge recap no longer covers this chat. It needs a fresh update.';
+    case 'ready':
+      return embeddingBlocked(maintenance.embeddingStatus)
+        ? 'Saved to Knowledge. Semantic search is paused; keyword search works.'
+        : null;
+    default:
+      return null;
   }
 }
 
+/**
+ * Sits after the last message of a closed chat. It stays silent while the recap is pending, shows a
+ * divider once the recap is saved to Knowledge, and a muted line with recovery actions if it is stuck.
+ */
 export function ChatMaintenance({
   api,
   chatId,
-  isClosed,
   disabled,
 }: {
   api: ConversationApi;
   chatId: string;
-  isClosed: boolean;
   disabled: boolean;
 }) {
   const read = useFeatureRead({
@@ -61,61 +61,41 @@ export function ChatMaintenance({
   const failed = state.kind === 'error' || (state.kind === 'ready' && !!state.error);
   const resumeEmbedding = maintenance?.state === 'ready' && embeddingBlocked(maintenance.embeddingStatus);
   const resume =
-    maintenance &&
+    !!maintenance &&
     (['blocked', 'failed'].includes(maintenance.state) || resumeEmbedding) &&
-    maintenance.errorCode !== 'generation-unconfirmed' &&
-    isClosed;
+    maintenance.errorCode !== 'generation-unconfirmed';
+  const problem = failed
+    ? 'Could not check whether this chat was saved to Knowledge. Your messages are unchanged.'
+    : maintenance
+      ? maintenanceProblem(maintenance)
+      : null;
+  const feedback = (
+    <CommandFeedback
+      write={write}
+      refresh={() => void read.refresh()}
+      refreshed={state.kind === 'ready' && !state.error && !state.refreshing}
+    />
+  );
+  if (!problem) {
+    return (
+      <>
+        {maintenance?.state === 'ready' && <Separator variant="fade">Saved to Knowledge</Separator>}
+        {feedback}
+      </>
+    );
+  }
   return (
-    <section aria-label="Chat Knowledge status" className="space-y-2 text-sm">
-      {state.kind === 'loading' && (
-        <p role="status" className="text-muted-foreground">
-          Loading chat Knowledge status...
-        </p>
-      )}
-      {state.kind === 'unavailable' && (
-        <p className="text-muted-foreground">Chat Knowledge status is unavailable with your current access.</p>
-      )}
-      {failed && (
-        <Alert variant="destructive">
-          <AlertDescription>
-            Could not check the Knowledge update. This does not change your saved messages.
-          </AlertDescription>
-        </Alert>
-      )}
-      {state.kind === 'ready' && !failed && (
-        <>
-          <p role="status" className="text-muted-foreground">
-            {maintenanceCopy(maintenance, isClosed)}
-          </p>
-          {isClosed && maintenance?.errorCode && (
-            <Alert variant="destructive">
-              <AlertDescription>{maintenanceReason(maintenance.errorCode)}</AlertDescription>
-            </Alert>
+    <section aria-label="Chat Knowledge status" className="space-y-1 text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-2">
+        <p role="status">
+          {problem}
+          {maintenance?.retryAt && ['blocked', 'failed'].includes(maintenance.state) && (
+            <> Next try {new Date(maintenance.retryAt).toLocaleString()}.</>
           )}
-          {isClosed &&
-            maintenance?.state === 'ready' &&
-            maintenance.embeddingStatus &&
-            !['ready', 'completed'].includes(maintenance.embeddingStatus) && (
-              <p className="text-muted-foreground">
-                Keyword search is ready. Semantic search: {maintenance.embeddingStatus.replaceAll('-', ' ')}.
-              </p>
-            )}
-          {isClosed && maintenance?.retryAt && ['blocked', 'failed'].includes(maintenance.state) && (
-            <p className="text-xs text-muted-foreground">
-              Next background check: {new Date(maintenance.retryAt).toLocaleString()}.
-            </p>
-          )}
-        </>
-      )}
-      {read.delayed && (
-        <p className="text-muted-foreground">
-          Automatic status checks are paused. The job continues in the background.
         </p>
-      )}
-      <div className="flex flex-wrap gap-2">
         {(failed || read.delayed) && (
           <Button
-            variant="outline"
+            variant="link"
             size="sm"
             disabled={state.kind === 'ready' && state.refreshing}
             onClick={() => void read.refresh()}
@@ -125,7 +105,7 @@ export function ChatMaintenance({
         )}
         {resume && (
           <Button
-            variant="outline"
+            variant="link"
             size="sm"
             disabled={disabled || write.locked || failed}
             aria-busy={write.state.kind === 'sending'}
@@ -139,11 +119,7 @@ export function ChatMaintenance({
           </Button>
         )}
       </div>
-      <CommandFeedback
-        write={write}
-        refresh={() => void read.refresh()}
-        refreshed={state.kind === 'ready' && !state.error && !state.refreshing}
-      />
+      {feedback}
     </section>
   );
 }

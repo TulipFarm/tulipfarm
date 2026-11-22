@@ -48,6 +48,8 @@ for (const { label, format, route } of routes)
         for (const name of ['memory_read', 'memory_edit', 'memory_forget']) assert.ok(offered.includes(name), name);
         const prompt = platformPrompt(body);
         assert.match(prompt, /keep their personal memory up to date without being asked/);
+        assert.match(prompt, /save it immediately, without asking or offering first/);
+        assert.match(prompt, /personal interests, likes and hobbies/);
         assert.match(prompt, /Never use api\.request.*memory/);
         assert.doesNotMatch(prompt, /Do not copy it into transcripts, saved definitions, shared outputs, or memory\./);
         assert.ok(step < 3, 'an applied memory change must not trigger reply corrections');

@@ -152,7 +152,10 @@ try {
   const lane = async title => columns[await columnOf(title)];
   const cell = column => page.locator('[data-task-board] .sprout-board-cell').nth(columns.indexOf(column));
   // Drops a card on a column and returns whether the column took it while dragging, then its drop hint.
+  // An earlier drag can leave the board scrolled sideways, so bring both ends into view before grabbing the card.
   const drag = async (title, column) => {
+    await cell(column).scrollIntoViewIfNeeded();
+    await card(title).scrollIntoViewIfNeeded();
     const from = await card(title).boundingBox();
     const to = await cell(column).boundingBox();
     await page.mouse.move(from.x + 20, from.y + 10);
@@ -187,8 +190,16 @@ try {
   assert.equal(await lane('Write the pricing FAQ'), 'To do', 'A task without an agent has nothing to run');
   assert.equal(moves.length, 3, 'Refused drops change nothing');
 
-  await card('Order new labels').click();
-  await page.getByRole('dialog', { name: 'Order new labels' }).waitFor();
+  // The board ignores the first click straight after a drag ends, so click until the details open.
+  const details = page.getByRole('dialog', { name: 'Order new labels' });
+  await until(async () => {
+    if (await details.isVisible()) return true;
+    await card('Order new labels').click();
+    return details.waitFor({ timeout: 2000 }).then(
+      () => true,
+      () => false,
+    );
+  }, 'Opening a card shows its details');
   assert.deepEqual(errors, [], 'No browser runtime errors');
   console.log('Tasks board moves cards by meaning and refuses the rest.');
 } catch (error) {

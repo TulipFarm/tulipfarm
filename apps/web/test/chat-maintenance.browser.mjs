@@ -11,7 +11,7 @@ import { chatCatalog } from './chat-catalog.fixture.mjs';
 import { membership, credits } from './chat-query.fixture.mjs';
 
 test(
-  'compaction dividers preserve history and Knowledge recovery without loading completed recaps',
+  'compaction dividers preserve history, saved recaps stay quiet, and Knowledge recovery still works',
   { timeout: 120000 },
   async () => {
     const { workspace, session } = createWorkspaceFixture({ slug: 'chat-recap-qa', name: 'Chat recap QA' });
@@ -124,7 +124,8 @@ test(
     let captured = false;
     let failRead = true,
       failWrite = true,
-      detailReads = 0;
+      detailReads = 0,
+      holdRead = null;
     try {
       page.on('pageerror', error => errors.push(error.message));
       await page.route('**/v1/**', async route => {
@@ -160,6 +161,7 @@ test(
             }
             maintenance = { ...maintenance, state: 'queued', errorCode: null };
           } else if (failRead) return route.fulfill({ status: 503, json: { error: 'unavailable' } });
+          else if (holdRead) await holdRead;
           json = { maintenance };
         } else return route.fulfill({ status: 404, json: { error: 'not-found' } });
         return route.fulfill({ json });
@@ -248,11 +250,15 @@ test(
         await page.mouse.move(0, 0);
         await page.emulateMedia({ reducedMotion: 'reduce' });
       }
+      const saved = page.getByRole('separator', { name: 'Saved to Knowledge', exact: true });
+      const silent = async reason => {
+        await history.getByText('Plan the support handoff.', { exact: true }).waitFor();
+        assert.equal(await status.count(), 0, reason);
+        assert.equal(await saved.count(), 0, reason);
+      };
       await status.getByRole('button', { name: 'Check Knowledge status' }).waitFor();
-      assert.equal(
-        await status.getByText('The recap is ready in Knowledge, with the same chat and source access checks.').count(),
-        0,
-      );
+      assert.equal(await status.getByRole('status').count(), 1, 'a status-check failure is one quiet line');
+      assert.equal(await page.getByRole('alert').count(), 0);
       failRead = false;
       await status.getByRole('button', { name: 'Check Knowledge status' }).click();
       await status
@@ -261,15 +267,25 @@ test(
       await status.getByRole('button', { name: 'Resume Knowledge update' }).click();
       await status.getByRole('button', { name: 'Try again', exact: true }).waitFor();
       await status.getByRole('button', { name: 'Try again', exact: true }).click();
-      await status.getByText('The recap is queued. It will run in the background using workspace credits.').waitFor();
+      await status.waitFor({ state: 'detached' });
       assert.equal(commands.length, 2);
       assert.equal(commands[0].commandId, commands[1].commandId, 'an uncertain resume keeps its command identity');
       assert.equal(sends.length, 0, 'resuming maintenance never creates a human chat turn');
+      await silent('a queued recap shows nothing');
       maintenance = { ...maintenance, state: 'publishing' };
-      await status.getByText('The recap is saved. Adding it to Knowledge...').waitFor();
+      await page.waitForTimeout(500);
+      await silent('a publishing recap shows nothing');
       maintenance = { ...maintenance, state: 'ready', embeddingStatus: 'disabled' };
-      await status.getByText('The recap is ready in Knowledge, with the same chat and source access checks.').waitFor();
-      await status.getByText('Keyword search is ready. Semantic search: disabled.').waitFor();
+      await saved.waitFor();
+      assert.equal(
+        await saved.evaluate(divider => {
+          const list = document.querySelector('[aria-label="Messages"]');
+          return !!(list.compareDocumentPosition(divider) & Node.DOCUMENT_POSITION_FOLLOWING);
+        }),
+        true,
+        'the saved divider sits after the last message',
+      );
+      assert.equal(await page.getByText(/You can keep replying here/).count(), 0);
       if (process.env.CHAT_MAINTENANCE_SCREENSHOT) {
         if (process.env.CHAT_MAINTENANCE_CDP_PORT) {
           await promisify(execFile)('agent-browser', [
@@ -285,22 +301,44 @@ test(
       }
       maintenance = { ...maintenance, state: 'ready', embeddingStatus: 'credits-blocked' };
       await load();
+      await status.getByText('Saved to Knowledge. Semantic search is paused; keyword search works.').waitFor();
       await status.getByRole('button', { name: 'Resume semantic search' }).click();
-      await status.getByText('The recap is queued. It will run in the background using workspace credits.').waitFor();
+      await status.waitFor({ state: 'detached' });
       assert.equal(commands.length, 3, 'semantic recovery uses the maintenance command rather than a chat turn');
+      maintenance = { ...maintenance, state: 'failed', errorCode: null, embeddingStatus: null };
+      await load();
+      await status.getByText('Could not save this chat to Knowledge yet. It will retry in the background.').waitFor();
+      assert.equal(await page.getByRole('alert').count(), 0, 'a failed recap is a quiet line, not an alert');
+      await status.getByRole('button', { name: 'Resume Knowledge update' }).click();
+      await status.waitFor({ state: 'detached' });
+      assert.equal(commands.length, 4, 'resume works from the failed line');
       maintenance = { ...maintenance, state: 'blocked', errorCode: 'generation-unconfirmed' };
       await load();
       await status.getByText(/Automatic retries are paused to avoid charging twice/).waitFor();
       assert.equal(await status.getByRole('button', { name: 'Resume Knowledge update' }).count(), 0);
+      maintenance = { ...maintenance, state: 'running', errorCode: null };
+      await load();
+      await silent('a running recap shows nothing');
+      const job = maintenance;
+      maintenance = null;
+      await load();
+      await silent('a chat without a recap job shows nothing');
+      let release;
+      holdRead = new Promise(resolve => {
+        release = resolve;
+      });
+      maintenance = { ...job, state: 'ready', embeddingStatus: 'ready' };
+      await load();
+      await silent('nothing shows while the status loads');
+      release();
+      holdRead = null;
+      await saved.waitFor();
       chat.isClosed = false;
       maintenance = { ...maintenance, state: 'stale', errorCode: null };
       await load();
-      await status
-        .getByText(
-          'This chat is active. Its earlier recap is kept here, but hidden from Knowledge until the next update.',
-        )
-        .waitFor();
       await automatic.first().waitFor();
+      await silent('an active chat shows no Knowledge status');
+      assert.equal(await page.getByText(/This chat is active/).count(), 0);
       detail.handoff.text = null;
       await load();
       await automatic.first().waitFor();
@@ -313,10 +351,12 @@ test(
       messages[1].parts[0].handoffStatus = 'pending';
       detail.handoff.status = 'pending';
       await load();
-      await history.getByText('Preparing recap...', { exact: true }).waitFor();
+      await automatic.first().waitFor();
+      await page.waitForTimeout(500);
       assert.equal(await automatic.count(), 1, 'pending inactivity recap is not marked complete');
+      assert.equal(await history.getByText('Preparing recap...', { exact: true }).count(), 0);
       detail.handoff.status = 'completed';
-      await history.getByText('Preparing recap...', { exact: true }).waitFor({ state: 'hidden' });
+      await automatic.nth(1).waitFor();
       assert.equal(await automatic.count(), 2, 'pending recap becomes a divider when completion is confirmed');
       messages[1].parts[0].state = 'failed';
       messages[1].parts[0].handoffStatus = 'failed';
@@ -324,7 +364,8 @@ test(
       detail.handoff.status = 'failed';
       await load();
       await history
-        .getByText('The recap could not be completed. Check the chat Knowledge status to resume it.')
+        .getByRole('status')
+        .filter({ hasText: 'The automatic recap could not be completed. Your messages are unchanged.' })
         .waitFor();
       assert.equal(await automatic.count(), 1, 'failed attempt is not shown as a successful compaction');
       assert.deepEqual(errors, []);
