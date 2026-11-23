@@ -126,10 +126,11 @@ export function createSlackChannelAgents(options: {
   const provider = createChannelProvider(options);
   const transaction = <T>(
     workspaceId: string,
+    mode: 'read' | 'write',
     action: (tx: Parameters<Parameters<SlackRuntime['transaction']>[2]>[0]) => Promise<T>,
   ) =>
     runtime.transaction(workspaceId, commonCompatibility, async tx => {
-      await lockAuthorization(tx, 'write');
+      await lockAuthorization(tx, mode);
       return action(tx);
     });
   // Polling runs every few seconds for every workspace, so it only shares the authorization lock; admission and
@@ -372,7 +373,7 @@ export function createSlackChannelAgents(options: {
   }
   async function attach(workspaceId: string, userId: string, value: unknown) {
     const input = attachmentInputSchema.parse(value);
-    return transaction(workspaceId, async tx => {
+    return transaction(workspaceId, 'write', async tx => {
       const actor = await resolveHuman(tx, userId),
         installed = await installation(tx);
       if (input.agentId) await requireAgentPermission(tx, actor, input.agentId, 'invoke');
@@ -380,7 +381,12 @@ export function createSlackChannelAgents(options: {
         tx,
         workspaceId,
         actor,
-        { installationId: installed.id, generation: installed.generation, channel: input.channel, rootTs: '0.000000' },
+        {
+          installationId: installed.id,
+          generation: installed.generation,
+          channel: input.channel,
+          rootTs: '0.000000',
+        },
         false,
       );
       return {
@@ -427,7 +433,7 @@ export function createSlackChannelAgents(options: {
     };
   }
   async function inspect(workspaceId: string, userId: string, channel: string) {
-    return transaction(workspaceId, tx => inspectSetup(tx, workspaceId, userId, channel));
+    return transaction(workspaceId, 'write', tx => inspectSetup(tx, workspaceId, userId, channel));
   }
   // The rule an agent's saved definition asks for, used when a channel sets none.
   const agentRuleSql = (tx: AuthorizationTransaction, agent: string) =>
@@ -445,7 +451,7 @@ export function createSlackChannelAgents(options: {
   }
   /** Every channel's saved settings, plus the agents this person may attach. Needs use of the installation. */
   async function settings(workspaceId: string, userId: string) {
-    return transaction(workspaceId, async tx => {
+    return transaction(workspaceId, 'write', async tx => {
       const actor = await resolveHuman(tx, userId),
         installed = await installation(tx);
       const canManage = await canAccessSlackInstallation(tx, actor, installed.id, 'manage');
@@ -492,7 +498,7 @@ export function createSlackChannelAgents(options: {
   async function configure(workspaceId: string, userId: string, channel: string, value: unknown) {
     attachmentInputSchema.shape.channel.parse(channel);
     const input = channelSettingInputSchema.parse(value);
-    return transaction(workspaceId, async tx => {
+    return transaction(workspaceId, 'write', async tx => {
       const actor = await resolveHuman(tx, userId),
         installed = await installation(tx);
       if (!(await canAccessSlackInstallation(tx, actor, installed.id, 'manage'))) throw new AccessDenied();
@@ -976,7 +982,7 @@ export function createSlackChannelAgents(options: {
     return openBotDirectMessage(token, user, options.fetcher);
   }
   async function admit(workspaceId: string, eventId: string) {
-    return transaction(workspaceId, async tx => {
+    return transaction(workspaceId, 'write', async tx => {
       await tx.client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1,93576))`, [`${tx.schema}:${eventId}`]);
       if (
         (await tx.client.query(`SELECT 1 FROM ${table(tx, 'tf_slack_agent_turns')} WHERE event_id=$1`, [eventId]))
@@ -1214,7 +1220,7 @@ export function createSlackChannelAgents(options: {
         if (error instanceof AccessDenied && !(error instanceof SourceAuthorizationUnavailable)) {
           // A rejection is permanent, so it is never silent: it is logged with its reason, and a requester who
           // mentioned the bot gets a reply in the thread saying why.
-          const target = await transaction(workspaceId, tx => recordSlackRejection(tx, candidate.id));
+          const target = await transaction(workspaceId, 'write', tx => recordSlackRejection(tx, candidate.id));
           await announceSlackRejection({
             surface: 'channel',
             workspaceId,
@@ -1232,7 +1238,7 @@ export function createSlackChannelAgents(options: {
               : reauthorize
                 ? 300
                 : 30;
-          await transaction(workspaceId, tx =>
+          await transaction(workspaceId, 'write', tx =>
             tx.client.query(
               `INSERT INTO ${table(tx, 'tf_slack_agent_admission_waits')} (event_id,state,next_attempt_at) VALUES ($1,$2,clock_timestamp()+$3*interval '1 second') ON CONFLICT (event_id) DO UPDATE SET state=EXCLUDED.state,next_attempt_at=EXCLUDED.next_attempt_at,attempts=tf_slack_agent_admission_waits.attempts+1`,
               [candidate.id, reauthorize ? 'reauthorization-required' : 'retry', seconds],
@@ -1257,7 +1263,7 @@ export function createSlackChannelAgents(options: {
   async function process(work: { workspaceId: string; eventId: string }) {
     const { workspaceId, eventId } = work;
     if (!(await slackCredentialsReady(runtime, work))) return 'idle';
-    const ready = await transaction(workspaceId, async tx => {
+    const ready = await transaction(workspaceId, 'write', async tx => {
       const row = z
         .object({ model_started: z.boolean(), status: z.string() })
         .optional()
@@ -1287,7 +1293,7 @@ export function createSlackChannelAgents(options: {
     if (!ready) return 'idle';
     try {
       if (options.publicDelivery && ready.replyPending)
-        await transaction(workspaceId, async tx => {
+        await transaction(workspaceId, 'write', async tx => {
           await guard(tx, workspaceId, eventId);
           const row = z
             .object({ root: rootSchema, bot_credential: z.unknown(), request_snapshot: messageSchema })
@@ -1302,7 +1308,12 @@ export function createSlackChannelAgents(options: {
           if (!row.request_snapshot.channel.startsWith('D'))
             await setBotThreadStatus({
               token: options.cipher.decrypt(
-                { workspaceId, installationId: row.root.installation_id, generation: row.root.generation, kind: 'bot' },
+                {
+                  workspaceId,
+                  installationId: row.root.installation_id,
+                  generation: row.root.generation,
+                  kind: 'bot',
+                },
                 row.bot_credential,
               ),
               channel: row.root.channel,
@@ -1314,7 +1325,7 @@ export function createSlackChannelAgents(options: {
     } catch (error) {
       if (!(error instanceof AccessDenied)) throw error;
       blockedReply();
-      await transaction(workspaceId, tx =>
+      await transaction(workspaceId, 'write', tx =>
         tx.client.query(
           `UPDATE ${table(tx, 'tf_slack_agent_turns')} SET state='blocked' WHERE event_id=$1 AND state IN ('pending','retry')`,
           [eventId],
@@ -1322,7 +1333,7 @@ export function createSlackChannelAgents(options: {
       );
       return 'blocked';
     }
-    await transaction(workspaceId, tx =>
+    await transaction(workspaceId, 'write', tx =>
       tx.client.query(
         `UPDATE ${table(tx, 'tf_slack_agent_turns')} SET next_attempt_at=clock_timestamp() WHERE event_id=$1 AND state IN ('pending','retry')`,
         [eventId],
@@ -1330,6 +1341,7 @@ export function createSlackChannelAgents(options: {
     );
     const status = await transaction(
       workspaceId,
+      'write',
       async tx =>
         (await tx.client.query(`SELECT status FROM ${table(tx, 'tf_agent_chat_turns')} WHERE id=$1`, [eventId])).rows[0]
           ?.status,
@@ -1338,6 +1350,7 @@ export function createSlackChannelAgents(options: {
     const attempt = randomUUID();
     const claimed = await transaction(
       workspaceId,
+      'write',
       async tx =>
         (
           await tx.client.query(
@@ -1347,7 +1360,7 @@ export function createSlackChannelAgents(options: {
         ).rowCount,
     );
     if (!claimed) return 'idle';
-    return transaction(workspaceId, async tx => {
+    return transaction(workspaceId, 'write', async tx => {
       const row = z
         .object({
           root: rootSchema,
@@ -1415,7 +1428,10 @@ export function createSlackChannelAgents(options: {
       const channel = destination.kind === 'ChannelAllowed' ? destination.channel : row.branch.dm_channel;
       const customizeName = destination.kind === 'ChannelAllowed' && row.scopes.includes('chat:write.customize');
       if (destination.kind === 'ChannelAllowed' && !customizeName)
-        log('warn', 'activity', 'call_failed', { operation: 'slack.channel.reply.identity', outcome: 'scope-missing' });
+        log('warn', 'activity', 'call_failed', {
+          operation: 'slack.channel.reply.identity',
+          outcome: 'scope-missing',
+        });
       const outcome = await postBotMessage({
         token: options.cipher.decrypt(
           { workspaceId, installationId: row.root.installation_id, generation: row.root.generation, kind: 'bot' },

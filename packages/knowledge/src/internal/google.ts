@@ -150,10 +150,10 @@ export function createGoogleKnowledge({
   }
   const authority = { requireExternalSource, requireExternalProof } satisfies Partial<KnowledgeOptions>;
   const store = createKnowledgeStore({ runtime, ...authority });
-  async function transaction<T>(workspaceId: string, operation: (tx: Tx) => Promise<T>) {
+  async function transaction<T>(workspaceId: string, mode: 'read' | 'write', operation: (tx: Tx) => Promise<T>) {
     return runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async raw => {
       const tx = store.bind(raw);
-      await lockAuthorization(tx, 'write');
+      await lockAuthorization(tx, mode);
       return operation(tx);
     });
   }
@@ -161,7 +161,7 @@ export function createGoogleKnowledge({
     workspaceId: string,
     userId: string,
     operation: (tx: Tx, actor: HumanActor) => Promise<T>,
-    write = true,
+    write: boolean,
   ) {
     return store.transaction(workspaceId, userId, write, async (tx, actor) => {
       return operation(tx, actor);
@@ -261,36 +261,41 @@ export function createGoogleKnowledge({
     const inspected = await provider.inspectSelection(workspaceId, userId, input.selection);
     if (input.accountId !== undefined && inspected.binding.accountId !== input.accountId)
       throw new KnowledgeAccountChanged();
-    return memberTransaction(workspaceId, userId, async (tx, human) => {
-      if (human.membershipId !== actor.membershipId) throw new AccessDenied();
-      await assertDefaultSourceEnabled(tx, input.commandId);
-      const existing = await tx.client.query(`SELECT 1 FROM ${table(tx, 'sources')} WHERE id=$1`, [input.commandId]);
-      if (existing.rowCount) {
-        const prior = await manager(tx, human, input.commandId);
-        if (prior.fingerprint !== fingerprint || prior.state === 'removed') throw new KnowledgeError('conflict');
-        return dto(tx, prior);
-      }
-      const active = await tx.client.query(
-        `SELECT id FROM ${qualified(tx.schema, 'tf_memberships')} WHERE id=ANY($1::uuid[]) AND removed_at IS NULL`,
-        [memberIds],
-      );
-      if (active.rowCount !== memberIds.length) throw new AccessDenied();
-      const inserted = await tx.client.query(
-        `INSERT INTO ${table(tx, 'sources')} (id,provider,account_namespace,selection,owner_membership_id) VALUES ($1,'google',$2,$3::jsonb::text,$4) ON CONFLICT DO NOTHING`,
-        [input.commandId, inspected.binding.accountId, JSON.stringify(input.selection), human.membershipId],
-      );
-      if (!inserted.rowCount) throw new KnowledgeError('conflict');
-      await tx.client.query(
-        `INSERT INTO ${table(tx, 'google_sources')} (source_id,binding,selection,title,fingerprint,cursor) VALUES ($1,$2,$3,$4,$5,$6)`,
-        [input.commandId, inspected.binding, input.selection, inspected.title, fingerprint, initialCursor()],
-      );
-      await tx.client.query(
-        `INSERT INTO ${table(tx, 'google_members')} (source_id,membership_id) SELECT $1,unnest($2::uuid[])`,
-        [input.commandId, memberIds],
-      );
-      await store.source(tx, human, input.commandId, true);
-      return dto(tx, await source(tx, input.commandId));
-    });
+    return memberTransaction(
+      workspaceId,
+      userId,
+      async (tx, human) => {
+        if (human.membershipId !== actor.membershipId) throw new AccessDenied();
+        await assertDefaultSourceEnabled(tx, input.commandId);
+        const existing = await tx.client.query(`SELECT 1 FROM ${table(tx, 'sources')} WHERE id=$1`, [input.commandId]);
+        if (existing.rowCount) {
+          const prior = await manager(tx, human, input.commandId);
+          if (prior.fingerprint !== fingerprint || prior.state === 'removed') throw new KnowledgeError('conflict');
+          return dto(tx, prior);
+        }
+        const active = await tx.client.query(
+          `SELECT id FROM ${qualified(tx.schema, 'tf_memberships')} WHERE id=ANY($1::uuid[]) AND removed_at IS NULL`,
+          [memberIds],
+        );
+        if (active.rowCount !== memberIds.length) throw new AccessDenied();
+        const inserted = await tx.client.query(
+          `INSERT INTO ${table(tx, 'sources')} (id,provider,account_namespace,selection,owner_membership_id) VALUES ($1,'google',$2,$3::jsonb::text,$4) ON CONFLICT DO NOTHING`,
+          [input.commandId, inspected.binding.accountId, JSON.stringify(input.selection), human.membershipId],
+        );
+        if (!inserted.rowCount) throw new KnowledgeError('conflict');
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'google_sources')} (source_id,binding,selection,title,fingerprint,cursor) VALUES ($1,$2,$3,$4,$5,$6)`,
+          [input.commandId, inspected.binding, input.selection, inspected.title, fingerprint, initialCursor()],
+        );
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'google_members')} (source_id,membership_id) SELECT $1,unnest($2::uuid[])`,
+          [input.commandId, memberIds],
+        );
+        await store.source(tx, human, input.commandId, true);
+        return dto(tx, await source(tx, input.commandId));
+      },
+      true,
+    );
   }
   async function list(workspaceId: string, userId: string) {
     return memberRead(workspaceId, userId, async (tx, actor) => {
@@ -342,52 +347,57 @@ export function createGoogleKnowledge({
             provider.inspectSelection(workspaceId, userId, s.selection),
           )
         : null;
-    return memberTransaction(workspaceId, userId, async (tx, actor) => {
-      const s = await manager(tx, actor, sourceId);
-      const replay = z
-        .object({ fingerprint: z.string() })
-        .optional()
-        .parse(
-          (
-            await tx.client.query(`SELECT fingerprint FROM ${table(tx, 'google_commands')} WHERE command_id=$1`, [
-              input.commandId,
-            ])
-          ).rows[0],
-        );
-      if (replay) {
-        if (replay.fingerprint !== fingerprint) throw new KnowledgeError('conflict');
-        return dto(tx, s);
-      }
-      if (s.state === 'removed') throw new KnowledgeError('conflict');
-      if (inspected && inspected.binding.accountId !== s.binding.accountId) throw new AccessDenied();
-      const state = input.action === 'remove' ? 'removed' : input.action === 'pause' ? 'paused' : 'active';
-      await tx.client.query(
-        `UPDATE ${table(tx, 'sources')} SET state=$2,access_epoch=access_epoch+1,removed_at=CASE WHEN $2='removed' THEN clock_timestamp() ELSE NULL END,retain_until=CASE WHEN $2='removed' THEN clock_timestamp()+interval '30 days' ELSE NULL END WHERE id=$1`,
-        [sourceId, state],
-      );
-      if (state === 'removed')
+    return memberTransaction(
+      workspaceId,
+      userId,
+      async (tx, actor) => {
+        const s = await manager(tx, actor, sourceId);
+        const replay = z
+          .object({ fingerprint: z.string() })
+          .optional()
+          .parse(
+            (
+              await tx.client.query(`SELECT fingerprint FROM ${table(tx, 'google_commands')} WHERE command_id=$1`, [
+                input.commandId,
+              ])
+            ).rows[0],
+          );
+        if (replay) {
+          if (replay.fingerprint !== fingerprint) throw new KnowledgeError('conflict');
+          return dto(tx, s);
+        }
+        if (s.state === 'removed') throw new KnowledgeError('conflict');
+        if (inspected && inspected.binding.accountId !== s.binding.accountId) throw new AccessDenied();
+        const state = input.action === 'remove' ? 'removed' : input.action === 'pause' ? 'paused' : 'active';
         await tx.client.query(
-          `UPDATE ${table(tx, 'documents')} SET tombstoned_at=clock_timestamp(),retain_until=clock_timestamp()+interval '30 days',lexical_publication_id=NULL WHERE source_id=$1`,
+          `UPDATE ${table(tx, 'sources')} SET state=$2,access_epoch=access_epoch+1,removed_at=CASE WHEN $2='removed' THEN clock_timestamp() ELSE NULL END,retain_until=CASE WHEN $2='removed' THEN clock_timestamp()+interval '30 days' ELSE NULL END WHERE id=$1`,
+          [sourceId, state],
+        );
+        if (state === 'removed')
+          await tx.client.query(
+            `UPDATE ${table(tx, 'documents')} SET tombstoned_at=clock_timestamp(),retain_until=clock_timestamp()+interval '30 days',lexical_publication_id=NULL WHERE source_id=$1`,
+            [sourceId],
+          );
+        await tx.client.query(
+          `UPDATE ${table(tx, 'google_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=clock_timestamp(),sync_state='queued',failure=NULL WHERE source_id=$1`,
           [sourceId],
         );
-      await tx.client.query(
-        `UPDATE ${table(tx, 'google_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=clock_timestamp(),sync_state='queued',failure=NULL WHERE source_id=$1`,
-        [sourceId],
-      );
-      if (inspected) {
-        await tx.client.query(`UPDATE ${table(tx, 'google_sources')} SET binding=$2 WHERE source_id=$1`, [
+        if (inspected) {
+          await tx.client.query(`UPDATE ${table(tx, 'google_sources')} SET binding=$2 WHERE source_id=$1`, [
+            sourceId,
+            inspected.binding,
+          ]);
+          await store.source(tx, actor, sourceId, true);
+        }
+        await tx.client.query(`INSERT INTO ${table(tx, 'google_commands')} VALUES ($1,$2,$3)`, [
+          input.commandId,
           sourceId,
-          inspected.binding,
+          fingerprint,
         ]);
-        await store.source(tx, actor, sourceId, true);
-      }
-      await tx.client.query(`INSERT INTO ${table(tx, 'google_commands')} VALUES ($1,$2,$3)`, [
-        input.commandId,
-        sourceId,
-        fingerprint,
-      ]);
-      return dto(tx, await source(tx, sourceId));
-    });
+        return dto(tx, await source(tx, sourceId));
+      },
+      true,
+    );
   }
   async function invalidate(tx: Tx, documentId: string, membershipId?: string) {
     await tx.client.query(
@@ -410,61 +420,66 @@ export function createGoogleKnowledge({
     await invalidate(tx, documentId);
   }
   async function proof(workspaceId: string, actor: HumanActor, sourceId: string, documentId: string, nativeId: string) {
-    const captured = await memberTransaction(workspaceId, actor.userId, async (tx, human) => {
-      if (human.membershipId !== actor.membershipId) throw new AccessDenied();
-      const s = await source(tx, sourceId);
-      await store.source(tx, human, sourceId);
-      const row = z
-        .object({
-          integration_id: uuidSchema,
-          account_id: z.string(),
-          generation: z.number(),
-          scopes: z.array(z.string()),
-        })
-        .parse(
-          (
-            await tx.client.query(
-              `SELECT * FROM ${table(tx, 'google_readers')} WHERE source_id=$1 AND membership_id=$2`,
-              [sourceId, human.membershipId],
-            )
-          ).rows[0],
+    const captured = await memberTransaction(
+      workspaceId,
+      actor.userId,
+      async (tx, human) => {
+        if (human.membershipId !== actor.membershipId) throw new AccessDenied();
+        const s = await source(tx, sourceId);
+        await store.source(tx, human, sourceId);
+        const row = z
+          .object({
+            integration_id: uuidSchema,
+            account_id: z.string(),
+            generation: z.number(),
+            scopes: z.array(z.string()),
+          })
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT * FROM ${table(tx, 'google_readers')} WHERE source_id=$1 AND membership_id=$2`,
+                [sourceId, human.membershipId],
+              )
+            ).rows[0],
+          );
+        const allowed =
+          s.selection.kind === 'gmail'
+            ? [
+                'https://www.googleapis.com/auth/gmail.readonly',
+                'https://www.googleapis.com/auth/gmail.modify',
+                'https://mail.google.com/',
+              ]
+            : ['https://www.googleapis.com/auth/drive.readonly', 'https://www.googleapis.com/auth/drive'];
+        const binding = googleCorpusBindingSchema.parse({
+          integrationId: row.integration_id,
+          accountId: row.account_id,
+          generation: row.generation,
+          requiredScopes: [allowed.find(scope => row.scopes.includes(scope))],
+        });
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'google_proof_fences')} (document_id,membership_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+          [documentId, human.membershipId],
         );
-      const allowed =
-        s.selection.kind === 'gmail'
-          ? [
-              'https://www.googleapis.com/auth/gmail.readonly',
-              'https://www.googleapis.com/auth/gmail.modify',
-              'https://mail.google.com/',
-            ]
-          : ['https://www.googleapis.com/auth/drive.readonly', 'https://www.googleapis.com/auth/drive'];
-      const binding = googleCorpusBindingSchema.parse({
-        integrationId: row.integration_id,
-        accountId: row.account_id,
-        generation: row.generation,
-        requiredScopes: [allowed.find(scope => row.scopes.includes(scope))],
-      });
-      await tx.client.query(
-        `INSERT INTO ${table(tx, 'google_proof_fences')} (document_id,membership_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-        [documentId, human.membershipId],
-      );
-      const fence = z
-        .object({ generation: z.string() })
-        .parse(
-          (
-            await tx.client.query(
-              `SELECT generation FROM ${table(tx, 'google_proof_fences')} WHERE document_id=$1 AND membership_id=$2`,
-              [documentId, human.membershipId],
-            )
-          ).rows[0],
-        );
-      return { s, binding, fence: fence.generation };
-    });
+        const fence = z
+          .object({ generation: z.string() })
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT generation FROM ${table(tx, 'google_proof_fences')} WHERE document_id=$1 AND membership_id=$2`,
+                [documentId, human.membershipId],
+              )
+            ).rows[0],
+          );
+        return { s, binding, fence: fence.generation };
+      },
+      true,
+    );
     let observed: GoogleCorpusObservation;
     try {
       observed = await corpus.permissions(workspaceId, actor.userId, captured.binding, captured.s.selection, nativeId);
     } catch (error) {
       if (denial(error))
-        await transaction(workspaceId, async tx => {
+        await transaction(workspaceId, 'write', async tx => {
           const manager = actor.membershipId === captured.s.owner_membership_id;
           await invalidate(tx, documentId, manager ? undefined : actor.membershipId);
           if (manager && error instanceof GoogleCorpusError && ['not-found', 'outside-selection'].includes(error.code))
@@ -472,91 +487,101 @@ export function createGoogleKnowledge({
         });
       throw error;
     }
-    return memberTransaction(workspaceId, actor.userId, async (tx, human) => {
-      const s = await source(tx, sourceId);
-      await store.source(tx, human, sourceId);
-      if (s.generation !== captured.s.generation || s.access_epoch !== captured.s.access_epoch)
-        throw new KnowledgeError('superseded');
-      const current = await tx.client.query(
-        `SELECT 1 FROM ${table(tx, 'google_readers')} WHERE source_id=$1 AND membership_id=$2 AND integration_id=$3 AND account_id=$4 AND generation=$5 AND scopes @> $6::text[]`,
-        [
-          sourceId,
-          human.membershipId,
-          captured.binding.integrationId,
-          captured.binding.accountId,
-          captured.binding.generation,
-          captured.binding.requiredScopes,
-        ],
-      );
-      if (!current.rowCount) throw new AccessDenied();
-      const checked = new Date(observed.accessedAt);
-      const now = z
-        .object({ now: z.date() })
-        .parse((await tx.client.query('SELECT clock_timestamp() AS now')).rows[0]).now;
-      if (!Number.isFinite(checked.getTime()) || checked > now || checked.getTime() + 300000 <= now.getTime())
-        throw new KnowledgeError('permission-expired');
-      const advanced = await tx.client.query(
-        `UPDATE ${table(tx, 'google_proof_fences')} SET observed_at=$4 WHERE document_id=$1 AND membership_id=$2 AND generation=$3 AND (observed_at IS NULL OR observed_at<=$4)`,
-        [documentId, human.membershipId, captured.fence, checked],
-      );
-      if (!advanced.rowCount) throw new KnowledgeError('superseded');
-      const revision = z
-        .object({ source_revision: z.string() })
-        .optional()
-        .parse(
-          (
-            await tx.client.query(
-              `SELECT r.source_revision FROM ${table(tx, 'documents')} d JOIN ${table(tx, 'revisions')} r ON r.id=d.observed_revision_id WHERE d.id=$1`,
-              [documentId],
-            )
-          ).rows[0],
+    return memberTransaction(
+      workspaceId,
+      actor.userId,
+      async (tx, human) => {
+        const s = await source(tx, sourceId);
+        await store.source(tx, human, sourceId);
+        if (s.generation !== captured.s.generation || s.access_epoch !== captured.s.access_epoch)
+          throw new KnowledgeError('superseded');
+        const current = await tx.client.query(
+          `SELECT 1 FROM ${table(tx, 'google_readers')} WHERE source_id=$1 AND membership_id=$2 AND integration_id=$3 AND account_id=$4 AND generation=$5 AND scopes @> $6::text[]`,
+          [
+            sourceId,
+            human.membershipId,
+            captured.binding.integrationId,
+            captured.binding.accountId,
+            captured.binding.generation,
+            captured.binding.requiredScopes,
+          ],
         );
-      if (revision && revision.source_revision !== observed.sourceRevision) {
-        await clear(tx, documentId);
-        return false;
-      }
-      await tx.client.query(
-        `INSERT INTO ${table(tx, 'access_proofs')} (id,document_id,membership_id,access_epoch,principal,acl_version,membership_version,acl_checked_at,membership_checked_at,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8,$9) ON CONFLICT(document_id,membership_id) DO UPDATE SET id=EXCLUDED.id,access_epoch=EXCLUDED.access_epoch,principal=EXCLUDED.principal,acl_version=EXCLUDED.acl_version,membership_version=EXCLUDED.membership_version,acl_checked_at=EXCLUDED.acl_checked_at,membership_checked_at=EXCLUDED.membership_checked_at,expires_at=EXCLUDED.expires_at`,
-        [
-          randomUUID(),
-          documentId,
-          human.membershipId,
-          s.access_epoch,
-          captured.binding.accountId,
-          observed.sourceRevision,
-          String(captured.binding.generation),
-          checked,
-          new Date(checked.getTime() + 300000),
-        ],
-      );
-      await tx.client.query(
-        `INSERT INTO ${table(tx, 'google_proof_bindings')} VALUES ($1,$2,$3) ON CONFLICT(document_id,membership_id) DO UPDATE SET binding=EXCLUDED.binding`,
-        [documentId, human.membershipId, captured.binding],
-      );
-      return true;
-    });
+        if (!current.rowCount) throw new AccessDenied();
+        const checked = new Date(observed.accessedAt);
+        const now = z
+          .object({ now: z.date() })
+          .parse((await tx.client.query('SELECT clock_timestamp() AS now')).rows[0]).now;
+        if (!Number.isFinite(checked.getTime()) || checked > now || checked.getTime() + 300000 <= now.getTime())
+          throw new KnowledgeError('permission-expired');
+        const advanced = await tx.client.query(
+          `UPDATE ${table(tx, 'google_proof_fences')} SET observed_at=$4 WHERE document_id=$1 AND membership_id=$2 AND generation=$3 AND (observed_at IS NULL OR observed_at<=$4)`,
+          [documentId, human.membershipId, captured.fence, checked],
+        );
+        if (!advanced.rowCount) throw new KnowledgeError('superseded');
+        const revision = z
+          .object({ source_revision: z.string() })
+          .optional()
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT r.source_revision FROM ${table(tx, 'documents')} d JOIN ${table(tx, 'revisions')} r ON r.id=d.observed_revision_id WHERE d.id=$1`,
+                [documentId],
+              )
+            ).rows[0],
+          );
+        if (revision && revision.source_revision !== observed.sourceRevision) {
+          await clear(tx, documentId);
+          return false;
+        }
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'access_proofs')} (id,document_id,membership_id,access_epoch,principal,acl_version,membership_version,acl_checked_at,membership_checked_at,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8,$9) ON CONFLICT(document_id,membership_id) DO UPDATE SET id=EXCLUDED.id,access_epoch=EXCLUDED.access_epoch,principal=EXCLUDED.principal,acl_version=EXCLUDED.acl_version,membership_version=EXCLUDED.membership_version,acl_checked_at=EXCLUDED.acl_checked_at,membership_checked_at=EXCLUDED.membership_checked_at,expires_at=EXCLUDED.expires_at`,
+          [
+            randomUUID(),
+            documentId,
+            human.membershipId,
+            s.access_epoch,
+            captured.binding.accountId,
+            observed.sourceRevision,
+            String(captured.binding.generation),
+            checked,
+            new Date(checked.getTime() + 300000),
+          ],
+        );
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'google_proof_bindings')} VALUES ($1,$2,$3) ON CONFLICT(document_id,membership_id) DO UPDATE SET binding=EXCLUDED.binding`,
+          [documentId, human.membershipId, captured.binding],
+        );
+        return true;
+      },
+      true,
+    );
   }
   async function refresh(workspaceId: string, userId: string, sourceId: string) {
     denyMcpEgress();
     sourceId = uuidSchema.parse(sourceId);
-    const captured = await memberTransaction(workspaceId, userId, async (tx, actor) => {
-      await store.source(tx, actor, sourceId);
-      await tx.client.query(
-        `INSERT INTO ${table(tx, 'google_refresh')} (source_id,membership_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-        [sourceId, actor.membershipId],
-      );
-      const rows = z
-        .array(z.object({ id: uuidSchema, native_id: z.string() }))
-        .parse(
-          (
-            await tx.client.query(
-              `SELECT d.id,d.native_id FROM ${table(tx, 'documents')} d JOIN ${table(tx, 'google_refresh')} f ON f.source_id=d.source_id AND f.membership_id=$2 WHERE d.source_id=$1 AND d.tombstoned_at IS NULL AND (f.after_id IS NULL OR d.id>f.after_id) AND f.next_attempt_at<=clock_timestamp() ORDER BY d.id LIMIT 20`,
-              [sourceId, actor.membershipId],
-            )
-          ).rows,
+    const captured = await memberTransaction(
+      workspaceId,
+      userId,
+      async (tx, actor) => {
+        await store.source(tx, actor, sourceId);
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'google_refresh')} (source_id,membership_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+          [sourceId, actor.membershipId],
         );
-      return { actor, rows };
-    });
+        const rows = z
+          .array(z.object({ id: uuidSchema, native_id: z.string() }))
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT d.id,d.native_id FROM ${table(tx, 'documents')} d JOIN ${table(tx, 'google_refresh')} f ON f.source_id=d.source_id AND f.membership_id=$2 WHERE d.source_id=$1 AND d.tombstoned_at IS NULL AND (f.after_id IS NULL OR d.id>f.after_id) AND f.next_attempt_at<=clock_timestamp() ORDER BY d.id LIMIT 20`,
+                [sourceId, actor.membershipId],
+              )
+            ).rows,
+          );
+        return { actor, rows };
+      },
+      true,
+    );
     let refreshed = 0,
       unavailable = 0;
     for (const row of captured.rows) {
@@ -572,7 +597,7 @@ export function createGoogleKnowledge({
           throw error;
         unavailable++;
         if (error instanceof GoogleCorpusError && error.code === 'rate-limited') {
-          await transaction(workspaceId, tx =>
+          await transaction(workspaceId, 'write', tx =>
             tx.client.query(
               `UPDATE ${table(tx, 'google_refresh')} SET next_attempt_at=clock_timestamp()+$3::double precision*interval '1 millisecond' WHERE source_id=$1 AND membership_id=$2`,
               [sourceId, captured.actor.membershipId, Math.max(30000, error.retryAfterMs ?? 0)],
@@ -582,7 +607,7 @@ export function createGoogleKnowledge({
         }
       }
     }
-    await transaction(workspaceId, tx =>
+    await transaction(workspaceId, 'write', tx =>
       tx.client.query(`UPDATE ${table(tx, 'google_refresh')} SET after_id=$3 WHERE source_id=$1 AND membership_id=$2`, [
         sourceId,
         captured.actor.membershipId,
@@ -593,7 +618,7 @@ export function createGoogleKnowledge({
   }
   async function due(workspaceId: string): Promise<GoogleKnowledgeWork[]> {
     const held = gate ? await gate(workspaceId) : [];
-    return transaction(workspaceId, async tx => {
+    return transaction(workspaceId, 'write', async tx => {
       await tx.client.query(
         `UPDATE ${table(tx, 'google_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL WHERE lease_until<=clock_timestamp()`,
       );
@@ -615,7 +640,7 @@ export function createGoogleKnowledge({
     token: string,
     operation: (tx: Tx, s: Source, actor: HumanActor) => Promise<T>,
   ) {
-    return transaction(work.workspaceId, async tx => {
+    return transaction(work.workspaceId, 'write', async tx => {
       const s = await source(tx, work.sourceId);
       const owned = await tx.client.query(
         `SELECT 1 FROM ${table(tx, 'google_sources')} WHERE source_id=$1 AND generation=$2 AND lease_token=$3 AND lease_until>clock_timestamp()`,
@@ -967,7 +992,7 @@ export function createGoogleKnowledge({
     const work = googleKnowledgeWorkSchema.parse(value);
     const token = randomUUID();
     if (gate && (await gate(work.workspaceId)).includes(work.sourceId)) return { disposition: 'stale' };
-    const claim = await transaction(work.workspaceId, async tx => {
+    const claim = await transaction(work.workspaceId, 'write', async tx => {
       const s = await source(tx, work.sourceId);
       if (s.generation !== work.generation || s.state !== 'active') return 'stale';
       if (s.lease_token) return 'busy';
@@ -1085,7 +1110,7 @@ export function createGoogleKnowledge({
       });
       return { disposition: 'retry' };
     } catch (error) {
-      return transaction(work.workspaceId, async tx => {
+      return transaction(work.workspaceId, 'write', async tx => {
         const current = await source(tx, work.sourceId);
         if (current.generation !== work.generation || current.lease_token !== token) return { disposition: 'stale' };
         const failure =

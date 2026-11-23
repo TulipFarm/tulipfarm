@@ -88,10 +88,11 @@ export function createSkillImports(
   async function transaction<T>(
     workspaceId: string,
     user: string | HumanActor,
+    mode: 'read' | 'write',
     operation: (tx: AgentTransaction, actor: HumanActor, bound: AgentStorage) => Promise<T>,
   ) {
     return runtime.transaction(uuidSchema.parse(workspaceId), skillPackageCompatibility, async tx => {
-      const actor = await lockAndResolvePrincipal(tx, user, 'write');
+      const actor = await lockAndResolvePrincipal(tx, user, mode);
       await currentMember(tx, actor);
       const bound: AgentStorage = {
         transaction: async (id, range, execute) => {
@@ -126,7 +127,7 @@ export function createSkillImports(
     if (input.kind !== 'url' || !input.url) throw new SkillPackageError('source-unsupported');
     resolveSkillSource(input.url);
     const sources = sourceDependenciesSchema.parse(origin);
-    await transaction(workspaceId, user, async (tx, actor) => {
+    await transaction(workspaceId, user, 'write', async (tx, actor) => {
       await requireNoMcpDerived(tx, sources);
       await requireOwnDefinitionSources(tx, actor, sources, true);
       if (input.target) await requireSkillGrant(tx, actor, input.target.id, 'manage');
@@ -164,7 +165,7 @@ export function createSkillImports(
     return read(workspaceId, user, id);
   }
   async function replayDraft(workspaceId: string, actor: HumanActor, id: string, requestDigest: string) {
-    const exists = await transaction(workspaceId, actor, async (tx, human) => {
+    const exists = await transaction(workspaceId, actor, 'write', async (tx, human) => {
       const row = (
         await tx.client.query(
           `SELECT membership_id,input,status FROM ${relation(tx, 'tf_skill_imports')} WHERE id=$1`,
@@ -200,7 +201,7 @@ export function createSkillImports(
       ...(requestDigest ? { requestDigest } : {}),
     });
     const sources = sourceDependenciesSchema.parse(origin);
-    const prepare = await transaction(workspaceId, actor, async (tx, human, bound) => {
+    const prepare = await transaction(workspaceId, actor, 'write', async (tx, human, bound) => {
       await requireNoMcpDerived(tx, sources);
       await requireOwnDefinitionSources(tx, human, sources, true);
       const previous = (
@@ -243,7 +244,7 @@ export function createSkillImports(
     });
     if (!prepare) return read(workspaceId, actor, id);
     const prepared = await objects.stage(workspaceId, actor, id, files, sources);
-    await transaction(workspaceId, actor, async (tx, human, bound) => {
+    await transaction(workspaceId, actor, 'write', async (tx, human, bound) => {
       await requireOwnDefinitionSources(tx, human, sources, true);
       let changes: ReturnType<typeof packageChanges> | undefined;
       if (target) {
@@ -269,7 +270,7 @@ export function createSkillImports(
     return read(workspaceId, actor, id);
   }
   async function read(workspaceId: string, user: string | HumanActor, id: string): Promise<SkillImportView> {
-    return transaction(workspaceId, user, async (tx, actor) => {
+    return transaction(workspaceId, user, 'write', async (tx, actor) => {
       const row = await load(tx, actor, id);
       const decision = (
         await tx.client.query(`SELECT receipts FROM ${relation(tx, 'tf_skill_import_decisions')} WHERE import_id=$1`, [
@@ -291,7 +292,7 @@ export function createSkillImports(
     });
   }
   async function provenance(workspaceId: string, user: string | HumanActor, skillId: string) {
-    return transaction(workspaceId, user, async (tx, actor, bound) => {
+    return transaction(workspaceId, user, 'write', async (tx, actor, bound) => {
       const skill = await createWorkspaceSkills(bound).read(workspaceId, actor, skillId);
       const row = (
         await tx.client.query(
@@ -304,7 +305,7 @@ export function createSkillImports(
   }
   async function history(workspaceId: string, user: string | HumanActor, skillId: string, value: unknown) {
     const { offset } = skillHistoryQuerySchema.parse(value);
-    return transaction(workspaceId, user, async (tx, actor, bound) => {
+    return transaction(workspaceId, user, 'write', async (tx, actor, bound) => {
       await createWorkspaceSkills(bound).read(workspaceId, actor, skillId);
       await requireSkillGrant(tx, actor, skillId, 'manage');
       const rows = (
@@ -323,7 +324,7 @@ export function createSkillImports(
     });
   }
   async function update(workspaceId: string, user: string, skillId: string, importId: string) {
-    const input = await transaction(workspaceId, user, async (tx, actor, bound) => {
+    const input = await transaction(workspaceId, user, 'write', async (tx, actor, bound) => {
       const existing = (
         await tx.client.query(
           `SELECT input FROM ${relation(tx, 'tf_skill_imports')} WHERE id=$1 AND membership_id=$2`,
@@ -355,7 +356,7 @@ export function createSkillImports(
     return begin(workspaceId, user, importId, input);
   }
   async function cancel(workspaceId: string, user: string | HumanActor, id: string) {
-    await transaction(workspaceId, user, async (tx, actor) => {
+    await transaction(workspaceId, user, 'write', async (tx, actor) => {
       const row = await load(tx, actor, id);
       if (row.status === 'installed') throw new SkillPackageError('import-conflict');
       await tx.client.query(`UPDATE ${relation(tx, 'tf_skill_imports')} SET status='cancelled' WHERE id=$1`, [id]);
@@ -364,7 +365,7 @@ export function createSkillImports(
   }
   async function select(workspaceId: string, user: string | HumanActor, id: string, value: unknown) {
     const input = skillImportSelectionSchema.parse(value);
-    await transaction(workspaceId, user, async (tx, actor) => {
+    await transaction(workspaceId, user, 'write', async (tx, actor) => {
       const row = await load(tx, actor, id);
       if (row.expired) throw new SkillPackageError('import-expired');
       if (
@@ -418,7 +419,7 @@ export function createSkillImports(
     });
     if (!claimed) return;
     async function live() {
-      await transaction(workspaceId, claimed!.actor, async (tx, actor) => {
+      await transaction(workspaceId, claimed!.actor, 'write', async (tx, actor) => {
         const row = await load(tx, actor, id);
         if (row.status !== claimed!.phase || row.expired) throw new SkillPackageError('import-expired');
       });
@@ -441,7 +442,7 @@ export function createSkillImports(
           );
           candidate.report = report;
         }
-        await transaction(workspaceId, claimed.actor, async (tx, actor) => {
+        await transaction(workspaceId, claimed.actor, 'write', async (tx, actor) => {
           const row = await load(tx, actor, id);
           if (row.status !== claimed.phase || row.expired) throw new SkillPackageError('import-expired');
           await tx.client.query(
@@ -468,7 +469,7 @@ export function createSkillImports(
           if (!current.management || current.management.version !== claimed.input.target.expectedVersion)
             throw new SkillPackageError('import-conflict');
           if (current.definition.package?.digest === packages[0]!.definition.package.digest) {
-            await transaction(workspaceId, claimed.actor, async (tx, actor) => {
+            await transaction(workspaceId, claimed.actor, 'write', async (tx, actor) => {
               const row = await load(tx, actor, id);
               if (row.status !== 'preparing' || row.expired) throw new SkillPackageError('import-expired');
               await tx.client.query(`UPDATE ${relation(tx, 'tf_skill_imports')} SET status='unchanged' WHERE id=$1`, [
@@ -504,7 +505,7 @@ export function createSkillImports(
           });
         }
       }
-      await transaction(workspaceId, claimed.actor, async (tx, actor) => {
+      await transaction(workspaceId, claimed.actor, 'write', async (tx, actor) => {
         const row = await load(tx, actor, id);
         if (row.status !== 'preparing' || row.expired) throw new SkillPackageError('import-expired');
         const digest = result.kind === 'skills' ? skillDefinitionRevision({ input: claimed.input, candidates }) : null;
@@ -548,7 +549,7 @@ export function createSkillImports(
       )
         ? await runtimeAvailable()
         : false;
-    return transaction(workspaceId, user, async (tx, actor, bound) => {
+    return transaction(workspaceId, user, 'write', async (tx, actor, bound) => {
       const row = await load(tx, actor, id);
       const previous = (
         await tx.client.query(

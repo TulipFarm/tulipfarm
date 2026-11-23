@@ -98,13 +98,17 @@ export function hostedMethods(options: WorkspaceMcpOptions, store: McpStore) {
     requester: Requester,
     operation: (tx: AuthorizationTransaction, membershipId: string) => Promise<T>,
   ) {
-    return store.transaction(workspaceId, async tx => {
-      if ('membershipId' in requester) return operation(tx, requester.membershipId);
-      const actor =
-        typeof requester.principal === 'string' ? await resolveHuman(tx, requester.principal) : requester.principal;
-      await currentMember(tx, actor);
-      return operation(tx, actor.membershipId);
-    });
+    return store.transaction(
+      workspaceId,
+      async tx => {
+        if ('membershipId' in requester) return operation(tx, requester.membershipId);
+        const actor =
+          typeof requester.principal === 'string' ? await resolveHuman(tx, requester.principal) : requester.principal;
+        await currentMember(tx, actor);
+        return operation(tx, actor.membershipId);
+      },
+      'write',
+    );
   }
   /** What the sandbox needs now, read for one member: its launch, fingerprint and the secret versions it holds. */
   async function launchFor(
@@ -251,61 +255,73 @@ export function hostedMethods(options: WorkspaceMcpOptions, store: McpStore) {
     }
   }
   async function publish(workspaceId: string, prepared: Extract<Prepared, { kind: 'provision' }>, sandboxId: string) {
-    return store.transaction(workspaceId, async tx => {
-      const row = await store.load(tx, prepared.row.id);
-      const current = await hostRow(tx, row.id);
-      if (
-        row.lifecycle !== 'active' ||
-        row.refresh_claim ||
-        row.authorization_epoch !== prepared.row.authorization_epoch ||
-        row.secret_version !== prepared.row.secret_version ||
-        current?.generation !== prepared.launch.generation ||
-        current.fingerprint !== prepared.launch.fingerprint
-      )
-        return false;
-      const versions = await store.checkHosted(tx, row, store.hostedCredential(workspaceId, row)).catch(() => null);
-      if (!versions || versionsKey(versions) !== versionsKey(prepared.versions)) return false;
-      const updated = await tx.client.query(
-        `UPDATE ${table(tx, 'hosts')} SET sandbox_id=$3,launched=$4,ready_at=clock_timestamp() WHERE integration_id=$1 AND generation=$2`,
-        [row.id, prepared.launch.generation, sandboxId, JSON.stringify({ secrets: prepared.versions })],
-      );
-      if (!updated.rowCount) return false;
-      if (prepared.buildId)
-        await tx.client.query(`UPDATE ${table(tx, 'builds')} SET outcome='ready' WHERE id=$1`, [prepared.buildId]);
-      await tx.client.query(
-        `UPDATE ${table(tx, 'integrations')} SET status_reason=NULL WHERE id=$1 AND status_reason=$2`,
-        [row.id, installingReason],
-      );
-      return true;
-    });
+    return store.transaction(
+      workspaceId,
+      async tx => {
+        const row = await store.load(tx, prepared.row.id);
+        const current = await hostRow(tx, row.id);
+        if (
+          row.lifecycle !== 'active' ||
+          row.refresh_claim ||
+          row.authorization_epoch !== prepared.row.authorization_epoch ||
+          row.secret_version !== prepared.row.secret_version ||
+          current?.generation !== prepared.launch.generation ||
+          current.fingerprint !== prepared.launch.fingerprint
+        )
+          return false;
+        const versions = await store.checkHosted(tx, row, store.hostedCredential(workspaceId, row)).catch(() => null);
+        if (!versions || versionsKey(versions) !== versionsKey(prepared.versions)) return false;
+        const updated = await tx.client.query(
+          `UPDATE ${table(tx, 'hosts')} SET sandbox_id=$3,launched=$4,ready_at=clock_timestamp() WHERE integration_id=$1 AND generation=$2`,
+          [row.id, prepared.launch.generation, sandboxId, JSON.stringify({ secrets: prepared.versions })],
+        );
+        if (!updated.rowCount) return false;
+        if (prepared.buildId)
+          await tx.client.query(`UPDATE ${table(tx, 'builds')} SET outcome='ready' WHERE id=$1`, [prepared.buildId]);
+        await tx.client.query(
+          `UPDATE ${table(tx, 'integrations')} SET status_reason=NULL WHERE id=$1 AND status_reason=$2`,
+          [row.id, installingReason],
+        );
+        return true;
+      },
+      'write',
+    );
   }
   async function fail(
     workspaceId: string,
     prepared: Extract<Prepared, { kind: 'provision' }>,
     reason: string | null = installFailedReason,
   ) {
-    await store.transaction(workspaceId, async tx => {
-      if (prepared.buildId)
-        await tx.client.query(`UPDATE ${table(tx, 'builds')} SET outcome='failed' WHERE id=$1 AND outcome='started'`, [
-          prepared.buildId,
-        ]);
-      const claimed = await tx.client.query(
-        `UPDATE ${table(tx, 'hosts')} SET claimed_at=NULL WHERE integration_id=$1 AND generation=$2 AND ready_at IS NULL`,
-        [prepared.row.id, prepared.launch.generation],
-      );
-      if (claimed.rowCount && reason)
-        await tx.client.query(`UPDATE ${table(tx, 'integrations')} SET status_reason=$2 WHERE id=$1`, [
-          prepared.row.id,
-          reason,
-        ]);
-    });
+    await store.transaction(
+      workspaceId,
+      async tx => {
+        if (prepared.buildId)
+          await tx.client.query(
+            `UPDATE ${table(tx, 'builds')} SET outcome='failed' WHERE id=$1 AND outcome='started'`,
+            [prepared.buildId],
+          );
+        const claimed = await tx.client.query(
+          `UPDATE ${table(tx, 'hosts')} SET claimed_at=NULL WHERE integration_id=$1 AND generation=$2 AND ready_at IS NULL`,
+          [prepared.row.id, prepared.launch.generation],
+        );
+        if (claimed.rowCount && reason)
+          await tx.client.query(`UPDATE ${table(tx, 'integrations')} SET status_reason=$2 WHERE id=$1`, [
+            prepared.row.id,
+            reason,
+          ]);
+      },
+      'write',
+    );
   }
   async function forget(workspaceId: string, integrationId: string, sandboxId: string, generation: number) {
-    await store.transaction(workspaceId, tx =>
-      tx.client.query(
-        `UPDATE ${table(tx, 'hosts')} SET sandbox_id=NULL,launched=NULL,ready_at=NULL WHERE integration_id=$1 AND generation=$2 AND sandbox_id=$3`,
-        [integrationId, generation, sandboxId],
-      ),
+    await store.transaction(
+      workspaceId,
+      tx =>
+        tx.client.query(
+          `UPDATE ${table(tx, 'hosts')} SET sandbox_id=NULL,launched=NULL,ready_at=NULL WHERE integration_id=$1 AND generation=$2 AND sandbox_id=$3`,
+          [integrationId, generation, sandboxId],
+        ),
+      'write',
     );
   }
   /**
@@ -328,7 +344,7 @@ export function hostedMethods(options: WorkspaceMcpOptions, store: McpStore) {
       else {
         // A sandbox is charged while it runs, so none starts while the workspace is out of credits.
         const exhausted = await store
-          .transaction(workspaceId, tx => requireCredits(tx))
+          .transaction(workspaceId, tx => requireCredits(tx), 'write')
           .then(() => false)
           .catch(error => {
             if (error instanceof CreditsExhausted) return true;
@@ -403,19 +419,23 @@ export function hostedMethods(options: WorkspaceMcpOptions, store: McpStore) {
         checked++;
         let keep = true;
         try {
-          keep = await store.transaction(entry.workspaceId, async tx => {
-            if (!store.hostedStorage(tx)) return false;
-            const row = await store.load(tx, entry.integrationId).catch(() => null);
-            if (!row) return false;
-            const hosted = await hostRow(tx, row.id);
-            const fine = await current(tx, entry.workspaceId, entry, row, hosted).catch(() => false);
-            if (!fine)
-              await tx.client.query(
-                `UPDATE ${table(tx, 'hosts')} SET sandbox_id=NULL,launched=NULL,ready_at=NULL WHERE integration_id=$1 AND generation=$2 AND sandbox_id=$3`,
-                [row.id, entry.generation, entry.sandboxId],
-              );
-            return fine;
-          });
+          keep = await store.transaction(
+            entry.workspaceId,
+            async tx => {
+              if (!store.hostedStorage(tx)) return false;
+              const row = await store.load(tx, entry.integrationId).catch(() => null);
+              if (!row) return false;
+              const hosted = await hostRow(tx, row.id);
+              const fine = await current(tx, entry.workspaceId, entry, row, hosted).catch(() => false);
+              if (!fine)
+                await tx.client.query(
+                  `UPDATE ${table(tx, 'hosts')} SET sandbox_id=NULL,launched=NULL,ready_at=NULL WHERE integration_id=$1 AND generation=$2 AND sandbox_id=$3`,
+                  [row.id, entry.generation, entry.sandboxId],
+                );
+              return fine;
+            },
+            'write',
+          );
         } catch {
           keep = true;
         }

@@ -264,9 +264,9 @@ export function createDefaultKnowledge({
   enabled?: (workspaceId: string, userId: string) => Promise<boolean>;
   now?: () => Date;
 }) {
-  async function transaction<T>(workspaceId: string, operation: (tx: Tx) => Promise<T>) {
+  async function transaction<T>(workspaceId: string, mode: 'read' | 'write', operation: (tx: Tx) => Promise<T>) {
     return runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async tx => {
-      await lockAuthorization(tx, 'write');
+      await lockAuthorization(tx, mode);
       return operation(tx);
     });
   }
@@ -512,7 +512,7 @@ export function createDefaultKnowledge({
 
   async function due(workspaceId: string): Promise<DefaultKnowledgeWork[]> {
     // Disabled owners are filtered before the limit, so their intents never starve others.
-    return transaction(workspaceId, async tx => {
+    return transaction(workspaceId, 'write', async tx => {
       if (!(await installed(tx))) return [];
       const disabled = await disabledOwners(tx, workspaceId, enabled);
       await tx.client.query(
@@ -534,7 +534,7 @@ export function createDefaultKnowledge({
   }
 
   async function fenced<T>(work: DefaultKnowledgeWork, token: string, operation: (tx: Tx, i: Intent) => Promise<T>) {
-    return transaction(work.workspaceId, async tx => {
+    return transaction(work.workspaceId, 'write', async tx => {
       const i = await intent(tx, work.intentId);
       if (i.generation !== work.generation || i.lease_token !== token || i.state !== 'active')
         throw new KnowledgeError('superseded');
@@ -686,7 +686,7 @@ export function createDefaultKnowledge({
     denyMcpEgress();
     const work = defaultKnowledgeWorkSchema.parse(value);
     const token = randomUUID();
-    const claim = await transaction(work.workspaceId, async tx => {
+    const claim = await transaction(work.workspaceId, 'write', async tx => {
       const i = await intent(tx, work.intentId);
       if (i.generation !== work.generation || i.state !== 'active') return 'stale' as const;
       if (i.lease_token || i.next_attempt_at.getTime() > now().getTime()) return 'busy' as const;
@@ -697,6 +697,7 @@ export function createDefaultKnowledge({
       return { disposition: 'stale' };
     const leased = await transaction(
       work.workspaceId,
+      'write',
       async tx =>
         (
           await tx.client.query(
@@ -814,7 +815,7 @@ export function createDefaultKnowledge({
       if (error instanceof KnowledgeError && error.code === 'superseded') return { disposition: 'stale' };
       const code = failureCode(error);
       // Discovery never deletes anything, so a failed page keeps every earlier scope and source.
-      return transaction(work.workspaceId, async tx => {
+      return transaction(work.workspaceId, 'write', async tx => {
         const current = await intent(tx, work.intentId);
         if (current.generation !== work.generation || current.lease_token !== token)
           return { disposition: 'stale' as const };
@@ -836,7 +837,7 @@ export function createDefaultKnowledge({
     workspaceId: string,
     userId: string,
     operation: (tx: Tx, actor: HumanActor) => Promise<T>,
-    mode: 'read' | 'write' = 'write',
+    mode: 'read' | 'write',
   ) {
     return runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async tx => {
       const actor = await lockAndResolveHuman(tx, userId, mode);
@@ -988,7 +989,7 @@ export function createDefaultKnowledge({
   /** A failed source still bound to an older account row of the intent's GitHub user runs its own Retry, which rebinds it to the current row. */
   async function rebind(work: DefaultKnowledgeWork, i: Intent) {
     if (!i.github_user_id || !engines.github?.manage) return;
-    const stale = await transaction(work.workspaceId, async tx =>
+    const stale = await transaction(work.workspaceId, 'write', async tx =>
       z.array(z.object({ source_id: uuidSchema })).parse(
         (
           await tx.client.query(
@@ -1060,34 +1061,39 @@ export function createDefaultKnowledge({
       if (i.membership_id !== actor.membershipId || i.user_id !== actor.userId) throw new AccessDenied();
       return i;
     };
-    const planned = await memberTransaction(workspaceId, userId, async (tx, actor) => {
-      const i = await owned(tx, actor);
-      if (input.action === 'opt-out' || input.action === 'narrow') {
+    const planned = await memberTransaction(
+      workspaceId,
+      userId,
+      async (tx, actor) => {
+        const i = await owned(tx, actor);
+        if (input.action === 'opt-out' || input.action === 'narrow') {
+          await tx.client.query(
+            `UPDATE ${table(tx, 'default_intents')} SET state='opted-out',restore_coverage=restore_coverage OR $2,generation=generation+1,lease_token=NULL,lease_until=NULL WHERE id=$1`,
+            [i.id, input.action === 'narrow'],
+          );
+          await changeSources(tx, i, input.action);
+          return null;
+        }
+        if (input.action !== 'resume' && i.state !== 'active') throw new KnowledgeError('conflict');
+        if (input.action === 'resume' && i.state === 'opted-out' && i.restore_coverage) {
+          await tx.client.query(
+            `UPDATE ${table(tx, 'default_scopes')} SET disposition='pending',source_id=NULL WHERE intent_id=$1`,
+            [i.id],
+          );
+          await tx.client.query(
+            `UPDATE ${table(tx, 'default_intents')} SET restore_coverage=true,cursor=NULL,sync_state='queued' WHERE id=$1`,
+            [i.id],
+          );
+        }
         await tx.client.query(
-          `UPDATE ${table(tx, 'default_intents')} SET state='opted-out',restore_coverage=restore_coverage OR $2,generation=generation+1,lease_token=NULL,lease_until=NULL WHERE id=$1`,
-          [i.id, input.action === 'narrow'],
+          `UPDATE ${table(tx, 'default_intents')} SET state='active',generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=$2,attempts=0,sync_state=CASE WHEN sync_state='failed' THEN 'queued' ELSE sync_state END WHERE id=$1`,
+          [i.id, now()],
         );
-        await changeSources(tx, i, input.action);
-        return null;
-      }
-      if (input.action !== 'resume' && i.state !== 'active') throw new KnowledgeError('conflict');
-      if (input.action === 'resume' && i.state === 'opted-out' && i.restore_coverage) {
-        await tx.client.query(
-          `UPDATE ${table(tx, 'default_scopes')} SET disposition='pending',source_id=NULL WHERE intent_id=$1`,
-          [i.id],
-        );
-        await tx.client.query(
-          `UPDATE ${table(tx, 'default_intents')} SET restore_coverage=true,cursor=NULL,sync_state='queued' WHERE id=$1`,
-          [i.id],
-        );
-      }
-      await tx.client.query(
-        `UPDATE ${table(tx, 'default_intents')} SET state='active',generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=$2,attempts=0,sync_state=CASE WHEN sync_state='failed' THEN 'queued' ELSE sync_state END WHERE id=$1`,
-        [i.id, now()],
-      );
-      if (input.action === 'resume') await changeSources(tx, i, 'resume');
-      return { kind: recovery[i.product].kind, generation: i.generation + 1, sources: await recoverable(tx, i) };
-    });
+        if (input.action === 'resume') await changeSources(tx, i, 'resume');
+        return { kind: recovery[i.product].kind, generation: i.generation + 1, sources: await recoverable(tx, i) };
+      },
+      'write',
+    );
     // Each source then runs its provider's own Retry, which rebinds it to the account's current authorization and restores its scopes.
     // These run after the intent's authorization lock is released, one source at a time, so one refused source never blocks the others.
     // Command IDs are stable for this Retry, so a replayed source command is not applied twice.

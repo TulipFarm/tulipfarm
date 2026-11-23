@@ -315,11 +315,7 @@ export function createGitHubKnowledge({
   // is migrated, its sources index every selected kind except commits.
   const storesCommits = (tx: Tx) => ((tx as { commonVersion?: number }).commonVersion ?? 0) >= 7;
   const storesOwner = (tx: Tx) => ((tx as { commonVersion?: number }).commonVersion ?? 0) >= 48;
-  async function transaction<T>(
-    workspaceId: string,
-    operation: (tx: Tx) => Promise<T>,
-    mode: 'read' | 'write' = 'write',
-  ) {
+  async function transaction<T>(workspaceId: string, operation: (tx: Tx) => Promise<T>, mode: 'read' | 'write') {
     return runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async raw => {
       const tx = store.bind(raw);
       await lockAuthorization(tx, mode);
@@ -330,7 +326,7 @@ export function createGitHubKnowledge({
     workspaceId: string,
     userId: string,
     operation: (tx: Tx, actor: HumanActor) => Promise<T>,
-    write = true,
+    write: boolean,
   ) {
     return store.transaction(workspaceId, userId, write, async (tx, actor) => {
       return operation(tx, actor);
@@ -555,62 +551,67 @@ export function createGitHubKnowledge({
       new Set(inspected.repositories.map(r => r.repositoryId)).size !== inspected.repositories.length
     )
       throw new GitHubCorpusError('invalid-selection');
-    return memberTransaction(workspaceId, userId, async (tx, human) => {
-      if (human.membershipId !== actor.membershipId) throw new AccessDenied();
-      await assertDefaultSourceEnabled(tx, input.commandId);
-      if ((await tx.client.query(`SELECT 1 FROM ${table(tx, 'sources')} WHERE id=$1`, [input.commandId])).rowCount) {
-        const prior = await manager(tx, human, input.commandId);
-        if (prior.fingerprint !== fingerprint || prior.state === 'removed') throw new KnowledgeError('conflict');
-        return dto(tx, prior);
-      }
-      await ownAccount(tx, human, inspected.binding);
-      const active = await tx.client.query(
-        `SELECT id FROM ${qualified(tx.schema, 'tf_memberships')} WHERE id=ANY($1::uuid[]) AND removed_at IS NULL`,
-        [memberIds],
-      );
-      if (active.rowCount !== memberIds.length) throw new AccessDenied();
-      const inserted = await tx.client.query(
-        `INSERT INTO ${table(tx, 'sources')} (id,provider,account_namespace,selection,owner_membership_id) VALUES ($1,'github',$2,$3::jsonb::text,$4) ON CONFLICT DO NOTHING`,
-        [input.commandId, inspected.binding.githubUserId, JSON.stringify(input.selection), human.membershipId],
-      );
-      if (!inserted.rowCount) throw new KnowledgeError('conflict');
-      await tx.client.query(
-        `INSERT INTO ${table(tx, 'github_sources')} (source_id,binding,selection,title,fingerprint,cursor) VALUES ($1,$2,$3,$4,$5,$6)`,
-        [
-          input.commandId,
-          inspected.binding,
-          input.selection,
-          inspected.title.slice(0, 2048) || 'GitHub repositories',
-          fingerprint,
-          initialCursor(),
-        ],
-      );
-      await tx.client.query(
-        `INSERT INTO ${table(tx, 'github_members')} (source_id,membership_id) SELECT $1,unnest($2::uuid[])`,
-        [input.commandId, memberIds],
-      );
-      for (const r of inspected.repositories)
+    return memberTransaction(
+      workspaceId,
+      userId,
+      async (tx, human) => {
+        if (human.membershipId !== actor.membershipId) throw new AccessDenied();
+        await assertDefaultSourceEnabled(tx, input.commandId);
+        if ((await tx.client.query(`SELECT 1 FROM ${table(tx, 'sources')} WHERE id=$1`, [input.commandId])).rowCount) {
+          const prior = await manager(tx, human, input.commandId);
+          if (prior.fingerprint !== fingerprint || prior.state === 'removed') throw new KnowledgeError('conflict');
+          return dto(tx, prior);
+        }
+        await ownAccount(tx, human, inspected.binding);
+        const active = await tx.client.query(
+          `SELECT id FROM ${qualified(tx.schema, 'tf_memberships')} WHERE id=ANY($1::uuid[]) AND removed_at IS NULL`,
+          [memberIds],
+        );
+        if (active.rowCount !== memberIds.length) throw new AccessDenied();
+        const inserted = await tx.client.query(
+          `INSERT INTO ${table(tx, 'sources')} (id,provider,account_namespace,selection,owner_membership_id) VALUES ($1,'github',$2,$3::jsonb::text,$4) ON CONFLICT DO NOTHING`,
+          [input.commandId, inspected.binding.githubUserId, JSON.stringify(input.selection), human.membershipId],
+        );
+        if (!inserted.rowCount) throw new KnowledgeError('conflict');
         await tx.client.query(
-          storesOwner(tx)
-            ? `INSERT INTO ${table(tx, 'github_repositories')} (source_id,repository_id,full_name,visibility,title,owner_id) VALUES ($1,$2,$3,$4,$5,$6)`
-            : `INSERT INTO ${table(tx, 'github_repositories')} (source_id,repository_id,full_name,visibility,title) VALUES ($1,$2,$3,$4,$5)`,
+          `INSERT INTO ${table(tx, 'github_sources')} (source_id,binding,selection,title,fingerprint,cursor) VALUES ($1,$2,$3,$4,$5,$6)`,
           [
             input.commandId,
-            r.repositoryId,
-            r.fullName,
-            r.visibility,
-            r.title.slice(0, 512) || r.fullName,
-            ...(storesOwner(tx) ? [r.ownerId ?? null] : []),
+            inspected.binding,
+            input.selection,
+            inspected.title.slice(0, 2048) || 'GitHub repositories',
+            fingerprint,
+            initialCursor(),
           ],
         );
-      await store.source(tx, human, input.commandId, true);
-      await handOver(
-        tx,
-        human.membershipId,
-        inspected.repositories.map(r => r.repositoryId),
-      );
-      return dto(tx, await source(tx, input.commandId));
-    });
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'github_members')} (source_id,membership_id) SELECT $1,unnest($2::uuid[])`,
+          [input.commandId, memberIds],
+        );
+        for (const r of inspected.repositories)
+          await tx.client.query(
+            storesOwner(tx)
+              ? `INSERT INTO ${table(tx, 'github_repositories')} (source_id,repository_id,full_name,visibility,title,owner_id) VALUES ($1,$2,$3,$4,$5,$6)`
+              : `INSERT INTO ${table(tx, 'github_repositories')} (source_id,repository_id,full_name,visibility,title) VALUES ($1,$2,$3,$4,$5)`,
+            [
+              input.commandId,
+              r.repositoryId,
+              r.fullName,
+              r.visibility,
+              r.title.slice(0, 512) || r.fullName,
+              ...(storesOwner(tx) ? [r.ownerId ?? null] : []),
+            ],
+          );
+        await store.source(tx, human, input.commandId, true);
+        await handOver(
+          tx,
+          human.membershipId,
+          inspected.repositories.map(r => r.repositoryId),
+        );
+        return dto(tx, await source(tx, input.commandId));
+      },
+      true,
+    );
   }
   async function list(workspaceId: string, userId: string) {
     return memberRead(workspaceId, userId, async (tx, actor) => {
@@ -784,81 +785,86 @@ export function createGitHubKnowledge({
       if (replay.fingerprint !== fingerprint) throw new KnowledgeError('conflict');
       return dto(tx, s);
     };
-    return memberTransaction(workspaceId, userId, async (tx, actor) => {
-      const s = await manager(tx, actor, sourceId);
-      const again = await replayed(tx, s);
-      if (again) return again;
-      if (s.state === 'removed') throw new KnowledgeError('conflict');
-      // Retry rebinds to the owner's current account for the same GitHub identity; the next sync re-checks every repository.
-      const rebound =
-        input.action === 'retry'
-          ? z
-              .object({ id: uuidSchema, generation: z.number().int(), login: z.string() })
-              .optional()
-              .parse(
-                (
-                  await tx.client.query(
-                    `SELECT id,generation,identity->>'login' AS login FROM ${qualified(tx.schema, 'tf_github_accounts')}
+    return memberTransaction(
+      workspaceId,
+      userId,
+      async (tx, actor) => {
+        const s = await manager(tx, actor, sourceId);
+        const again = await replayed(tx, s);
+        if (again) return again;
+        if (s.state === 'removed') throw new KnowledgeError('conflict');
+        // Retry rebinds to the owner's current account for the same GitHub identity; the next sync re-checks every repository.
+        const rebound =
+          input.action === 'retry'
+            ? z
+                .object({ id: uuidSchema, generation: z.number().int(), login: z.string() })
+                .optional()
+                .parse(
+                  (
+                    await tx.client.query(
+                      `SELECT id,generation,identity->>'login' AS login FROM ${qualified(tx.schema, 'tf_github_accounts')}
         WHERE owner_membership_id=$1 AND state='active' AND identity->>'id'=$2 AND (expires_at IS NULL OR expires_at>clock_timestamp()) ORDER BY (id=$3::uuid) DESC,created_at LIMIT 1`,
-                    [actor.membershipId, s.binding.githubUserId, s.binding.accountId],
-                  )
-                ).rows[0],
-              )
-          : undefined;
-      if (input.action === 'retry' && !rebound) throw new GitHubCorpusError('not-linked');
-      const state = input.action === 'remove' ? 'removed' : input.action === 'pause' ? 'paused' : 'active';
-      await tx.client.query(
-        `UPDATE ${table(tx, 'sources')} SET state=$2,access_epoch=access_epoch+1,removed_at=CASE WHEN $2='removed' THEN clock_timestamp() ELSE NULL END,retain_until=CASE WHEN $2='removed' THEN clock_timestamp()+interval '30 days' ELSE NULL END WHERE id=$1`,
-        [sourceId, state],
-      );
-      if (state === 'removed')
+                      [actor.membershipId, s.binding.githubUserId, s.binding.accountId],
+                    )
+                  ).rows[0],
+                )
+            : undefined;
+        if (input.action === 'retry' && !rebound) throw new GitHubCorpusError('not-linked');
+        const state = input.action === 'remove' ? 'removed' : input.action === 'pause' ? 'paused' : 'active';
         await tx.client.query(
-          `UPDATE ${table(tx, 'documents')} SET tombstoned_at=clock_timestamp(),retain_until=clock_timestamp()+interval '30 days',lexical_publication_id=NULL WHERE source_id=$1`,
+          `UPDATE ${table(tx, 'sources')} SET state=$2,access_epoch=access_epoch+1,removed_at=CASE WHEN $2='removed' THEN clock_timestamp() ELSE NULL END,retain_until=CASE WHEN $2='removed' THEN clock_timestamp()+interval '30 days' ELSE NULL END WHERE id=$1`,
+          [sourceId, state],
+        );
+        if (state === 'removed')
+          await tx.client.query(
+            `UPDATE ${table(tx, 'documents')} SET tombstoned_at=clock_timestamp(),retain_until=clock_timestamp()+interval '30 days',lexical_publication_id=NULL WHERE source_id=$1`,
+            [sourceId],
+          );
+        await invalidate(tx, sourceId, null);
+        await tx.client.query(
+          `UPDATE ${table(tx, 'github_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=clock_timestamp(),sync_state='queued',failure=NULL WHERE source_id=$1`,
           [sourceId],
         );
-      await invalidate(tx, sourceId, null);
-      await tx.client.query(
-        `UPDATE ${table(tx, 'github_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=clock_timestamp(),sync_state='queued',failure=NULL WHERE source_id=$1`,
-        [sourceId],
-      );
-      if (rebound) {
-        await tx.client.query(
-          `UPDATE ${table(tx, 'work')} w SET parsing='queued',failure=NULL,attempts=0 FROM ${table(tx, 'documents')} d
+        if (rebound) {
+          await tx.client.query(
+            `UPDATE ${table(tx, 'work')} w SET parsing='queued',failure=NULL,attempts=0 FROM ${table(tx, 'documents')} d
           WHERE d.source_id=$1 AND w.revision_id=d.observed_revision_id AND w.parsing='failed' AND d.tombstoned_at IS NULL`,
-          [sourceId],
-        );
-        await tx.client.query(
-          `UPDATE ${table(tx, 'github_sources')} SET cursor=$2,reconciliation=reconciliation+1 WHERE source_id=$1`,
-          [sourceId, initialCursor()],
-        );
-        await tx.client.query(`UPDATE ${table(tx, 'github_sources')} SET binding=$2 WHERE source_id=$1`, [
+            [sourceId],
+          );
+          await tx.client.query(
+            `UPDATE ${table(tx, 'github_sources')} SET cursor=$2,reconciliation=reconciliation+1 WHERE source_id=$1`,
+            [sourceId, initialCursor()],
+          );
+          await tx.client.query(`UPDATE ${table(tx, 'github_sources')} SET binding=$2 WHERE source_id=$1`, [
+            sourceId,
+            githubCorpusBindingSchema.parse({
+              ...s.binding,
+              accountId: rebound.id,
+              accountGeneration: rebound.generation,
+              login: rebound.login,
+            }),
+          ]);
+          await tx.client.query(
+            `UPDATE ${table(tx, 'github_repositories')} SET state='active',failure=NULL WHERE source_id=$1`,
+            [sourceId],
+          );
+          await store.source(tx, actor, sourceId, true);
+        }
+        if (state === 'removed' && s.selection.scope !== 'all')
+          await handOver(
+            tx,
+            s.owner_membership_id,
+            (await repositories(tx, sourceId)).map(r => r.repository_id),
+          );
+        await tx.client.query(`INSERT INTO ${table(tx, 'github_commands')} VALUES ($1,$2,$3)`, [
+          input.commandId,
           sourceId,
-          githubCorpusBindingSchema.parse({
-            ...s.binding,
-            accountId: rebound.id,
-            accountGeneration: rebound.generation,
-            login: rebound.login,
-          }),
+          fingerprint,
         ]);
-        await tx.client.query(
-          `UPDATE ${table(tx, 'github_repositories')} SET state='active',failure=NULL WHERE source_id=$1`,
-          [sourceId],
-        );
-        await store.source(tx, actor, sourceId, true);
-      }
-      if (state === 'removed' && s.selection.scope !== 'all')
-        await handOver(
-          tx,
-          s.owner_membership_id,
-          (await repositories(tx, sourceId)).map(r => r.repository_id),
-        );
-      await tx.client.query(`INSERT INTO ${table(tx, 'github_commands')} VALUES ($1,$2,$3)`, [
-        input.commandId,
-        sourceId,
-        fingerprint,
-      ]);
-      return dto(tx, await source(tx, sourceId));
-    });
+        return dto(tx, await source(tx, sourceId));
+      },
+      true,
+    );
   }
   // Replaces the source's kinds, opt-out patterns, optional cutoff and excluded repositories, then starts a new pass.
   // Content of newly excluded repositories and kinds is withdrawn at once; the pass withdraws anything the new
@@ -870,146 +876,156 @@ export function createGitHubKnowledge({
     if (!cutoffValid(input.after, now())) throw new GitHubCorpusError('invalid-selection');
     const excluded = [...new Set(input.excludedRepositories)].sort();
     const fingerprint = digest(JSON.stringify({ sourceId, settings: { ...input, excludedRepositories: excluded } }));
-    return memberTransaction(workspaceId, userId, async (tx, actor) => {
-      const s = await manager(tx, actor, sourceId);
-      const replay = z
-        .object({ fingerprint: z.string() })
-        .optional()
-        .parse(
-          (
-            await tx.client.query(`SELECT fingerprint FROM ${table(tx, 'github_commands')} WHERE command_id=$1`, [
-              input.commandId,
-            ])
-          ).rows[0],
+    return memberTransaction(
+      workspaceId,
+      userId,
+      async (tx, actor) => {
+        const s = await manager(tx, actor, sourceId);
+        const replay = z
+          .object({ fingerprint: z.string() })
+          .optional()
+          .parse(
+            (
+              await tx.client.query(`SELECT fingerprint FROM ${table(tx, 'github_commands')} WHERE command_id=$1`, [
+                input.commandId,
+              ])
+            ).rows[0],
+          );
+        if (replay) {
+          if (replay.fingerprint !== fingerprint) throw new KnowledgeError('conflict');
+          return dto(tx, s);
+        }
+        if (s.state === 'removed') throw new KnowledgeError('conflict');
+        const { kinds: _kinds, excludePaths: _paths, after: _after, ...kept } = s.selection;
+        const selection = githubCorpusSelectionSchema.parse({
+          ...kept,
+          kinds: input.kinds,
+          ...(input.excludePaths.length ? { excludePaths: input.excludePaths } : {}),
+          ...(input.after ? { after: input.after } : {}),
+        });
+        const known = new Set((await repositories(tx, sourceId)).map(r => r.repository_id));
+        if (excluded.some(id => !known.has(id))) throw new GitHubCorpusError('invalid-selection');
+        const text = z
+          .object({ text: z.string() })
+          .parse((await tx.client.query('SELECT $1::jsonb::text AS text', [JSON.stringify(selection)])).rows[0]).text;
+        const duplicate = await tx.client.query(
+          `SELECT 1 FROM ${table(tx, 'sources')} WHERE provider='github' AND account_namespace=$1 AND owner_membership_id=$2 AND state<>'removed' AND id<>$3 AND md5(selection)=md5($4)`,
+          [s.binding.githubUserId, s.owner_membership_id, sourceId, text],
         );
-      if (replay) {
-        if (replay.fingerprint !== fingerprint) throw new KnowledgeError('conflict');
-        return dto(tx, s);
-      }
-      if (s.state === 'removed') throw new KnowledgeError('conflict');
-      const { kinds: _kinds, excludePaths: _paths, after: _after, ...kept } = s.selection;
-      const selection = githubCorpusSelectionSchema.parse({
-        ...kept,
-        kinds: input.kinds,
-        ...(input.excludePaths.length ? { excludePaths: input.excludePaths } : {}),
-        ...(input.after ? { after: input.after } : {}),
-      });
-      const known = new Set((await repositories(tx, sourceId)).map(r => r.repository_id));
-      if (excluded.some(id => !known.has(id))) throw new GitHubCorpusError('invalid-selection');
-      const text = z
-        .object({ text: z.string() })
-        .parse((await tx.client.query('SELECT $1::jsonb::text AS text', [JSON.stringify(selection)])).rows[0]).text;
-      const duplicate = await tx.client.query(
-        `SELECT 1 FROM ${table(tx, 'sources')} WHERE provider='github' AND account_namespace=$1 AND owner_membership_id=$2 AND state<>'removed' AND id<>$3 AND md5(selection)=md5($4)`,
-        [s.binding.githubUserId, s.owner_membership_id, sourceId, text],
-      );
-      if (duplicate.rowCount) throw new KnowledgeError('conflict');
-      await tx.client.query(`UPDATE ${table(tx, 'sources')} SET selection=$2 WHERE id=$1`, [sourceId, text]);
-      await tx.client.query(
-        `UPDATE ${table(tx, 'github_sources')} SET selection=$2::jsonb,cursor=$3,reconciliation=reconciliation+1,generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=clock_timestamp(),sync_state='queued',failure=NULL WHERE source_id=$1`,
-        [sourceId, text, initialCursor()],
-      );
-      const newlyExcluded = z
-        .array(z.object({ repository_id: z.string() }))
-        .parse(
-          (
-            await tx.client.query(
-              `UPDATE ${table(tx, 'github_repositories')} SET excluded=true WHERE source_id=$1 AND NOT excluded AND repository_id=ANY($2::text[]) RETURNING repository_id`,
-              [sourceId, excluded],
-            )
-          ).rows,
-        )
-        .map(row => row.repository_id);
-      const included = z
-        .array(z.object({ repository_id: z.string() }))
-        .parse(
-          (
-            await tx.client.query(
-              `UPDATE ${table(tx, 'github_repositories')} SET excluded=false WHERE source_id=$1 AND excluded AND NOT repository_id=ANY($2::text[]) RETURNING repository_id`,
-              [sourceId, excluded],
-            )
-          ).rows,
-        )
-        .map(row => row.repository_id);
-      if (s.selection.scope !== 'all') await handOver(tx, s.owner_membership_id, [...newlyExcluded, ...included]);
-      const kinds = selection.kinds.map(kind => itemKinds[kind]);
-      await tx.client.query(
-        `UPDATE ${table(tx, 'documents')} d SET tombstoned_at=COALESCE(d.tombstoned_at,clock_timestamp()),retain_until=COALESCE(d.retain_until,clock_timestamp()+interval '30 days'),lexical_publication_id=NULL
-        FROM ${table(tx, 'github_items')} i WHERE i.source_id=$1 AND d.id=i.document_id AND (i.repository_id=ANY($2::text[]) OR NOT i.kind=ANY($3::text[]))`,
-        [sourceId, newlyExcluded, kinds],
-      );
-      await tx.client.query(
-        `DELETE FROM ${table(tx, 'access_proofs')} p USING ${table(tx, 'github_items')} i
-        WHERE i.source_id=$1 AND p.document_id=i.document_id AND (i.repository_id=ANY($2::text[]) OR NOT i.kind=ANY($3::text[]))`,
-        [sourceId, newlyExcluded, kinds],
-      );
-      for (const repositoryId of newlyExcluded) await invalidate(tx, sourceId, repositoryId);
-      // Commits left coverage, so a later pass that brings them back must list the whole history again.
-      if (storesCommits(tx))
+        if (duplicate.rowCount) throw new KnowledgeError('conflict');
+        await tx.client.query(`UPDATE ${table(tx, 'sources')} SET selection=$2 WHERE id=$1`, [sourceId, text]);
         await tx.client.query(
-          `UPDATE ${table(tx, 'github_repositories')} SET commit_head=NULL WHERE source_id=$1 AND ($2 OR repository_id=ANY($3::text[]))`,
-          [sourceId, !selection.kinds.includes('commits'), newlyExcluded],
+          `UPDATE ${table(tx, 'github_sources')} SET selection=$2::jsonb,cursor=$3,reconciliation=reconciliation+1,generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=clock_timestamp(),sync_state='queued',failure=NULL WHERE source_id=$1`,
+          [sourceId, text, initialCursor()],
         );
-      await tx.client.query(`INSERT INTO ${table(tx, 'github_commands')} VALUES ($1,$2,$3)`, [
-        input.commandId,
-        sourceId,
-        fingerprint,
-      ]);
-      return dto(tx, await source(tx, sourceId));
-    });
+        const newlyExcluded = z
+          .array(z.object({ repository_id: z.string() }))
+          .parse(
+            (
+              await tx.client.query(
+                `UPDATE ${table(tx, 'github_repositories')} SET excluded=true WHERE source_id=$1 AND NOT excluded AND repository_id=ANY($2::text[]) RETURNING repository_id`,
+                [sourceId, excluded],
+              )
+            ).rows,
+          )
+          .map(row => row.repository_id);
+        const included = z
+          .array(z.object({ repository_id: z.string() }))
+          .parse(
+            (
+              await tx.client.query(
+                `UPDATE ${table(tx, 'github_repositories')} SET excluded=false WHERE source_id=$1 AND excluded AND NOT repository_id=ANY($2::text[]) RETURNING repository_id`,
+                [sourceId, excluded],
+              )
+            ).rows,
+          )
+          .map(row => row.repository_id);
+        if (s.selection.scope !== 'all') await handOver(tx, s.owner_membership_id, [...newlyExcluded, ...included]);
+        const kinds = selection.kinds.map(kind => itemKinds[kind]);
+        await tx.client.query(
+          `UPDATE ${table(tx, 'documents')} d SET tombstoned_at=COALESCE(d.tombstoned_at,clock_timestamp()),retain_until=COALESCE(d.retain_until,clock_timestamp()+interval '30 days'),lexical_publication_id=NULL
+        FROM ${table(tx, 'github_items')} i WHERE i.source_id=$1 AND d.id=i.document_id AND (i.repository_id=ANY($2::text[]) OR NOT i.kind=ANY($3::text[]))`,
+          [sourceId, newlyExcluded, kinds],
+        );
+        await tx.client.query(
+          `DELETE FROM ${table(tx, 'access_proofs')} p USING ${table(tx, 'github_items')} i
+        WHERE i.source_id=$1 AND p.document_id=i.document_id AND (i.repository_id=ANY($2::text[]) OR NOT i.kind=ANY($3::text[]))`,
+          [sourceId, newlyExcluded, kinds],
+        );
+        for (const repositoryId of newlyExcluded) await invalidate(tx, sourceId, repositoryId);
+        // Commits left coverage, so a later pass that brings them back must list the whole history again.
+        if (storesCommits(tx))
+          await tx.client.query(
+            `UPDATE ${table(tx, 'github_repositories')} SET commit_head=NULL WHERE source_id=$1 AND ($2 OR repository_id=ANY($3::text[]))`,
+            [sourceId, !selection.kinds.includes('commits'), newlyExcluded],
+          );
+        await tx.client.query(`INSERT INTO ${table(tx, 'github_commands')} VALUES ($1,$2,$3)`, [
+          input.commandId,
+          sourceId,
+          fingerprint,
+        ]);
+        return dto(tx, await source(tx, sourceId));
+      },
+      true,
+    );
   }
   // One authoritative repository check with the reader's own linked GitHub accounts. Failures never renew evidence.
   async function check(workspaceId: string, actor: HumanActor, sourceId: string, repositoryId: string, owner: boolean) {
-    const captured = await memberTransaction(workspaceId, actor.userId, async (tx, human) => {
-      if (human.membershipId !== actor.membershipId) throw new AccessDenied();
-      const s = await source(tx, sourceId);
-      await store.source(tx, human, sourceId);
-      if (owner && s.owner_membership_id !== human.membershipId) throw new AccessDenied();
-      const r = repositorySchema
-        .optional()
-        .parse(
+    const captured = await memberTransaction(
+      workspaceId,
+      actor.userId,
+      async (tx, human) => {
+        if (human.membershipId !== actor.membershipId) throw new AccessDenied();
+        const s = await source(tx, sourceId);
+        await store.source(tx, human, sourceId);
+        if (owner && s.owner_membership_id !== human.membershipId) throw new AccessDenied();
+        const r = repositorySchema
+          .optional()
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT repository_id,full_name,visibility,title,state,failure,excluded FROM ${table(tx, 'github_repositories')} WHERE source_id=$1 AND repository_id=$2`,
+                [sourceId, repositoryId],
+              )
+            ).rows[0],
+          );
+        if (!r) throw new AccessDenied();
+        const readers = z.array(readerSchema).parse(
           (
             await tx.client.query(
-              `SELECT repository_id,full_name,visibility,title,state,failure,excluded FROM ${table(tx, 'github_repositories')} WHERE source_id=$1 AND repository_id=$2`,
-              [sourceId, repositoryId],
-            )
-          ).rows[0],
-        );
-      if (!r) throw new AccessDenied();
-      const readers = z.array(readerSchema).parse(
-        (
-          await tx.client.query(
-            `SELECT account_id,account_generation,github_user_id,login FROM ${table(tx, 'github_readers')} WHERE source_id=$1 AND membership_id=$2
+              `SELECT account_id,account_generation,github_user_id,login FROM ${table(tx, 'github_readers')} WHERE source_id=$1 AND membership_id=$2
         ORDER BY (account_id::text=$3) DESC,created_at,account_id LIMIT 3`,
-            [sourceId, human.membershipId, s.binding.accountId],
-          )
-        ).rows,
-      );
-      if (!readers.length) throw new AccessDenied();
-      await tx.client.query(
-        `INSERT INTO ${table(tx, 'github_access')} (source_id,repository_id,membership_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
-        [sourceId, repositoryId, human.membershipId],
-      );
-      const fence = z
-        .object({ generation: z.string() })
-        .parse(
-          (
-            await tx.client.query(
-              `SELECT generation FROM ${table(tx, 'github_access')} WHERE source_id=$1 AND repository_id=$2 AND membership_id=$3`,
-              [sourceId, repositoryId, human.membershipId],
+              [sourceId, human.membershipId, s.binding.accountId],
             )
-          ).rows[0],
-        ).generation;
-      const bindings = readers.map(reader =>
-        githubCorpusBindingSchema.parse({
-          accountId: reader.account_id,
-          accountGeneration: reader.account_generation,
-          githubUserId: reader.github_user_id,
-          login: reader.login,
-        }),
-      );
-      return { s, r, bindings: owner ? bindings.slice(0, 1) : bindings, fence };
-    });
+          ).rows,
+        );
+        if (!readers.length) throw new AccessDenied();
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'github_access')} (source_id,repository_id,membership_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+          [sourceId, repositoryId, human.membershipId],
+        );
+        const fence = z
+          .object({ generation: z.string() })
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT generation FROM ${table(tx, 'github_access')} WHERE source_id=$1 AND repository_id=$2 AND membership_id=$3`,
+                [sourceId, repositoryId, human.membershipId],
+              )
+            ).rows[0],
+          ).generation;
+        const bindings = readers.map(reader =>
+          githubCorpusBindingSchema.parse({
+            accountId: reader.account_id,
+            accountGeneration: reader.account_generation,
+            githubUserId: reader.github_user_id,
+            login: reader.login,
+          }),
+        );
+        return { s, r, bindings: owner ? bindings.slice(0, 1) : bindings, fence };
+      },
+      true,
+    );
     if ((!owner && captured.r.state !== 'active') || captured.r.excluded) return false;
     let result: { observed: GitHubRepositoryAccess; binding: GitHubCorpusBinding } | null = null;
     let failure: GitHubCorpusError | null = null;
@@ -1032,59 +1048,68 @@ export function createGitHubKnowledge({
     }
     if (!result) {
       const error = failure ?? new GitHubCorpusError('forbidden');
-      await transaction(workspaceId, async tx => {
-        if (owner && ownerDenials.includes(error.code)) await unavailable(tx, sourceId, repositoryId, error.code);
-        else await invalidate(tx, sourceId, repositoryId, actor.membershipId);
-      });
+      await transaction(
+        workspaceId,
+        async tx => {
+          if (owner && ownerDenials.includes(error.code)) await unavailable(tx, sourceId, repositoryId, error.code);
+          else await invalidate(tx, sourceId, repositoryId, actor.membershipId);
+        },
+        'write',
+      );
       throw error;
     }
     const { observed, binding } = result;
-    return memberTransaction(workspaceId, actor.userId, async (tx, human) => {
-      const s = await source(tx, sourceId);
-      await store.source(tx, human, sourceId);
-      if (s.access_epoch !== captured.s.access_epoch || s.state !== 'active') throw new KnowledgeError('superseded');
-      const current = await tx.client.query(
-        `SELECT 1 FROM ${table(tx, 'github_readers')} WHERE source_id=$1 AND membership_id=$2 AND account_id=$3 AND account_generation=$4 AND github_user_id=$5`,
-        [sourceId, human.membershipId, binding.accountId, binding.accountGeneration, binding.githubUserId],
-      );
-      if (!current.rowCount) throw new AccessDenied();
-      const checked = new Date(observed.accessedAt);
-      const now = z
-        .object({ now: z.date() })
-        .parse((await tx.client.query('SELECT clock_timestamp() AS now')).rows[0]).now;
-      if (!Number.isFinite(checked.getTime()) || checked > now || checked.getTime() + 300000 <= now.getTime())
-        throw new KnowledgeError('permission-expired');
-      const advanced = await tx.client.query(
-        `UPDATE ${table(tx, 'github_access')} SET binding=$5,observed_at=$4,expires_at=$4::timestamptz+interval '5 minutes' WHERE source_id=$1 AND repository_id=$2 AND membership_id=$3 AND generation=$6 AND (observed_at IS NULL OR observed_at<=$4)`,
-        [sourceId, repositoryId, human.membershipId, checked, binding, captured.fence],
-      );
-      if (!advanced.rowCount) throw new KnowledgeError('superseded');
-      if (owner)
-        await tx.client.query(
-          storesOwner(tx)
-            ? `UPDATE ${table(tx, 'github_repositories')} SET state='active',failure=NULL,full_name=$3,visibility=$4,title=$5,owner_id=COALESCE($6,owner_id) WHERE source_id=$1 AND repository_id=$2`
-            : `UPDATE ${table(tx, 'github_repositories')} SET state='active',failure=NULL,full_name=$3,visibility=$4,title=$5 WHERE source_id=$1 AND repository_id=$2`,
-          [
-            sourceId,
-            repositoryId,
-            observed.fullName,
-            observed.visibility,
-            observed.title.slice(0, 512) || observed.fullName,
-            ...(storesOwner(tx) ? [observed.ownerId ?? null] : []),
-          ],
+    return memberTransaction(
+      workspaceId,
+      actor.userId,
+      async (tx, human) => {
+        const s = await source(tx, sourceId);
+        await store.source(tx, human, sourceId);
+        if (s.access_epoch !== captured.s.access_epoch || s.state !== 'active') throw new KnowledgeError('superseded');
+        const current = await tx.client.query(
+          `SELECT 1 FROM ${table(tx, 'github_readers')} WHERE source_id=$1 AND membership_id=$2 AND account_id=$3 AND account_generation=$4 AND github_user_id=$5`,
+          [sourceId, human.membershipId, binding.accountId, binding.accountGeneration, binding.githubUserId],
         );
-      const r = repositorySchema.parse(
-        (
+        if (!current.rowCount) throw new AccessDenied();
+        const checked = new Date(observed.accessedAt);
+        const now = z
+          .object({ now: z.date() })
+          .parse((await tx.client.query('SELECT clock_timestamp() AS now')).rows[0]).now;
+        if (!Number.isFinite(checked.getTime()) || checked > now || checked.getTime() + 300000 <= now.getTime())
+          throw new KnowledgeError('permission-expired');
+        const advanced = await tx.client.query(
+          `UPDATE ${table(tx, 'github_access')} SET binding=$5,observed_at=$4,expires_at=$4::timestamptz+interval '5 minutes' WHERE source_id=$1 AND repository_id=$2 AND membership_id=$3 AND generation=$6 AND (observed_at IS NULL OR observed_at<=$4)`,
+          [sourceId, repositoryId, human.membershipId, checked, binding, captured.fence],
+        );
+        if (!advanced.rowCount) throw new KnowledgeError('superseded');
+        if (owner)
           await tx.client.query(
-            `SELECT repository_id,full_name,visibility,title,state,failure,excluded FROM ${table(tx, 'github_repositories')} WHERE source_id=$1 AND repository_id=$2`,
-            [sourceId, repositoryId],
-          )
-        ).rows[0],
-      );
-      if (r.state !== 'active') return false;
-      await project(tx, sourceId, repositoryId, human.membershipId);
-      return true;
-    });
+            storesOwner(tx)
+              ? `UPDATE ${table(tx, 'github_repositories')} SET state='active',failure=NULL,full_name=$3,visibility=$4,title=$5,owner_id=COALESCE($6,owner_id) WHERE source_id=$1 AND repository_id=$2`
+              : `UPDATE ${table(tx, 'github_repositories')} SET state='active',failure=NULL,full_name=$3,visibility=$4,title=$5 WHERE source_id=$1 AND repository_id=$2`,
+            [
+              sourceId,
+              repositoryId,
+              observed.fullName,
+              observed.visibility,
+              observed.title.slice(0, 512) || observed.fullName,
+              ...(storesOwner(tx) ? [observed.ownerId ?? null] : []),
+            ],
+          );
+        const r = repositorySchema.parse(
+          (
+            await tx.client.query(
+              `SELECT repository_id,full_name,visibility,title,state,failure,excluded FROM ${table(tx, 'github_repositories')} WHERE source_id=$1 AND repository_id=$2`,
+              [sourceId, repositoryId],
+            )
+          ).rows[0],
+        );
+        if (r.state !== 'active') return false;
+        await project(tx, sourceId, repositoryId, human.membershipId);
+        return true;
+      },
+      true,
+    );
   }
   async function renew(workspaceId: string, userId: string, sourceId: string, limit: number, staleOnly: boolean) {
     const captured = await memberRead(workspaceId, userId, async (tx, actor) => {

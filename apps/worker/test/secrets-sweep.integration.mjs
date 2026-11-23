@@ -68,7 +68,7 @@ test('the secrets sweep ends the forms and temporary secrets of a deleted chat',
     prompt: request.purpose,
     answerSchema: { kind: 'secrets', secretRequestId: answered },
   });
-  await services.secrets.transaction(w.id, tx =>
+  await services.secrets.transaction(w.id, 'write', tx =>
     services.requests.create(tx, {
       id: answered,
       membershipId: w.membershipId,
@@ -83,7 +83,7 @@ test('the secrets sweep ends the forms and temporary secrets of a deleted chat',
   });
   assert.equal(provided.status, 'provided');
   const waiting = randomUUID();
-  await services.secrets.transaction(w.id, tx =>
+  await services.secrets.transaction(w.id, 'write', tx =>
     services.requests.create(tx, {
       id: waiting,
       membershipId: w.membershipId,

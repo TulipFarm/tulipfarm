@@ -154,7 +154,7 @@ export function createSystemPackages(options: Options) {
     workspaceId: string,
     user: string,
     action: (tx: Transaction, actor: HumanActor) => Promise<T>,
-    mode: 'read' | 'write' = 'write',
+    mode: 'read' | 'write',
   ) {
     return runtime.transaction(z.uuid().parse(workspaceId), systemPackageCompatibility, async tx => {
       const actor = await lockAndResolveHuman(tx, user, mode);
@@ -461,8 +461,11 @@ export function createSystemPackages(options: Options) {
   }
   async function validate(workspaceId: string, user: string, value: unknown) {
     const input = validateSystemPackageSchema.parse(value);
-    return transaction(workspaceId, user, (tx, actor) =>
-      preflight(tx, actor, workspaceId, input.package, input.bindings),
+    return transaction(
+      workspaceId,
+      user,
+      (tx, actor) => preflight(tx, actor, workspaceId, input.package, input.bindings),
+      'write',
     );
   }
   async function create(workspaceId: string, user: string, value: unknown) {
@@ -473,121 +476,131 @@ export function createSystemPackages(options: Options) {
         input.approval.inputDigest !== packageDigest({ package: input.package, bindings: input.bindings }))
     )
       throw new SystemPackageError('review-digest-conflict');
-    const created = await transaction(workspaceId, user, async (tx, actor) => {
-      await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 734812))', [
-        `${tx.schema}:${actor.membershipId}:${input.requestId}`,
-      ]);
-      const previous = (
-        await tx.client.query(
-          `SELECT id FROM ${relation(tx, 'tf_system_package_installations')} WHERE membership_id=$1 AND request_id=$2`,
-          [actor.membershipId, input.requestId],
-        )
-      ).rows[0];
-      if (previous) {
-        const row = await load(tx, actor, z.uuid().parse(previous.id));
-        if (
-          !same(row.package, input.package) ||
-          !same(row.bindings, input.bindings) ||
-          row.conversation_id !== (input.chatId ?? null)
-        )
-          throw new SystemPackageError('idempotency-conflict');
-        return view(workspaceId, row);
-      }
-      if (input.chatId) await chatAccess(tx, actor, input.chatId);
-      const id = randomUUID();
-      const report = await preflight(tx, actor, workspaceId, input.package, input.bindings, id);
-      if (!report.valid) throw new SystemPackageError('package-preflight-failed', 400);
-      const compiler = packageCompiler(input.package, input.bindings, id);
-      const resources = new Map(input.package.resources.map(resource => [resource.key, resource]));
-      const identities = Object.fromEntries(
-        input.package.resources.map(resource => [
-          resource.key,
-          resource.kind === 'integration' ? compiler.integration(resource) : compiler.id(resource.key),
-        ]),
-      );
-      const nodes: InstallationNode[] = report.order.map(key => {
-        const resource = resources.get(key)!;
-        return {
-          key,
+    const created = await transaction(
+      workspaceId,
+      user,
+      async (tx, actor) => {
+        await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 734812))', [
+          `${tx.schema}:${actor.membershipId}:${input.requestId}`,
+        ]);
+        const previous = (
+          await tx.client.query(
+            `SELECT id FROM ${relation(tx, 'tf_system_package_installations')} WHERE membership_id=$1 AND request_id=$2`,
+            [actor.membershipId, input.requestId],
+          )
+        ).rows[0];
+        if (previous) {
+          const row = await load(tx, actor, z.uuid().parse(previous.id));
+          if (
+            !same(row.package, input.package) ||
+            !same(row.bindings, input.bindings) ||
+            row.conversation_id !== (input.chatId ?? null)
+          )
+            throw new SystemPackageError('idempotency-conflict');
+          return view(workspaceId, row);
+        }
+        if (input.chatId) await chatAccess(tx, actor, input.chatId);
+        const id = randomUUID();
+        const report = await preflight(tx, actor, workspaceId, input.package, input.bindings, id);
+        if (!report.valid) throw new SystemPackageError('package-preflight-failed', 400);
+        const compiler = packageCompiler(input.package, input.bindings, id);
+        const resources = new Map(input.package.resources.map(resource => [resource.key, resource]));
+        const identities = Object.fromEntries(
+          input.package.resources.map(resource => [
+            resource.key,
+            resource.kind === 'integration' ? compiler.integration(resource) : compiler.id(resource.key),
+          ]),
+        );
+        const nodes: InstallationNode[] = report.order.map(key => {
+          const resource = resources.get(key)!;
+          return {
+            key,
+            attempt: 0,
+            kind: resource.kind,
+            title: nodeTitle(resource),
+            dependsOn: installationDependencies(input.package, resource),
+            state: 'pending',
+            resourceId: identities[key]!,
+            revision: null,
+            error: null,
+            review: null,
+            definition: resource,
+          };
+        });
+        nodes.push({
+          key: '$verify',
           attempt: 0,
-          kind: resource.kind,
-          title: nodeTitle(resource),
-          dependsOn: installationDependencies(input.package, resource),
+          kind: 'verify',
+          title: 'Verify every installed resource',
+          dependsOn: report.order,
           state: 'pending',
-          resourceId: identities[key]!,
+          resourceId: null,
           revision: null,
           error: null,
           review: null,
-          definition: resource,
-        };
-      });
-      nodes.push({
-        key: '$verify',
-        attempt: 0,
-        kind: 'verify',
-        title: 'Verify every installed resource',
-        dependsOn: report.order,
-        state: 'pending',
-        resourceId: null,
-        revision: null,
-        error: null,
-        review: null,
-        definition: null,
-      });
-      await tx.client.query(
-        `INSERT INTO ${relation(tx, 'tf_system_package_installations')}
+          definition: null,
+        });
+        await tx.client.query(
+          `INSERT INTO ${relation(tx, 'tf_system_package_installations')}
         (id,membership_id,user_id,request_id,conversation_id,package_digest,input_digest,package,bindings,identities,nodes)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-        [
-          id,
-          actor.membershipId,
-          actor.userId,
-          input.requestId,
-          input.chatId ?? null,
-          report.packageDigest,
-          report.inputDigest,
-          input.package,
-          input.bindings,
-          identities,
-          JSON.stringify(nodes),
-        ],
-      );
-      return view(workspaceId, await load(tx, actor, id));
-    });
+          [
+            id,
+            actor.membershipId,
+            actor.userId,
+            input.requestId,
+            input.chatId ?? null,
+            report.packageDigest,
+            report.inputDigest,
+            input.package,
+            input.bindings,
+            identities,
+            JSON.stringify(nodes),
+          ],
+        );
+        return view(workspaceId, await load(tx, actor, id));
+      },
+      'write',
+    );
     return input.approval ? approve(workspaceId, user, created.id, input.approval) : created;
   }
   async function approve(workspaceId: string, user: string, id: string, value: unknown) {
     const input = installationApprovalSchema.parse(value);
-    return transaction(workspaceId, user, async (tx, actor) => {
-      const row = await load(tx, actor, id);
-      if (row.package_digest !== input.packageDigest || row.input_digest !== input.inputDigest)
-        throw new SystemPackageError('review-digest-conflict');
-      if (row.package_approved && !row.nodes.some(node => node.state === 'waiting-review'))
-        return view(workspaceId, row);
-      if (!row.package_approved) {
-        await withMaintenanceTransaction({
-          connectionString: await options.resolveConfirmationCredential(workspaceId),
-          workspaceId,
-          capability: 'confirmation',
-          operation: async confirmation => {
-            await confirmation.client.query(
-              `INSERT INTO ${relation(confirmation, 'tf_system_package_reviews')}
+    return transaction(
+      workspaceId,
+      user,
+      async (tx, actor) => {
+        const row = await load(tx, actor, id);
+        if (row.package_digest !== input.packageDigest || row.input_digest !== input.inputDigest)
+          throw new SystemPackageError('review-digest-conflict');
+        if (row.package_approved && !row.nodes.some(node => node.state === 'waiting-review'))
+          return view(workspaceId, row);
+        if (!row.package_approved) {
+          await withMaintenanceTransaction({
+            connectionString: await options.resolveConfirmationCredential(workspaceId),
+            workspaceId,
+            capability: 'confirmation',
+            operation: async confirmation => {
+              await confirmation.client.query(
+                `INSERT INTO ${relation(confirmation, 'tf_system_package_reviews')}
              (installation_id,resource_key,membership_id,request_id,digest,decision,attempt)
              VALUES($1,'$package',$2,$3,$4,'approve',0)
              ON CONFLICT (installation_id,resource_key,attempt) DO NOTHING`,
-              [row.id, actor.membershipId, packageIdentity(row.id, 'approve-package'), row.input_digest],
-            );
-          },
-        });
-      }
-      const approved = await load(tx, actor, id);
-      if (!approved.package_approved) throw new SystemPackageError('review-digest-conflict');
-      for (const node of approved.nodes) {
-        if (node.state === 'waiting-review') node.state = 'running';
-      }
-      await persist(tx, approved);
-      return view(workspaceId, approved);
-    });
+                [row.id, actor.membershipId, packageIdentity(row.id, 'approve-package'), row.input_digest],
+              );
+            },
+          });
+        }
+        const approved = await load(tx, actor, id);
+        if (!approved.package_approved) throw new SystemPackageError('review-digest-conflict');
+        for (const node of approved.nodes) {
+          if (node.state === 'waiting-review') node.state = 'running';
+        }
+        await persist(tx, approved);
+        return view(workspaceId, approved);
+      },
+      'write',
+    );
   }
   async function prepare(
     tx: Transaction,
@@ -1365,143 +1378,154 @@ export function createSystemPackages(options: Options) {
   }
   async function resume(workspaceId: string, user: string, id: string, value: unknown) {
     const input = installationResumeSchema.parse(value);
-    return transaction(workspaceId, user, async (tx, actor) => {
-      const row = await load(tx, actor, id);
-      if (row.version !== input.expectedVersion) throw new SystemPackageError('installation-version-conflict');
-      if (row.status === 'completed') return view(workspaceId, row);
-      for (const node of row.nodes) {
-        const before = structuredClone(node);
-        await tx.client.query('SAVEPOINT package_recovery');
-        try {
-          await recoverTable(tx, actor, workspaceId, row, node);
-          await tx.client.query('RELEASE SAVEPOINT package_recovery');
-        } catch (error) {
-          await tx.client.query('ROLLBACK TO SAVEPOINT package_recovery');
-          await tx.client.query('RELEASE SAVEPOINT package_recovery');
-          Object.assign(node, before);
-          node.state = 'blocked';
-          node.error =
-            error instanceof SystemPackageError
-              ? error.code
-              : error instanceof AccessDenied
-                ? 'resource-access-denied'
-                : 'table-recovery-unavailable';
-          continue;
-        }
-        if (node.state === 'blocked' && node.error !== 'review-rejected') {
-          if (node.error?.startsWith('table-recovery-')) continue;
-          node.state = node.review ? 'running' : 'pending';
-          node.error = null;
-        }
-      }
-      await tx.client.query(`UPDATE ${relation(tx, 'tf_system_package_installations')} SET nodes=$2 WHERE id=$1`, [
-        row.id,
-        JSON.stringify(row.nodes),
-      ]);
-      const resources = new Map(row.package.resources.map(resource => [resource.key, resource]));
-      for (const node of row.nodes) {
-        if (node.state === 'completed' || node.state === 'failed' || node.state === 'blocked') continue;
-        if (node.dependsOn.some(key => row.nodes.find(node => node.key === key)?.state !== 'completed')) continue;
-        if (node.kind === 'table' && node.revision !== null && node.state === 'saved') {
-          const group = cyclicTableGroup(row.package, node.key);
-          if (group?.some(table => row.nodes.find(node => node.key === table.key)?.revision === null)) continue;
-        }
-        const before = structuredClone(node);
-        await tx.client.query('SAVEPOINT package_step');
-        try {
-          if (node.kind === 'verify') {
-            await verify(tx, actor, workspaceId, row);
-            node.state = 'completed';
-            node.error = null;
-          } else {
-            const resource = resources.get(node.key)!;
-            if (!node.review) {
-              await prepare(tx, actor, workspaceId, row, node, resource);
-              if (row.package_approved) node.state = 'running';
-            } else await apply(tx, actor, workspaceId, row, node, resource);
+    return transaction(
+      workspaceId,
+      user,
+      async (tx, actor) => {
+        const row = await load(tx, actor, id);
+        if (row.version !== input.expectedVersion) throw new SystemPackageError('installation-version-conflict');
+        if (row.status === 'completed') return view(workspaceId, row);
+        for (const node of row.nodes) {
+          const before = structuredClone(node);
+          await tx.client.query('SAVEPOINT package_recovery');
+          try {
+            await recoverTable(tx, actor, workspaceId, row, node);
+            await tx.client.query('RELEASE SAVEPOINT package_recovery');
+          } catch (error) {
+            await tx.client.query('ROLLBACK TO SAVEPOINT package_recovery');
+            await tx.client.query('RELEASE SAVEPOINT package_recovery');
+            Object.assign(node, before);
+            node.state = 'blocked';
+            node.error =
+              error instanceof SystemPackageError
+                ? error.code
+                : error instanceof AccessDenied
+                  ? 'resource-access-denied'
+                  : 'table-recovery-unavailable';
+            continue;
           }
-          await tx.client.query('RELEASE SAVEPOINT package_step');
-          await tx.client.query(`UPDATE ${relation(tx, 'tf_system_package_installations')} SET nodes=$2 WHERE id=$1`, [
-            row.id,
-            JSON.stringify(row.nodes),
-          ]);
-          if (node.state !== 'completed' && node.state !== 'saved') break;
-        } catch (error) {
-          await tx.client.query('ROLLBACK TO SAVEPOINT package_step');
-          Object.assign(node, before);
-          node.state = 'blocked';
-          node.error =
-            error instanceof SystemPackageError
-              ? error.code
-              : error instanceof AccessDenied
-                ? 'resource-access-denied'
-                : error instanceof Error && 'code' in error && typeof error.code === 'string'
-                  ? error.code
-                  : 'resource-operation-unavailable';
-          break;
+          if (node.state === 'blocked' && node.error !== 'review-rejected') {
+            if (node.error?.startsWith('table-recovery-')) continue;
+            node.state = node.review ? 'running' : 'pending';
+            node.error = null;
+          }
         }
-      }
-      await persist(tx, row);
-      return view(workspaceId, row);
-    });
+        await tx.client.query(`UPDATE ${relation(tx, 'tf_system_package_installations')} SET nodes=$2 WHERE id=$1`, [
+          row.id,
+          JSON.stringify(row.nodes),
+        ]);
+        const resources = new Map(row.package.resources.map(resource => [resource.key, resource]));
+        for (const node of row.nodes) {
+          if (node.state === 'completed' || node.state === 'failed' || node.state === 'blocked') continue;
+          if (node.dependsOn.some(key => row.nodes.find(node => node.key === key)?.state !== 'completed')) continue;
+          if (node.kind === 'table' && node.revision !== null && node.state === 'saved') {
+            const group = cyclicTableGroup(row.package, node.key);
+            if (group?.some(table => row.nodes.find(node => node.key === table.key)?.revision === null)) continue;
+          }
+          const before = structuredClone(node);
+          await tx.client.query('SAVEPOINT package_step');
+          try {
+            if (node.kind === 'verify') {
+              await verify(tx, actor, workspaceId, row);
+              node.state = 'completed';
+              node.error = null;
+            } else {
+              const resource = resources.get(node.key)!;
+              if (!node.review) {
+                await prepare(tx, actor, workspaceId, row, node, resource);
+                if (row.package_approved) node.state = 'running';
+              } else await apply(tx, actor, workspaceId, row, node, resource);
+            }
+            await tx.client.query('RELEASE SAVEPOINT package_step');
+            await tx.client.query(
+              `UPDATE ${relation(tx, 'tf_system_package_installations')} SET nodes=$2 WHERE id=$1`,
+              [row.id, JSON.stringify(row.nodes)],
+            );
+            if (node.state !== 'completed' && node.state !== 'saved') break;
+          } catch (error) {
+            await tx.client.query('ROLLBACK TO SAVEPOINT package_step');
+            Object.assign(node, before);
+            node.state = 'blocked';
+            node.error =
+              error instanceof SystemPackageError
+                ? error.code
+                : error instanceof AccessDenied
+                  ? 'resource-access-denied'
+                  : error instanceof Error && 'code' in error && typeof error.code === 'string'
+                    ? error.code
+                    : 'resource-operation-unavailable';
+            break;
+          }
+        }
+        await persist(tx, row);
+        return view(workspaceId, row);
+      },
+      'write',
+    );
   }
   async function review(workspaceId: string, user: string, id: string, value: unknown) {
     const input = installationReviewSchema.parse(value);
-    return transaction(workspaceId, user, async (tx, actor) => {
-      const row = await load(tx, actor, id);
-      const node = row.nodes.find(node => node.key === input.key && node.kind !== 'verify');
-      if (!node?.review || node.review.digest !== input.digest) throw new SystemPackageError('review-digest-conflict');
-      const previous = (
-        await tx.client.query(
-          `SELECT request_id,digest,decision FROM ${relation(tx, 'tf_system_package_reviews')} WHERE installation_id=$1 AND resource_key=$2 AND attempt=$3`,
-          [row.id, node.key, attempt(row, node.key)],
-        )
-      ).rows[0];
-      if (previous) {
+    return transaction(
+      workspaceId,
+      user,
+      async (tx, actor) => {
+        const row = await load(tx, actor, id);
+        const node = row.nodes.find(node => node.key === input.key && node.kind !== 'verify');
+        if (!node?.review || node.review.digest !== input.digest)
+          throw new SystemPackageError('review-digest-conflict');
+        const previous = (
+          await tx.client.query(
+            `SELECT request_id,digest,decision FROM ${relation(tx, 'tf_system_package_reviews')} WHERE installation_id=$1 AND resource_key=$2 AND attempt=$3`,
+            [row.id, node.key, attempt(row, node.key)],
+          )
+        ).rows[0];
+        if (previous) {
+          if (
+            previous.request_id !== input.requestId ||
+            previous.digest !== input.digest ||
+            previous.decision !== input.decision
+          )
+            throw new SystemPackageError('review-idempotency-conflict');
+          return view(workspaceId, row);
+        }
+        if (row.version !== input.expectedVersion || node.state !== 'waiting-review')
+          throw new SystemPackageError('installation-version-conflict');
         if (
-          previous.request_id !== input.requestId ||
-          previous.digest !== input.digest ||
-          previous.decision !== input.decision
+          (
+            await tx.client.query(
+              `SELECT 1 FROM ${relation(tx, 'tf_system_package_reviews')} WHERE membership_id=$1 AND request_id=$2`,
+              [actor.membershipId, input.requestId],
+            )
+          ).rowCount
         )
           throw new SystemPackageError('review-idempotency-conflict');
-        return view(workspaceId, row);
-      }
-      if (row.version !== input.expectedVersion || node.state !== 'waiting-review')
-        throw new SystemPackageError('installation-version-conflict');
-      if (
-        (
-          await tx.client.query(
-            `SELECT 1 FROM ${relation(tx, 'tf_system_package_reviews')} WHERE membership_id=$1 AND request_id=$2`,
-            [actor.membershipId, input.requestId],
-          )
-        ).rowCount
-      )
-        throw new SystemPackageError('review-idempotency-conflict');
-      await withMaintenanceTransaction({
-        connectionString: await options.resolveConfirmationCredential(workspaceId),
-        workspaceId,
-        capability: 'confirmation',
-        operation: async confirmation => {
-          await confirmation.client.query(
-            `INSERT INTO ${relation(confirmation, 'tf_system_package_reviews')}
+        await withMaintenanceTransaction({
+          connectionString: await options.resolveConfirmationCredential(workspaceId),
+          workspaceId,
+          capability: 'confirmation',
+          operation: async confirmation => {
+            await confirmation.client.query(
+              `INSERT INTO ${relation(confirmation, 'tf_system_package_reviews')}
              (installation_id,resource_key,membership_id,request_id,digest,decision,attempt) VALUES($1,$2,$3,$4,$5,$6,$7)`,
-            [
-              row.id,
-              node.key,
-              actor.membershipId,
-              input.requestId,
-              input.digest,
-              input.decision,
-              attempt(row, node.key),
-            ],
-          );
-        },
-      });
-      node.state = input.decision === 'reject' ? 'blocked' : 'running';
-      node.error = input.decision === 'reject' ? 'review-rejected' : null;
-      await persist(tx, row);
-      return view(workspaceId, row);
-    });
+              [
+                row.id,
+                node.key,
+                actor.membershipId,
+                input.requestId,
+                input.digest,
+                input.decision,
+                attempt(row, node.key),
+              ],
+            );
+          },
+        });
+        node.state = input.decision === 'reject' ? 'blocked' : 'running';
+        node.error = input.decision === 'reject' ? 'review-rejected' : null;
+        await persist(tx, row);
+        return view(workspaceId, row);
+      },
+      'write',
+    );
   }
   return {
     validate,

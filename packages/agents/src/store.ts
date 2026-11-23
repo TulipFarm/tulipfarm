@@ -92,10 +92,11 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
   async function mutation<T>(
     workspaceId: string,
     actor: HumanActor,
+    mode: 'read' | 'write',
     operation: (transaction: AgentTransaction) => Promise<T>,
   ) {
     return storage.transaction(uuidSchema.parse(workspaceId), agentCompatibility, async transaction => {
-      await lockAuthorization(transaction, 'write');
+      await lockAuthorization(transaction, mode);
       await currentMember(transaction, actor);
       return operation(transaction);
     });
@@ -104,7 +105,7 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
   async function saveDefinition(workspaceId: string, actor: HumanActor, agentIdInput: string, input: unknown) {
     const agentId = uuidSchema.parse(agentIdInput);
     agentDefinitionSchema.parse(input);
-    return mutation(workspaceId, actor, async transaction => {
+    return mutation(workspaceId, actor, 'write', async transaction => {
       await requireAgentGrant(transaction, actor, agentId, 'manage');
       throw new AccessDenied();
     });
@@ -119,7 +120,7 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
         requestId: uuidSchema.optional(),
       })
       .parse(input);
-    return mutation(workspaceId, actor, async transaction => {
+    return mutation(workspaceId, actor, 'write', async transaction => {
       await requireAgentPermission(transaction, actor, value.agentId, 'manage');
       await requireActivationAuthority(transaction, actor, value.agentId);
       const item = (
@@ -173,7 +174,7 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
 
   async function configure(workspaceId: string, actor: HumanActor, input: unknown) {
     const value = executionPolicySchema.extend({ agentId: uuidSchema }).parse(input);
-    return mutation(workspaceId, actor, async transaction => {
+    return mutation(workspaceId, actor, 'write', async transaction => {
       await requireAgentPermission(transaction, actor, value.agentId, 'manage');
       const before = await definitionRecommendationAudience(transaction, 'agent', value.agentId);
       const existingTeams = z
@@ -243,7 +244,7 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
 
   async function replaceActivation(workspaceId: string, actor: HumanActor, input: unknown) {
     const value = replaceAgentActivationSchema.extend({ agentId: uuidSchema }).parse(input);
-    return mutation(workspaceId, actor, async transaction => {
+    return mutation(workspaceId, actor, 'write', async transaction => {
       if (!supportsReplacement(transaction)) throw new AgentError('activation-replacement-unavailable', 503);
       await requireAgentPermission(transaction, actor, value.agentId, 'manage');
       await requireActivationAuthority(transaction, actor, value.agentId);
@@ -362,7 +363,7 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
     const value = z
       .strictObject({ agentId: uuidSchema, version: z.number().int().nonnegative(), scope: scopeSchema })
       .parse(input);
-    return mutation(workspaceId, actor, async transaction => {
+    return mutation(workspaceId, actor, 'write', async transaction => {
       await requireAgentPermission(transaction, actor, value.agentId, 'manage');
       await requireActivationAuthority(transaction, actor, value.agentId);
       if (
@@ -447,7 +448,7 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
   async function revoke(workspaceId: string, actor: HumanActor, input: unknown) {
     const value = z.strictObject({ kind: z.enum(['activation', 'run']), id: uuidSchema }).parse(input);
     const tables = { activation: 'tf_agent_activations', run: 'tf_agent_runs' };
-    return mutation(workspaceId, actor, async transaction => {
+    return mutation(workspaceId, actor, 'write', async transaction => {
       let changedDefinition: { id: string; before: Map<string, string> } | undefined;
       if (value.kind === 'run') {
         const run = await loadRun(transaction, value.id);
@@ -484,7 +485,7 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
 
   async function revokeActivation(workspaceId: string, actor: HumanActor, input: unknown) {
     const value = z.strictObject({ agentId: uuidSchema, activationId: uuidSchema }).parse(input);
-    return mutation(workspaceId, actor, async transaction => {
+    return mutation(workspaceId, actor, 'write', async transaction => {
       await requireAgentPermission(transaction, actor, value.agentId, 'manage');
       const before = await definitionRecommendationAudience(transaction, 'agent', value.agentId);
       const changed = await transaction.client.query(

@@ -62,9 +62,13 @@ export function createSlackDirectMessages(options: {
   const { runtime, cipher, files: reading } = options;
   const shared = reading && createAttachments(runtime, reading.bytes);
   const appId = slackId.parse(options.appId);
-  async function transaction<T>(workspaceId: string, operation: (tx: Transaction) => Promise<T>) {
+  async function transaction<T>(
+    workspaceId: string,
+    mode: 'read' | 'write',
+    operation: (tx: Transaction) => Promise<T>,
+  ) {
     return runtime.transaction(z.uuid().parse(workspaceId), compatibility, async tx => {
-      await lockAuthorization(tx, 'write');
+      await lockAuthorization(tx, mode);
       return operation(tx);
     });
   }
@@ -87,7 +91,7 @@ export function createSlackDirectMessages(options: {
     files: SlackFileShare | 'defer' | 'failed' | null,
     adopted = new Set<string>(),
   ) {
-    return transaction(workspaceId, async (tx): Promise<boolean | 'files'> => {
+    return transaction(workspaceId, 'write', async (tx): Promise<boolean | 'files'> => {
       const table = (name: string) => qualified(tx.schema, name);
       await tx.client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1,93572))`, [`${tx.schema}:${eventId}`]);
       const event = z
@@ -134,7 +138,10 @@ export function createSlackDirectMessages(options: {
         files === 'failed'
           ? {
               staged: [],
-              unread: (message.shared_files ?? []).map(file => ({ file, reason: unreadSlackFileLine(file, 'failed') })),
+              unread: (message.shared_files ?? []).map(file => ({
+                file,
+                reason: unreadSlackFileLine(file, 'failed'),
+              })),
             }
           : files === 'defer'
             ? null
@@ -213,7 +220,10 @@ export function createSlackDirectMessages(options: {
       const conversations = createConversations(bound);
       const conversationId = prior?.conversation_id ?? randomUUID();
       if (!prior) {
-        await conversations.create(workspaceId, identity.user_id, { chatId: conversationId, commandId: randomUUID() });
+        await conversations.create(workspaceId, identity.user_id, {
+          chatId: conversationId,
+          commandId: randomUUID(),
+        });
         await tx.client.query(
           `INSERT INTO ${table('tf_slack_dm_roots')} (conversation_id,identity_id,installation_id,generation,channel,root_ts) VALUES ($1,$2,$3,$4,$5,$6)`,
           [conversationId, identity.id, event.installation_id, event.generation, message.channel, rootTs],
@@ -374,7 +384,7 @@ export function createSlackDirectMessages(options: {
     const work = slackPromptWorkSchema.parse(value),
       attemptId = randomUUID();
     if (!(await slackCredentialsReady(runtime, work))) return 'idle';
-    const claim = await transaction(work.workspaceId, async tx => {
+    const claim = await transaction(work.workspaceId, 'write', async tx => {
       const row = await load(tx, work.eventId);
       if (!row || !row.due || !['pending', 'sending', 'retry'].includes(row.state)) return false;
       if (row.state === 'sending') {
@@ -392,7 +402,7 @@ export function createSlackDirectMessages(options: {
       return true;
     });
     if (!claim) return 'idle';
-    return transaction(work.workspaceId, async tx => {
+    return transaction(work.workspaceId, 'write', async tx => {
       const row = await load(tx, work.eventId);
       if (!row || row.state !== 'sending' || row.attempt_id !== attemptId) return 'idle';
       let outcome: BotMessageOutcome = { kind: 'blocked' };

@@ -119,9 +119,9 @@ export function createSlackDefault(
   const { runtime, channels } = options;
   const provider = createChannelProvider(options);
   type Transaction = Parameters<Parameters<typeof runtime.transaction>[2]>[0];
-  const transaction = <T>(workspaceId: string, operation: (tx: Transaction) => Promise<T>) =>
+  const transaction = <T>(workspaceId: string, mode: 'read' | 'write', operation: (tx: Transaction) => Promise<T>) =>
     runtime.transaction(workspaceId, commonCompatibility, async tx => {
-      await lockAuthorization(tx, 'write');
+      await lockAuthorization(tx, mode);
       return operation(tx);
     });
   // Polling runs every few seconds for every workspace, so it only shares the authorization lock; admission and
@@ -234,7 +234,7 @@ export function createSlackDefault(
       await channels.delivery.sources(tx, workspaceId, actor, prior, new Set(), true);
   };
   const threadReaction: SlackThreadReactions = async (context, call) => {
-    const result = await transaction(context.workspaceId, async tx => {
+    const result = await transaction(context.workspaceId, 'write', async tx => {
       const event = z
         .uuid()
         .optional()
@@ -315,7 +315,7 @@ export function createSlackDefault(
     options.compactor,
   );
   async function admit(workspaceId: string, eventId: string) {
-    return transaction(workspaceId, async tx => {
+    return transaction(workspaceId, 'write', async tx => {
       await tx.client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1,93576))`, [`${tx.schema}:${eventId}`]);
       if (
         (await tx.client.query(`SELECT 1 FROM ${table(tx, 'tf_slack_default_turns')} WHERE event_id=$1`, [eventId]))
@@ -512,7 +512,7 @@ export function createSlackDefault(
         if (error instanceof AccessDenied && !(error instanceof SourceAuthorizationUnavailable)) {
           // A rejection is permanent, so it is never silent: it is logged with its reason, and a requester who
           // mentioned the bot gets a reply in the thread saying why.
-          const target = await transaction(workspaceId, tx => recordSlackRejection(tx, event.id));
+          const target = await transaction(workspaceId, 'write', tx => recordSlackRejection(tx, event.id));
           await announceSlackRejection({
             surface: 'default',
             workspaceId,
@@ -530,7 +530,7 @@ export function createSlackDefault(
               : reauthorize
                 ? 300
                 : 30;
-          await transaction(workspaceId, tx =>
+          await transaction(workspaceId, 'write', tx =>
             tx.client.query(
               `INSERT INTO ${table(tx, 'tf_slack_agent_admission_waits')} (event_id,state,next_attempt_at) VALUES ($1,$2,clock_timestamp()+$3*interval '1 second') ON CONFLICT (event_id) DO UPDATE SET state=EXCLUDED.state,next_attempt_at=EXCLUDED.next_attempt_at,attempts=tf_slack_agent_admission_waits.attempts+1`,
               [event.id, reauthorize ? 'reauthorization-required' : 'retry', seconds],
@@ -558,7 +558,7 @@ export function createSlackDefault(
     const { workspaceId, eventId } = work;
     if (!(await slackCredentialsReady(runtime, work))) return 'idle';
     let stopped: Blocked | undefined;
-    const selected = await transaction(workspaceId, async tx => {
+    const selected = await transaction(workspaceId, 'write', async tx => {
       const row = await load(tx, eventId);
       if (!['pending', 'retry'].includes(row.state) || !row.due) return null;
       if (row.model_started && ['failed', 'cancelled', 'blocked'].includes(row.status)) {
@@ -615,7 +615,7 @@ export function createSlackDefault(
           : executor.process(replyWork));
       } catch (error) {
         const denied = error instanceof AccessDenied;
-        const target = await transaction(workspaceId, async tx => {
+        const target = await transaction(workspaceId, 'write', async tx => {
           const updated = await tx.client.query(
             `UPDATE ${table(tx, 'tf_slack_default_turns')} SET state='blocked' WHERE event_id=$1 AND state='pending'`,
             [eventId],
@@ -626,7 +626,7 @@ export function createSlackDefault(
         return 'blocked';
       }
     }
-    const waiting = await transaction(workspaceId, async tx => {
+    const waiting = await transaction(workspaceId, 'write', async tx => {
       const row = await load(tx, eventId);
       if (!['waiting', 'queued', 'processing', 'reconciling'].includes(row.status)) return false;
       await tx.client.query(
@@ -637,14 +637,14 @@ export function createSlackDefault(
     });
     if (waiting) return 'waiting';
     const attempt = randomUUID();
-    const claimed = await transaction(workspaceId, tx =>
+    const claimed = await transaction(workspaceId, 'write', tx =>
       tx.client.query(
         `UPDATE ${table(tx, 'tf_slack_default_turns')} SET state='sending',attempt_id=$2,next_attempt_at=clock_timestamp()+interval '30 seconds' WHERE event_id=$1 AND state IN ('pending','retry') RETURNING event_id`,
         [eventId, attempt],
       ),
     );
     if (!claimed.rowCount) return 'idle';
-    const result = await transaction(workspaceId, async (tx): Promise<string | Blocked> => {
+    const result = await transaction(workspaceId, 'write', async (tx): Promise<string | Blocked> => {
       const row = await load(tx, eventId);
       if (row.state !== 'sending' || row.attempt_id !== attempt) return 'idle';
       // A failed conversation has no result to deliver, so its real reason is reported instead of a delivery block.
@@ -768,7 +768,7 @@ export function createSlackDefault(
     eventId: string,
     clicker: { appId: string; teamId: string; slackUserId: string },
   ): Promise<'retrying' | 'already-retried'> {
-    return transaction(workspaceId, async tx => {
+    return transaction(workspaceId, 'write', async tx => {
       const original = z
         .object({
           installation_id: z.uuid(),
@@ -832,7 +832,7 @@ export function createSlackDefault(
     clicker: { appId: string; teamId: string; slackUserId: string },
     text: string,
   ): Promise<'following-up' | 'busy'> {
-    return transaction(workspaceId, async tx => {
+    return transaction(workspaceId, 'write', async tx => {
       const parent = z
         .object({
           event_id: z.uuid(),
@@ -894,7 +894,7 @@ export function createSlackDefault(
     clicker: { appId: string; teamId: string; slackUserId: string },
     modalId: string,
   ) {
-    return transaction(workspaceId, async tx => {
+    return transaction(workspaceId, 'write', async tx => {
       const turn = z
         .object({ event_id: z.uuid() })
         .optional()
@@ -924,7 +924,7 @@ export function createSlackDefault(
     decision: 'save' | 'dismiss',
     clicker: { appId: string; teamId: string; slackUserId: string },
   ): Promise<'created' | 'updated' | 'deleted' | 'dismissed' | 'stale' | 'decided'> {
-    const userId = await transaction(value.workspaceId, async tx => {
+    const userId = await transaction(value.workspaceId, 'write', async tx => {
       const owner = z
         .object({ user_id: z.string(), membership_id: z.uuid() })
         .optional()

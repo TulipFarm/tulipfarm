@@ -593,16 +593,20 @@ export function createLocalKnowledge({ runtime, files, recognition, recognitionA
     };
   }
 
-  async function jobTransaction<T>(workspaceId: string, operation: (tx: Transaction) => Promise<T>) {
+  async function jobTransaction<T>(
+    workspaceId: string,
+    mode: 'read' | 'write',
+    operation: (tx: Transaction) => Promise<T>,
+  ) {
     return runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async raw => {
       const tx = store.bind(raw);
-      await lockAuthorization(tx, 'write');
+      await lockAuthorization(tx, mode);
       return operation(tx);
     });
   }
   async function due(workspaceId: string): Promise<KnowledgeWork[]> {
     const available = recognitionAvailable ? await recognitionAvailable(workspaceId) : false;
-    return jobTransaction(workspaceId, async tx => {
+    return jobTransaction(workspaceId, 'write', async tx => {
       if (available) await requeueLocalRecognition(tx, mediaLimitsForStorage.sweepBatch);
       await tx.client
         .query(`UPDATE ${table(tx, 'work')} w SET parsing=CASE WHEN w.attempts>=8 THEN 'failed' ELSE 'queued' END,failure=CASE WHEN w.attempts>=8 THEN 'provider' ELSE NULL END
@@ -629,7 +633,7 @@ export function createLocalKnowledge({ runtime, files, recognition, recognitionA
   }
   async function acknowledge(value: KnowledgeWork) {
     const work = knowledgeWorkSchema.parse(value);
-    return jobTransaction(work.workspaceId, async tx => {
+    return jobTransaction(work.workspaceId, 'write', async tx => {
       const result = await tx.client.query(
         `UPDATE ${table(tx, 'jobs')} SET dispatched_at=COALESCE(dispatched_at,clock_timestamp()),dispatch_after=CASE WHEN dispatched_at IS NULL THEN clock_timestamp()+interval '1 minute' ELSE dispatch_after END WHERE revision_id=$1 AND generation=$2 AND lease_token IS NULL`,
         [work.revisionId, work.generation],
@@ -643,7 +647,7 @@ export function createLocalKnowledge({ runtime, files, recognition, recognitionA
     denyMcpEgress();
     const work = knowledgeWorkSchema.parse(value);
     const token = randomUUID();
-    const claim = await jobTransaction(work.workspaceId, async tx => {
+    const claim = await jobTransaction(work.workspaceId, 'write', async tx => {
       const job = jobRow
         .optional()
         .parse(
@@ -660,7 +664,11 @@ export function createLocalKnowledge({ runtime, files, recognition, recognitionA
         (await tx.client.query(`SELECT * FROM ${table(tx, 'local_revisions')} WHERE revision_id=$1`, [work.revisionId]))
           .rows[0],
       );
-      const actor: HumanActor = { kind: 'human', userId: local.owner_user_id, membershipId: local.owner_membership_id };
+      const actor: HumanActor = {
+        kind: 'human',
+        userId: local.owner_user_id,
+        membershipId: local.owner_membership_id,
+      };
       try {
         await currentMember(tx, actor);
       } catch (error) {
@@ -749,7 +757,7 @@ export function createLocalKnowledge({ runtime, files, recognition, recognitionA
                   (error instanceof FileError && error.code === 'integrity')
                 ? 'malformed'
                 : 'provider';
-      return jobTransaction(work.workspaceId, async tx => {
+      return jobTransaction(work.workspaceId, 'write', async tx => {
         const job = await tx.client.query(
           `SELECT 1 FROM ${table(tx, 'jobs')} WHERE revision_id=$1 AND generation=$2 AND lease_token=$3 AND lease_until>clock_timestamp()`,
           [work.revisionId, work.generation, token],

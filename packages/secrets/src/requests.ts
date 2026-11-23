@@ -579,7 +579,7 @@ export function createSecretRequests(secrets: Secrets, config: { settle?: Settle
      * Run by the worker sweep (P11, P46, P47).
      */
     async sweep(workspaceId: string) {
-      const expired = await secrets.transaction(workspaceId, async tx => {
+      const expired = await secrets.transaction(workspaceId, 'write', async tx => {
         const rows = z.array(requestRowSchema).parse(
           (
             await tx.client.query(
@@ -592,7 +592,7 @@ export function createSecretRequests(secrets: Secrets, config: { settle?: Settle
         for (const row of rows) if (await finish(tx, workspaceId, row, { status: 'expired' })) count++;
         return count;
       });
-      const endedChats = await secrets.transaction(workspaceId, async tx => {
+      const endedChats = await secrets.transaction(workspaceId, 'write', async tx => {
         const chats = z.array(z.object({ id: z.uuid() })).parse(
           (
             await tx.client.query(
@@ -609,7 +609,7 @@ export function createSecretRequests(secrets: Secrets, config: { settle?: Settle
         for (const chat of chats) await endOrigin(tx, { kind: 'chat', conversationId: chat.id });
         return chats.length;
       });
-      const endedRuns = await secrets.transaction(workspaceId, async tx => {
+      const endedRuns = await secrets.transaction(workspaceId, 'write', async tx => {
         const runs = z.array(z.object({ task_id: z.uuid(), run_id: z.uuid() })).parse(
           (
             await tx.client.query(

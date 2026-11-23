@@ -304,7 +304,7 @@ export function createWorkflows(
   function transaction<T>(
     workspaceId: string,
     operation: (tx: WorkflowTransaction) => Promise<T>,
-    mode: 'read' | 'write' = 'write',
+    mode: 'read' | 'write',
   ) {
     return workflowTransaction(runtime, workspaceId, operation, mode);
   }
@@ -313,7 +313,7 @@ export function createWorkflows(
     workspaceId: string,
     user: string,
     operation: (tx: WorkflowTransaction) => Promise<T>,
-    mode: 'read' | 'write' = 'write',
+    mode: 'read' | 'write',
   ) {
     return workflowTransaction(runtime, workspaceId, operation, mode, user);
   }
@@ -674,8 +674,11 @@ export function createWorkflows(
   }
   /** Runs the repository check a save would, so a chat draft fails before review. */
   async function checkGitHubRepository(workspaceId: string, user: string, trigger: GitHubTrigger) {
-    return memberTransaction(workspaceId, user, async tx =>
-      requireGitHubRepository(tx, trigger, (await workflowMember(tx, user)).membershipId),
+    return memberTransaction(
+      workspaceId,
+      user,
+      async tx => requireGitHubRepository(tx, trigger, (await workflowMember(tx, user)).membershipId),
+      'write',
     );
   }
   async function revisionHasGitHub(tx: WorkflowTransaction, id: string, revision: string | null) {
@@ -706,38 +709,53 @@ export function createWorkflows(
   }
   /** Runs the record checks a save would, so a chat draft fails before review, and names the table and field for the card. */
   async function recordSourceLabels(workspaceId: string, user: string, trigger: RecordTrigger) {
-    return memberTransaction(workspaceId, user, async tx => {
-      const { definition } = await savableRecordSource(tx, trigger, (await workflowMember(tx, user)).membershipId);
-      const field = definition.fields.find(item => item.id === trigger.field.fieldId);
-      if (!field) throw new WorkflowConflict('record-field-unavailable');
-      return {
-        table: definition.label,
-        field: field.label,
-        filter: trigger.filter ? recordFilterLabels(definition.fields, trigger.filter) : null,
-      };
-    });
+    return memberTransaction(
+      workspaceId,
+      user,
+      async tx => {
+        const { definition } = await savableRecordSource(tx, trigger, (await workflowMember(tx, user)).membershipId);
+        const field = definition.fields.find(item => item.id === trigger.field.fieldId);
+        if (!field) throw new WorkflowConflict('record-field-unavailable');
+        return {
+          table: definition.label,
+          field: field.label,
+          filter: trigger.filter ? recordFilterLabels(definition.fields, trigger.filter) : null,
+        };
+      },
+      'write',
+    );
   }
   /** Runs the row checks a save would, so a chat draft fails before review, and names the table, watched fields, and filter for the card. */
   async function rowSourceLabels(workspaceId: string, user: string, trigger: RowTrigger) {
-    return memberTransaction(workspaceId, user, async tx => {
-      const { definition } = await savableRowSource(tx, trigger, (await workflowMember(tx, user)).membershipId);
-      const label = (id: string) => definition.fields.find(item => item.id === id)?.label ?? '';
-      return {
-        table: definition.label,
-        fields: trigger.fieldIds?.map(label) ?? [],
-        filter: trigger.filter ? recordFilterLabels(definition.fields, trigger.filter) : null,
-      };
-    });
+    return memberTransaction(
+      workspaceId,
+      user,
+      async tx => {
+        const { definition } = await savableRowSource(tx, trigger, (await workflowMember(tx, user)).membershipId);
+        const label = (id: string) => definition.fields.find(item => item.id === id)?.label ?? '';
+        return {
+          table: definition.label,
+          fields: trigger.fieldIds?.map(label) ?? [],
+          filter: trigger.filter ? recordFilterLabels(definition.fields, trigger.filter) : null,
+        };
+      },
+      'write',
+    );
   }
   /** Runs the table step checks a save, and the activation that makes the member sponsor, would, so a chat draft fails before review. */
   async function checkTableSteps(workspaceId: string, user: string, definition: z.infer<typeof definitionSchema>) {
-    return memberTransaction(workspaceId, user, async tx => {
-      const { membershipId } = await workflowMember(tx, user);
-      const labels = await requireTableStepFields(tx, membershipId, definition);
-      if (definition.triggers.some(isUnattendedTrigger))
-        await requireTableStepAuthority(tx, definition, membershipId, []);
-      return labels;
-    });
+    return memberTransaction(
+      workspaceId,
+      user,
+      async tx => {
+        const { membershipId } = await workflowMember(tx, user);
+        const labels = await requireTableStepFields(tx, membershipId, definition);
+        if (definition.triggers.some(isUnattendedTrigger))
+          await requireTableStepAuthority(tx, definition, membershipId, []);
+        return labels;
+      },
+      'write',
+    );
   }
   async function list(workspaceId: string, user: string, options: { archived?: boolean } = {}) {
     return memberTransaction(
@@ -776,139 +794,154 @@ export function createWorkflows(
   }
   async function calendar(workspaceId: string, user: string, value: unknown) {
     const range = calendarRangeSchema.parse(value);
-    return memberTransaction(workspaceId, user, async tx => {
-      const actor = await workflowMember(tx, user);
-      if (tx.commonVersion < 1) throw new StorageUnavailableError('incompatible_version');
-      const rows = (
-        await tx.client.query(
-          `SELECT w.id,
+    return memberTransaction(
+      workspaceId,
+      user,
+      async tx => {
+        const actor = await workflowMember(tx, user);
+        if (tx.commonVersion < 1) throw new StorageUnavailableError('incompatible_version');
+        const rows = (
+          await tx.client.query(
+            `SELECT w.id,
         (w.sponsor_membership_id=$1 OR (SELECT author_membership_id FROM ${table(tx, 'tf_workflow_revisions')} WHERE workflow_id=w.id ORDER BY created_at,id LIMIT 1)=$1) AS personal,
         EXISTS (SELECT 1 FROM ${table(tx, 'tf_calendar_workflow_follows')} f WHERE f.workflow_id=w.id AND f.membership_id=$1) AS following
         FROM ${table(tx, 'tf_workflows')} w WHERE ${unarchived(tx, 'w')} AND ${readableWorkflow(tx, 'w', '$1')} ORDER BY w.id LIMIT 101`,
-          [actor.membershipId],
-        )
-      ).rows;
-      const workflows: z.infer<typeof workflowCalendarSchema>['workflows'] = [];
-      const actions: z.infer<typeof workflowCalendarSchema>['actions'] = [];
-      let more = rows.length > 100;
-      for (const row of rows.slice(0, 100)) {
-        const current = await read(tx, row.id, actor.membershipId);
-        const personal = row.personal === true,
-          following = row.following === true;
-        const projected = { times: [] as string[], more: false };
-        if (current.enabled && (personal || following)) {
-          // Schedule triggers due at the same time start one run, so their times merge.
-          const times = new Set<string>();
-          for (const trigger of current.activeTriggers ?? []) {
-            const state = current.triggers.find(item => item.id === trigger.id);
-            if (!state?.enabled) continue;
-            if (trigger.kind === 'record') {
-              for (const item of current.upcomingRecords ?? [])
-                if (Date.parse(item.dueAt) >= Date.parse(range.from) && Date.parse(item.dueAt) < Date.parse(range.to))
-                  times.add(item.dueAt);
-              projected.more ||= (current.upcomingRecords?.length ?? 0) === 10;
-            } else if (state.nextRunAt) {
-              const occurrences = calendarOccurrences(trigger, state.nextRunAt, range.from, range.to);
-              for (const at of occurrences.times) times.add(at);
-              projected.more ||= occurrences.more;
+            [actor.membershipId],
+          )
+        ).rows;
+        const workflows: z.infer<typeof workflowCalendarSchema>['workflows'] = [];
+        const actions: z.infer<typeof workflowCalendarSchema>['actions'] = [];
+        let more = rows.length > 100;
+        for (const row of rows.slice(0, 100)) {
+          const current = await read(tx, row.id, actor.membershipId);
+          const personal = row.personal === true,
+            following = row.following === true;
+          const projected = { times: [] as string[], more: false };
+          if (current.enabled && (personal || following)) {
+            // Schedule triggers due at the same time start one run, so their times merge.
+            const times = new Set<string>();
+            for (const trigger of current.activeTriggers ?? []) {
+              const state = current.triggers.find(item => item.id === trigger.id);
+              if (!state?.enabled) continue;
+              if (trigger.kind === 'record') {
+                for (const item of current.upcomingRecords ?? [])
+                  if (Date.parse(item.dueAt) >= Date.parse(range.from) && Date.parse(item.dueAt) < Date.parse(range.to))
+                    times.add(item.dueAt);
+                projected.more ||= (current.upcomingRecords?.length ?? 0) === 10;
+              } else if (state.nextRunAt) {
+                const occurrences = calendarOccurrences(trigger, state.nextRunAt, range.from, range.to);
+                for (const at of occurrences.times) times.add(at);
+                projected.more ||= occurrences.more;
+              }
             }
+            projected.times = [...times].sort().slice(0, 250);
+            projected.more ||= times.size > 250;
           }
-          projected.times = [...times].sort().slice(0, 250);
-          projected.more ||= times.size > 250;
-        }
-        const occurrences: z.infer<typeof workflowCalendarSchema>['workflows'][number]['occurrences'] =
-          projected.times.map(at => ({ at, status: 'Scheduled' }));
-        more ||= projected.more;
-        const runs = (
-          await tx.client.query(
-            `SELECT r.id,r.status,${utcInstant('COALESCE(r.scheduled_for,r.started_at,r.created_at)')} AS at
+          const occurrences: z.infer<typeof workflowCalendarSchema>['workflows'][number]['occurrences'] =
+            projected.times.map(at => ({ at, status: 'Scheduled' }));
+          more ||= projected.more;
+          const runs = (
+            await tx.client.query(
+              `SELECT r.id,r.status,${utcInstant('COALESCE(r.scheduled_for,r.started_at,r.created_at)')} AS at
           FROM ${table(tx, 'tf_workflow_runs')} r WHERE r.workflow_id=$1 AND
           ((r.membership_id=$2 AND r.sponsorship_id IS NULL) OR EXISTS (SELECT 1 FROM ${table(tx, 'tf_workflow_run_audience')} a WHERE a.run_id=r.id AND a.membership_id=$2))
           AND (r.status='waiting' OR (COALESCE(r.scheduled_for,r.started_at,r.created_at)>=$3 AND COALESCE(r.scheduled_for,r.started_at,r.created_at)<$4))
           ORDER BY r.created_at DESC,r.id DESC LIMIT 251`,
-            [current.id, actor.membershipId, range.from, range.to],
-          )
-        ).rows;
-        more ||= runs.length > 250;
-        for (const run of runs.slice(0, 250)) {
-          try {
-            await requireRunAccess(tx, actor.membershipId, current.id, run.id, false);
-          } catch (error) {
-            if (error instanceof AccessDenied) continue;
-            throw error;
+              [current.id, actor.membershipId, range.from, range.to],
+            )
+          ).rows;
+          more ||= runs.length > 250;
+          for (const run of runs.slice(0, 250)) {
+            try {
+              await requireRunAccess(tx, actor.membershipId, current.id, run.id, false);
+            } catch (error) {
+              if (error instanceof AccessDenied) continue;
+              throw error;
+            }
+            if (
+              (personal || following) &&
+              Date.parse(run.at) >= Date.parse(range.from) &&
+              Date.parse(run.at) < Date.parse(range.to)
+            ) {
+              const existing = occurrences.findIndex(item => item.at === run.at);
+              if (existing >= 0) occurrences.splice(existing, 1);
+              occurrences.push({ at: run.at, runId: run.id, status: run.status });
+            }
+            if (run.status === 'waiting' && current.capabilities.invoke) {
+              const steps = (
+                await tx.client.query(
+                  `SELECT step_id,prompt FROM ${table(tx, 'tf_workflow_steps')} WHERE run_id=$1 AND status='waiting' AND prompt IS NOT NULL ORDER BY ordinal`,
+                  [run.id],
+                )
+              ).rows;
+              for (const step of steps)
+                actions.push({
+                  workflowId: current.id,
+                  runId: run.id,
+                  stepId: step.step_id,
+                  title: `${current.definition.name}: ${step.step_id}`,
+                });
+            }
           }
-          if (
-            (personal || following) &&
-            Date.parse(run.at) >= Date.parse(range.from) &&
-            Date.parse(run.at) < Date.parse(range.to)
-          ) {
-            const existing = occurrences.findIndex(item => item.at === run.at);
-            if (existing >= 0) occurrences.splice(existing, 1);
-            occurrences.push({ at: run.at, runId: run.id, status: run.status });
-          }
-          if (run.status === 'waiting' && current.capabilities.invoke) {
-            const steps = (
-              await tx.client.query(
-                `SELECT step_id,prompt FROM ${table(tx, 'tf_workflow_steps')} WHERE run_id=$1 AND status='waiting' AND prompt IS NOT NULL ORDER BY ordinal`,
-                [run.id],
-              )
-            ).rows;
-            for (const step of steps)
-              actions.push({
-                workflowId: current.id,
-                runId: run.id,
-                stepId: step.step_id,
-                title: `${current.definition.name}: ${step.step_id}`,
-              });
-          }
+          workflows.push({
+            id: current.id,
+            name: current.definition.name,
+            personal,
+            following,
+            enabled: current.enabled,
+            occurrences,
+            more: projected.more,
+          });
         }
-        workflows.push({
-          id: current.id,
-          name: current.definition.name,
-          personal,
-          following,
-          enabled: current.enabled,
-          occurrences,
-          more: projected.more,
-        });
-      }
-      return workflowCalendarSchema.parse({ workflows, actions, more });
-    });
+        return workflowCalendarSchema.parse({ workflows, actions, more });
+      },
+      'write',
+    );
   }
   async function followCalendar(workspaceId: string, user: string, id: string, value: unknown) {
     const input = calendarFollowSchema.parse(value);
-    return memberTransaction(workspaceId, user, async tx => {
-      const actor = await workflowMember(tx, user);
-      if (tx.commonVersion < 1) throw new StorageUnavailableError('incompatible_version');
-      await requireGrant(tx, actor.membershipId, id, 'read');
-      if (input.following)
-        await tx.client.query(
-          `INSERT INTO ${table(tx, 'tf_calendar_workflow_follows')} (membership_id,workflow_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-          [actor.membershipId, id],
-        );
-      else
-        await tx.client.query(
-          `DELETE FROM ${table(tx, 'tf_calendar_workflow_follows')} WHERE membership_id=$1 AND workflow_id=$2`,
-          [actor.membershipId, id],
-        );
-      return input;
-    });
+    return memberTransaction(
+      workspaceId,
+      user,
+      async tx => {
+        const actor = await workflowMember(tx, user);
+        if (tx.commonVersion < 1) throw new StorageUnavailableError('incompatible_version');
+        await requireGrant(tx, actor.membershipId, id, 'read');
+        if (input.following)
+          await tx.client.query(
+            `INSERT INTO ${table(tx, 'tf_calendar_workflow_follows')} (membership_id,workflow_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+            [actor.membershipId, id],
+          );
+        else
+          await tx.client.query(
+            `DELETE FROM ${table(tx, 'tf_calendar_workflow_follows')} WHERE membership_id=$1 AND workflow_id=$2`,
+            [actor.membershipId, id],
+          );
+        return input;
+      },
+      'write',
+    );
   }
   async function recent(workspaceId: string, user: string) {
-    return memberTransaction(workspaceId, user, async tx => {
-      const actor = await workflowMember(tx, user);
-      return z.array(z.object({ id: idSchema, name: z.string() })).parse(
-        (
-          await tx.client.query(
-            `SELECT w.id,r.definition->>'name' AS name FROM ${table(tx, 'tf_workflows')} w
+    return memberTransaction(
+      workspaceId,
+      user,
+      async tx => {
+        const actor = await workflowMember(tx, user);
+        return z.array(z.object({ id: idSchema, name: z.string() })).parse(
+          (
+            await tx.client.query(
+              `SELECT w.id,r.definition->>'name' AS name FROM ${table(tx, 'tf_workflows')} w
          JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=w.revision
          WHERE ${unarchived(tx, 'w')} AND ${readableWorkflow(tx, 'w', '$1')}
          ORDER BY r.created_at DESC,w.id DESC LIMIT 3`,
-            [actor.membershipId],
-          )
-        ).rows,
-      );
-    });
+              [actor.membershipId],
+            )
+          ).rows,
+        );
+      },
+      'write',
+    );
   }
   /** Enabled workflows whose active revision mentions the table, limited to ones the person can read. */
   async function usingTable(workspaceId: string, user: string, tableId: string) {
@@ -949,120 +982,125 @@ export function createWorkflows(
     } catch {
       throw new WorkflowConflict('invalid-schedule');
     }
-    return memberTransaction(workspaceId, user, async tx => {
-      const actor = await workflowMember(tx, user);
-      const previous = (await tx.client.query(`SELECT revision FROM ${table(tx, 'tf_workflows')} WHERE id=$1`, [id]))
-        .rows[0];
-      if (input.definition.steps.some(step => step.kind === 'slack-message') && tx.commonVersion < 1)
-        throw new WorkflowConflict('slack-action-unavailable');
-      if (
-        input.definition.steps.some(step => step.kind === 'slack-message' && step.sender === 'app') &&
-        tx.commonVersion < 1
-      )
-        throw new WorkflowConflict('slack-action-unavailable');
-      if (previous) await requireGrant(tx, actor.membershipId, id, 'manage');
-      const existing = (
-        await tx.client.query(
-          `SELECT definition FROM ${table(tx, 'tf_workflow_revisions')} WHERE workflow_id=$1 AND id=$2`,
-          [id, input.revision],
+    return memberTransaction(
+      workspaceId,
+      user,
+      async tx => {
+        const actor = await workflowMember(tx, user);
+        const previous = (await tx.client.query(`SELECT revision FROM ${table(tx, 'tf_workflows')} WHERE id=$1`, [id]))
+          .rows[0];
+        if (input.definition.steps.some(step => step.kind === 'slack-message') && tx.commonVersion < 1)
+          throw new WorkflowConflict('slack-action-unavailable');
+        if (
+          input.definition.steps.some(step => step.kind === 'slack-message' && step.sender === 'app') &&
+          tx.commonVersion < 1
         )
-      ).rows[0];
-      if (existing) {
-        if (canonical(definitionSchema.parse(existing.definition)) !== canonical(input.definition))
-          throw new WorkflowConflict('revision-conflict');
-        return read(tx, id, actor.membershipId);
-      }
-      if (previous) {
-        await requireUnarchived(tx, id);
-        // Saving the latest definition again keeps its revision, so the sponsor's consent and the generation stand.
-        const latest = (
+          throw new WorkflowConflict('slack-action-unavailable');
+        if (previous) await requireGrant(tx, actor.membershipId, id, 'manage');
+        const existing = (
           await tx.client.query(
             `SELECT definition FROM ${table(tx, 'tf_workflow_revisions')} WHERE workflow_id=$1 AND id=$2`,
-            [id, previous.revision],
+            [id, input.revision],
           )
         ).rows[0];
-        if (latest && canonical(definitionSchema.parse(latest.definition)) === canonical(input.definition))
+        if (existing) {
+          if (canonical(definitionSchema.parse(existing.definition)) !== canonical(input.definition))
+            throw new WorkflowConflict('revision-conflict');
           return read(tx, id, actor.membershipId);
-      }
-      requireCodeRunner(input.definition);
-      requireAgentRunner(input.definition);
-      const states = await triggerStates(tx, id);
-      const kept = await keptOnceTimes(tx, id);
-      for (const trigger of input.definition.triggers) {
-        const state = states.get(trigger.id);
-        if (state && state.kind !== trigger.kind) throw new WorkflowConflict('trigger-kind-changed');
-        if (trigger.kind === 'provider') await providers.authorize(tx, trigger, actor.membershipId);
-        // An unchanged once trigger may stay after its time has passed; it never fires again.
-        if (
-          trigger.kind === 'once' &&
-          !kept.has(onceKey(trigger.id, trigger.at)) &&
-          !(state?.onceFiredAt && Date.parse(state.onceFiredAt) === Date.parse(trigger.at)) &&
-          Date.parse(trigger.at) <= (await databaseNow(tx)).getTime()
-        )
-          throw new WorkflowConflict('schedule-in-past');
-        if (trigger.kind === 'record') await savableRecordSource(tx, trigger, actor.membershipId);
-        if (trigger.kind === 'row') await savableRowSource(tx, trigger, actor.membershipId);
-        if (trigger.kind === 'github') await requireGitHubRepository(tx, trigger, actor.membershipId);
-      }
-      await requireTableStepFields(tx, actor.membershipId, input.definition);
-      await requireAgentStepReader(tx, actor.membershipId, input.definition);
-      if ((previous?.revision ?? null) !== input.expectedRevision) throw new WorkflowConflict('stale-revision');
-      if (!previous) {
-        if (forAgentId !== null && !agentLinked(tx)) throw new WorkflowConflict('agent-workflows-unavailable');
-        await tx.client.query(
-          forAgentId === null
-            ? `INSERT INTO ${table(tx, 'tf_workflows')} (id,revision) VALUES ($1,$2)`
-            : `INSERT INTO ${table(tx, 'tf_workflows')} (id,revision,agent_id) VALUES ($1,$2,$3)`,
-          forAgentId === null ? [id, input.revision] : [id, input.revision, forAgentId],
-        );
-        await initializeManager(tx, id, actor.membershipId);
-      }
-      await tx.client.query(
-        `INSERT INTO ${table(tx, 'tf_workflow_revisions')} (workflow_id,id,definition,author_membership_id) VALUES ($1,$2,$3,$4)`,
-        [id, input.revision, JSON.stringify(input.definition), actor.membershipId],
-      );
-      for (const trigger of input.definition.triggers)
-        await tx.client.query(
-          `INSERT INTO ${table(tx, 'tf_workflow_triggers')} (workflow_id,trigger_id,kind) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
-          [id, trigger.id, trigger.kind],
-        );
-      if (previous)
-        await tx.client.query(
-          `UPDATE ${table(tx, 'tf_workflows')} SET revision=$2,generation=generation+1 WHERE id=$1`,
-          [id, input.revision],
-        );
-      if (previous) {
-        const current = await read(tx, id, actor.membershipId);
-        if (
-          current.sponsorMembershipId === actor.membershipId &&
-          current.historyAudience.length &&
-          (tx.commonVersion >= workflowActiveSponsorshipCommonVersion || !current.enabled)
-        ) {
-          try {
-            await requireSponsorshipAuthority(tx, current, actor.membershipId);
+        }
+        if (previous) {
+          await requireUnarchived(tx, id);
+          // Saving the latest definition again keeps its revision, so the sponsor's consent and the generation stand.
+          const latest = (
             await tx.client.query(
-              `UPDATE ${table(tx, 'tf_workflows')} SET sponsorship_revision=revision WHERE id=$1 AND sponsorship_id IS NOT NULL`,
-              [id],
-            );
-          } catch (error) {
-            // Saving a draft does not require the sponsor to be able to authorize runs.
-            if (
-              !(error instanceof AccessDenied) &&
-              !(
-                error instanceof WorkflowConflict &&
-                ['record-source-denied', 'table-step-access-denied'].includes(error.message)
-              )
+              `SELECT definition FROM ${table(tx, 'tf_workflow_revisions')} WHERE workflow_id=$1 AND id=$2`,
+              [id, previous.revision],
             )
-              throw error;
+          ).rows[0];
+          if (latest && canonical(definitionSchema.parse(latest.definition)) === canonical(input.definition))
+            return read(tx, id, actor.membershipId);
+        }
+        requireCodeRunner(input.definition);
+        requireAgentRunner(input.definition);
+        const states = await triggerStates(tx, id);
+        const kept = await keptOnceTimes(tx, id);
+        for (const trigger of input.definition.triggers) {
+          const state = states.get(trigger.id);
+          if (state && state.kind !== trigger.kind) throw new WorkflowConflict('trigger-kind-changed');
+          if (trigger.kind === 'provider') await providers.authorize(tx, trigger, actor.membershipId);
+          // An unchanged once trigger may stay after its time has passed; it never fires again.
+          if (
+            trigger.kind === 'once' &&
+            !kept.has(onceKey(trigger.id, trigger.at)) &&
+            !(state?.onceFiredAt && Date.parse(state.onceFiredAt) === Date.parse(trigger.at)) &&
+            Date.parse(trigger.at) <= (await databaseNow(tx)).getTime()
+          )
+            throw new WorkflowConflict('schedule-in-past');
+          if (trigger.kind === 'record') await savableRecordSource(tx, trigger, actor.membershipId);
+          if (trigger.kind === 'row') await savableRowSource(tx, trigger, actor.membershipId);
+          if (trigger.kind === 'github') await requireGitHubRepository(tx, trigger, actor.membershipId);
+        }
+        await requireTableStepFields(tx, actor.membershipId, input.definition);
+        await requireAgentStepReader(tx, actor.membershipId, input.definition);
+        if ((previous?.revision ?? null) !== input.expectedRevision) throw new WorkflowConflict('stale-revision');
+        if (!previous) {
+          if (forAgentId !== null && !agentLinked(tx)) throw new WorkflowConflict('agent-workflows-unavailable');
+          await tx.client.query(
+            forAgentId === null
+              ? `INSERT INTO ${table(tx, 'tf_workflows')} (id,revision) VALUES ($1,$2)`
+              : `INSERT INTO ${table(tx, 'tf_workflows')} (id,revision,agent_id) VALUES ($1,$2,$3)`,
+            forAgentId === null ? [id, input.revision] : [id, input.revision, forAgentId],
+          );
+          await initializeManager(tx, id, actor.membershipId);
+        }
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'tf_workflow_revisions')} (workflow_id,id,definition,author_membership_id) VALUES ($1,$2,$3,$4)`,
+          [id, input.revision, JSON.stringify(input.definition), actor.membershipId],
+        );
+        for (const trigger of input.definition.triggers)
+          await tx.client.query(
+            `INSERT INTO ${table(tx, 'tf_workflow_triggers')} (workflow_id,trigger_id,kind) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+            [id, trigger.id, trigger.kind],
+          );
+        if (previous)
+          await tx.client.query(
+            `UPDATE ${table(tx, 'tf_workflows')} SET revision=$2,generation=generation+1 WHERE id=$1`,
+            [id, input.revision],
+          );
+        if (previous) {
+          const current = await read(tx, id, actor.membershipId);
+          if (
+            current.sponsorMembershipId === actor.membershipId &&
+            current.historyAudience.length &&
+            (tx.commonVersion >= workflowActiveSponsorshipCommonVersion || !current.enabled)
+          ) {
+            try {
+              await requireSponsorshipAuthority(tx, current, actor.membershipId);
+              await tx.client.query(
+                `UPDATE ${table(tx, 'tf_workflows')} SET sponsorship_revision=revision WHERE id=$1 AND sponsorship_id IS NOT NULL`,
+                [id],
+              );
+            } catch (error) {
+              // Saving a draft does not require the sponsor to be able to authorize runs.
+              if (
+                !(error instanceof AccessDenied) &&
+                !(
+                  error instanceof WorkflowConflict &&
+                  ['record-source-denied', 'table-step-access-denied'].includes(error.message)
+                )
+              )
+                throw error;
+            }
           }
         }
-      }
-      await auditWorkflow(tx, actor.membershipId, 'workflow.save', id);
-      afterCommit(tx.client, () =>
-        trackEvent('workflow_saved', { userId: user, workspaceId }, { workflow_id: id, created: !previous }),
-      );
-      return read(tx, id, actor.membershipId);
-    });
+        await auditWorkflow(tx, actor.membershipId, 'workflow.save', id);
+        afterCommit(tx.client, () =>
+          trackEvent('workflow_saved', { userId: user, workspaceId }, { workflow_id: id, created: !previous }),
+        );
+        return read(tx, id, actor.membershipId);
+      },
+      'write',
+    );
   }
   /**
    * Sets each trigger's next due time for the activated triggers, or clears it. A once trigger whose time already fired
@@ -1348,47 +1386,56 @@ export function createWorkflows(
   /** Restores, disabled, only the workflows the agent's archive took down; ones archived by hand stay archived. */
   async function restoreForAgent(workspaceId: string, actorMembershipId: string, agentId: string) {
     agentId = idSchema.parse(agentId);
-    return transaction(workspaceId, async tx => {
-      if (!agentLinked(tx)) return [];
-      const rows = (
-        await tx.client.query(
-          `SELECT id FROM ${table(tx, 'tf_workflows')} WHERE agent_id=$1 AND archived_at IS NOT NULL AND archived_with_agent ORDER BY id FOR UPDATE`,
-          [agentId],
-        )
-      ).rows;
-      for (const row of rows) await restoreRow(tx, row.id, actorMembershipId);
-      return rows.map(row => idSchema.parse(row.id));
-    });
+    return transaction(
+      workspaceId,
+      async tx => {
+        if (!agentLinked(tx)) return [];
+        const rows = (
+          await tx.client.query(
+            `SELECT id FROM ${table(tx, 'tf_workflows')} WHERE agent_id=$1 AND archived_at IS NOT NULL AND archived_with_agent ORDER BY id FOR UPDATE`,
+            [agentId],
+          )
+        ).rows;
+        for (const row of rows) await restoreRow(tx, row.id, actorMembershipId);
+        return rows.map(row => idSchema.parse(row.id));
+      },
+      'write',
+    );
   }
   // Restoring returns the workflow disabled; its triggers and webhook keys start again only after a manager reactivates it.
   async function restore(workspaceId: string, user: string, id: string, value: unknown) {
     const input = commandSchema.parse(value);
-    return memberTransaction(workspaceId, user, async tx => {
-      const actor = await workflowMember(tx, user);
-      await requireGrant(tx, actor.membershipId, id, 'manage');
-      if (tx.commonVersion < 1) throw new WorkflowConflict('workflow-archive-unavailable');
-      const current = await read(tx, id);
-      await administrativeCommand(
-        tx,
-        {
-          ...input,
-          generation: current.generation,
-          membershipId: actor.membershipId,
-          operation: 'restore',
-          target: current.id,
-          request: input,
-        },
-        async () => {
-          if (current.archivedAt === null) throw new WorkflowConflict('workflow-not-archived');
-          // A workflow restored by hand owns its public URL again instead of forwarding it to the workflow it was combined into.
-          await tx.client.query(`DELETE FROM ${table(tx, 'tf_workflow_webhook_aliases')} WHERE old_workflow_id=$1`, [
-            id,
-          ]);
-          await restoreRow(tx, id, actor.membershipId);
-        },
-      );
-      return read(tx, id, actor.membershipId);
-    });
+    return memberTransaction(
+      workspaceId,
+      user,
+      async tx => {
+        const actor = await workflowMember(tx, user);
+        await requireGrant(tx, actor.membershipId, id, 'manage');
+        if (tx.commonVersion < 1) throw new WorkflowConflict('workflow-archive-unavailable');
+        const current = await read(tx, id);
+        await administrativeCommand(
+          tx,
+          {
+            ...input,
+            generation: current.generation,
+            membershipId: actor.membershipId,
+            operation: 'restore',
+            target: current.id,
+            request: input,
+          },
+          async () => {
+            if (current.archivedAt === null) throw new WorkflowConflict('workflow-not-archived');
+            // A workflow restored by hand owns its public URL again instead of forwarding it to the workflow it was combined into.
+            await tx.client.query(`DELETE FROM ${table(tx, 'tf_workflow_webhook_aliases')} WHERE old_workflow_id=$1`, [
+              id,
+            ]);
+            await restoreRow(tx, id, actor.membershipId);
+          },
+        );
+        return read(tx, id, actor.membershipId);
+      },
+      'write',
+    );
   }
   /**
    * Switches one trigger on or off outside revisions. It takes the workflow row lock the sweep takes, so a switch and a
@@ -1519,33 +1566,38 @@ export function createWorkflows(
   }
   async function cancelRowEvents(workspaceId: string, user: string, id: string, value: unknown) {
     const input = commandSchema.parse(value);
-    return memberTransaction(workspaceId, user, async tx => {
-      const actor = await workflowMember(tx, user);
-      await requireGrant(tx, actor.membershipId, id, 'manage');
-      if (tx.commonVersion < rowTriggerCommonVersion) throw new WorkflowConflict('record-trigger-unavailable');
-      const current = await read(tx, id);
-      if (!(await readRowQueue(tx, id, actor.membershipId, current.activeTriggers))) throw new AccessDenied();
-      await administrativeCommand(
-        tx,
-        {
-          ...input,
-          generation: current.generation,
-          membershipId: actor.membershipId,
-          operation: 'row-events-cancel',
-          target: current.id,
-          request: input,
-        },
-        async () => {
-          await tx.client.query(
-            `UPDATE ${table(tx, 'tf_workflow_row_events')} SET state='cancelled',reason='user-cancelled',settled_at=clock_timestamp(),snapshot=NULL WHERE workflow_id=$1 AND settled_at IS NULL`,
-            [id],
-          );
-          await tx.client.query(`UPDATE ${table(tx, 'tf_workflows')} SET generation=generation+1 WHERE id=$1`, [id]);
-          await auditWorkflow(tx, actor.membershipId, 'workflow.row-events.cancel', id);
-        },
-      );
-      return read(tx, id, actor.membershipId);
-    });
+    return memberTransaction(
+      workspaceId,
+      user,
+      async tx => {
+        const actor = await workflowMember(tx, user);
+        await requireGrant(tx, actor.membershipId, id, 'manage');
+        if (tx.commonVersion < rowTriggerCommonVersion) throw new WorkflowConflict('record-trigger-unavailable');
+        const current = await read(tx, id);
+        if (!(await readRowQueue(tx, id, actor.membershipId, current.activeTriggers))) throw new AccessDenied();
+        await administrativeCommand(
+          tx,
+          {
+            ...input,
+            generation: current.generation,
+            membershipId: actor.membershipId,
+            operation: 'row-events-cancel',
+            target: current.id,
+            request: input,
+          },
+          async () => {
+            await tx.client.query(
+              `UPDATE ${table(tx, 'tf_workflow_row_events')} SET state='cancelled',reason='user-cancelled',settled_at=clock_timestamp(),snapshot=NULL WHERE workflow_id=$1 AND settled_at IS NULL`,
+              [id],
+            );
+            await tx.client.query(`UPDATE ${table(tx, 'tf_workflows')} SET generation=generation+1 WHERE id=$1`, [id]);
+            await auditWorkflow(tx, actor.membershipId, 'workflow.row-events.cancel', id);
+          },
+        );
+        return read(tx, id, actor.membershipId);
+      },
+      'write',
+    );
   }
   async function admit(
     tx: WorkflowTransaction,
@@ -1684,17 +1736,22 @@ export function createWorkflows(
   }
   async function start(workspaceId: string, user: string, id: string, value: unknown) {
     const input = startSchema.parse(value);
-    return memberTransaction(workspaceId, user, async tx => {
-      const actor = await workflowMember(tx, user);
-      const { runId } = await admit(
-        tx,
-        idSchema.parse(id),
-        `manual:${actor.membershipId}:${input.requestId}`,
-        input.input,
-        actor.membershipId,
-      );
-      return { runId };
-    });
+    return memberTransaction(
+      workspaceId,
+      user,
+      async tx => {
+        const actor = await workflowMember(tx, user);
+        const { runId } = await admit(
+          tx,
+          idSchema.parse(id),
+          `manual:${actor.membershipId}:${input.requestId}`,
+          input.input,
+          actor.membershipId,
+        );
+        return { runId };
+      },
+      'write',
+    );
   }
   async function person(tx: AuthorizationTransaction, membershipId: string | null) {
     if (!membershipId) return null;
@@ -1786,69 +1843,79 @@ export function createWorkflows(
       );
   }
   async function runDetail(workspaceId: string, user: string, id: string, runId: string) {
-    return memberTransaction(workspaceId, user, async tx => {
-      const actor = await workflowMember(tx, user);
-      await requireRunAccess(tx, actor.membershipId, id, runId, false);
-      const row = (
-        await tx.client.query(
-          `SELECT r.id,r.workflow_id AS "workflowId",r.revision,r.status,split_part(r.request_key,':',1) AS source,r.input,r.created_at::text AS "createdAt",${utcInstant('r.scheduled_for')} AS "scheduledFor",${utcInstant('r.started_at')} AS "startedAt",${utcInstant('r.finished_at')} AS "finishedAt",r.error,r.trigger_id AS "triggerId",r.fired_trigger_ids AS "firedTriggerIds",r.membership_id,d.definition FROM ${table(tx, 'tf_workflow_runs')} r JOIN ${table(tx, 'tf_workflow_revisions')} d ON d.workflow_id=r.workflow_id AND d.id=r.revision WHERE r.id=$1 AND r.workflow_id=$2`,
-          [runId, id],
-        )
-      ).rows[0];
-      await requireDefinitionProvenance(tx, actor, id, row.revision);
-      return runDetailSchema.parse({
-        run: { ...runSchema.parse(row), steps: await runReceipts(tx, actor, runId) },
-        definition: row.definition,
-        actor: await person(tx, row.membership_id),
-        canManage: await hasGrant(tx, actor.membershipId, id, 'manage'),
-      });
-    });
+    return memberTransaction(
+      workspaceId,
+      user,
+      async tx => {
+        const actor = await workflowMember(tx, user);
+        await requireRunAccess(tx, actor.membershipId, id, runId, false);
+        const row = (
+          await tx.client.query(
+            `SELECT r.id,r.workflow_id AS "workflowId",r.revision,r.status,split_part(r.request_key,':',1) AS source,r.input,r.created_at::text AS "createdAt",${utcInstant('r.scheduled_for')} AS "scheduledFor",${utcInstant('r.started_at')} AS "startedAt",${utcInstant('r.finished_at')} AS "finishedAt",r.error,r.trigger_id AS "triggerId",r.fired_trigger_ids AS "firedTriggerIds",r.membership_id,d.definition FROM ${table(tx, 'tf_workflow_runs')} r JOIN ${table(tx, 'tf_workflow_revisions')} d ON d.workflow_id=r.workflow_id AND d.id=r.revision WHERE r.id=$1 AND r.workflow_id=$2`,
+            [runId, id],
+          )
+        ).rows[0];
+        await requireDefinitionProvenance(tx, actor, id, row.revision);
+        return runDetailSchema.parse({
+          run: { ...runSchema.parse(row), steps: await runReceipts(tx, actor, runId) },
+          definition: row.definition,
+          actor: await person(tx, row.membership_id),
+          canManage: await hasGrant(tx, actor.membershipId, id, 'manage'),
+        });
+      },
+      'write',
+    );
   }
   const actionableSkips = ['github-repository-not-connected'];
   async function history(workspaceId: string, user: string, id: string, value: unknown = {}) {
     const query = runHistoryQuerySchema.parse(value);
     const [beforeAt, beforeId] = query.before?.split('~') ?? [];
-    return memberTransaction(workspaceId, user, async tx => {
-      const actor = await workflowMember(tx, user);
-      await requireGrant(tx, actor.membershipId, id, 'read');
-      const runs = async (statuses: readonly string[], limit: number | null, skips: readonly string[] = []) =>
-        (
-          await tx.client.query(
-            `WITH visible AS (SELECT r.* FROM ${table(tx, 'tf_workflow_runs')} r WHERE workflow_id=$1 AND ((sponsorship_id IS NULL AND membership_id=$2 AND (request_key LIKE 'manual:%' OR request_key LIKE 'event:%')) OR EXISTS (SELECT 1 FROM ${table(tx, 'tf_workflow_run_audience')} a WHERE a.run_id=r.id AND a.membership_id=$2))) SELECT id,workflow_id AS "workflowId",revision,status,split_part(request_key,':',1) AS source,input,created_at::text AS "createdAt",${utcInstant('scheduled_for')} AS "scheduledFor",${utcInstant('started_at')} AS "startedAt",${utcInstant('finished_at')} AS "finishedAt",error,trigger_id AS "triggerId",fired_trigger_ids AS "firedTriggerIds",to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') || '~' || id AS cursor FROM visible WHERE (status=ANY($3::text[]) OR (status='skipped' AND error=ANY($8::text[]))) AND ($4::timestamptz IS NULL OR (created_at,id)<($4::timestamptz,$5::uuid)) AND ($7::text IS NULL OR $7=ANY(fired_trigger_ids)) ORDER BY created_at DESC,id DESC LIMIT $6`,
-            [
-              id,
-              actor.membershipId,
-              statuses,
-              beforeAt ?? null,
-              beforeId ?? null,
-              limit,
-              query.triggerId ?? null,
-              skips,
-            ],
-          )
-        ).rows;
-      const finished = statusSchema.options.filter(
-        status => !unfinishedStatuses.some(live => live === status) && status !== 'skipped',
-      );
-      const pinned = query.status || query.before ? [] : await runs(unfinishedStatuses, null);
-      // Routine skips such as schedule overlaps stay behind the skipped filter; skips the user must act on show by default.
-      const page = query.status
-        ? await runs([query.status], runHistoryPageSize + 1)
-        : await runs(finished, runHistoryPageSize + 1, actionableSkips);
-      const nextCursor =
-        page.length > runHistoryPageSize ? runHistoryCursorSchema.parse(page[runHistoryPageSize - 1].cursor) : null;
-      const result = [];
-      for (const run of runSchema.array().parse([...pinned, ...page.slice(0, runHistoryPageSize)])) {
-        try {
-          await requireRunAccess(tx, actor.membershipId, id, run.id, false);
-        } catch (error) {
-          if (error instanceof AccessDenied) continue;
-          throw error;
+    return memberTransaction(
+      workspaceId,
+      user,
+      async tx => {
+        const actor = await workflowMember(tx, user);
+        await requireGrant(tx, actor.membershipId, id, 'read');
+        const runs = async (statuses: readonly string[], limit: number | null, skips: readonly string[] = []) =>
+          (
+            await tx.client.query(
+              `WITH visible AS (SELECT r.* FROM ${table(tx, 'tf_workflow_runs')} r WHERE workflow_id=$1 AND ((sponsorship_id IS NULL AND membership_id=$2 AND (request_key LIKE 'manual:%' OR request_key LIKE 'event:%')) OR EXISTS (SELECT 1 FROM ${table(tx, 'tf_workflow_run_audience')} a WHERE a.run_id=r.id AND a.membership_id=$2))) SELECT id,workflow_id AS "workflowId",revision,status,split_part(request_key,':',1) AS source,input,created_at::text AS "createdAt",${utcInstant('scheduled_for')} AS "scheduledFor",${utcInstant('started_at')} AS "startedAt",${utcInstant('finished_at')} AS "finishedAt",error,trigger_id AS "triggerId",fired_trigger_ids AS "firedTriggerIds",to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') || '~' || id AS cursor FROM visible WHERE (status=ANY($3::text[]) OR (status='skipped' AND error=ANY($8::text[]))) AND ($4::timestamptz IS NULL OR (created_at,id)<($4::timestamptz,$5::uuid)) AND ($7::text IS NULL OR $7=ANY(fired_trigger_ids)) ORDER BY created_at DESC,id DESC LIMIT $6`,
+              [
+                id,
+                actor.membershipId,
+                statuses,
+                beforeAt ?? null,
+                beforeId ?? null,
+                limit,
+                query.triggerId ?? null,
+                skips,
+              ],
+            )
+          ).rows;
+        const finished = statusSchema.options.filter(
+          status => !unfinishedStatuses.some(live => live === status) && status !== 'skipped',
+        );
+        const pinned = query.status || query.before ? [] : await runs(unfinishedStatuses, null);
+        // Routine skips such as schedule overlaps stay behind the skipped filter; skips the user must act on show by default.
+        const page = query.status
+          ? await runs([query.status], runHistoryPageSize + 1)
+          : await runs(finished, runHistoryPageSize + 1, actionableSkips);
+        const nextCursor =
+          page.length > runHistoryPageSize ? runHistoryCursorSchema.parse(page[runHistoryPageSize - 1].cursor) : null;
+        const result = [];
+        for (const run of runSchema.array().parse([...pinned, ...page.slice(0, runHistoryPageSize)])) {
+          try {
+            await requireRunAccess(tx, actor.membershipId, id, run.id, false);
+          } catch (error) {
+            if (error instanceof AccessDenied) continue;
+            throw error;
+          }
+          result.push({ ...run, steps: await runReceipts(tx, actor, run.id) });
         }
-        result.push({ ...run, steps: await runReceipts(tx, actor, run.id) });
-      }
-      return { runs: result, nextCursor };
-    });
+        return { runs: result, nextCursor };
+      },
+      'write',
+    );
   }
   /** The ordinal of the first agent result the reader cannot see. Later steps can copy that result, so history withholds them too. */
   async function unreadableAgentResult(
@@ -2017,78 +2084,83 @@ export function createWorkflows(
     triggerId: string = legacyWebhookTriggerId,
   ) {
     const input = webhookKeySchema.parse(value);
-    return memberTransaction(workspaceId, user, async tx => {
-      const actor = await workflowMember(tx, user),
-        current = await read(tx, id);
-      await requireGrant(tx, actor.membershipId, id, 'manage');
-      if (
-        ![...current.definition.triggers, ...(current.activeTriggers ?? [])].some(
-          trigger => trigger.id === triggerId && trigger.kind === 'webhook',
+    return memberTransaction(
+      workspaceId,
+      user,
+      async tx => {
+        const actor = await workflowMember(tx, user),
+          current = await read(tx, id);
+        await requireGrant(tx, actor.membershipId, id, 'manage');
+        if (
+          ![...current.definition.triggers, ...(current.activeTriggers ?? [])].some(
+            trigger => trigger.id === triggerId && trigger.kind === 'webhook',
+          )
         )
-      )
-        throw new WorkflowConflict('trigger-not-webhook');
-      let key: string | null = null;
-      await administrativeCommand(
-        tx,
-        {
-          ...input,
-          generation: current.generation,
-          membershipId: actor.membershipId,
-          operation: 'webhook-key',
-          target: current.id,
-          request: input,
-        },
-        async () => {
-          await requireUnarchived(tx, id);
-          const rotation = webhookRotation(tx);
-          if (!rotation && input.mode !== 'bearer') throw new WorkflowConflict('webhook-signing-unavailable');
-          let issued;
-          try {
-            issued = issueWebhookKey(cipher, workspaceId, id, current.generation + 1, input.mode, input.secret);
-          } catch {
-            throw new WorkflowConflict('webhook-signing-unavailable');
-          }
-          const bearerDigest = issued.stored.mode === 'bearer' ? issued.stored.digest : null;
-          if (!rotation)
-            await tx.client.query(
-              `UPDATE ${table(tx, 'tf_workflow_triggers')} SET webhook_digest=$3 WHERE workflow_id=$1 AND trigger_id=$2`,
-              [id, triggerId, bearerDigest],
-            );
-          else {
-            const previous =
-              input.graceSeconds > 0
-                ? currentKey(
-                    (
-                      await tx.client.query(
-                        `SELECT webhook_digest,webhook_secret FROM ${table(tx, 'tf_workflow_triggers')} WHERE workflow_id=$1 AND trigger_id=$2`,
-                        [id, triggerId],
-                      )
-                    ).rows[0],
-                  )
-                : null;
-            const secret =
-              issued.stored.mode !== 'bearer'
-                ? { mode: issued.stored.mode, generation: issued.stored.generation, envelope: issued.stored.envelope }
-                : null;
-            await tx.client.query(
-              `UPDATE ${table(tx, 'tf_workflow_triggers')} SET webhook_digest=$2,webhook_secret=$3,webhook_previous=$4,webhook_previous_expires_at=CASE WHEN $4::jsonb IS NULL THEN NULL ELSE clock_timestamp()+$5*interval '1 second' END WHERE workflow_id=$1 AND trigger_id=$6`,
-              [
-                id,
-                bearerDigest,
-                secret && JSON.stringify(secret),
-                previous && JSON.stringify(previous),
-                input.graceSeconds,
-                triggerId,
-              ],
-            );
-          }
-          await tx.client.query(`UPDATE ${table(tx, 'tf_workflows')} SET generation=generation+1 WHERE id=$1`, [id]);
-          key = issued.key;
-          await auditWorkflow(tx, actor.membershipId, 'workflow.webhook.rotate', id);
-        },
-      );
-      return { workflow: await read(tx, id, actor.membershipId), key };
-    });
+          throw new WorkflowConflict('trigger-not-webhook');
+        let key: string | null = null;
+        await administrativeCommand(
+          tx,
+          {
+            ...input,
+            generation: current.generation,
+            membershipId: actor.membershipId,
+            operation: 'webhook-key',
+            target: current.id,
+            request: input,
+          },
+          async () => {
+            await requireUnarchived(tx, id);
+            const rotation = webhookRotation(tx);
+            if (!rotation && input.mode !== 'bearer') throw new WorkflowConflict('webhook-signing-unavailable');
+            let issued;
+            try {
+              issued = issueWebhookKey(cipher, workspaceId, id, current.generation + 1, input.mode, input.secret);
+            } catch {
+              throw new WorkflowConflict('webhook-signing-unavailable');
+            }
+            const bearerDigest = issued.stored.mode === 'bearer' ? issued.stored.digest : null;
+            if (!rotation)
+              await tx.client.query(
+                `UPDATE ${table(tx, 'tf_workflow_triggers')} SET webhook_digest=$3 WHERE workflow_id=$1 AND trigger_id=$2`,
+                [id, triggerId, bearerDigest],
+              );
+            else {
+              const previous =
+                input.graceSeconds > 0
+                  ? currentKey(
+                      (
+                        await tx.client.query(
+                          `SELECT webhook_digest,webhook_secret FROM ${table(tx, 'tf_workflow_triggers')} WHERE workflow_id=$1 AND trigger_id=$2`,
+                          [id, triggerId],
+                        )
+                      ).rows[0],
+                    )
+                  : null;
+              const secret =
+                issued.stored.mode !== 'bearer'
+                  ? { mode: issued.stored.mode, generation: issued.stored.generation, envelope: issued.stored.envelope }
+                  : null;
+              await tx.client.query(
+                `UPDATE ${table(tx, 'tf_workflow_triggers')} SET webhook_digest=$2,webhook_secret=$3,webhook_previous=$4,webhook_previous_expires_at=CASE WHEN $4::jsonb IS NULL THEN NULL ELSE clock_timestamp()+$5*interval '1 second' END WHERE workflow_id=$1 AND trigger_id=$6`,
+                [
+                  id,
+                  bearerDigest,
+                  secret && JSON.stringify(secret),
+                  previous && JSON.stringify(previous),
+                  input.graceSeconds,
+                  triggerId,
+                ],
+              );
+            }
+            await tx.client.query(`UPDATE ${table(tx, 'tf_workflows')} SET generation=generation+1 WHERE id=$1`, [id]);
+            key = issued.key;
+            await auditWorkflow(tx, actor.membershipId, 'workflow.webhook.rotate', id);
+          },
+        );
+        return { workflow: await read(tx, id, actor.membershipId), key };
+      },
+      'write',
+    );
   }
   async function revokePreviousWebhookKey(
     workspaceId: string,
@@ -2098,34 +2170,39 @@ export function createWorkflows(
     triggerId: string = legacyWebhookTriggerId,
   ) {
     const input = commandSchema.parse(value);
-    return memberTransaction(workspaceId, user, async tx => {
-      const actor = await workflowMember(tx, user),
-        current = await read(tx, id);
-      await requireGrant(tx, actor.membershipId, id, 'manage');
-      if (!webhookRotation(tx)) throw new WorkflowConflict('webhook-signing-unavailable');
-      await administrativeCommand(
-        tx,
-        {
-          ...input,
-          generation: current.generation,
-          membershipId: actor.membershipId,
-          operation: 'webhook-key-revoke',
-          target: current.id,
-          request: input,
-        },
-        async () => {
-          await requireUnarchived(tx, id);
-          const revoked = await tx.client.query(
-            `UPDATE ${table(tx, 'tf_workflow_triggers')} SET webhook_previous=NULL,webhook_previous_expires_at=NULL WHERE workflow_id=$1 AND trigger_id=$2 AND webhook_previous_expires_at>clock_timestamp()`,
-            [id, triggerId],
-          );
-          if (!revoked.rowCount) return;
-          await tx.client.query(`UPDATE ${table(tx, 'tf_workflows')} SET generation=generation+1 WHERE id=$1`, [id]);
-          await auditWorkflow(tx, actor.membershipId, 'workflow.webhook.revoke', id);
-        },
-      );
-      return read(tx, id, actor.membershipId);
-    });
+    return memberTransaction(
+      workspaceId,
+      user,
+      async tx => {
+        const actor = await workflowMember(tx, user),
+          current = await read(tx, id);
+        await requireGrant(tx, actor.membershipId, id, 'manage');
+        if (!webhookRotation(tx)) throw new WorkflowConflict('webhook-signing-unavailable');
+        await administrativeCommand(
+          tx,
+          {
+            ...input,
+            generation: current.generation,
+            membershipId: actor.membershipId,
+            operation: 'webhook-key-revoke',
+            target: current.id,
+            request: input,
+          },
+          async () => {
+            await requireUnarchived(tx, id);
+            const revoked = await tx.client.query(
+              `UPDATE ${table(tx, 'tf_workflow_triggers')} SET webhook_previous=NULL,webhook_previous_expires_at=NULL WHERE workflow_id=$1 AND trigger_id=$2 AND webhook_previous_expires_at>clock_timestamp()`,
+              [id, triggerId],
+            );
+            if (!revoked.rowCount) return;
+            await tx.client.query(`UPDATE ${table(tx, 'tf_workflows')} SET generation=generation+1 WHERE id=$1`, [id]);
+            await auditWorkflow(tx, actor.membershipId, 'workflow.webhook.revoke', id);
+          },
+        );
+        return read(tx, id, actor.membershipId);
+      },
+      'write',
+    );
   }
   function currentKey(
     row: { webhook_digest: string | null; webhook_secret: unknown } | undefined,
@@ -2251,49 +2328,53 @@ export function createWorkflows(
   ) {
     const proofs = webhookProof(delivery);
     if (!proofs.length) throw new WebhookRejected('key-missing');
-    const outcome = await transaction(workspaceId, async tx => {
-      if (!triggerIdSchema.safeParse(triggerId).success) throw new WebhookRejected('workflow-inactive');
-      ({ id, triggerId } = await webhookTarget(tx, id, triggerId));
-      const active = await activeWebhook(tx, id, triggerId);
-      if (!active) throw new WebhookRejected('workflow-inactive');
-      if (!active.enabled) throw new WebhookRejected('trigger-disabled');
-      const { row, trigger } = active;
-      const keys = [
-        currentKey(row),
-        row.webhook_previous ? storedWebhookKeySchema.parse(row.webhook_previous) : null,
-      ].filter(key => key !== null);
-      const proof = matchWebhookKey(cipher, workspaceId, id, keys, proofs);
-      if (!proof) throw new WebhookRejected('key-rejected');
-      if (proof.kind === 'signed' || proof.kind === 'stripe') {
-        if (Math.abs(z.number().parse(row.now) - proof.timestamp) > tolerance)
-          throw new WorkflowConflict('webhook-signature-expired');
-        // A signature stays replayable only while its timestamp is inside the window, which closes at most twice the tolerance after it was first seen.
-        await tx.client.query(
-          `DELETE FROM ${table(tx, 'tf_workflow_webhook_signatures')} WHERE workflow_id=$1 AND received_at<clock_timestamp()-$2*interval '1 second'`,
-          [id, tolerance * 2],
-        );
-        const recorded = await tx.client.query(
-          `INSERT INTO ${table(tx, 'tf_workflow_webhook_signatures')} (workflow_id,trigger_id,signature) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
-          [id, triggerId, proof.signature],
-        );
-        if (recorded.rowCount !== 1) throw new WorkflowConflict('webhook-signature-replayed');
-        // A refusal these exact bytes would always get keeps the signature spent, so a captured request cannot be resent for free.
-        // A run limit or an outage rolls it back, so the sender can retry the same request.
-        await tx.client.query('SAVEPOINT webhook_admission');
-        try {
-          return { run: await receive(tx, id, trigger, delivery.body, delivery.headers) };
-        } catch (failure) {
-          if (
-            failure instanceof WorkflowLimitReached ||
-            !(failure instanceof WorkflowConflict || failure instanceof z.ZodError)
-          )
-            throw failure;
-          await tx.client.query('ROLLBACK TO SAVEPOINT webhook_admission');
-          return { failure };
+    const outcome = await transaction(
+      workspaceId,
+      async tx => {
+        if (!triggerIdSchema.safeParse(triggerId).success) throw new WebhookRejected('workflow-inactive');
+        ({ id, triggerId } = await webhookTarget(tx, id, triggerId));
+        const active = await activeWebhook(tx, id, triggerId);
+        if (!active) throw new WebhookRejected('workflow-inactive');
+        if (!active.enabled) throw new WebhookRejected('trigger-disabled');
+        const { row, trigger } = active;
+        const keys = [
+          currentKey(row),
+          row.webhook_previous ? storedWebhookKeySchema.parse(row.webhook_previous) : null,
+        ].filter(key => key !== null);
+        const proof = matchWebhookKey(cipher, workspaceId, id, keys, proofs);
+        if (!proof) throw new WebhookRejected('key-rejected');
+        if (proof.kind === 'signed' || proof.kind === 'stripe') {
+          if (Math.abs(z.number().parse(row.now) - proof.timestamp) > tolerance)
+            throw new WorkflowConflict('webhook-signature-expired');
+          // A signature stays replayable only while its timestamp is inside the window, which closes at most twice the tolerance after it was first seen.
+          await tx.client.query(
+            `DELETE FROM ${table(tx, 'tf_workflow_webhook_signatures')} WHERE workflow_id=$1 AND received_at<clock_timestamp()-$2*interval '1 second'`,
+            [id, tolerance * 2],
+          );
+          const recorded = await tx.client.query(
+            `INSERT INTO ${table(tx, 'tf_workflow_webhook_signatures')} (workflow_id,trigger_id,signature) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+            [id, triggerId, proof.signature],
+          );
+          if (recorded.rowCount !== 1) throw new WorkflowConflict('webhook-signature-replayed');
+          // A refusal these exact bytes would always get keeps the signature spent, so a captured request cannot be resent for free.
+          // A run limit or an outage rolls it back, so the sender can retry the same request.
+          await tx.client.query('SAVEPOINT webhook_admission');
+          try {
+            return { run: await receive(tx, id, trigger, delivery.body, delivery.headers) };
+          } catch (failure) {
+            if (
+              failure instanceof WorkflowLimitReached ||
+              !(failure instanceof WorkflowConflict || failure instanceof z.ZodError)
+            )
+              throw failure;
+            await tx.client.query('ROLLBACK TO SAVEPOINT webhook_admission');
+            return { failure };
+          }
         }
-      }
-      return { run: await receive(tx, id, trigger, delivery.body, delivery.headers) };
-    });
+        return { run: await receive(tx, id, trigger, delivery.body, delivery.headers) };
+      },
+      'write',
+    );
     if ('failure' in outcome) throw outcome.failure;
     return outcome.run;
   }
@@ -2357,15 +2438,20 @@ export function createWorkflows(
     triggerId: string = legacyWebhookTriggerId,
   ) {
     const input = webhookTestSchema.parse(value);
-    return memberTransaction(workspaceId, user, async tx => {
-      const actor = await workflowMember(tx, user);
-      await requireGrant(tx, actor.membershipId, id, 'manage');
-      const active = await activeWebhook(tx, id, triggerId);
-      if (!active) throw new WorkflowConflict('workflow-inactive');
-      if (!active.enabled) throw new WorkflowConflict('trigger-disabled');
-      const sample = webhookSample(active.trigger, input.requestId);
-      return receive(tx, id, active.trigger, sample.body, sample.headers);
-    });
+    return memberTransaction(
+      workspaceId,
+      user,
+      async tx => {
+        const actor = await workflowMember(tx, user);
+        await requireGrant(tx, actor.membershipId, id, 'manage');
+        const active = await activeWebhook(tx, id, triggerId);
+        if (!active) throw new WorkflowConflict('workflow-inactive');
+        if (!active.enabled) throw new WorkflowConflict('trigger-disabled');
+        const sample = webhookSample(active.trigger, input.requestId);
+        return receive(tx, id, active.trigger, sample.body, sample.headers);
+      },
+      'write',
+    );
   }
   type DeliveryRecord = {
     status: number;
@@ -2433,58 +2519,68 @@ export function createWorkflows(
     id: string,
     triggerId: string = legacyWebhookTriggerId,
   ) {
-    return memberTransaction(workspaceId, user, async tx => {
-      const actor = await workflowMember(tx, user);
-      await requireGrant(tx, actor.membershipId, id, 'manage');
-      if (!webhookLog(tx)) return webhookDeliveryLogSchema.parse({ available: false, deliveries: [] });
-      return webhookDeliveryLogSchema.parse({
-        available: true,
-        deliveries: (
-          await tx.client.query(
-            `SELECT d.id,${utcInstant('d.received_at')} AS "receivedAt",d.status,d.outcome,CASE WHEN d.run_id IS NULL OR v.visible THEN d.request_id END AS "requestId",d.body_bytes AS "bodyBytes",d.run_id IS NOT NULL AS "runStarted",CASE WHEN v.visible THEN d.run_id END AS "runId",d.test FROM ${table(tx, 'tf_workflow_webhook_deliveries')} d CROSS JOIN LATERAL (SELECT EXISTS (SELECT 1 FROM ${table(tx, 'tf_workflow_run_audience')} a WHERE a.run_id=d.run_id AND a.membership_id=$2) AS visible) v WHERE d.workflow_id=$1 AND d.trigger_id=$5 AND d.received_at>=clock_timestamp()-$3*interval '1 day' ORDER BY d.received_at DESC,d.id DESC LIMIT $4`,
-            [
-              idSchema.parse(id),
-              actor.membershipId,
-              webhookDeliveryRetention.days,
-              webhookDeliveryRetention.count,
-              triggerIdSchema.parse(triggerId),
-            ],
-          )
-        ).rows,
-      });
-    });
+    return memberTransaction(
+      workspaceId,
+      user,
+      async tx => {
+        const actor = await workflowMember(tx, user);
+        await requireGrant(tx, actor.membershipId, id, 'manage');
+        if (!webhookLog(tx)) return webhookDeliveryLogSchema.parse({ available: false, deliveries: [] });
+        return webhookDeliveryLogSchema.parse({
+          available: true,
+          deliveries: (
+            await tx.client.query(
+              `SELECT d.id,${utcInstant('d.received_at')} AS "receivedAt",d.status,d.outcome,CASE WHEN d.run_id IS NULL OR v.visible THEN d.request_id END AS "requestId",d.body_bytes AS "bodyBytes",d.run_id IS NOT NULL AS "runStarted",CASE WHEN v.visible THEN d.run_id END AS "runId",d.test FROM ${table(tx, 'tf_workflow_webhook_deliveries')} d CROSS JOIN LATERAL (SELECT EXISTS (SELECT 1 FROM ${table(tx, 'tf_workflow_run_audience')} a WHERE a.run_id=d.run_id AND a.membership_id=$2) AS visible) v WHERE d.workflow_id=$1 AND d.trigger_id=$5 AND d.received_at>=clock_timestamp()-$3*interval '1 day' ORDER BY d.received_at DESC,d.id DESC LIMIT $4`,
+              [
+                idSchema.parse(id),
+                actor.membershipId,
+                webhookDeliveryRetention.days,
+                webhookDeliveryRetention.count,
+                triggerIdSchema.parse(triggerId),
+              ],
+            )
+          ).rows,
+        });
+      },
+      'write',
+    );
   }
   async function event(workspaceId: string, user: string, id: string, eventName: string, value: unknown) {
     const input = startSchema.parse(value);
-    return memberTransaction(workspaceId, user, async tx => {
-      const actor = await workflowMember(tx, user);
-      await requireGrant(tx, actor.membershipId, id, 'invoke');
-      const row = (
-        await tx.client.query(
-          `SELECT r.definition,ARRAY(SELECT t.trigger_id FROM ${table(tx, 'tf_workflow_triggers')} t WHERE t.workflow_id=w.id AND t.enabled) AS enabled FROM ${table(tx, 'tf_workflows')} w JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=w.active_revision WHERE w.id=$1 AND w.enabled`,
-          [idSchema.parse(id)],
-        )
-      ).rows[0];
-      const enabled = new Set(z.array(z.string()).parse(row?.enabled ?? []));
-      const matched = row
-        ? definitionSchema
-            .parse(row.definition)
-            .triggers.filter(
-              trigger => trigger.kind === 'event' && trigger.name === eventName && enabled.has(trigger.id),
-            )
-            .map(trigger => trigger.id)
-        : [];
-      if (!matched.length) throw new AccessDenied();
-      const { runId } = await admit(
-        tx,
-        id,
-        `event:${actor.membershipId}:${input.requestId}`,
-        input.input,
-        actor.membershipId,
-        firedBy(matched),
-      );
-      return { runId };
-    });
+    return memberTransaction(
+      workspaceId,
+      user,
+      async tx => {
+        const actor = await workflowMember(tx, user);
+        await requireGrant(tx, actor.membershipId, id, 'invoke');
+        const row = (
+          await tx.client.query(
+            `SELECT r.definition,ARRAY(SELECT t.trigger_id FROM ${table(tx, 'tf_workflow_triggers')} t WHERE t.workflow_id=w.id AND t.enabled) AS enabled FROM ${table(tx, 'tf_workflows')} w JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=w.active_revision WHERE w.id=$1 AND w.enabled`,
+            [idSchema.parse(id)],
+          )
+        ).rows[0];
+        const enabled = new Set(z.array(z.string()).parse(row?.enabled ?? []));
+        const matched = row
+          ? definitionSchema
+              .parse(row.definition)
+              .triggers.filter(
+                trigger => trigger.kind === 'event' && trigger.name === eventName && enabled.has(trigger.id),
+              )
+              .map(trigger => trigger.id)
+          : [];
+        if (!matched.length) throw new AccessDenied();
+        const { runId } = await admit(
+          tx,
+          id,
+          `event:${actor.membershipId}:${input.requestId}`,
+          input.input,
+          actor.membershipId,
+          firedBy(matched),
+        );
+        return { runId };
+      },
+      'write',
+    );
   }
   type TriggerState<T extends Trigger = Trigger> = { trigger: T; enabled: boolean };
   type ScheduleTrigger = Extract<Trigger, { kind: 'once' | 'interval' | 'cron' }>;
@@ -3063,554 +3159,571 @@ export function createWorkflows(
     coding?: { work: CodingWork; started: boolean },
   ): Promise<Progress | CodeWork | AgentWork | HttpWork | SlackWork | CodingWork> {
     const work = workSchema.parse(value);
-    return transaction(work.workspaceId, async tx => {
-      const raw = (
-        await tx.client.query(
-          `SELECT r.*,m.user_id,d.definition,w.enabled,w.sponsor_membership_id,w.sponsorship_id AS current_sponsorship_id FROM ${table(tx, 'tf_workflow_runs')} r JOIN ${table(tx, 'tf_memberships')} m ON m.id=r.membership_id JOIN ${table(tx, 'tf_workflow_revisions')} d ON d.workflow_id=r.workflow_id AND d.id=r.revision JOIN ${table(tx, 'tf_workflows')} w ON w.id=r.workflow_id WHERE r.id=$1 FOR UPDATE OF r`,
-          [work.runId],
-        )
-      ).rows[0];
-      if (!raw || !['queued', 'running', 'waiting'].includes(raw.status)) return { kind: 'done' };
-      const allowed =
-        raw.enabled &&
-        raw.membership_id &&
-        (await hasGrant(tx, raw.membership_id, raw.workflow_id, 'invoke')) &&
-        (raw.sponsorship_id
-          ? raw.sponsorship_id === raw.current_sponsorship_id && raw.membership_id === raw.sponsor_membership_id
-          : /^(manual|event):/.test(raw.request_key));
-      if (!allowed) {
-        await tx.client.query(
-          `UPDATE ${table(tx, 'tf_workflow_runs')} SET status='blocked',error='authority-revoked' WHERE id=$1`,
-          [work.runId],
-        );
-        return { kind: 'done' };
-      }
-      const definition = definitionSchema.parse(raw.definition);
-      for (const trigger of definition.triggers)
-        try {
-          await authorizeSource(tx, trigger, idSchema.parse(raw.membership_id));
-        } catch {
-          await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='blocked',error=$2 WHERE id=$1`, [
-            work.runId,
-            `${trigger.kind}-authority-revoked`,
-          ]);
-          return { kind: 'done' };
-        }
-      const startedBy = definition.triggers.find(trigger => trigger.id === raw.trigger_id) ?? null;
-      try {
-        await requireTableStepReader(tx, idSchema.parse(raw.membership_id), definition);
-      } catch {
-        await tx.client.query(
-          `UPDATE ${table(tx, 'tf_workflow_runs')} SET status='blocked',error='table-authority-revoked' WHERE id=$1`,
-          [work.runId],
-        );
-        return { kind: 'done' };
-      }
-      try {
-        await requireAgentStepReader(tx, idSchema.parse(raw.membership_id), definition);
-      } catch {
-        await tx.client.query(
-          `UPDATE ${table(tx, 'tf_workflow_runs')} SET status='blocked',error='agent-authority-revoked' WHERE id=$1`,
-          [work.runId],
-        );
-        return { kind: 'done' };
-      }
-      try {
-        for (const step of definition.steps)
-          if (step.kind === 'http' && step.credential)
-            await providers.authorizeIntegration(tx, step.credential.integrationId, idSchema.parse(raw.membership_id));
-      } catch {
-        await tx.client.query(
-          `UPDATE ${table(tx, 'tf_workflow_runs')} SET status='blocked',error='http-credential-authority-revoked' WHERE id=$1`,
-          [work.runId],
-        );
-        return { kind: 'done' };
-      }
-      const rows = (
-        await tx.client.query(
-          `SELECT step_id,status,output,EXTRACT(EPOCH FROM (due_at-clock_timestamp()))::float8 AS remaining FROM ${table(tx, 'tf_workflow_steps')} WHERE run_id=$1 ORDER BY ordinal`,
-          [work.runId],
-        )
-      ).rows;
-      const outputs = new Map<string, z.infer<typeof payloadSchema>>();
-      for (const row of rows)
-        if (row.status === 'completed') outputs.set(z.string().parse(row.step_id), payloadSchema.parse(row.output));
-      outputs.set(runTriggerKey, startedBy ? { id: startedBy.id, kind: startedBy.kind } : manualRunTrigger);
-      const next = nextStep(definition.steps, outputs);
-      if (!next) {
-        await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='completed' WHERE id=$1`, [
-          work.runId,
-        ]);
-        return { kind: 'done' };
-      }
-      // A step skipped by a condition leaves no receipt, so a receipt's ordinal is its definition position, not a count.
-      const { step, index: ordinal } = next;
-      const receipt = rows.find(row => row.step_id === step.id);
-      if (step.kind === 'slack-message') {
-        const fail = async (error: string): Promise<Progress> => {
-          await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='failed',error=$2 WHERE id=$1`, [
-            work.runId,
-            error,
-          ]);
-          return { kind: 'done' };
-        };
-        if (tx.commonVersion < 1 || !options.slackActions) return fail('slack-action-unavailable');
-        try {
-          z.string()
-            .min(1)
-            .max(4000)
-            .parse(resolveSlackText(step.text, payloadSchema.parse(raw.input), outputs));
-        } catch {
-          return fail('slack-message-text-invalid');
-        }
-        const actionId = agentRequestId(work.runId, step.id);
-        if (!receipt) {
+    return transaction(
+      work.workspaceId,
+      async tx => {
+        const raw = (
           await tx.client.query(
-            `INSERT INTO ${table(tx, 'tf_workflow_steps')} (run_id,step_id,ordinal,status,output,due_at) VALUES ($1,$2,$3,'waiting',$4,clock_timestamp()+interval '24 hours')`,
-            [work.runId, step.id, ordinal, JSON.stringify({ provider: 'slack', actionId, status: 'preparing' })],
-          );
-          await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='waiting' WHERE id=$1`, [
-            work.runId,
-          ]);
-        }
-        if (slack?.work.actionId === actionId) {
-          const result = slack.result;
-          await tx.client.query(
-            `UPDATE ${table(tx, 'tf_workflow_steps')} SET output=$3,due_at=$4 WHERE run_id=$1 AND step_id=$2`,
-            [
-              work.runId,
-              step.id,
-              JSON.stringify({
-                provider: 'slack',
-                actionId,
-                status: result.status,
-                sentMessageTs: result.sentMessageTs ?? null,
-              }),
-              result.expiresAt,
-            ],
-          );
-          if (result.status === 'sent') {
-            await tx.client.query(
-              `UPDATE ${table(tx, 'tf_workflow_steps')} SET status='completed' WHERE run_id=$1 AND step_id=$2`,
-              [work.runId, step.id],
-            );
-            await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='running' WHERE id=$1`, [
-              work.runId,
-            ]);
-            return { kind: 'continue' };
-          }
-          if (result.status === 'revoked' && result.reason && result.reason !== 'access-denied')
-            return fail(`slack-${result.reason}`);
-          if (
-            ['rejected', 'expired', 'stale', 'revoked', 'unknown', 'reauthorization-required'].includes(result.status)
+            `SELECT r.*,m.user_id,d.definition,w.enabled,w.sponsor_membership_id,w.sponsorship_id AS current_sponsorship_id FROM ${table(tx, 'tf_workflow_runs')} r JOIN ${table(tx, 'tf_memberships')} m ON m.id=r.membership_id JOIN ${table(tx, 'tf_workflow_revisions')} d ON d.workflow_id=r.workflow_id AND d.id=r.revision JOIN ${table(tx, 'tf_workflows')} w ON w.id=r.workflow_id WHERE r.id=$1 FOR UPDATE OF r`,
+            [work.runId],
           )
-            return fail(`slack-action-${result.status}`);
-          const due = result.status === 'pending' ? result.expiresAt : result.nextAttemptAt;
-          return {
-            kind: 'wait',
-            seconds: Math.max(
-              1,
-              Math.ceil((Math.min(Date.parse(due), Date.parse(result.expiresAt)) - Date.now()) / 1000),
-            ),
+        ).rows[0];
+        if (!raw || !['queued', 'running', 'waiting'].includes(raw.status)) return { kind: 'done' };
+        const allowed =
+          raw.enabled &&
+          raw.membership_id &&
+          (await hasGrant(tx, raw.membership_id, raw.workflow_id, 'invoke')) &&
+          (raw.sponsorship_id
+            ? raw.sponsorship_id === raw.current_sponsorship_id && raw.membership_id === raw.sponsor_membership_id
+            : /^(manual|event):/.test(raw.request_key));
+        if (!allowed) {
+          await tx.client.query(
+            `UPDATE ${table(tx, 'tf_workflow_runs')} SET status='blocked',error='authority-revoked' WHERE id=$1`,
+            [work.runId],
+          );
+          return { kind: 'done' };
+        }
+        const definition = definitionSchema.parse(raw.definition);
+        for (const trigger of definition.triggers)
+          try {
+            await authorizeSource(tx, trigger, idSchema.parse(raw.membership_id));
+          } catch {
+            await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='blocked',error=$2 WHERE id=$1`, [
+              work.runId,
+              `${trigger.kind}-authority-revoked`,
+            ]);
+            return { kind: 'done' };
+          }
+        const startedBy = definition.triggers.find(trigger => trigger.id === raw.trigger_id) ?? null;
+        try {
+          await requireTableStepReader(tx, idSchema.parse(raw.membership_id), definition);
+        } catch {
+          await tx.client.query(
+            `UPDATE ${table(tx, 'tf_workflow_runs')} SET status='blocked',error='table-authority-revoked' WHERE id=$1`,
+            [work.runId],
+          );
+          return { kind: 'done' };
+        }
+        try {
+          await requireAgentStepReader(tx, idSchema.parse(raw.membership_id), definition);
+        } catch {
+          await tx.client.query(
+            `UPDATE ${table(tx, 'tf_workflow_runs')} SET status='blocked',error='agent-authority-revoked' WHERE id=$1`,
+            [work.runId],
+          );
+          return { kind: 'done' };
+        }
+        try {
+          for (const step of definition.steps)
+            if (step.kind === 'http' && step.credential)
+              await providers.authorizeIntegration(
+                tx,
+                step.credential.integrationId,
+                idSchema.parse(raw.membership_id),
+              );
+        } catch {
+          await tx.client.query(
+            `UPDATE ${table(tx, 'tf_workflow_runs')} SET status='blocked',error='http-credential-authority-revoked' WHERE id=$1`,
+            [work.runId],
+          );
+          return { kind: 'done' };
+        }
+        const rows = (
+          await tx.client.query(
+            `SELECT step_id,status,output,EXTRACT(EPOCH FROM (due_at-clock_timestamp()))::float8 AS remaining FROM ${table(tx, 'tf_workflow_steps')} WHERE run_id=$1 ORDER BY ordinal`,
+            [work.runId],
+          )
+        ).rows;
+        const outputs = new Map<string, z.infer<typeof payloadSchema>>();
+        for (const row of rows)
+          if (row.status === 'completed') outputs.set(z.string().parse(row.step_id), payloadSchema.parse(row.output));
+        outputs.set(runTriggerKey, startedBy ? { id: startedBy.id, kind: startedBy.kind } : manualRunTrigger);
+        const next = nextStep(definition.steps, outputs);
+        if (!next) {
+          await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='completed' WHERE id=$1`, [
+            work.runId,
+          ]);
+          return { kind: 'done' };
+        }
+        // A step skipped by a condition leaves no receipt, so a receipt's ordinal is its definition position, not a count.
+        const { step, index: ordinal } = next;
+        const receipt = rows.find(row => row.step_id === step.id);
+        if (step.kind === 'slack-message') {
+          const fail = async (error: string): Promise<Progress> => {
+            await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='failed',error=$2 WHERE id=$1`, [
+              work.runId,
+              error,
+            ]);
+            return { kind: 'done' };
           };
-        }
-        return { kind: 'slack', workspaceId: work.workspaceId, runId: work.runId, stepId: step.id, actionId };
-      }
-      if (step.kind === 'condition') {
-        let output;
-        try {
-          output = runCondition(step, payloadSchema.parse(raw.input), outputs);
-        } catch (error) {
-          if (!(error instanceof ConditionIncomparable)) throw error;
-          await tx.client.query(
-            `UPDATE ${table(tx, 'tf_workflow_runs')} SET status='failed',error='condition-values-incomparable' WHERE id=$1`,
-            [work.runId],
-          );
-          return { kind: 'done' };
-        }
-        await tx.client.query(
-          `INSERT INTO ${table(tx, 'tf_workflow_steps')} (run_id,step_id,ordinal,status,output) VALUES ($1,$2,$3,'completed',$4)`,
-          [work.runId, step.id, ordinal, JSON.stringify(output)],
-        );
-        await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='running' WHERE id=$1`, [work.runId]);
-        return { kind: 'continue' };
-      }
-      if (step.kind === 'code') {
-        const fail = async (error: string): Promise<Progress> => {
-          await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='failed',error=$2 WHERE id=$1`, [
-            work.runId,
-            error,
-          ]);
-          return { kind: 'done' };
-        };
-        if (!options.snippets) return fail('snippet-runner-unavailable');
-        let input;
-        try {
-          input = resolveValue(step.input, payloadSchema.parse(raw.input), outputs);
-        } catch {
-          return fail('snippet-input-invalid');
-        }
-        const job: SnippetJob = {
-          workspaceId: work.workspaceId,
-          runId: work.runId,
-          revision: idSchema.parse(raw.revision),
-          stepId: step.id,
-          language: step.language,
-          source: step.source,
-          input,
-        };
-        if (!jobSchema.safeParse(job).success) return fail('snippet-input-invalid');
-        if (!receipt) {
-          await tx.client.query(
-            `INSERT INTO ${table(tx, 'tf_workflow_steps')} (run_id,step_id,ordinal,status,due_at) VALUES ($1,$2,$3,'waiting',clock_timestamp()+interval '5 minutes')`,
-            [work.runId, step.id, ordinal],
-          );
-          await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='waiting' WHERE id=$1`, [
-            work.runId,
-          ]);
-        } else if (z.number().parse(receipt.remaining) <= 0) return fail('snippet-runner-deadline');
-        if (completed && canonical(completed.job) === canonical(job)) {
-          if (completed.result.kind === 'failed') return fail(`snippet-${completed.result.error}`);
-          if (completed.result.kind === 'completed') {
-            await tx.client.query(
-              `UPDATE ${table(tx, 'tf_workflow_steps')} SET status='completed',output=$3 WHERE run_id=$1 AND step_id=$2`,
-              [work.runId, step.id, JSON.stringify(completed.result.output)],
-            );
-            await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='running' WHERE id=$1`, [
-              work.runId,
-            ]);
-            return { kind: 'continue' };
-          }
-          return { kind: 'wait', seconds: 2 };
-        }
-        return { kind: 'code', job };
-      }
-      if (step.kind === 'coding') {
-        const fail = async (error: string): Promise<Progress> => {
-          await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='failed',error=$2 WHERE id=$1`, [
-            work.runId,
-            error,
-          ]);
-          return { kind: 'done' };
-        };
-        if (!codingStepsAvailable) return fail('coding-runner-unavailable');
-        const jobId = agentRequestId(work.runId, step.id);
-        const pending: CodingWork = {
-          kind: 'coding',
-          workspaceId: work.workspaceId,
-          runId: work.runId,
-          stepId: step.id,
-          jobId,
-        };
-        if (!receipt) {
-          let job: CodingStepJob;
+          if (tx.commonVersion < 1 || !options.slackActions) return fail('slack-action-unavailable');
           try {
-            const input = payloadSchema.parse(raw.input);
-            let prompt = z
-              .string()
-              .trim()
+            z.string()
               .min(1)
-              .max(agentTextLimit)
-              .parse(resolveValue(step.prompt, input, outputs));
-            const context = step.context ? resolveValue(step.context, input, outputs) : input;
-            if (step.triggerContext) prompt = withAgentContext(prompt, triggerContext(startedBy, context));
-            else if (step.context) prompt = withAgentContext(prompt, context);
-            const branch = step.branch ? resolveValue(step.branch, input, outputs) : null;
-            const title = step.title ? resolveValue(step.title, input, outputs) : null;
-            job = codingStepJobSchema.parse({
-              agent: step.agent,
-              repository: workflowRepositorySchema.parse(resolveValue(step.repository, input, outputs)),
-              branch: branch === null || branch === '' ? null : codingBranchSchema.parse(branch),
-              prompt,
-              pullRequest: step.pullRequest,
-              title: typeof title === 'string' && title.trim() ? Array.from(title.trim()).slice(0, 256).join('') : null,
-              githubAccount: step.githubAccount ?? null,
-              planConnectionId: step.planConnectionId ?? null,
-            });
+              .max(4000)
+              .parse(resolveSlackText(step.text, payloadSchema.parse(raw.input), outputs));
           } catch {
-            return fail('coding-input-invalid');
+            return fail('slack-message-text-invalid');
           }
-          // The job is fixed now, so a retried start or a later run detail always describes the same work.
-          await tx.client.query(
-            `INSERT INTO ${table(tx, 'tf_workflow_steps')} (run_id,step_id,ordinal,status,output,due_at) VALUES ($1,$2,$3,'waiting',$4,clock_timestamp()+interval '45 minutes')`,
-            [work.runId, step.id, ordinal, JSON.stringify({ jobId, state: 'starting', job })],
-          );
-          await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='waiting' WHERE id=$1`, [
-            work.runId,
-          ]);
-          return pending;
-        }
-        const stored = codingReceiptSchema.safeParse(receipt.output);
-        if (!stored.success || stored.data.jobId !== jobId) return fail('coding-input-invalid');
-        const result = stored.data.result;
-        if (result?.kind === 'completed') {
-          await tx.client.query(
-            `UPDATE ${table(tx, 'tf_workflow_steps')} SET status='completed',output=$3 WHERE run_id=$1 AND step_id=$2`,
-            [work.runId, step.id, JSON.stringify(result.output)],
-          );
-          await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='running' WHERE id=$1`, [
-            work.runId,
-          ]);
-          return { kind: 'continue' };
-        }
-        if (result?.kind === 'failed') return fail(`coding-${result.error}`);
-        if (z.number().parse(receipt.remaining) <= 0) return fail('coding-deadline');
-        if (coding?.work.jobId === jobId && coding.started && stored.data.state === 'starting') {
-          await tx.client.query(
-            `UPDATE ${table(tx, 'tf_workflow_steps')} SET output=output||'{"state":"running"}'::jsonb WHERE run_id=$1 AND step_id=$2`,
-            [work.runId, step.id],
-          );
-          return { kind: 'wait', seconds: 30 };
-        }
-        // A start that did not reach the runner is tried again; a started job reports back on its own.
-        if (stored.data.state === 'starting' && !coding) return pending;
-        return { kind: 'wait', seconds: stored.data.state === 'starting' ? 5 : 30 };
-      }
-      if (step.kind === 'agent') {
-        const fail = async (error: string): Promise<Progress> => {
-          await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='failed',error=$2 WHERE id=$1`, [
-            work.runId,
-            error,
-          ]);
-          return { kind: 'done' };
-        };
-        if (!options.agentTasks) return fail('agent-task-runner-unavailable');
-        let text: string;
-        try {
-          const input = payloadSchema.parse(raw.input);
-          text = z
-            .string()
-            .trim()
-            .min(1)
-            .max(8000)
-            .parse(resolveValue(step.prompt, input, outputs));
-          const context = step.context ? resolveValue(step.context, input, outputs) : input;
-          if (step.triggerContext) text = withAgentContext(text, triggerContext(startedBy, context));
-          else if (step.context) text = withAgentContext(text, context);
-        } catch {
-          return fail('agent-prompt-invalid');
-        }
-        const storedTask =
-          receipt?.output === null || receipt?.output === undefined
-            ? undefined
-            : z.object({ taskId: idSchema }).safeParse(receipt.output);
-        const taskId = storedTask?.success ? storedTask.data.taskId : undefined;
-        if (
-          !taskId &&
-          step.activationId &&
-          !(
+          const actionId = agentRequestId(work.runId, step.id);
+          if (!receipt) {
             await tx.client.query(
-              `SELECT 1 FROM ${table(tx, 'tf_agent_activations')} WHERE id=$1 AND agent_id=$2 AND revoked_at IS NULL`,
-              [step.activationId, step.agentId],
-            )
-          ).rowCount
-        )
-          return fail('activation-unavailable');
-        const task: AgentWork = {
-          kind: 'agent',
-          workspaceId: work.workspaceId,
-          userId: z.string().parse(raw.user_id),
-          taskId,
-          request: taskId
-            ? undefined
-            : {
-                requestId: agentRequestId(work.runId, step.id),
-                agentId: step.agentId,
-                ...(step.activationId ? { activationId: step.activationId } : {}),
-                text,
-                limits: step.limits,
-              },
-        };
-        if (!receipt) {
-          await tx.client.query(
-            `INSERT INTO ${table(tx, 'tf_workflow_steps')} (run_id,step_id,ordinal,status) VALUES ($1,$2,$3,'waiting')`,
-            [work.runId, step.id, ordinal],
-          );
-          await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='waiting' WHERE id=$1`, [
-            work.runId,
-          ]);
-        }
-        if (agent && agent.work.request?.requestId === task.request?.requestId && agent.failed)
-          return fail('agent-task-unavailable');
-        if (agent && agent.work.taskId === task.taskId && agent.failed) return fail('agent-task-unavailable');
-        if (agent && agent.work.request?.requestId === task.request?.requestId && agent.taskId) {
-          await tx.client.query(
-            `UPDATE ${table(tx, 'tf_workflow_steps')} SET output=$3 WHERE run_id=$1 AND step_id=$2`,
-            [work.runId, step.id, JSON.stringify({ taskId: agent.taskId })],
-          );
-          return { kind: 'wait', seconds: 2 };
-        }
-        if (agent && agent.work.taskId === task.taskId && agent.result) {
-          if (agent.result.status === 'completed') {
-            await tx.client.query(
-              `UPDATE ${table(tx, 'tf_workflow_steps')} SET status='completed',output=$3 WHERE run_id=$1 AND step_id=$2`,
-              [work.runId, step.id, JSON.stringify({ taskId, result: agent.result.text ?? '' })],
+              `INSERT INTO ${table(tx, 'tf_workflow_steps')} (run_id,step_id,ordinal,status,output,due_at) VALUES ($1,$2,$3,'waiting',$4,clock_timestamp()+interval '24 hours')`,
+              [work.runId, step.id, ordinal, JSON.stringify({ provider: 'slack', actionId, status: 'preparing' })],
             );
-            await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='running' WHERE id=$1`, [
+            await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='waiting' WHERE id=$1`, [
               work.runId,
             ]);
-            return { kind: 'continue' };
           }
-          const output = { taskId, status: agent.result.status, pauseReason: agent.result.pauseReason ?? null };
-          if (canonical(receipt?.output ?? null) !== canonical(output)) {
+          if (slack?.work.actionId === actionId) {
+            const result = slack.result;
             await tx.client.query(
-              `UPDATE ${table(tx, 'tf_workflow_steps')} SET output=$3 WHERE run_id=$1 AND step_id=$2`,
-              [work.runId, step.id, JSON.stringify(output)],
+              `UPDATE ${table(tx, 'tf_workflow_steps')} SET output=$3,due_at=$4 WHERE run_id=$1 AND step_id=$2`,
+              [
+                work.runId,
+                step.id,
+                JSON.stringify({
+                  provider: 'slack',
+                  actionId,
+                  status: result.status,
+                  sentMessageTs: result.sentMessageTs ?? null,
+                }),
+                result.expiresAt,
+              ],
             );
+            if (result.status === 'sent') {
+              await tx.client.query(
+                `UPDATE ${table(tx, 'tf_workflow_steps')} SET status='completed' WHERE run_id=$1 AND step_id=$2`,
+                [work.runId, step.id],
+              );
+              await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='running' WHERE id=$1`, [
+                work.runId,
+              ]);
+              return { kind: 'continue' };
+            }
+            if (result.status === 'revoked' && result.reason && result.reason !== 'access-denied')
+              return fail(`slack-${result.reason}`);
+            if (
+              ['rejected', 'expired', 'stale', 'revoked', 'unknown', 'reauthorization-required'].includes(result.status)
+            )
+              return fail(`slack-action-${result.status}`);
+            const due = result.status === 'pending' ? result.expiresAt : result.nextAttemptAt;
+            return {
+              kind: 'wait',
+              seconds: Math.max(
+                1,
+                Math.ceil((Math.min(Date.parse(due), Date.parse(result.expiresAt)) - Date.now()) / 1000),
+              ),
+            };
           }
-          if (agent.result.status === 'failed') return fail('agent-task-failed');
-          return { kind: 'wait', seconds: 2 };
+          return { kind: 'slack', workspaceId: work.workspaceId, runId: work.runId, stepId: step.id, actionId };
         }
-        return task;
-      }
-      if (step.kind === 'http') {
-        const fail = async (error: string): Promise<Progress> => {
-          await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='failed',error=$2 WHERE id=$1`, [
-            work.runId,
-            error,
-          ]);
-          return { kind: 'done' };
-        };
-        let headers: Record<string, string>, body: string | undefined;
-        try {
-          headers = Object.fromEntries(
-            Object.entries(step.headers).map(([name, source]) => [
-              name,
-              z
-                .string()
-                .max(8192)
-                .parse(resolveValue(source, payloadSchema.parse(raw.input), outputs)),
-            ]),
-          );
-          body = step.body
-            ? JSON.stringify(resolveValue(step.body, payloadSchema.parse(raw.input), outputs))
-            : undefined;
-          if (body && !headers['content-type']) headers['content-type'] = 'application/json';
-          if (step.credential)
-            headers[step.credential.header] = await providers.credential(
-              work.workspaceId,
-              tx,
-              step.credential.integrationId,
-              idSchema.parse(raw.membership_id),
-            );
-        } catch {
-          return fail('http-request-invalid');
-        }
-        const request: HttpWork = {
-          kind: 'http',
-          method: step.method,
-          url: step.url,
-          headers: { ...headers, 'idempotency-key': `${work.runId}:${step.id}` },
-          body,
-        };
-        if (!receipt) {
-          await tx.client.query(
-            `INSERT INTO ${table(tx, 'tf_workflow_steps')} (run_id,step_id,ordinal,status) VALUES ($1,$2,$3,'waiting')`,
-            [work.runId, step.id, ordinal],
-          );
-          await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='waiting' WHERE id=$1`, [
-            work.runId,
-          ]);
-        }
-        if (http?.work.url === request.url && http.error) return fail(`http-${http.error}`);
-        if (http?.work.url === request.url && http.result) {
-          await tx.client.query(
-            `UPDATE ${table(tx, 'tf_workflow_steps')} SET status='completed',output=$3 WHERE run_id=$1 AND step_id=$2`,
-            [work.runId, step.id, JSON.stringify(http.result)],
-          );
-          await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='running' WHERE id=$1`, [
-            work.runId,
-          ]);
-          return { kind: 'continue' };
-        }
-        return request;
-      }
-      if (isTableStep(step)) {
-        const result = await runTableStep(
-          { ...tx, workspaceId: work.workspaceId },
-          step,
-          idSchema.parse(raw.membership_id),
-          payloadSchema.parse(raw.input),
-          outputs,
-        );
-        if (result.kind !== 'completed') {
-          await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status=$2,error=$3 WHERE id=$1`, [
-            work.runId,
-            result.kind,
-            result.error,
-          ]);
-          return { kind: 'done' };
-        }
-        await tx.client.query(
-          `INSERT INTO ${table(tx, 'tf_workflow_steps')} (run_id,step_id,ordinal,status,output) VALUES ($1,$2,$3,'completed',$4)`,
-          [work.runId, step.id, ordinal, JSON.stringify(result.output)],
-        );
-        await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='running' WHERE id=$1`, [work.runId]);
-        return { kind: 'continue' };
-      }
-      if (step.kind === 'transform') {
-        let output;
-        try {
-          output = transform(step, payloadSchema.parse(raw.input), outputs);
-        } catch {
-          await tx.client.query(
-            `UPDATE ${table(tx, 'tf_workflow_runs')} SET status='failed',error='transform-input-invalid' WHERE id=$1`,
-            [work.runId],
-          );
-          return { kind: 'done' };
-        }
-        await tx.client.query(
-          `INSERT INTO ${table(tx, 'tf_workflow_steps')} (run_id,step_id,ordinal,status,output) VALUES ($1,$2,$3,'completed',$4)`,
-          [work.runId, step.id, ordinal, JSON.stringify(output)],
-        );
-        await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='running' WHERE id=$1`, [work.runId]);
-        return { kind: 'continue' };
-      }
-      let remaining = receipt ? z.number().parse(receipt.remaining) : null;
-      if (remaining === null) {
-        let due: Date | null = null;
-        if (step.kind === 'wait-until') {
+        if (step.kind === 'condition') {
+          let output;
           try {
-            due = waitUntilInstant(resolveValue(step.at, payloadSchema.parse(raw.input), outputs));
-          } catch {
+            output = runCondition(step, payloadSchema.parse(raw.input), outputs);
+          } catch (error) {
+            if (!(error instanceof ConditionIncomparable)) throw error;
             await tx.client.query(
-              `UPDATE ${table(tx, 'tf_workflow_runs')} SET status='failed',error='wait-until-invalid' WHERE id=$1`,
+              `UPDATE ${table(tx, 'tf_workflow_runs')} SET status='failed',error='condition-values-incomparable' WHERE id=$1`,
               [work.runId],
             );
             return { kind: 'done' };
           }
-        }
-        if (due && due.getTime() - (await databaseNow(tx)).getTime() > maxWaitSeconds * 1000) {
           await tx.client.query(
-            `UPDATE ${table(tx, 'tf_workflow_runs')} SET status='failed',error='wait-until-too-far' WHERE id=$1`,
+            `INSERT INTO ${table(tx, 'tf_workflow_steps')} (run_id,step_id,ordinal,status,output) VALUES ($1,$2,$3,'completed',$4)`,
+            [work.runId, step.id, ordinal, JSON.stringify(output)],
+          );
+          await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='running' WHERE id=$1`, [
+            work.runId,
+          ]);
+          return { kind: 'continue' };
+        }
+        if (step.kind === 'code') {
+          const fail = async (error: string): Promise<Progress> => {
+            await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='failed',error=$2 WHERE id=$1`, [
+              work.runId,
+              error,
+            ]);
+            return { kind: 'done' };
+          };
+          if (!options.snippets) return fail('snippet-runner-unavailable');
+          let input;
+          try {
+            input = resolveValue(step.input, payloadSchema.parse(raw.input), outputs);
+          } catch {
+            return fail('snippet-input-invalid');
+          }
+          const job: SnippetJob = {
+            workspaceId: work.workspaceId,
+            runId: work.runId,
+            revision: idSchema.parse(raw.revision),
+            stepId: step.id,
+            language: step.language,
+            source: step.source,
+            input,
+          };
+          if (!jobSchema.safeParse(job).success) return fail('snippet-input-invalid');
+          if (!receipt) {
+            await tx.client.query(
+              `INSERT INTO ${table(tx, 'tf_workflow_steps')} (run_id,step_id,ordinal,status,due_at) VALUES ($1,$2,$3,'waiting',clock_timestamp()+interval '5 minutes')`,
+              [work.runId, step.id, ordinal],
+            );
+            await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='waiting' WHERE id=$1`, [
+              work.runId,
+            ]);
+          } else if (z.number().parse(receipt.remaining) <= 0) return fail('snippet-runner-deadline');
+          if (completed && canonical(completed.job) === canonical(job)) {
+            if (completed.result.kind === 'failed') return fail(`snippet-${completed.result.error}`);
+            if (completed.result.kind === 'completed') {
+              await tx.client.query(
+                `UPDATE ${table(tx, 'tf_workflow_steps')} SET status='completed',output=$3 WHERE run_id=$1 AND step_id=$2`,
+                [work.runId, step.id, JSON.stringify(completed.result.output)],
+              );
+              await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='running' WHERE id=$1`, [
+                work.runId,
+              ]);
+              return { kind: 'continue' };
+            }
+            return { kind: 'wait', seconds: 2 };
+          }
+          return { kind: 'code', job };
+        }
+        if (step.kind === 'coding') {
+          const fail = async (error: string): Promise<Progress> => {
+            await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='failed',error=$2 WHERE id=$1`, [
+              work.runId,
+              error,
+            ]);
+            return { kind: 'done' };
+          };
+          if (!codingStepsAvailable) return fail('coding-runner-unavailable');
+          const jobId = agentRequestId(work.runId, step.id);
+          const pending: CodingWork = {
+            kind: 'coding',
+            workspaceId: work.workspaceId,
+            runId: work.runId,
+            stepId: step.id,
+            jobId,
+          };
+          if (!receipt) {
+            let job: CodingStepJob;
+            try {
+              const input = payloadSchema.parse(raw.input);
+              let prompt = z
+                .string()
+                .trim()
+                .min(1)
+                .max(agentTextLimit)
+                .parse(resolveValue(step.prompt, input, outputs));
+              const context = step.context ? resolveValue(step.context, input, outputs) : input;
+              if (step.triggerContext) prompt = withAgentContext(prompt, triggerContext(startedBy, context));
+              else if (step.context) prompt = withAgentContext(prompt, context);
+              const branch = step.branch ? resolveValue(step.branch, input, outputs) : null;
+              const title = step.title ? resolveValue(step.title, input, outputs) : null;
+              job = codingStepJobSchema.parse({
+                agent: step.agent,
+                repository: workflowRepositorySchema.parse(resolveValue(step.repository, input, outputs)),
+                branch: branch === null || branch === '' ? null : codingBranchSchema.parse(branch),
+                prompt,
+                pullRequest: step.pullRequest,
+                title:
+                  typeof title === 'string' && title.trim() ? Array.from(title.trim()).slice(0, 256).join('') : null,
+                githubAccount: step.githubAccount ?? null,
+                planConnectionId: step.planConnectionId ?? null,
+              });
+            } catch {
+              return fail('coding-input-invalid');
+            }
+            // The job is fixed now, so a retried start or a later run detail always describes the same work.
+            await tx.client.query(
+              `INSERT INTO ${table(tx, 'tf_workflow_steps')} (run_id,step_id,ordinal,status,output,due_at) VALUES ($1,$2,$3,'waiting',$4,clock_timestamp()+interval '45 minutes')`,
+              [work.runId, step.id, ordinal, JSON.stringify({ jobId, state: 'starting', job })],
+            );
+            await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='waiting' WHERE id=$1`, [
+              work.runId,
+            ]);
+            return pending;
+          }
+          const stored = codingReceiptSchema.safeParse(receipt.output);
+          if (!stored.success || stored.data.jobId !== jobId) return fail('coding-input-invalid');
+          const result = stored.data.result;
+          if (result?.kind === 'completed') {
+            await tx.client.query(
+              `UPDATE ${table(tx, 'tf_workflow_steps')} SET status='completed',output=$3 WHERE run_id=$1 AND step_id=$2`,
+              [work.runId, step.id, JSON.stringify(result.output)],
+            );
+            await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='running' WHERE id=$1`, [
+              work.runId,
+            ]);
+            return { kind: 'continue' };
+          }
+          if (result?.kind === 'failed') return fail(`coding-${result.error}`);
+          if (z.number().parse(receipt.remaining) <= 0) return fail('coding-deadline');
+          if (coding?.work.jobId === jobId && coding.started && stored.data.state === 'starting') {
+            await tx.client.query(
+              `UPDATE ${table(tx, 'tf_workflow_steps')} SET output=output||'{"state":"running"}'::jsonb WHERE run_id=$1 AND step_id=$2`,
+              [work.runId, step.id],
+            );
+            return { kind: 'wait', seconds: 30 };
+          }
+          // A start that did not reach the runner is tried again; a started job reports back on its own.
+          if (stored.data.state === 'starting' && !coding) return pending;
+          return { kind: 'wait', seconds: stored.data.state === 'starting' ? 5 : 30 };
+        }
+        if (step.kind === 'agent') {
+          const fail = async (error: string): Promise<Progress> => {
+            await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='failed',error=$2 WHERE id=$1`, [
+              work.runId,
+              error,
+            ]);
+            return { kind: 'done' };
+          };
+          if (!options.agentTasks) return fail('agent-task-runner-unavailable');
+          let text: string;
+          try {
+            const input = payloadSchema.parse(raw.input);
+            text = z
+              .string()
+              .trim()
+              .min(1)
+              .max(8000)
+              .parse(resolveValue(step.prompt, input, outputs));
+            const context = step.context ? resolveValue(step.context, input, outputs) : input;
+            if (step.triggerContext) text = withAgentContext(text, triggerContext(startedBy, context));
+            else if (step.context) text = withAgentContext(text, context);
+          } catch {
+            return fail('agent-prompt-invalid');
+          }
+          const storedTask =
+            receipt?.output === null || receipt?.output === undefined
+              ? undefined
+              : z.object({ taskId: idSchema }).safeParse(receipt.output);
+          const taskId = storedTask?.success ? storedTask.data.taskId : undefined;
+          if (
+            !taskId &&
+            step.activationId &&
+            !(
+              await tx.client.query(
+                `SELECT 1 FROM ${table(tx, 'tf_agent_activations')} WHERE id=$1 AND agent_id=$2 AND revoked_at IS NULL`,
+                [step.activationId, step.agentId],
+              )
+            ).rowCount
+          )
+            return fail('activation-unavailable');
+          const task: AgentWork = {
+            kind: 'agent',
+            workspaceId: work.workspaceId,
+            userId: z.string().parse(raw.user_id),
+            taskId,
+            request: taskId
+              ? undefined
+              : {
+                  requestId: agentRequestId(work.runId, step.id),
+                  agentId: step.agentId,
+                  ...(step.activationId ? { activationId: step.activationId } : {}),
+                  text,
+                  limits: step.limits,
+                },
+          };
+          if (!receipt) {
+            await tx.client.query(
+              `INSERT INTO ${table(tx, 'tf_workflow_steps')} (run_id,step_id,ordinal,status) VALUES ($1,$2,$3,'waiting')`,
+              [work.runId, step.id, ordinal],
+            );
+            await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='waiting' WHERE id=$1`, [
+              work.runId,
+            ]);
+          }
+          if (agent && agent.work.request?.requestId === task.request?.requestId && agent.failed)
+            return fail('agent-task-unavailable');
+          if (agent && agent.work.taskId === task.taskId && agent.failed) return fail('agent-task-unavailable');
+          if (agent && agent.work.request?.requestId === task.request?.requestId && agent.taskId) {
+            await tx.client.query(
+              `UPDATE ${table(tx, 'tf_workflow_steps')} SET output=$3 WHERE run_id=$1 AND step_id=$2`,
+              [work.runId, step.id, JSON.stringify({ taskId: agent.taskId })],
+            );
+            return { kind: 'wait', seconds: 2 };
+          }
+          if (agent && agent.work.taskId === task.taskId && agent.result) {
+            if (agent.result.status === 'completed') {
+              await tx.client.query(
+                `UPDATE ${table(tx, 'tf_workflow_steps')} SET status='completed',output=$3 WHERE run_id=$1 AND step_id=$2`,
+                [work.runId, step.id, JSON.stringify({ taskId, result: agent.result.text ?? '' })],
+              );
+              await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='running' WHERE id=$1`, [
+                work.runId,
+              ]);
+              return { kind: 'continue' };
+            }
+            const output = { taskId, status: agent.result.status, pauseReason: agent.result.pauseReason ?? null };
+            if (canonical(receipt?.output ?? null) !== canonical(output)) {
+              await tx.client.query(
+                `UPDATE ${table(tx, 'tf_workflow_steps')} SET output=$3 WHERE run_id=$1 AND step_id=$2`,
+                [work.runId, step.id, JSON.stringify(output)],
+              );
+            }
+            if (agent.result.status === 'failed') return fail('agent-task-failed');
+            return { kind: 'wait', seconds: 2 };
+          }
+          return task;
+        }
+        if (step.kind === 'http') {
+          const fail = async (error: string): Promise<Progress> => {
+            await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='failed',error=$2 WHERE id=$1`, [
+              work.runId,
+              error,
+            ]);
+            return { kind: 'done' };
+          };
+          let headers: Record<string, string>, body: string | undefined;
+          try {
+            headers = Object.fromEntries(
+              Object.entries(step.headers).map(([name, source]) => [
+                name,
+                z
+                  .string()
+                  .max(8192)
+                  .parse(resolveValue(source, payloadSchema.parse(raw.input), outputs)),
+              ]),
+            );
+            body = step.body
+              ? JSON.stringify(resolveValue(step.body, payloadSchema.parse(raw.input), outputs))
+              : undefined;
+            if (body && !headers['content-type']) headers['content-type'] = 'application/json';
+            if (step.credential)
+              headers[step.credential.header] = await providers.credential(
+                work.workspaceId,
+                tx,
+                step.credential.integrationId,
+                idSchema.parse(raw.membership_id),
+              );
+          } catch {
+            return fail('http-request-invalid');
+          }
+          const request: HttpWork = {
+            kind: 'http',
+            method: step.method,
+            url: step.url,
+            headers: { ...headers, 'idempotency-key': `${work.runId}:${step.id}` },
+            body,
+          };
+          if (!receipt) {
+            await tx.client.query(
+              `INSERT INTO ${table(tx, 'tf_workflow_steps')} (run_id,step_id,ordinal,status) VALUES ($1,$2,$3,'waiting')`,
+              [work.runId, step.id, ordinal],
+            );
+            await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='waiting' WHERE id=$1`, [
+              work.runId,
+            ]);
+          }
+          if (http?.work.url === request.url && http.error) return fail(`http-${http.error}`);
+          if (http?.work.url === request.url && http.result) {
+            await tx.client.query(
+              `UPDATE ${table(tx, 'tf_workflow_steps')} SET status='completed',output=$3 WHERE run_id=$1 AND step_id=$2`,
+              [work.runId, step.id, JSON.stringify(http.result)],
+            );
+            await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='running' WHERE id=$1`, [
+              work.runId,
+            ]);
+            return { kind: 'continue' };
+          }
+          return request;
+        }
+        if (isTableStep(step)) {
+          const result = await runTableStep(
+            { ...tx, workspaceId: work.workspaceId },
+            step,
+            idSchema.parse(raw.membership_id),
+            payloadSchema.parse(raw.input),
+            outputs,
+          );
+          if (result.kind !== 'completed') {
+            await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status=$2,error=$3 WHERE id=$1`, [
+              work.runId,
+              result.kind,
+              result.error,
+            ]);
+            return { kind: 'done' };
+          }
+          await tx.client.query(
+            `INSERT INTO ${table(tx, 'tf_workflow_steps')} (run_id,step_id,ordinal,status,output) VALUES ($1,$2,$3,'completed',$4)`,
+            [work.runId, step.id, ordinal, JSON.stringify(result.output)],
+          );
+          await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='running' WHERE id=$1`, [
+            work.runId,
+          ]);
+          return { kind: 'continue' };
+        }
+        if (step.kind === 'transform') {
+          let output;
+          try {
+            output = transform(step, payloadSchema.parse(raw.input), outputs);
+          } catch {
+            await tx.client.query(
+              `UPDATE ${table(tx, 'tf_workflow_runs')} SET status='failed',error='transform-input-invalid' WHERE id=$1`,
+              [work.runId],
+            );
+            return { kind: 'done' };
+          }
+          await tx.client.query(
+            `INSERT INTO ${table(tx, 'tf_workflow_steps')} (run_id,step_id,ordinal,status,output) VALUES ($1,$2,$3,'completed',$4)`,
+            [work.runId, step.id, ordinal, JSON.stringify(output)],
+          );
+          await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='running' WHERE id=$1`, [
+            work.runId,
+          ]);
+          return { kind: 'continue' };
+        }
+        let remaining = receipt ? z.number().parse(receipt.remaining) : null;
+        if (remaining === null) {
+          let due: Date | null = null;
+          if (step.kind === 'wait-until') {
+            try {
+              due = waitUntilInstant(resolveValue(step.at, payloadSchema.parse(raw.input), outputs));
+            } catch {
+              await tx.client.query(
+                `UPDATE ${table(tx, 'tf_workflow_runs')} SET status='failed',error='wait-until-invalid' WHERE id=$1`,
+                [work.runId],
+              );
+              return { kind: 'done' };
+            }
+          }
+          if (due && due.getTime() - (await databaseNow(tx)).getTime() > maxWaitSeconds * 1000) {
+            await tx.client.query(
+              `UPDATE ${table(tx, 'tf_workflow_runs')} SET status='failed',error='wait-until-too-far' WHERE id=$1`,
+              [work.runId],
+            );
+            return { kind: 'done' };
+          }
+          const seconds = step.kind === 'delay' ? step.seconds : step.kind === 'human' ? step.timeoutSeconds : null;
+          const inserted = (
+            await tx.client.query(
+              `INSERT INTO ${table(tx, 'tf_workflow_steps')} (run_id,step_id,ordinal,status,prompt,due_at) VALUES ($1,$2,$3,'waiting',$4,COALESCE($6::timestamptz,clock_timestamp()+$5*interval '1 second')) RETURNING EXTRACT(EPOCH FROM (due_at-clock_timestamp()))::float8 AS remaining`,
+              [work.runId, step.id, ordinal, step.kind === 'human' ? step.prompt : null, seconds, due],
+            )
+          ).rows[0];
+          remaining = z.number().parse(inserted.remaining);
+          await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='waiting' WHERE id=$1`, [
+            work.runId,
+          ]);
+        }
+        if (remaining > 0) return { kind: 'wait', seconds: Math.max(1, Math.ceil(remaining)) };
+        if (step.kind === 'human') {
+          await tx.client.query(
+            `UPDATE ${table(tx, 'tf_workflow_runs')} SET status='failed',error='human-input-expired' WHERE id=$1`,
             [work.runId],
           );
           return { kind: 'done' };
         }
-        const seconds = step.kind === 'delay' ? step.seconds : step.kind === 'human' ? step.timeoutSeconds : null;
-        const inserted = (
-          await tx.client.query(
-            `INSERT INTO ${table(tx, 'tf_workflow_steps')} (run_id,step_id,ordinal,status,prompt,due_at) VALUES ($1,$2,$3,'waiting',$4,COALESCE($6::timestamptz,clock_timestamp()+$5*interval '1 second')) RETURNING EXTRACT(EPOCH FROM (due_at-clock_timestamp()))::float8 AS remaining`,
-            [work.runId, step.id, ordinal, step.kind === 'human' ? step.prompt : null, seconds, due],
-          )
-        ).rows[0];
-        remaining = z.number().parse(inserted.remaining);
-        await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='waiting' WHERE id=$1`, [work.runId]);
-      }
-      if (remaining > 0) return { kind: 'wait', seconds: Math.max(1, Math.ceil(remaining)) };
-      if (step.kind === 'human') {
         await tx.client.query(
-          `UPDATE ${table(tx, 'tf_workflow_runs')} SET status='failed',error='human-input-expired' WHERE id=$1`,
-          [work.runId],
+          `UPDATE ${table(tx, 'tf_workflow_steps')} SET status='completed',output='null'::jsonb WHERE run_id=$1 AND step_id=$2`,
+          [work.runId, step.id],
         );
-        return { kind: 'done' };
-      }
-      await tx.client.query(
-        `UPDATE ${table(tx, 'tf_workflow_steps')} SET status='completed',output='null'::jsonb WHERE run_id=$1 AND step_id=$2`,
-        [work.runId, step.id],
-      );
-      return { kind: 'continue' };
-    });
+        return { kind: 'continue' };
+      },
+      'write',
+    );
   }
   async function advance(value: unknown): Promise<Progress> {
     const progress = await advanceTransaction(value);
