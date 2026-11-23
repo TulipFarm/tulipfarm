@@ -126,8 +126,14 @@ Two optional methods let a gate keep per-workspace state. `provision(tx)` runs
 while TulipFarm provisions a workspace, in the same transaction and as the
 workspace schema owner, before the isolation check; create the gate's tables and
 grants there (the workspace runtime role gets `SELECT`/`UPDATE` only through
-grants you add). Provisioning retries, so `provision` must be idempotent.
-Workspaces provisioned before the gate was registered need their own backfill.
+grants you add). `workspace-rollout` (`pnpm db workspace-rollout`, run after
+every release) loads the database app's extensions and calls `provision` again
+for every ready workspace, in that workspace's rollout transaction and as the
+same owner, so workspaces provisioned before the gate was registered get its
+state, and existing state gets the gate's upgrades. Provisioning retries and
+every rollout repeats it, so `provision` must be idempotent and cheap when
+nothing changed: check the catalog before altering a table, since `ALTER TABLE`
+locks it even when there is nothing to do.
 `balance(tx)` returns `{ available, granted }` for the credit summary
 (`GET /v1/workspaces/:id/credits`); without it the summary shows `available()`
 and a `null` granted total, and with the default gate both are `null`

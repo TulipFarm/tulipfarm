@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { escapeIdentifier } from 'pg';
 import { registerExtension, resetExtensions } from '@tulipfarm/extensions';
 import { creditSummary } from '../../src/credits.ts';
-import { provisionWorkspace, qualified } from '../../src/provisioning.ts';
+import { provisionWorkspace, qualified, rolloutCommonMigrations } from '../../src/provisioning.ts';
 import { connect, fixture } from './fixture.mjs';
 
 const credit = 1_000_000_000_000n;
@@ -112,3 +113,58 @@ test('a credit gate provisions per-workspace state and reports the summary balan
     await db.close();
   }
 });
+
+test(
+  'workspace rollout provisions a credit gate for existing workspaces, idempotently',
+  { timeout: 120000 },
+  async () => {
+    const db = await fixture();
+    try {
+      const existing = await db.create();
+      await registerExtension(
+        {
+          name: 'test-billing',
+          register(slots) {
+            slots.creditGate(gate);
+          },
+        },
+        { app: 'database', env: {} },
+      );
+      const rollout = migrations =>
+        rolloutCommonMigrations({
+          connectionString: db.connectionString,
+          migrations,
+          listWorkspaceIds: async () => [existing.id],
+        });
+
+      const current = await rollout(db.baseline);
+      assert.deepEqual(current.results, [{ workspaceId: existing.id, status: 'applied', errorCode: null }]);
+      assert.equal(
+        (
+          await db.platform.query('SELECT pg_get_userbyid(relowner) AS owner FROM pg_class WHERE oid = $1::regclass', [
+            balanceTable(existing.names.schema),
+          ])
+        ).rows[0].owner,
+        db.owner,
+        'the gate state is created as the workspace schema owner',
+      );
+      let result = await summary(db, existing);
+      assert.deepEqual([result.available, result.granted], [7, 7], 'a workspace with current migrations gets the gate');
+
+      await db.platform.query(`UPDATE ${balanceTable(existing.names.schema)} SET available=$1 WHERE id=1`, [
+        (5n * credit).toString(),
+      ]);
+      const sql = 'CREATE TABLE {{schema}}.tf_gate_rollout_probe (id integer)';
+      const next = await rollout([
+        ...db.baseline,
+        { name: '9999_gate_rollout_probe.sql', sql, checksum: createHash('sha256').update(sql).digest('hex') },
+      ]);
+      assert.deepEqual(next.results, [{ workspaceId: existing.id, status: 'applied', errorCode: null }]);
+      result = await summary(db, existing);
+      assert.deepEqual([result.available, result.granted], [5, 7], 'rolling out again keeps the balance');
+    } finally {
+      resetExtensions();
+      await db.close();
+    }
+  },
+);

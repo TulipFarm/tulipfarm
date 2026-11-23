@@ -23,7 +23,7 @@ const help = `Usage: pnpm db <command> --env local|production
   status --env local|production               Query database identity, TLS, extensions
   workspace-preflight --env local|production  Refuse fresh cutover when workspace data exists
   workspace-inventory --env local|production Read aggregate preservation inventory without row contents
-  workspace-rollout --env local|production    Apply the common migration stream to every ready workspace
+  workspace-rollout --env local|production    Apply common migrations and credit gate state to ready workspaces
   chat-traces --env local|production --chat URL|ID [--workspace ID]
                                               Print a chat's turns with each reply's trace id (operators only)
 
@@ -155,6 +155,8 @@ async function main() {
       : process.env.WORKSPACE_PROVISIONING_DATABASE_URL;
     if (!connectionString)
       throw new DatabaseError('Set WORKSPACE_PROVISIONING_DATABASE_URL for local database access.');
+    // A registered credit gate provisions its per-workspace state in each workspace's rollout transaction.
+    await loadDatabaseExtensions();
     const migrations = await workspaceTableMigrations();
     const listClient = await connect(connectionString);
     try {
