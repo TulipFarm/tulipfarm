@@ -27,7 +27,7 @@
     "infra:down": "docker compose down",
     "build": "turbo run build --concurrency=2",
     "lint": "turbo run lint:repo",
-    "lint:repo": "oxfmt --check && oxlint --deny-warnings --no-error-on-unmatched-pattern --threads=2 . && node --test --test-concurrency=1 tooling/*.test.mjs && node tooling/check-doc-links.mjs && node packages/tables/scripts/table-schemas.mjs --check",
+    "lint:repo": "oxfmt --check && oxlint --deny-warnings --no-error-on-unmatched-pattern --threads=2 . && node --test --test-concurrency=1 tooling/*.test.mjs && node tooling/check-doc-links.mjs && node tooling/check-migration-numbers.mjs && node packages/tables/scripts/table-schemas.mjs --check",
     "test:slack:acceptance": "node tooling/slack-acceptance.mjs",
     "lint:fix": "oxlint --fix --no-error-on-unmatched-pattern .",
     "format": "oxfmt",
