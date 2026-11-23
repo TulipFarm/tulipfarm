@@ -21,7 +21,7 @@
     "url": "https://mcp.zapier.com/api/v1/connect",
     "transport": "streamable-http",
     "auth": "oauth",
-    "checked": "2026-11-17"
+    "checked": "2026-11-23"
   },
   "registryName": "zapier/zapier-mcp",
   "icons": {

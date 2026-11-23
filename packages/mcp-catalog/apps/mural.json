@@ -20,7 +20,7 @@
     "url": "https://mcp-canvas.mural.co/mcp",
     "transport": "streamable-http",
     "auth": "oauth",
-    "checked": "2026-11-17"
+    "checked": "2026-11-23"
   },
   "registryName": "co.mural/mural",
   "icons": {

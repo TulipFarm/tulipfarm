@@ -17,7 +17,7 @@
     "url": "https://mcp.twilio.com/docs",
     "transport": "streamable-http",
     "auth": "none",
-    "checked": "2026-11-17"
+    "checked": "2026-11-23"
   },
   "packages": [
     {
