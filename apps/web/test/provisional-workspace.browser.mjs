@@ -209,7 +209,10 @@ test(
       );
       await composer.waitFor();
       assert.ok(log.filter(entry => entry === 'GET /v1/workspaces/northstar').length >= 2, 'Workspace read again');
-      assert.ok(log.filter(entry => entry.endsWith('/governance/me')).length >= 2, 'Membership read again');
+      await waitFor(
+        async () => log.filter(entry => entry.endsWith('/governance/me')).length >= 2,
+        'Membership read again',
+      );
       await waitFor(async () => {
         const { reads, admissions } = await stored();
         return ![...reads, ...admissions].some(id => id.includes('"viewer"'));
