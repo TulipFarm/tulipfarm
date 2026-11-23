@@ -68,10 +68,11 @@ schema with its own `<schema>.schema_migrations` ledger. See
 ## Integration test inputs
 
 `migrations/0001_baseline.sql` is the whole platform schema; later changes
-append `0002_*.sql` and onward. Numbers must be unique and have no gaps. The
-`migration numbers` CI job checks this against the latest `main`, and re-runs
-on open pull requests that add migrations whenever `main` changes; run
-`node tooling/check-migration-numbers.mjs --base origin/main` locally. Run the
+append `0002_*.sql` and onward. Numbers must be unique and have no gaps. Each
+stream's `LATEST` file names its newest migration, so two pull requests that
+take the same number conflict there and cannot both merge; `pnpm lint` checks
+`LATEST`. The `migration numbers` CI job also checks against the latest `main`;
+run `node tooling/check-migration-numbers.mjs --base origin/main` locally. Run the
 suite against a disposable server:
 
 ```sh
