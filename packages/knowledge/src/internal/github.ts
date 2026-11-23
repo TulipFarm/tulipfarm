@@ -750,9 +750,10 @@ export function createGitHubKnowledge({
     }
   }
   // Copies a still-current authoritative repository check onto each current document revision. Expiry is never extended.
+  // A proof that already matches is left as it is, so projecting the same check again writes nothing.
   async function project(tx: Tx, sourceId: string, repositoryId: string, membershipId?: string, documentId?: string) {
     await tx.client.query(
-      `INSERT INTO ${table(tx, 'access_proofs')} (id,document_id,membership_id,access_epoch,principal,acl_version,membership_version,acl_checked_at,membership_checked_at,expires_at)
+      `INSERT INTO ${table(tx, 'access_proofs')} AS proof (id,document_id,membership_id,access_epoch,principal,acl_version,membership_version,acl_checked_at,membership_checked_at,expires_at)
       SELECT gen_random_uuid(),d.id,x.membership_id,s.access_epoch,x.binding->>'githubUserId',r.source_revision,x.binding->>'accountGeneration',x.observed_at,x.observed_at,x.expires_at
       FROM ${table(tx, 'github_access')} x
       JOIN ${table(tx, 'github_repositories')} c ON c.source_id=x.source_id AND c.repository_id=x.repository_id AND c.state='active' AND NOT c.excluded
@@ -761,7 +762,9 @@ export function createGitHubKnowledge({
       JOIN ${table(tx, 'revisions')} r ON r.id=d.observed_revision_id
       JOIN ${table(tx, 'sources')} s ON s.id=x.source_id
       WHERE x.source_id=$1 AND x.repository_id=$2 AND ($3::uuid IS NULL OR x.membership_id=$3) AND ($4::uuid IS NULL OR d.id=$4) AND x.expires_at>clock_timestamp()
-      ON CONFLICT (document_id,membership_id) DO UPDATE SET id=EXCLUDED.id,access_epoch=EXCLUDED.access_epoch,principal=EXCLUDED.principal,acl_version=EXCLUDED.acl_version,membership_version=EXCLUDED.membership_version,acl_checked_at=EXCLUDED.acl_checked_at,membership_checked_at=EXCLUDED.membership_checked_at,expires_at=EXCLUDED.expires_at`,
+      ON CONFLICT (document_id,membership_id) DO UPDATE SET id=EXCLUDED.id,access_epoch=EXCLUDED.access_epoch,principal=EXCLUDED.principal,acl_version=EXCLUDED.acl_version,membership_version=EXCLUDED.membership_version,acl_checked_at=EXCLUDED.acl_checked_at,membership_checked_at=EXCLUDED.membership_checked_at,expires_at=EXCLUDED.expires_at
+      WHERE (proof.access_epoch,proof.principal,proof.acl_version,proof.membership_version,proof.acl_checked_at,proof.membership_checked_at,proof.expires_at)
+        IS DISTINCT FROM (EXCLUDED.access_epoch,EXCLUDED.principal,EXCLUDED.acl_version,EXCLUDED.membership_version,EXCLUDED.acl_checked_at,EXCLUDED.membership_checked_at,EXCLUDED.expires_at)`,
       [sourceId, repositoryId, membershipId ?? null, documentId ?? null],
     );
   }
@@ -1276,18 +1279,22 @@ export function createGitHubKnowledge({
       if (proofs.get(key) === next) proofs.delete(key);
     }
   }
+  // The owner's last repository check is still good for more than a minute, so a new one would only repeat it.
+  async function ownerFresh(tx: Tx, sourceId: string, repositoryId: string, membershipId: string) {
+    return !!(
+      await tx.client.query(
+        `SELECT 1 FROM ${table(tx, 'github_access')} a JOIN ${table(tx, 'github_repositories')} r USING(source_id,repository_id)
+        WHERE a.source_id=$1 AND a.repository_id=$2 AND a.membership_id=$3 AND r.state='active' AND NOT r.excluded
+        AND a.binding IS NOT NULL AND a.expires_at>clock_timestamp()+interval '1 minute'`,
+        [sourceId, repositoryId, membershipId],
+      )
+    ).rowCount;
+  }
   async function proveOwner(work: GitHubKnowledgeWork, token: string, repositoryId: string) {
     const captured = await fenced(work, token, async (tx, s, actor) => ({
       actor,
       sourceId: s.source_id,
-      fresh: !!(
-        await tx.client.query(
-          `SELECT 1 FROM ${table(tx, 'github_access')} a JOIN ${table(tx, 'github_repositories')} r USING(source_id,repository_id)
-        WHERE a.source_id=$1 AND a.repository_id=$2 AND a.membership_id=$3 AND r.state='active' AND NOT r.excluded
-        AND a.binding IS NOT NULL AND a.expires_at>clock_timestamp()+interval '1 minute'`,
-          [s.source_id, repositoryId, actor.membershipId],
-        )
-      ).rowCount,
+      fresh: await ownerFresh(tx, s.source_id, repositoryId, actor.membershipId),
     }));
     if (!captured.fresh && !(await check(work.workspaceId, captured.actor, captured.sourceId, repositoryId, true)))
       throw new GitHubCorpusError('forbidden');
@@ -1378,7 +1385,8 @@ export function createGitHubKnowledge({
   // Records one listed item; true when it still needs a read.
   async function admit(work: GitHubKnowledgeWork, token: string, s: Source, item: GitHubItemObservation) {
     const documentId = identity(`${s.source_id}:github:${item.nativeId}`);
-    await fenced(work, token, async tx => {
+    // One transaction records the item and reads its published revision, since an unchanged item needs nothing more.
+    const previous = await fenced(work, token, async tx => {
       const prior = z
         .object({ source_revision: z.string() })
         .optional()
@@ -1406,10 +1414,8 @@ export function createGitHubKnowledge({
           ...(storesPath(tx) ? [item.path ?? null] : []),
         ],
       );
-    });
-    if (item.coverage !== 'supported') return false;
-    const previous = await fenced(work, token, async tx =>
-      z
+      if (item.coverage !== 'supported') return undefined;
+      return z
         .object({ id: uuidSchema, source_revision: z.string(), lexical_publication_id: uuidSchema.nullable() })
         .optional()
         .parse(
@@ -1419,8 +1425,9 @@ export function createGitHubKnowledge({
               [documentId],
             )
           ).rows[0],
-        ),
-    );
+        );
+    });
+    if (item.coverage !== 'supported') return false;
     if (previous?.source_revision === item.sourceRevision && previous.lexical_publication_id) return false;
     return !(
       previous?.source_revision === item.sourceRevision &&
@@ -1803,10 +1810,23 @@ export function createGitHubKnowledge({
     };
     const owner: HumanActor = { kind: 'human', membershipId: claim.owner_membership_id, userId: claim.owner_user_id };
     // Owner check for one repository: false when GitHub denies it, isolated when GitHub is transiently unavailable.
+    // Each run asks GitHub first; later pages and sweep batches reuse that answer while it is still fresh.
+    const verified = new Set<string>();
     const verify = async (repositoryId: string) => {
       try {
-        return await check(work.workspaceId, owner, claim.source_id, repositoryId, true);
+        if (
+          verified.has(repositoryId) &&
+          (await fenced(work, token, (tx, _s, actor) =>
+            ownerFresh(tx, claim.source_id, repositoryId, actor.membershipId),
+          ))
+        )
+          return true;
+        const allowed = await check(work.workspaceId, owner, claim.source_id, repositoryId, true);
+        if (allowed) verified.add(repositoryId);
+        else verified.delete(repositoryId);
+        return allowed;
       } catch (error) {
+        verified.delete(repositoryId);
         if (ownerDenied(error)) return false;
         if (!isolatable(error)) throw error;
         isolate(repositoryId, error.code);
@@ -2038,7 +2058,8 @@ export function createGitHubKnowledge({
             ));
           const { markdown: _markdown, ...observation } = read;
           await ingest(work, token, claim, observation, read);
-          await fenced(work, token, tx => project(tx, claim.source_id, row.repository_id));
+          const documentId = identity(`${claim.source_id}:github:${observation.nativeId}`);
+          await fenced(work, token, tx => project(tx, claim.source_id, row.repository_id, undefined, documentId));
         } catch (error) {
           if (ownerDenied(error)) {
             verified.set(row.repository_id, false);
