@@ -866,7 +866,7 @@ function WorkspaceShellContent() {
               <ReauthorizationBanner key={workspace.id} workspaceId={workspace.id} slug={workspace.slug} />
             )}
             {membershipId && workspace.status === 'ready' && (
-              <CreditsBanner key={workspace.id} workspaceId={workspace.id} slug={workspace.slug} />
+              <CreditsBanner key={`credits-${workspace.id}`} workspaceId={workspace.id} slug={workspace.slug} />
             )}
             <header
               aria-label="Workspace header"
