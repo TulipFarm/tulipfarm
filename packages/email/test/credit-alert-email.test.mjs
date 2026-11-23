@@ -27,3 +27,21 @@ test('credit alert emails state the balance, grace and what stops, and link to u
   assert.match(stopped.text, /0 of 100 credits left/);
   assert.match(stopped.text, /Model calls, agent runs and sandboxes are paused until you add credits/);
 });
+
+test('with a support address, credit alert emails ask admins to write to it', async () => {
+  const { html, text } = await renderEmail({
+    template: 'credit-alert',
+    props: {
+      level: 'stopped',
+      workspaceName: 'Acme',
+      available: 0,
+      granted: 1000,
+      grace: null,
+      url,
+      supportEmail: 'help@example.test',
+    },
+  });
+  assert.ok(html.includes('href="mailto:help@example.test?subject=Add%20credits%3A%20Acme"'));
+  assert.match(text, /Contact us to add credits/);
+  assert.match(text, /To add credits, email help@example.test/);
+});

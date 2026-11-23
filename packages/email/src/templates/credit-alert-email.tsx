@@ -19,6 +19,8 @@ export interface CreditAlertEmailProps {
   grace: number | null;
   /** Settings → Usage for the workspace. */
   url: string;
+  /** Where admins write to add credits; without one the button opens Settings → Usage. */
+  supportEmail?: string | null;
 }
 
 const amount = (value: number) => value.toLocaleString('en-US', { maximumFractionDigits: 2 });
@@ -30,7 +32,19 @@ export function creditAlertSubject({ level, workspaceName }: Pick<CreditAlertEma
   return `Work is paused in ${workspaceName}: out of credits`;
 }
 
-export function CreditAlertEmail({ level, workspaceName, available, granted, grace, url }: CreditAlertEmailProps) {
+export function CreditAlertEmail({
+  level,
+  workspaceName,
+  available,
+  granted,
+  grace,
+  url,
+  supportEmail,
+}: CreditAlertEmailProps) {
+  const add = supportEmail ? 'Contact us to add credits' : 'Add credits';
+  const action = supportEmail
+    ? `mailto:${supportEmail}?subject=${encodeURIComponent(`Add credits: ${workspaceName}`)}`
+    : url;
   const graceLeft = grace === null ? 0 : Math.max(0, Math.min(grace, available + grace));
   const stops = 'model calls, agent runs and sandboxes';
   const hero =
@@ -54,7 +68,7 @@ export function CreditAlertEmail({ level, workspaceName, available, granted, gra
   return (
     <EmailShell preview={creditAlertSubject({ level, workspaceName })} appUrl={new URL(url).origin}>
       <EmailHero eyebrow={hero.eyebrow} title={hero.title} description={hero.description}>
-        <EmailButton href={url}>Add credits</EmailButton>
+        <EmailButton href={action}>{add}</EmailButton>
       </EmailHero>
       <EmailSection>
         <EmailText>
@@ -68,8 +82,19 @@ export function CreditAlertEmail({ level, workspaceName, available, granted, gra
           </EmailText>
         )}
         {level !== 'low' && <EmailText>Storage is still charged each day, so the balance can keep falling.</EmailText>}
-        <EmailText>See usage and add credits in Settings → Usage.</EmailText>
-        <EmailLinkFallback label="Button not working? Paste this link into your browser:" href={url} />
+        {supportEmail ? (
+          <>
+            <EmailText>
+              To add credits, email <EmailStrong>{supportEmail}</EmailStrong>. See usage in Settings → Usage.
+            </EmailText>
+            <EmailLinkFallback label="Usage:" href={url} />
+          </>
+        ) : (
+          <>
+            <EmailText>See usage and add credits in Settings → Usage.</EmailText>
+            <EmailLinkFallback label="Button not working? Paste this link into your browser:" href={url} />
+          </>
+        )}
         <EmailText variant="muted">
           You get this email because you are an admin of {workspaceName}. We send it once each time the balance crosses
           this level.

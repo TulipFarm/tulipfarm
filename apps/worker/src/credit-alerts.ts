@@ -62,6 +62,7 @@ export function createCreditAlerts(options: {
           granted: account.granted === null ? null : credits(account.granted),
           grace: account.grace == null ? null : credits(account.grace),
           url: new URL(`/${encodeURIComponent(workspace.slug)}/settings/usage`, origin).href,
+          supportEmail: env.SUPPORT_EMAIL || null,
         },
       });
       // A failed send rolls the recorded level back, so the next check sends it again.
