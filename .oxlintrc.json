@@ -41,7 +41,8 @@
     {
       "files": ["apps/**/*.{js,jsx,ts,tsx,mjs}", "packages/**/*.{js,jsx,ts,tsx,mjs}"],
       "rules": {
-        "tulipfarm/product-copy": "error"
+        "tulipfarm/product-copy": "error",
+        "tulipfarm/authorization-lock-mode": "error"
       }
     },
     {

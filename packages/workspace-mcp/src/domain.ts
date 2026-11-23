@@ -466,70 +466,75 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       if (setup) await hostedAllowed(workspaceId);
       else if (value.endpoint === undefined) throw new McpError('invalid-input');
       const endpoint = setup ? setup.endpoint : endpointIdentity(value.endpoint!);
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
-        if (setup && !store.hostedStorage(tx)) throw new McpError('disabled');
-        const result = await store.command(
-          tx,
-          actor,
-          value.requestId,
-          'create',
-          value,
-          integrationMetadataSchema,
-          async () => {
-            const count = z
-              .object({ count: z.number() })
-              .parse(
-                (
-                  await tx.client.query(
-                    `SELECT count(*)::integer AS count FROM ${table(tx, 'integrations')} WHERE lifecycle<>'deleted'`,
-                  )
-                ).rows[0],
-              );
-            if (count.count >= mcpLimits.integrations) throw new McpError('limit');
-            const id = randomUUID();
-            const recommendations = await watchIntegrationRecommendations(tx, id, () => mcpRecommendations(tx, id));
-            const encrypted = store.cipher.encrypt(
-              { workspaceId, integrationId: id, version: 1, purpose: 'credential' },
-              JSON.stringify(value.credential),
-            );
-            rejectReflectedSecrets({ endpoint, name: value.name }, value.credential);
-            const columns = [
-              id,
-              value.ownership,
-              value.ownership === 'personal' ? actor.membershipId : null,
-              value.name,
-              endpoint,
-              setup ? setup.serverIdentity : serverIdentity(endpoint),
-              encrypted,
-              value.credential.kind,
-              value.credential.kind === 'oauth' ? value.credential.expiresAt : null,
-            ];
-            await tx.client.query(
-              setup
-                ? `INSERT INTO ${table(tx, 'integrations')} (id,ownership,owner_membership_id,name,endpoint,server_identity,lifecycle,credential,auth_method,credential_expires_at,kind,package,egress) VALUES ($1,$2,$3,$4,$5,$6,'active',$7,$8,$9,'hosted',$10,$11)`
-                : `INSERT INTO ${table(tx, 'integrations')} (id,ownership,owner_membership_id,name,endpoint,server_identity,lifecycle,credential,auth_method,credential_expires_at) VALUES ($1,$2,$3,$4,$5,$6,'active',$7,$8,$9)`,
-              setup ? [...columns, JSON.stringify(setup.package), JSON.stringify(setup.egress)] : columns,
-            );
-            if (value.ownership === 'shared') {
-              await setIntegrationManagers(tx, actor, 'mcp', id, { memberIds: [actor.membershipId], teamIds: [] });
-              await tx.client.query(
-                `INSERT INTO ${table(tx, 'member_grants')} (integration_id,membership_id) VALUES ($1,$2)`,
-                [id, actor.membershipId],
-              );
-              if (value.workspace)
-                await tx.client.query(
-                  `UPDATE ${table(tx, 'integrations')} SET shared_with_workspace=true WHERE id=$1`,
-                  [id],
+      return store.authorized(
+        workspaceId,
+        principal,
+        async (tx, actor) => {
+          if (setup && !store.hostedStorage(tx)) throw new McpError('disabled');
+          const result = await store.command(
+            tx,
+            actor,
+            value.requestId,
+            'create',
+            value,
+            integrationMetadataSchema,
+            async () => {
+              const count = z
+                .object({ count: z.number() })
+                .parse(
+                  (
+                    await tx.client.query(
+                      `SELECT count(*)::integer AS count FROM ${table(tx, 'integrations')} WHERE lifecycle<>'deleted'`,
+                    )
+                  ).rows[0],
                 );
-            }
-            await bindSecrets(tx, await store.load(tx, id), value.credential);
-            await recommendations();
-            return store.metadata(tx, actor, await store.load(tx, id));
-          },
-        );
-        await store.permit(tx, actor, await store.load(tx, result.id), 'read');
-        return result;
-      });
+              if (count.count >= mcpLimits.integrations) throw new McpError('limit');
+              const id = randomUUID();
+              const recommendations = await watchIntegrationRecommendations(tx, id, () => mcpRecommendations(tx, id));
+              const encrypted = store.cipher.encrypt(
+                { workspaceId, integrationId: id, version: 1, purpose: 'credential' },
+                JSON.stringify(value.credential),
+              );
+              rejectReflectedSecrets({ endpoint, name: value.name }, value.credential);
+              const columns = [
+                id,
+                value.ownership,
+                value.ownership === 'personal' ? actor.membershipId : null,
+                value.name,
+                endpoint,
+                setup ? setup.serverIdentity : serverIdentity(endpoint),
+                encrypted,
+                value.credential.kind,
+                value.credential.kind === 'oauth' ? value.credential.expiresAt : null,
+              ];
+              await tx.client.query(
+                setup
+                  ? `INSERT INTO ${table(tx, 'integrations')} (id,ownership,owner_membership_id,name,endpoint,server_identity,lifecycle,credential,auth_method,credential_expires_at,kind,package,egress) VALUES ($1,$2,$3,$4,$5,$6,'active',$7,$8,$9,'hosted',$10,$11)`
+                  : `INSERT INTO ${table(tx, 'integrations')} (id,ownership,owner_membership_id,name,endpoint,server_identity,lifecycle,credential,auth_method,credential_expires_at) VALUES ($1,$2,$3,$4,$5,$6,'active',$7,$8,$9)`,
+                setup ? [...columns, JSON.stringify(setup.package), JSON.stringify(setup.egress)] : columns,
+              );
+              if (value.ownership === 'shared') {
+                await setIntegrationManagers(tx, actor, 'mcp', id, { memberIds: [actor.membershipId], teamIds: [] });
+                await tx.client.query(
+                  `INSERT INTO ${table(tx, 'member_grants')} (integration_id,membership_id) VALUES ($1,$2)`,
+                  [id, actor.membershipId],
+                );
+                if (value.workspace)
+                  await tx.client.query(
+                    `UPDATE ${table(tx, 'integrations')} SET shared_with_workspace=true WHERE id=$1`,
+                    [id],
+                  );
+              }
+              await bindSecrets(tx, await store.load(tx, id), value.credential);
+              await recommendations();
+              return store.metadata(tx, actor, await store.load(tx, id));
+            },
+          );
+          await store.permit(tx, actor, await store.load(tx, result.id), 'read');
+          return result;
+        },
+        'write',
+      );
     },
     async list(workspaceId: string, principal: McpPrincipal) {
       return store.reading.authorized(workspaceId, principal, async (tx, actor) => {
@@ -557,21 +562,26 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       );
     },
     approveServerDescriptor(workspaceId: string, principal: McpPrincipal, id: string, expectedServerIdentity: string) {
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
-        const row = await store.load(tx, id);
-        await store.permit(tx, actor, row, 'manage');
-        store.active(row);
-        if (row.server_identity !== expectedServerIdentity) throw new McpError('conflict');
-        const recommendations = await watchIntegrationRecommendations(tx, id, () => mcpRecommendations(tx, id));
-        await tx.client.query(`UPDATE ${table(tx, 'integrations')} SET descriptor_approved=true WHERE id=$1`, [id]);
-        await recommendations();
-        return {
-          serverIdentity: row.server_identity,
-          tools: (await policies(tx, id))
-            .filter(policy => policy.enabled_revision && !policy.compatibility_reason)
-            .map(policy => ({ name: policy.name, revision: policy.enabled_revision })),
-        };
-      });
+      return store.authorized(
+        workspaceId,
+        principal,
+        async (tx, actor) => {
+          const row = await store.load(tx, id);
+          await store.permit(tx, actor, row, 'manage');
+          store.active(row);
+          if (row.server_identity !== expectedServerIdentity) throw new McpError('conflict');
+          const recommendations = await watchIntegrationRecommendations(tx, id, () => mcpRecommendations(tx, id));
+          await tx.client.query(`UPDATE ${table(tx, 'integrations')} SET descriptor_approved=true WHERE id=$1`, [id]);
+          await recommendations();
+          return {
+            serverIdentity: row.server_identity,
+            tools: (await policies(tx, id))
+              .filter(policy => policy.enabled_revision && !policy.compatibility_reason)
+              .map(policy => ({ name: policy.name, revision: policy.enabled_revision })),
+          };
+        },
+        'write',
+      );
     },
     async setGrants(workspaceId: string, principal: McpPrincipal, id: string, input: unknown) {
       const value = z
@@ -584,69 +594,81 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
           managers: managerGrantsSchema.optional(),
         })
         .parse(input);
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
-        const row = await store.load(tx, id);
-        await store.permit(tx, actor, row, 'manage');
-        if (row.ownership !== 'shared') throw new AccessDenied();
-        const before = await store.metadata(tx, actor, row);
-        return store.command(
-          tx,
-          actor,
-          value.requestId,
-          'grants',
-          { id, ...value },
-          integrationMetadataSchema,
-          async () => {
-            if ((value.requestId ? row.version : row.grants_version) !== value.expectedVersion)
-              throw new McpError('conflict');
-            const recommendationBefore = await mcpRecommendations(tx, id);
-            await validateIntegrationRecipients(
-              tx,
-              actor,
-              value,
-              z
-                .array(z.object({ team_id: z.uuid() }))
-                .parse(
-                  (
-                    await tx.client.query(`SELECT team_id FROM ${table(tx, 'team_grants')} WHERE integration_id=$1`, [
-                      id,
-                    ])
-                  ).rows,
-                )
-                .map(row => row.team_id),
-            );
-            if (value.managers) await setIntegrationManagers(tx, actor, 'mcp', id, value.managers);
-            await tx.client.query(`DELETE FROM ${table(tx, 'member_grants')} WHERE integration_id=$1`, [id]);
-            await tx.client.query(`DELETE FROM ${table(tx, 'team_grants')} WHERE integration_id=$1`, [id]);
-            for (const member of new Set(value.memberIds))
-              await tx.client.query(`INSERT INTO ${table(tx, 'member_grants')} VALUES ($1,$2)`, [id, member]);
-            for (const team of new Set(value.teamIds))
-              await tx.client.query(`INSERT INTO ${table(tx, 'team_grants')} VALUES ($1,$2)`, [id, team]);
-            await tx.client.query(
-              `UPDATE ${table(tx, 'integrations')} SET shared_with_workspace=$2,grants_version=grants_version+1,version=version+1 WHERE id=$1`,
-              [id, value.workspace],
-            );
-            if (row.credential) {
-              const current = await store.load(tx, id);
-              await bindSecrets(tx, current, store.credential(workspaceId, current));
-            }
-            if (changedIntegrationRecommendationMembers(recommendationBefore, await mcpRecommendations(tx, id)).length)
-              await store.invalidate(tx, row);
-            await recordIntegrationRecommendationChange(tx, id, recommendationBefore, await mcpRecommendations(tx, id));
-            const updated = await store.load(tx, id);
-            const capabilities = await store.capabilities(tx, actor, updated);
-            return capabilities.read
-              ? store.metadata(tx, actor, updated)
-              : {
-                  ...before,
-                  capabilities,
-                  version: updated.version,
-                  grantsVersion: updated.grants_version,
-                  authorizationEpoch: updated.authorization_epoch,
-                };
-          },
-        );
-      });
+      return store.authorized(
+        workspaceId,
+        principal,
+        async (tx, actor) => {
+          const row = await store.load(tx, id);
+          await store.permit(tx, actor, row, 'manage');
+          if (row.ownership !== 'shared') throw new AccessDenied();
+          const before = await store.metadata(tx, actor, row);
+          return store.command(
+            tx,
+            actor,
+            value.requestId,
+            'grants',
+            { id, ...value },
+            integrationMetadataSchema,
+            async () => {
+              if ((value.requestId ? row.version : row.grants_version) !== value.expectedVersion)
+                throw new McpError('conflict');
+              const recommendationBefore = await mcpRecommendations(tx, id);
+              await validateIntegrationRecipients(
+                tx,
+                actor,
+                value,
+                z
+                  .array(z.object({ team_id: z.uuid() }))
+                  .parse(
+                    (
+                      await tx.client.query(`SELECT team_id FROM ${table(tx, 'team_grants')} WHERE integration_id=$1`, [
+                        id,
+                      ])
+                    ).rows,
+                  )
+                  .map(row => row.team_id),
+              );
+              if (value.managers) await setIntegrationManagers(tx, actor, 'mcp', id, value.managers);
+              await tx.client.query(`DELETE FROM ${table(tx, 'member_grants')} WHERE integration_id=$1`, [id]);
+              await tx.client.query(`DELETE FROM ${table(tx, 'team_grants')} WHERE integration_id=$1`, [id]);
+              for (const member of new Set(value.memberIds))
+                await tx.client.query(`INSERT INTO ${table(tx, 'member_grants')} VALUES ($1,$2)`, [id, member]);
+              for (const team of new Set(value.teamIds))
+                await tx.client.query(`INSERT INTO ${table(tx, 'team_grants')} VALUES ($1,$2)`, [id, team]);
+              await tx.client.query(
+                `UPDATE ${table(tx, 'integrations')} SET shared_with_workspace=$2,grants_version=grants_version+1,version=version+1 WHERE id=$1`,
+                [id, value.workspace],
+              );
+              if (row.credential) {
+                const current = await store.load(tx, id);
+                await bindSecrets(tx, current, store.credential(workspaceId, current));
+              }
+              if (
+                changedIntegrationRecommendationMembers(recommendationBefore, await mcpRecommendations(tx, id)).length
+              )
+                await store.invalidate(tx, row);
+              await recordIntegrationRecommendationChange(
+                tx,
+                id,
+                recommendationBefore,
+                await mcpRecommendations(tx, id),
+              );
+              const updated = await store.load(tx, id);
+              const capabilities = await store.capabilities(tx, actor, updated);
+              return capabilities.read
+                ? store.metadata(tx, actor, updated)
+                : {
+                    ...before,
+                    capabilities,
+                    version: updated.version,
+                    grantsVersion: updated.grants_version,
+                    authorizationEpoch: updated.authorization_epoch,
+                  };
+            },
+          );
+        },
+        'write',
+      );
     },
     grants(workspaceId: string, principal: McpPrincipal, id: string) {
       return store.reading.authorized(workspaceId, principal, async (tx, actor) => {
@@ -704,34 +726,39 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
             value.operation
           ]
         : z.enum(['active', 'disabled', 'disconnected', 'deleted']).parse(input);
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
-        const row = await store.load(tx, id);
-        await store.permit(tx, actor, row, 'manage');
-        return store.command(
-          tx,
-          actor,
-          value?.requestId,
-          'lifecycle',
-          { id, input },
-          integrationMetadataSchema,
-          async () => {
-            if (value && row.version !== value.expectedVersion) throw new McpError('conflict');
-            if (row.lifecycle === 'deleted' || (lifecycle === 'active' && !row.credential))
-              throw new McpError('integration-unavailable');
-            if (row.lifecycle === lifecycle) return store.metadata(tx, actor, row);
-            const recommendations = await watchIntegrationRecommendations(tx, id, () => mcpRecommendations(tx, id));
-            await store.invalidate(tx, row);
-            await tx.client.query(
-              `UPDATE ${table(tx, 'integrations')} SET version=version+1,lifecycle=$2,credential=CASE WHEN $2 IN ('deleted','disconnected') THEN NULL ELSE credential END WHERE id=$1`,
-              [id, lifecycle],
-            );
-            if (lifecycle === 'deleted' || lifecycle === 'disconnected')
-              await tx.client.query(`DELETE FROM ${table(tx, 'integration_secrets')} WHERE integration_id=$1`, [id]);
-            await recommendations();
-            return store.metadata(tx, actor, await store.load(tx, id));
-          },
-        );
-      });
+      return store.authorized(
+        workspaceId,
+        principal,
+        async (tx, actor) => {
+          const row = await store.load(tx, id);
+          await store.permit(tx, actor, row, 'manage');
+          return store.command(
+            tx,
+            actor,
+            value?.requestId,
+            'lifecycle',
+            { id, input },
+            integrationMetadataSchema,
+            async () => {
+              if (value && row.version !== value.expectedVersion) throw new McpError('conflict');
+              if (row.lifecycle === 'deleted' || (lifecycle === 'active' && !row.credential))
+                throw new McpError('integration-unavailable');
+              if (row.lifecycle === lifecycle) return store.metadata(tx, actor, row);
+              const recommendations = await watchIntegrationRecommendations(tx, id, () => mcpRecommendations(tx, id));
+              await store.invalidate(tx, row);
+              await tx.client.query(
+                `UPDATE ${table(tx, 'integrations')} SET version=version+1,lifecycle=$2,credential=CASE WHEN $2 IN ('deleted','disconnected') THEN NULL ELSE credential END WHERE id=$1`,
+                [id, lifecycle],
+              );
+              if (lifecycle === 'deleted' || lifecycle === 'disconnected')
+                await tx.client.query(`DELETE FROM ${table(tx, 'integration_secrets')} WHERE integration_id=$1`, [id]);
+              await recommendations();
+              return store.metadata(tx, actor, await store.load(tx, id));
+            },
+          );
+        },
+        'write',
+      );
     },
     async replaceCredential(workspaceId: string, principal: McpPrincipal, id: string, input: unknown) {
       admitted();
@@ -749,83 +776,96 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
         .parse(input);
       const setup = hostedSetup(value.credential, value);
       if (setup) await hostedAllowed(workspaceId);
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
-        const row = await store.load(tx, id);
-        await store.permit(tx, actor, row, 'manage');
-        return store.command(
-          tx,
-          actor,
-          value.requestId,
-          'credential',
-          { id, ...value },
-          integrationMetadataSchema,
-          async () => {
-            if (
-              row.lifecycle === 'deleted' ||
-              (value.requestId
-                ? row.version !== value.expectedVersion
-                : row.secret_version !== value.expectedSecretVersion)
-            )
-              throw new McpError('conflict');
-            // A hosted integration keeps its package name, so its server identity and approvals stay with it.
-            if (
-              (row.kind === 'hosted') !== !!setup ||
-              (setup && (setup.serverIdentity !== row.server_identity || value.endpoint !== undefined))
-            )
-              throw new McpError('invalid-input');
-            const endpoint = setup ? row.endpoint : endpointIdentity(value.endpoint ?? row.endpoint);
-            rejectReflectedSecrets({ endpoint, name: row.name }, value.credential);
-            const recommendations = await watchIntegrationRecommendations(tx, id, () => mcpRecommendations(tx, id));
-            await store.invalidate(tx, row);
-            const encrypted = store.cipher.encrypt(
-              { workspaceId, integrationId: id, version: row.secret_version + 1, purpose: 'credential' },
-              JSON.stringify(value.credential),
-            );
-            await tx.client.query(
-              `UPDATE ${table(tx, 'integrations')} SET credential=$2,secret_version=secret_version+1,version=version+1,endpoint=$3,server_identity=$4,lifecycle='active',auth_method=$5,credential_expires_at=$6,transport=NULL WHERE id=$1`,
-              [
-                id,
-                encrypted,
-                endpoint,
-                serverIdentity(endpoint),
-                value.credential.kind,
-                value.credential.kind === 'oauth' ? value.credential.expiresAt : null,
-              ],
-            );
-            if (setup)
-              await tx.client.query(`UPDATE ${table(tx, 'integrations')} SET package=$2,egress=$3 WHERE id=$1`, [
-                id,
-                JSON.stringify(setup.package),
-                JSON.stringify(setup.egress),
-              ]);
-            await bindSecrets(tx, await store.load(tx, id), value.credential);
-            await recommendations();
-            return store.metadata(tx, actor, await store.load(tx, id));
-          },
-        );
-      });
+      return store.authorized(
+        workspaceId,
+        principal,
+        async (tx, actor) => {
+          const row = await store.load(tx, id);
+          await store.permit(tx, actor, row, 'manage');
+          return store.command(
+            tx,
+            actor,
+            value.requestId,
+            'credential',
+            { id, ...value },
+            integrationMetadataSchema,
+            async () => {
+              if (
+                row.lifecycle === 'deleted' ||
+                (value.requestId
+                  ? row.version !== value.expectedVersion
+                  : row.secret_version !== value.expectedSecretVersion)
+              )
+                throw new McpError('conflict');
+              // A hosted integration keeps its package name, so its server identity and approvals stay with it.
+              if (
+                (row.kind === 'hosted') !== !!setup ||
+                (setup && (setup.serverIdentity !== row.server_identity || value.endpoint !== undefined))
+              )
+                throw new McpError('invalid-input');
+              const endpoint = setup ? row.endpoint : endpointIdentity(value.endpoint ?? row.endpoint);
+              rejectReflectedSecrets({ endpoint, name: row.name }, value.credential);
+              const recommendations = await watchIntegrationRecommendations(tx, id, () => mcpRecommendations(tx, id));
+              await store.invalidate(tx, row);
+              const encrypted = store.cipher.encrypt(
+                { workspaceId, integrationId: id, version: row.secret_version + 1, purpose: 'credential' },
+                JSON.stringify(value.credential),
+              );
+              await tx.client.query(
+                `UPDATE ${table(tx, 'integrations')} SET credential=$2,secret_version=secret_version+1,version=version+1,endpoint=$3,server_identity=$4,lifecycle='active',auth_method=$5,credential_expires_at=$6,transport=NULL WHERE id=$1`,
+                [
+                  id,
+                  encrypted,
+                  endpoint,
+                  serverIdentity(endpoint),
+                  value.credential.kind,
+                  value.credential.kind === 'oauth' ? value.credential.expiresAt : null,
+                ],
+              );
+              if (setup)
+                await tx.client.query(`UPDATE ${table(tx, 'integrations')} SET package=$2,egress=$3 WHERE id=$1`, [
+                  id,
+                  JSON.stringify(setup.package),
+                  JSON.stringify(setup.egress),
+                ]);
+              await bindSecrets(tx, await store.load(tx, id), value.credential);
+              await recommendations();
+              return store.metadata(tx, actor, await store.load(tx, id));
+            },
+          );
+        },
+        'write',
+      );
     },
     /** Marks discovery as running elsewhere, such as in the worker, and returns the version it must match. */
     queueDiscovery(workspaceId: string, principal: McpPrincipal, id: string) {
       admitted();
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
-        const row = await store.load(tx, id);
-        await store.permit(tx, actor, row, 'manage');
-        if (row.lifecycle !== 'active' || !row.credential) throw new McpError('integration-unavailable');
-        await tx.client.query(
-          `UPDATE ${table(tx, 'integrations')} SET discovery='queued',status_reason=NULL WHERE id=$1`,
-          [id],
-        );
-        return row.version;
-      });
+      return store.authorized(
+        workspaceId,
+        principal,
+        async (tx, actor) => {
+          const row = await store.load(tx, id);
+          await store.permit(tx, actor, row, 'manage');
+          if (row.lifecycle !== 'active' || !row.credential) throw new McpError('integration-unavailable');
+          await tx.client.query(
+            `UPDATE ${table(tx, 'integrations')} SET discovery='queued',status_reason=NULL WHERE id=$1`,
+            [id],
+          );
+          return row.version;
+        },
+        'write',
+      );
     },
     /** Records why queued discovery failed, unless the integration changed since it was queued. */
     async failDiscovery(workspaceId: string, id: string, expectedVersion: number, reason: string) {
-      await store.transaction(workspaceId, tx =>
-        tx.client.query(
-          `UPDATE ${table(tx, 'integrations')} SET discovery='failed',status_reason=$3 WHERE id=$1 AND version=$2 AND discovery='queued'`,
-          [id, expectedVersion, reason.slice(0, 500)],
-        ),
+      await store.transaction(
+        workspaceId,
+        tx =>
+          tx.client.query(
+            `UPDATE ${table(tx, 'integrations')} SET discovery='failed',status_reason=$3 WHERE id=$1 AND version=$2 AND discovery='queued'`,
+            [id, expectedVersion, reason.slice(0, 500)],
+          ),
+        'write',
       );
     },
     async discover(
@@ -837,30 +877,35 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       const command = input
         ? z.strictObject({ requestId: z.uuid(), expectedVersion: z.number().int().positive() }).parse(input)
         : null;
-      const before = await store.authorized(workspaceId, principal, async (tx, actor) => {
-        const row = await store.load(tx, id);
-        await store.permit(tx, actor, row, 'manage');
-        store.active(row);
-        if (command) {
-          const old = z
-            .object({ digest: z.string(), result: z.array(policySchema) })
-            .optional()
-            .parse(
-              (
-                await tx.client.query(
-                  `SELECT digest,result FROM ${table(tx, 'commands')} WHERE membership_id=$1 AND request_id=$2 AND kind='discover'`,
-                  [actor.membershipId, command.requestId],
-                )
-              ).rows[0],
-            );
-          if (old) {
-            if (old.digest !== digest(['discover', { id, ...command }])) throw new McpError('conflict');
-            return { row, result: old.result };
+      const before = await store.authorized(
+        workspaceId,
+        principal,
+        async (tx, actor) => {
+          const row = await store.load(tx, id);
+          await store.permit(tx, actor, row, 'manage');
+          store.active(row);
+          if (command) {
+            const old = z
+              .object({ digest: z.string(), result: z.array(policySchema) })
+              .optional()
+              .parse(
+                (
+                  await tx.client.query(
+                    `SELECT digest,result FROM ${table(tx, 'commands')} WHERE membership_id=$1 AND request_id=$2 AND kind='discover'`,
+                    [actor.membershipId, command.requestId],
+                  )
+                ).rows[0],
+              );
+            if (old) {
+              if (old.digest !== digest(['discover', { id, ...command }])) throw new McpError('conflict');
+              return { row, result: old.result };
+            }
+            if (row.version !== command.expectedVersion) throw new McpError('conflict');
           }
-          if (row.version !== command.expectedVersion) throw new McpError('conflict');
-        }
-        return { row, result: null, material: await material(tx, workspaceId, actor.membershipId, row) };
-      });
+          return { row, result: null, material: await material(tx, workspaceId, actor.membershipId, row) };
+        },
+        'write',
+      );
       if (before.result) return before.result;
       const target = await hosted.ensureHosted(workspaceId, { principal }, id);
       const discovered = await discoverPrepared(
@@ -868,33 +913,38 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
         { ...before.material!, values: [...before.material!.values, ...(target?.values ?? [])] },
         target?.hostTarget,
       );
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
-        const row = await store.load(tx, id);
-        await store.permit(tx, actor, row, 'manage');
-        store.active(row);
-        return store.command(
-          tx,
-          actor,
-          command?.requestId,
-          'discover',
-          { id, ...command },
-          z.array(policySchema),
-          async () => {
-            if (
-              row.authorization_epoch !== before.row.authorization_epoch ||
-              row.secret_version !== before.row.secret_version ||
-              (command && row.version !== command.expectedVersion)
-            )
-              throw new McpError('conflict');
-            await saveDiscovery(tx, row, discovered);
-            await tx.client.query(
-              `UPDATE ${table(tx, 'integrations')} SET version=version+1,discovery=NULL,status_reason=NULL WHERE id=$1`,
-              [id],
-            );
-            return policies(tx, id);
-          },
-        );
-      });
+      return store.authorized(
+        workspaceId,
+        principal,
+        async (tx, actor) => {
+          const row = await store.load(tx, id);
+          await store.permit(tx, actor, row, 'manage');
+          store.active(row);
+          return store.command(
+            tx,
+            actor,
+            command?.requestId,
+            'discover',
+            { id, ...command },
+            z.array(policySchema),
+            async () => {
+              if (
+                row.authorization_epoch !== before.row.authorization_epoch ||
+                row.secret_version !== before.row.secret_version ||
+                (command && row.version !== command.expectedVersion)
+              )
+                throw new McpError('conflict');
+              await saveDiscovery(tx, row, discovered);
+              await tx.client.query(
+                `UPDATE ${table(tx, 'integrations')} SET version=version+1,discovery=NULL,status_reason=NULL WHERE id=$1`,
+                [id],
+              );
+              return policies(tx, id);
+            },
+          );
+        },
+        'write',
+      );
     },
     tools(workspaceId: string, principal: McpPrincipal, id: string) {
       return store.reading.authorized(workspaceId, principal, async (tx, actor) => {
@@ -920,43 +970,48 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
             .strictObject({ requestId: z.uuid(), expectedVersion: z.number().int().positive(), tools: toolsSchema })
             .parse(input);
       const value = command?.tools ?? toolsSchema.parse(input);
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
-        const row = await store.load(tx, id);
-        await store.permit(tx, actor, row, 'manage');
-        store.active(row);
-        return store.command(
-          tx,
-          actor,
-          command?.requestId,
-          'review',
-          { id, input },
-          z.array(policySchema),
-          async () => {
-            if (command && row.version !== command.expectedVersion) throw new McpError('conflict');
-            const existing = await policies(tx, id);
-            const recommendations = await watchIntegrationRecommendations(tx, id, () => mcpRecommendations(tx, id));
-            if (new Set(value.map(tool => tool.name)).size !== value.length) throw new McpError('invalid-input');
-            for (const tool of value) {
-              const policy = existing.find(policy => policy.name === tool.name);
-              if (
-                !policy ||
-                !policy.present ||
-                policy.discovered_revision !== tool.revision ||
-                (tool.enabled && policy.compatibility_reason) ||
-                (!tool.enabled && tool.standingException)
-              )
-                throw new McpError('incompatible-tool');
-              await tx.client.query(
-                `UPDATE ${table(tx, 'tool_policies')} SET enabled_revision=$3,standing_exception=$4,policy_version=policy_version+1 WHERE integration_id=$1 AND name=$2`,
-                [id, tool.name, tool.enabled ? tool.revision : null, tool.standingException],
-              );
-            }
-            await tx.client.query(`UPDATE ${table(tx, 'integrations')} SET version=version+1 WHERE id=$1`, [id]);
-            await recommendations();
-            return policies(tx, id);
-          },
-        );
-      });
+      return store.authorized(
+        workspaceId,
+        principal,
+        async (tx, actor) => {
+          const row = await store.load(tx, id);
+          await store.permit(tx, actor, row, 'manage');
+          store.active(row);
+          return store.command(
+            tx,
+            actor,
+            command?.requestId,
+            'review',
+            { id, input },
+            z.array(policySchema),
+            async () => {
+              if (command && row.version !== command.expectedVersion) throw new McpError('conflict');
+              const existing = await policies(tx, id);
+              const recommendations = await watchIntegrationRecommendations(tx, id, () => mcpRecommendations(tx, id));
+              if (new Set(value.map(tool => tool.name)).size !== value.length) throw new McpError('invalid-input');
+              for (const tool of value) {
+                const policy = existing.find(policy => policy.name === tool.name);
+                if (
+                  !policy ||
+                  !policy.present ||
+                  policy.discovered_revision !== tool.revision ||
+                  (tool.enabled && policy.compatibility_reason) ||
+                  (!tool.enabled && tool.standingException)
+                )
+                  throw new McpError('incompatible-tool');
+                await tx.client.query(
+                  `UPDATE ${table(tx, 'tool_policies')} SET enabled_revision=$3,standing_exception=$4,policy_version=policy_version+1 WHERE integration_id=$1 AND name=$2`,
+                  [id, tool.name, tool.enabled ? tool.revision : null, tool.standingException],
+                );
+              }
+              await tx.client.query(`UPDATE ${table(tx, 'integrations')} SET version=version+1 WHERE id=$1`, [id]);
+              await recommendations();
+              return policies(tx, id);
+            },
+          );
+        },
+        'write',
+      );
     },
     setSelection(workspaceId: string, principal: McpPrincipal, input: unknown) {
       const value = z
@@ -966,29 +1021,37 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
           integrationIds: z.array(z.uuid()).max(20),
         })
         .parse(input);
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
-        await store.origin(tx, actor, value.origin, 'select');
-        const old = await store.selection(tx, actor, value.origin);
-        if (old.version !== value.expectedVersion || new Set(value.integrationIds).size !== value.integrationIds.length)
-          throw new McpError('conflict');
-        const bindings = [];
-        for (const id of value.integrationIds) {
-          const row = await store.load(tx, id);
-          await store.permit(tx, actor, row, 'use');
-          store.active(row);
-          bindings.push({ integrationId: id, authorizationEpoch: row.authorization_epoch });
-        }
-        await tx.client.query(
-          `INSERT INTO ${table(tx, 'selections')} (membership_id,origin_key,version,bindings) VALUES ($1,$2,$3,$4) ON CONFLICT (membership_id,origin_key) DO UPDATE SET version=EXCLUDED.version,bindings=EXCLUDED.bindings`,
-          [
-            actor.membershipId,
-            originKey(value.origin),
-            old.version + 1,
-            JSON.stringify(bindingsSchema.parse(bindings)),
-          ],
-        );
-        return { version: old.version + 1, bindings };
-      });
+      return store.authorized(
+        workspaceId,
+        principal,
+        async (tx, actor) => {
+          await store.origin(tx, actor, value.origin, 'select');
+          const old = await store.selection(tx, actor, value.origin);
+          if (
+            old.version !== value.expectedVersion ||
+            new Set(value.integrationIds).size !== value.integrationIds.length
+          )
+            throw new McpError('conflict');
+          const bindings = [];
+          for (const id of value.integrationIds) {
+            const row = await store.load(tx, id);
+            await store.permit(tx, actor, row, 'use');
+            store.active(row);
+            bindings.push({ integrationId: id, authorizationEpoch: row.authorization_epoch });
+          }
+          await tx.client.query(
+            `INSERT INTO ${table(tx, 'selections')} (membership_id,origin_key,version,bindings) VALUES ($1,$2,$3,$4) ON CONFLICT (membership_id,origin_key) DO UPDATE SET version=EXCLUDED.version,bindings=EXCLUDED.bindings`,
+            [
+              actor.membershipId,
+              originKey(value.origin),
+              old.version + 1,
+              JSON.stringify(bindingsSchema.parse(bindings)),
+            ],
+          );
+          return { version: old.version + 1, bindings };
+        },
+        'write',
+      );
     },
     selection(workspaceId: string, principal: McpPrincipal, origin: McpOrigin) {
       return store.reading.authorized(workspaceId, principal, async (tx, actor) => {
@@ -1220,7 +1283,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       const value = z
         .strictObject({ requestId: z.uuid().optional(), digest: z.string(), decision: z.enum(['approve', 'reject']) })
         .parse(input);
-      return store.confirmation(workspaceId, principal, async (tx, actor) => {
+      return store.confirmation(workspaceId, principal, 'write', async (tx, actor) => {
         const action = await store.action(tx, id);
         await authorizeAction(tx, actor, action, 'read', false);
         await store.command(
@@ -1266,17 +1329,22 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       });
     },
     cancel(workspaceId: string, principal: McpPrincipal, id: string) {
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
-        const action = await store.action(tx, id);
-        if (action.requester.membershipId !== actor.membershipId) throw new AccessDenied();
-        if ((await tx.client.query(`SELECT 1 FROM ${table(tx, 'claims')} WHERE action_id=$1`, [id])).rowCount)
-          throw new McpError('conflict');
-        await tx.client.query(
-          `INSERT INTO ${table(tx, 'cancellations')} (action_id,membership_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-          [id, actor.membershipId],
-        );
-        return { id, status: 'cancelled-before-dispatch' };
-      });
+      return store.authorized(
+        workspaceId,
+        principal,
+        async (tx, actor) => {
+          const action = await store.action(tx, id);
+          if (action.requester.membershipId !== actor.membershipId) throw new AccessDenied();
+          if ((await tx.client.query(`SELECT 1 FROM ${table(tx, 'claims')} WHERE action_id=$1`, [id])).rowCount)
+            throw new McpError('conflict');
+          await tx.client.query(
+            `INSERT INTO ${table(tx, 'cancellations')} (action_id,membership_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+            [id, actor.membershipId],
+          );
+          return { id, status: 'cancelled-before-dispatch' };
+        },
+        'write',
+      );
     },
     async dispatch(workspaceId: string, id: string) {
       dispatchEnabled();
@@ -1502,7 +1570,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
         .refine(value => !value.requestId || !!value.digest)
         .parse(input);
       if (Buffer.byteLength(value.notes) > 8192) throw new McpError('limit');
-      return store.confirmation(workspaceId, principal, async (tx, actor) => {
+      return store.confirmation(workspaceId, principal, 'write', async (tx, actor) => {
         const action = await store.action(tx, id);
         const administrative =
           actor.membershipId !== action.requester.membershipId || actor.userId !== action.requester.userId;

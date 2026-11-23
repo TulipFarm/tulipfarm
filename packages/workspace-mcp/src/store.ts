@@ -64,7 +64,7 @@ export function createStore(options: WorkspaceMcpOptions) {
   async function transaction<T>(
     workspaceId: string,
     operation: (tx: AuthorizationTransaction) => Promise<T>,
-    mode: McpLockMode = 'write',
+    mode: McpLockMode,
   ) {
     return options.runtime.transaction(z.uuid().parse(workspaceId), workspaceMcpCompatibility, async tx => {
       workspaces.set(tx, workspaceId);
@@ -78,7 +78,7 @@ export function createStore(options: WorkspaceMcpOptions) {
     workspaceId: string,
     principal: McpPrincipal,
     operation: (tx: AuthorizationTransaction, actor: HumanActor) => Promise<T>,
-    mode: McpLockMode = 'write',
+    mode: McpLockMode,
   ) {
     return transaction(
       workspaceId,
@@ -93,17 +93,18 @@ export function createStore(options: WorkspaceMcpOptions) {
   async function confirmation<T>(
     workspaceId: string,
     principal: McpPrincipal,
+    mode: 'read' | 'write',
     operation: (tx: AuthorizationTransaction, actor: HumanActor) => Promise<T>,
   ) {
     if (!options.resolveConfirmationCredential) throw new McpError('disabled');
-    const actor = await authorized(workspaceId, principal, async (_tx, actor) => actor);
+    const actor = await authorized(workspaceId, principal, async (_tx, actor) => actor, mode);
     return withMaintenanceTransaction({
       workspaceId,
       connectionString: await options.resolveConfirmationCredential(workspaceId),
       capability: 'confirmation',
       operation: async tx => {
         workspaces.set(tx, workspaceId);
-        await lockAuthorization(tx, 'write');
+        await lockAuthorization(tx, mode);
         await currentMember(tx, actor);
         return operation(tx, actor);
       },

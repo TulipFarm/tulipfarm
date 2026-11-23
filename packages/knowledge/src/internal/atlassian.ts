@@ -154,10 +154,10 @@ export function createAtlassianKnowledge({
   }
   const authority = { requireExternalSource, requireExternalProof } satisfies Partial<KnowledgeOptions>;
   const store = createKnowledgeStore({ runtime, ...authority });
-  async function transaction<T>(workspaceId: string, operation: (tx: Tx) => Promise<T>) {
+  async function transaction<T>(workspaceId: string, mode: 'read' | 'write', operation: (tx: Tx) => Promise<T>) {
     return runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async raw => {
       const tx = store.bind(raw);
-      await lockAuthorization(tx, 'write');
+      await lockAuthorization(tx, mode);
       return operation(tx);
     });
   }
@@ -165,7 +165,7 @@ export function createAtlassianKnowledge({
     workspaceId: string,
     userId: string,
     operation: (tx: Tx, actor: HumanActor) => Promise<T>,
-    write = true,
+    write: boolean,
   ) {
     return store.transaction(workspaceId, userId, write, async (tx, actor) => {
       return operation(tx, actor);
@@ -319,71 +319,76 @@ export function createAtlassianKnowledge({
       })
     )
       throw new AtlassianCorpusError('invalid-selection');
-    return memberTransaction(workspaceId, userId, async (tx, human) => {
-      if (human.membershipId !== actor.membershipId) throw new AccessDenied();
-      await assertDefaultSourceEnabled(tx, input.commandId);
-      const again = await prior(tx, human);
-      if (again) return again;
-      const linked = await tx.client.query(
-        `SELECT 1 FROM ${qualified(tx.schema, 'tf_atlassian_accounts')} WHERE id=$1 AND protocol='atlassian-rest' AND ownership='personal' AND owner_membership_id=$2
+    return memberTransaction(
+      workspaceId,
+      userId,
+      async (tx, human) => {
+        if (human.membershipId !== actor.membershipId) throw new AccessDenied();
+        await assertDefaultSourceEnabled(tx, input.commandId);
+        const again = await prior(tx, human);
+        if (again) return again;
+        const linked = await tx.client.query(
+          `SELECT 1 FROM ${qualified(tx.schema, 'tf_atlassian_accounts')} WHERE id=$1 AND protocol='atlassian-rest' AND ownership='personal' AND owner_membership_id=$2
         AND state IN ('active','refreshing') AND identity->>'qualification'='verified' AND identity->>'id'=$3 AND resources @> jsonb_build_array(jsonb_build_object('id',$4::text))`,
-        [
-          inspected.binding.accountId,
-          human.membershipId,
-          inspected.binding.atlassianAccountId,
-          inspected.binding.cloudId,
-        ],
-      );
-      if (!linked.rowCount) throw new AtlassianCorpusError('stale-integration');
-      const active = await tx.client.query(
-        `SELECT id FROM ${qualified(tx.schema, 'tf_memberships')} WHERE id=ANY($1::uuid[]) AND removed_at IS NULL`,
-        [memberIds],
-      );
-      if (active.rowCount !== memberIds.length) throw new AccessDenied();
-      const inserted = await tx.client.query(
-        `INSERT INTO ${table(tx, 'sources')} (id,provider,account_namespace,selection,owner_membership_id,account_identity) VALUES ($1,$2,$3,$4::jsonb::text,$5,$6) ON CONFLICT DO NOTHING`,
-        [
-          input.commandId,
-          input.selection.product,
-          input.selection.cloudId,
-          JSON.stringify(input.selection),
-          human.membershipId,
-          inspected.binding.accountId,
-        ],
-      );
-      if (!inserted.rowCount) throw new KnowledgeError('conflict');
-      await tx.client.query(
-        `INSERT INTO ${table(tx, 'atlassian_sources')} (source_id,product,binding,selection,title,fingerprint,cursor) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [
-          input.commandId,
-          input.selection.product,
-          inspected.binding,
-          input.selection,
-          inspected.title.slice(0, 2048) ||
-            (input.selection.product === 'jira' ? 'Jira projects' : 'Confluence content'),
-          fingerprint,
-          initialCursor(),
-        ],
-      );
-      await tx.client.query(
-        `INSERT INTO ${table(tx, 'atlassian_members')} (source_id,membership_id) SELECT $1,unnest($2::uuid[])`,
-        [input.commandId, memberIds],
-      );
-      for (const [index, t] of inspected.targets.entries())
-        await tx.client.query(
-          `INSERT INTO ${table(tx, 'atlassian_targets')} (source_id,target_id,kind,key,title,descendants) VALUES ($1,$2,$3,$4,$5,$6)`,
           [
-            input.commandId,
-            atlassianTargetKey(t),
-            t.kind,
-            t.key?.slice(0, 255) ?? null,
-            t.title.slice(0, 512) || atlassianTargetKey(t),
-            input.selection.targets[index]?.descendants ?? false,
+            inspected.binding.accountId,
+            human.membershipId,
+            inspected.binding.atlassianAccountId,
+            inspected.binding.cloudId,
           ],
         );
-      await store.source(tx, human, input.commandId, true);
-      return dto(tx, await source(tx, input.commandId));
-    });
+        if (!linked.rowCount) throw new AtlassianCorpusError('stale-integration');
+        const active = await tx.client.query(
+          `SELECT id FROM ${qualified(tx.schema, 'tf_memberships')} WHERE id=ANY($1::uuid[]) AND removed_at IS NULL`,
+          [memberIds],
+        );
+        if (active.rowCount !== memberIds.length) throw new AccessDenied();
+        const inserted = await tx.client.query(
+          `INSERT INTO ${table(tx, 'sources')} (id,provider,account_namespace,selection,owner_membership_id,account_identity) VALUES ($1,$2,$3,$4::jsonb::text,$5,$6) ON CONFLICT DO NOTHING`,
+          [
+            input.commandId,
+            input.selection.product,
+            input.selection.cloudId,
+            JSON.stringify(input.selection),
+            human.membershipId,
+            inspected.binding.accountId,
+          ],
+        );
+        if (!inserted.rowCount) throw new KnowledgeError('conflict');
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'atlassian_sources')} (source_id,product,binding,selection,title,fingerprint,cursor) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [
+            input.commandId,
+            input.selection.product,
+            inspected.binding,
+            input.selection,
+            inspected.title.slice(0, 2048) ||
+              (input.selection.product === 'jira' ? 'Jira projects' : 'Confluence content'),
+            fingerprint,
+            initialCursor(),
+          ],
+        );
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'atlassian_members')} (source_id,membership_id) SELECT $1,unnest($2::uuid[])`,
+          [input.commandId, memberIds],
+        );
+        for (const [index, t] of inspected.targets.entries())
+          await tx.client.query(
+            `INSERT INTO ${table(tx, 'atlassian_targets')} (source_id,target_id,kind,key,title,descendants) VALUES ($1,$2,$3,$4,$5,$6)`,
+            [
+              input.commandId,
+              atlassianTargetKey(t),
+              t.kind,
+              t.key?.slice(0, 255) ?? null,
+              t.title.slice(0, 512) || atlassianTargetKey(t),
+              input.selection.targets[index]?.descendants ?? false,
+            ],
+          );
+        await store.source(tx, human, input.commandId, true);
+        return dto(tx, await source(tx, input.commandId));
+      },
+      true,
+    );
   }
   async function list(workspaceId: string, userId: string) {
     return memberRead(workspaceId, userId, async (tx, actor) => {
@@ -481,96 +486,106 @@ export function createAtlassianKnowledge({
             }),
           )
         : null;
-    return memberTransaction(workspaceId, userId, async (tx, actor) => {
-      const s = await manager(tx, actor, sourceId);
-      const again = await replayed(tx, s);
-      if (again) return again;
-      if (s.state === 'removed') throw new KnowledgeError('conflict');
-      if (
-        inspected &&
-        (inspected.binding.cloudId !== s.binding.cloudId ||
-          inspected.binding.atlassianAccountId !== s.binding.atlassianAccountId)
-      )
-        throw new AccessDenied();
-      const state = input.action === 'remove' ? 'removed' : input.action === 'pause' ? 'paused' : 'active';
-      await tx.client.query(
-        `UPDATE ${table(tx, 'sources')} SET state=$2,access_epoch=access_epoch+1,removed_at=CASE WHEN $2='removed' THEN clock_timestamp() ELSE NULL END,retain_until=CASE WHEN $2='removed' THEN clock_timestamp()+interval '30 days' ELSE NULL END WHERE id=$1`,
-        [sourceId, state],
-      );
-      if (state === 'removed')
+    return memberTransaction(
+      workspaceId,
+      userId,
+      async (tx, actor) => {
+        const s = await manager(tx, actor, sourceId);
+        const again = await replayed(tx, s);
+        if (again) return again;
+        if (s.state === 'removed') throw new KnowledgeError('conflict');
+        if (
+          inspected &&
+          (inspected.binding.cloudId !== s.binding.cloudId ||
+            inspected.binding.atlassianAccountId !== s.binding.atlassianAccountId)
+        )
+          throw new AccessDenied();
+        const state = input.action === 'remove' ? 'removed' : input.action === 'pause' ? 'paused' : 'active';
         await tx.client.query(
-          `UPDATE ${table(tx, 'documents')} SET tombstoned_at=clock_timestamp(),retain_until=clock_timestamp()+interval '30 days',lexical_publication_id=NULL WHERE source_id=$1`,
+          `UPDATE ${table(tx, 'sources')} SET state=$2,access_epoch=access_epoch+1,removed_at=CASE WHEN $2='removed' THEN clock_timestamp() ELSE NULL END,retain_until=CASE WHEN $2='removed' THEN clock_timestamp()+interval '30 days' ELSE NULL END WHERE id=$1`,
+          [sourceId, state],
+        );
+        if (state === 'removed')
+          await tx.client.query(
+            `UPDATE ${table(tx, 'documents')} SET tombstoned_at=clock_timestamp(),retain_until=clock_timestamp()+interval '30 days',lexical_publication_id=NULL WHERE source_id=$1`,
+            [sourceId],
+          );
+        await invalidate(tx, sourceId, {});
+        await tx.client.query(
+          `UPDATE ${table(tx, 'atlassian_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=clock_timestamp(),sync_state='queued',failure=NULL WHERE source_id=$1`,
           [sourceId],
         );
-      await invalidate(tx, sourceId, {});
-      await tx.client.query(
-        `UPDATE ${table(tx, 'atlassian_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=clock_timestamp(),sync_state='queued',failure=NULL WHERE source_id=$1`,
-        [sourceId],
-      );
-      if (inspected) {
-        await tx.client.query(`UPDATE ${table(tx, 'atlassian_sources')} SET binding=$2 WHERE source_id=$1`, [
+        if (inspected) {
+          await tx.client.query(`UPDATE ${table(tx, 'atlassian_sources')} SET binding=$2 WHERE source_id=$1`, [
+            sourceId,
+            inspected.binding,
+          ]);
+          for (const t of inspected.targets)
+            await tx.client.query(
+              `UPDATE ${table(tx, 'atlassian_targets')} SET state='active',failure=NULL,key=$3,title=$4 WHERE source_id=$1 AND target_id=$2`,
+              [
+                sourceId,
+                atlassianTargetKey(t),
+                t.key?.slice(0, 255) ?? null,
+                t.title.slice(0, 512) || atlassianTargetKey(t),
+              ],
+            );
+          await store.source(tx, actor, sourceId, true);
+        }
+        await tx.client.query(`INSERT INTO ${table(tx, 'atlassian_commands')} VALUES ($1,$2,$3)`, [
+          input.commandId,
           sourceId,
-          inspected.binding,
+          fingerprint,
         ]);
-        for (const t of inspected.targets)
-          await tx.client.query(
-            `UPDATE ${table(tx, 'atlassian_targets')} SET state='active',failure=NULL,key=$3,title=$4 WHERE source_id=$1 AND target_id=$2`,
-            [
-              sourceId,
-              atlassianTargetKey(t),
-              t.key?.slice(0, 255) ?? null,
-              t.title.slice(0, 512) || atlassianTargetKey(t),
-            ],
-          );
-        await store.source(tx, actor, sourceId, true);
-      }
-      await tx.client.query(`INSERT INTO ${table(tx, 'atlassian_commands')} VALUES ($1,$2,$3)`, [
-        input.commandId,
-        sourceId,
-        fingerprint,
-      ]);
-      return dto(tx, await source(tx, sourceId));
-    });
+        return dto(tx, await source(tx, sourceId));
+      },
+      true,
+    );
   }
   // One authoritative batch check with the reader's own Atlassian account. Failures never renew evidence.
   async function check(workspaceId: string, actor: HumanActor, sourceId: string, nativeIds: string[]) {
     if (!nativeIds.length) return { visible: 0, denied: 0 };
-    const captured = await memberTransaction(workspaceId, actor.userId, async (tx, human) => {
-      if (human.membershipId !== actor.membershipId) throw new AccessDenied();
-      const s = await source(tx, sourceId);
-      await store.source(tx, human, sourceId);
-      const reader = readerSchema
-        .optional()
-        .parse(
-          (
-            await tx.client.query(
-              `SELECT account_id,account_generation,atlassian_account_id FROM ${table(tx, 'atlassian_readers')} WHERE source_id=$1 AND membership_id=$2 AND user_id=$3 ORDER BY account_id LIMIT 1`,
-              [sourceId, human.membershipId, human.userId],
-            )
-          ).rows[0],
+    const captured = await memberTransaction(
+      workspaceId,
+      actor.userId,
+      async (tx, human) => {
+        if (human.membershipId !== actor.membershipId) throw new AccessDenied();
+        const s = await source(tx, sourceId);
+        await store.source(tx, human, sourceId);
+        const reader = readerSchema
+          .optional()
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT account_id,account_generation,atlassian_account_id FROM ${table(tx, 'atlassian_readers')} WHERE source_id=$1 AND membership_id=$2 AND user_id=$3 ORDER BY account_id LIMIT 1`,
+                [sourceId, human.membershipId, human.userId],
+              )
+            ).rows[0],
+          );
+        if (!reader) throw new AccessDenied();
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'atlassian_access')} (source_id,native_id,membership_id) SELECT $1,i.native_id,$2 FROM ${table(tx, 'atlassian_items')} i WHERE i.source_id=$1 AND i.native_id=ANY($3::text[]) ON CONFLICT DO NOTHING`,
+          [sourceId, human.membershipId, nativeIds],
         );
-      if (!reader) throw new AccessDenied();
-      await tx.client.query(
-        `INSERT INTO ${table(tx, 'atlassian_access')} (source_id,native_id,membership_id) SELECT $1,i.native_id,$2 FROM ${table(tx, 'atlassian_items')} i WHERE i.source_id=$1 AND i.native_id=ANY($3::text[]) ON CONFLICT DO NOTHING`,
-        [sourceId, human.membershipId, nativeIds],
-      );
-      const fences = z
-        .array(z.object({ native_id: z.string(), generation: z.string() }))
-        .parse(
-          (
-            await tx.client.query(
-              `SELECT native_id,generation FROM ${table(tx, 'atlassian_access')} WHERE source_id=$1 AND membership_id=$2 AND native_id=ANY($3::text[])`,
-              [sourceId, human.membershipId, nativeIds],
-            )
-          ).rows,
-        );
-      const binding = atlassianCorpusBindingSchema.parse({
-        accountId: reader.account_id,
-        atlassianAccountId: reader.atlassian_account_id,
-        cloudId: s.binding.cloudId,
-      });
-      return { s, binding, fences };
-    });
+        const fences = z
+          .array(z.object({ native_id: z.string(), generation: z.string() }))
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT native_id,generation FROM ${table(tx, 'atlassian_access')} WHERE source_id=$1 AND membership_id=$2 AND native_id=ANY($3::text[])`,
+                [sourceId, human.membershipId, nativeIds],
+              )
+            ).rows,
+          );
+        const binding = atlassianCorpusBindingSchema.parse({
+          accountId: reader.account_id,
+          atlassianAccountId: reader.atlassian_account_id,
+          cloudId: s.binding.cloudId,
+        });
+        return { s, binding, fences };
+      },
+      true,
+    );
     if (!captured.fences.length) return { visible: 0, denied: 0 };
     let observed;
     try {
@@ -583,7 +598,7 @@ export function createAtlassianKnowledge({
       );
     } catch (error) {
       if (credentialDenied(error) || (error instanceof AtlassianCorpusError && itemGone.includes(error.code)))
-        await transaction(workspaceId, async tx =>
+        await transaction(workspaceId, 'write', async tx =>
           invalidate(tx, sourceId, {
             nativeIds: captured.fences.map(f => f.native_id),
             membershipId: actor.membershipId,
@@ -592,53 +607,58 @@ export function createAtlassianKnowledge({
       throw error;
     }
     const result = observed;
-    return memberTransaction(workspaceId, actor.userId, async (tx, human) => {
-      const s = await source(tx, sourceId);
-      await store.source(tx, human, sourceId);
-      if (s.access_epoch !== captured.s.access_epoch || !['active', 'paused'].includes(s.state))
-        throw new KnowledgeError('superseded');
-      const current = await tx.client.query(
-        `SELECT 1 FROM ${table(tx, 'atlassian_readers')} WHERE source_id=$1 AND membership_id=$2 AND account_id=$3 AND account_generation=$4 AND atlassian_account_id=$5`,
-        [
-          sourceId,
-          human.membershipId,
-          captured.binding.accountId,
-          result.accountGeneration,
-          captured.binding.atlassianAccountId,
-        ],
-      );
-      if (!current.rowCount) throw new AccessDenied();
-      const checked = new Date(result.accessedAt);
-      const now = z
-        .object({ now: z.date() })
-        .parse((await tx.client.query('SELECT clock_timestamp() AS now')).rows[0]).now;
-      if (!Number.isFinite(checked.getTime()) || checked > now || checked.getTime() + 300000 <= now.getTime())
-        throw new KnowledgeError('permission-expired');
-      const visible = new Set(result.visible);
-      const granted = captured.fences.filter(f => visible.has(itemOf(f.native_id)));
-      const denied = captured.fences.filter(f => !visible.has(itemOf(f.native_id))).map(f => f.native_id);
-      const binding = { ...captured.binding, accountGeneration: String(result.accountGeneration) };
-      const advanced = granted.length
-        ? (
-            await tx.client.query(
-              `UPDATE ${table(tx, 'atlassian_access')} a SET binding=$3,observed_at=$4,expires_at=$4::timestamptz+interval '5 minutes'
+    return memberTransaction(
+      workspaceId,
+      actor.userId,
+      async (tx, human) => {
+        const s = await source(tx, sourceId);
+        await store.source(tx, human, sourceId);
+        if (s.access_epoch !== captured.s.access_epoch || !['active', 'paused'].includes(s.state))
+          throw new KnowledgeError('superseded');
+        const current = await tx.client.query(
+          `SELECT 1 FROM ${table(tx, 'atlassian_readers')} WHERE source_id=$1 AND membership_id=$2 AND account_id=$3 AND account_generation=$4 AND atlassian_account_id=$5`,
+          [
+            sourceId,
+            human.membershipId,
+            captured.binding.accountId,
+            result.accountGeneration,
+            captured.binding.atlassianAccountId,
+          ],
+        );
+        if (!current.rowCount) throw new AccessDenied();
+        const checked = new Date(result.accessedAt);
+        const now = z
+          .object({ now: z.date() })
+          .parse((await tx.client.query('SELECT clock_timestamp() AS now')).rows[0]).now;
+        if (!Number.isFinite(checked.getTime()) || checked > now || checked.getTime() + 300000 <= now.getTime())
+          throw new KnowledgeError('permission-expired');
+        const visible = new Set(result.visible);
+        const granted = captured.fences.filter(f => visible.has(itemOf(f.native_id)));
+        const denied = captured.fences.filter(f => !visible.has(itemOf(f.native_id))).map(f => f.native_id);
+        const binding = { ...captured.binding, accountGeneration: String(result.accountGeneration) };
+        const advanced = granted.length
+          ? (
+              await tx.client.query(
+                `UPDATE ${table(tx, 'atlassian_access')} a SET binding=$3,observed_at=$4,expires_at=$4::timestamptz+interval '5 minutes'
         FROM unnest($5::text[],$6::bigint[]) AS f(native_id,generation)
         WHERE a.source_id=$1 AND a.membership_id=$2 AND a.native_id=f.native_id AND a.generation=f.generation AND (a.observed_at IS NULL OR a.observed_at<=$4) RETURNING a.native_id`,
-              [
-                sourceId,
-                human.membershipId,
-                binding,
-                checked,
-                granted.map(f => f.native_id),
-                granted.map(f => f.generation),
-              ],
-            )
-          ).rows.map(row => z.string().parse(row.native_id))
-        : [];
-      if (denied.length) await invalidate(tx, sourceId, { nativeIds: denied, membershipId: human.membershipId });
-      if (advanced.length) await project(tx, sourceId, advanced, human.membershipId);
-      return { visible: advanced.length, denied: captured.fences.length - advanced.length };
-    });
+                [
+                  sourceId,
+                  human.membershipId,
+                  binding,
+                  checked,
+                  granted.map(f => f.native_id),
+                  granted.map(f => f.generation),
+                ],
+              )
+            ).rows.map(row => z.string().parse(row.native_id))
+          : [];
+        if (denied.length) await invalidate(tx, sourceId, { nativeIds: denied, membershipId: human.membershipId });
+        if (advanced.length) await project(tx, sourceId, advanced, human.membershipId);
+        return { visible: advanced.length, denied: captured.fences.length - advanced.length };
+      },
+      true,
+    );
   }
   async function renew(
     workspaceId: string,
@@ -695,7 +715,7 @@ export function createAtlassianKnowledge({
   }
   async function due(workspaceId: string): Promise<AtlassianKnowledgeWork[]> {
     const held = gate ? await gate(workspaceId) : [];
-    return transaction(workspaceId, async tx => {
+    return transaction(workspaceId, 'write', async tx => {
       await tx.client.query(
         `UPDATE ${table(tx, 'atlassian_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL WHERE lease_until<=clock_timestamp()`,
       );
@@ -717,7 +737,7 @@ export function createAtlassianKnowledge({
     token: string,
     operation: (tx: Tx, s: Source, actor: HumanActor) => Promise<T>,
   ) {
-    return transaction(work.workspaceId, async tx => {
+    return transaction(work.workspaceId, 'write', async tx => {
       const s = await source(tx, work.sourceId);
       const owned = await tx.client.query(
         `SELECT 1 FROM ${table(tx, 'atlassian_sources')} WHERE source_id=$1 AND generation=$2 AND lease_token=$3 AND lease_until>clock_timestamp()`,
@@ -1011,7 +1031,7 @@ export function createAtlassianKnowledge({
     const work = atlassianKnowledgeWorkSchema.parse(value);
     const token = randomUUID();
     if (gate && (await gate(work.workspaceId)).includes(work.sourceId)) return { disposition: 'stale' };
-    const claim = await transaction(work.workspaceId, async tx => {
+    const claim = await transaction(work.workspaceId, 'write', async tx => {
       const s = await source(tx, work.sourceId);
       if (s.generation !== work.generation || !['active', 'paused'].includes(s.state)) return 'stale' as const;
       if (s.lease_token) return 'busy' as const;
@@ -1029,7 +1049,7 @@ export function createAtlassianKnowledge({
         const result = await renew(work.workspaceId, claim.owner_user_id, claim.source_id, 100, true, permissionAfter);
         permissionAfter = result.after;
       } finally {
-        await transaction(work.workspaceId, tx =>
+        await transaction(work.workspaceId, 'write', tx =>
           tx.client.query(
             `UPDATE ${table(tx, 'atlassian_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=clock_timestamp()+interval '1 minute',cursor=jsonb_set(cursor,'{permissionAfter}',$4::jsonb) WHERE source_id=$1 AND generation=$2 AND lease_token=$3`,
             [work.sourceId, work.generation, token, JSON.stringify(permissionAfter)],
@@ -1160,7 +1180,7 @@ export function createAtlassianKnowledge({
       });
       return { disposition: 'retry' };
     } catch (error) {
-      return transaction(work.workspaceId, async tx => {
+      return transaction(work.workspaceId, 'write', async tx => {
         const current = await source(tx, work.sourceId);
         if (current.generation !== work.generation || current.lease_token !== token)
           return { disposition: 'stale' as const };

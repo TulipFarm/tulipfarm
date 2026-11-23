@@ -48,7 +48,7 @@ test('a submitted secrets form answers the chat request without exposing the val
       prompt: 'Weather API key',
       answerSchema: { kind: 'secrets', secretRequestId },
     });
-    await services.secrets.transaction(w.id, tx =>
+    await services.secrets.transaction(w.id, 'write', tx =>
       services.requests.create(tx, {
         id: secretRequestId,
         membershipId: w.membershipId,
@@ -219,7 +219,7 @@ test('answering a task’s secrets form wakes the task, and only its owner can',
     const taskId = randomUUID(),
       ids = [randomUUID(), randomUUID()];
     for (const id of ids)
-      await services.secrets.transaction(w.id, tx =>
+      await services.secrets.transaction(w.id, 'write', tx =>
         services.requests.create(tx, {
           id,
           membershipId: w.membershipId,

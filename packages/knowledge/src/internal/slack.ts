@@ -151,10 +151,10 @@ export function createSlackKnowledge({
   }
   const authority = { requireExternalSource, requireExternalProof } satisfies Partial<KnowledgeOptions>;
   const store = createKnowledgeStore({ runtime, ...authority });
-  async function transaction<T>(workspaceId: string, operation: (tx: Tx) => Promise<T>) {
+  async function transaction<T>(workspaceId: string, mode: 'read' | 'write', operation: (tx: Tx) => Promise<T>) {
     return runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async raw => {
       const tx = store.bind(raw);
-      await lockAuthorization(tx, 'write');
+      await lockAuthorization(tx, mode);
       return operation(tx);
     });
   }
@@ -162,7 +162,7 @@ export function createSlackKnowledge({
     workspaceId: string,
     userId: string,
     operation: (tx: Tx, actor: HumanActor) => Promise<T>,
-    write = true,
+    write: boolean,
   ) {
     return store.transaction(workspaceId, userId, write, async (tx, actor) => {
       return operation(tx, actor);
@@ -293,61 +293,66 @@ export function createSlackKnowledge({
       )
     )
       throw new SlackCorpusError('wrong-kind');
-    return memberTransaction(workspaceId, userId, async (tx, human) => {
-      if (human.membershipId !== actor.membershipId) throw new AccessDenied();
-      await assertDefaultSourceEnabled(tx, input.commandId);
-      if ((await tx.client.query(`SELECT 1 FROM ${table(tx, 'sources')} WHERE id=$1`, [input.commandId])).rowCount) {
-        const prior = await manager(tx, human, input.commandId);
-        if (prior.fingerprint !== fingerprint || prior.state === 'removed') throw new KnowledgeError('conflict');
-        return dto(tx, prior);
-      }
-      const linked = await tx.client.query(
-        `SELECT 1 FROM ${qualified(tx.schema, 'tf_slack_identities')} p JOIN ${qualified(tx.schema, 'tf_slack_installations')} i ON i.id=p.installation_id AND i.generation=p.generation
+    return memberTransaction(
+      workspaceId,
+      userId,
+      async (tx, human) => {
+        if (human.membershipId !== actor.membershipId) throw new AccessDenied();
+        await assertDefaultSourceEnabled(tx, input.commandId);
+        if ((await tx.client.query(`SELECT 1 FROM ${table(tx, 'sources')} WHERE id=$1`, [input.commandId])).rowCount) {
+          const prior = await manager(tx, human, input.commandId);
+          if (prior.fingerprint !== fingerprint || prior.state === 'removed') throw new KnowledgeError('conflict');
+          return dto(tx, prior);
+        }
+        const linked = await tx.client.query(
+          `SELECT 1 FROM ${qualified(tx.schema, 'tf_slack_identities')} p JOIN ${qualified(tx.schema, 'tf_slack_installations')} i ON i.id=p.installation_id AND i.generation=p.generation
         WHERE p.id=$1 AND p.membership_id=$2 AND p.user_id=$3 AND p.state='authorized' AND i.state='active' AND i.id=$4 AND i.generation=$5 AND i.team_id=$6 AND p.slack_user_id=$7`,
-        [
-          inspected.binding.identityId,
-          human.membershipId,
-          human.userId,
-          inspected.binding.installationId,
-          inspected.binding.installationGeneration,
-          inspected.binding.teamId,
-          inspected.binding.slackUserId,
-        ],
-      );
-      if (!linked.rowCount) throw new SlackCorpusError('stale-integration');
-      const active = await tx.client.query(
-        `SELECT id FROM ${qualified(tx.schema, 'tf_memberships')} WHERE id=ANY($1::uuid[]) AND removed_at IS NULL`,
-        [memberIds],
-      );
-      if (active.rowCount !== memberIds.length) throw new AccessDenied();
-      const inserted = await tx.client.query(
-        `INSERT INTO ${table(tx, 'sources')} (id,provider,account_namespace,selection,owner_membership_id) VALUES ($1,'slack',$2,$3::jsonb::text,$4) ON CONFLICT DO NOTHING`,
-        [input.commandId, inspected.binding.teamId, JSON.stringify(input.selection), human.membershipId],
-      );
-      if (!inserted.rowCount) throw new KnowledgeError('conflict');
-      await tx.client.query(
-        `INSERT INTO ${table(tx, 'slack_sources')} (source_id,binding,selection,title,fingerprint,cursor) VALUES ($1,$2,$3,$4,$5,$6)`,
-        [
-          input.commandId,
-          inspected.binding,
-          input.selection,
-          inspected.title.slice(0, 2048) || 'Slack conversations',
-          fingerprint,
-          initialCursor(),
-        ],
-      );
-      await tx.client.query(
-        `INSERT INTO ${table(tx, 'slack_members')} (source_id,membership_id) SELECT $1,unnest($2::uuid[])`,
-        [input.commandId, memberIds],
-      );
-      for (const c of inspected.conversations)
-        await tx.client.query(
-          `INSERT INTO ${table(tx, 'slack_conversations')} (source_id,conversation_id,kind,title) VALUES ($1,$2,$3,$4)`,
-          [input.commandId, c.conversationId, c.kind, c.title.slice(0, 512) || c.conversationId],
+          [
+            inspected.binding.identityId,
+            human.membershipId,
+            human.userId,
+            inspected.binding.installationId,
+            inspected.binding.installationGeneration,
+            inspected.binding.teamId,
+            inspected.binding.slackUserId,
+          ],
         );
-      await store.source(tx, human, input.commandId, true);
-      return dto(tx, await source(tx, input.commandId));
-    });
+        if (!linked.rowCount) throw new SlackCorpusError('stale-integration');
+        const active = await tx.client.query(
+          `SELECT id FROM ${qualified(tx.schema, 'tf_memberships')} WHERE id=ANY($1::uuid[]) AND removed_at IS NULL`,
+          [memberIds],
+        );
+        if (active.rowCount !== memberIds.length) throw new AccessDenied();
+        const inserted = await tx.client.query(
+          `INSERT INTO ${table(tx, 'sources')} (id,provider,account_namespace,selection,owner_membership_id) VALUES ($1,'slack',$2,$3::jsonb::text,$4) ON CONFLICT DO NOTHING`,
+          [input.commandId, inspected.binding.teamId, JSON.stringify(input.selection), human.membershipId],
+        );
+        if (!inserted.rowCount) throw new KnowledgeError('conflict');
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'slack_sources')} (source_id,binding,selection,title,fingerprint,cursor) VALUES ($1,$2,$3,$4,$5,$6)`,
+          [
+            input.commandId,
+            inspected.binding,
+            input.selection,
+            inspected.title.slice(0, 2048) || 'Slack conversations',
+            fingerprint,
+            initialCursor(),
+          ],
+        );
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'slack_members')} (source_id,membership_id) SELECT $1,unnest($2::uuid[])`,
+          [input.commandId, memberIds],
+        );
+        for (const c of inspected.conversations)
+          await tx.client.query(
+            `INSERT INTO ${table(tx, 'slack_conversations')} (source_id,conversation_id,kind,title) VALUES ($1,$2,$3,$4)`,
+            [input.commandId, c.conversationId, c.kind, c.title.slice(0, 512) || c.conversationId],
+          );
+        await store.source(tx, human, input.commandId, true);
+        return dto(tx, await source(tx, input.commandId));
+      },
+      true,
+    );
   }
   async function list(workspaceId: string, userId: string) {
     return memberRead(workspaceId, userId, async (tx, actor) => {
@@ -438,50 +443,55 @@ export function createSlackKnowledge({
             provider.inspectSelection(workspaceId, userId, s.selection),
           )
         : null;
-    return memberTransaction(workspaceId, userId, async (tx, actor) => {
-      const s = await manager(tx, actor, sourceId);
-      const again = await replayed(tx, s);
-      if (again) return again;
-      if (s.state === 'removed') throw new KnowledgeError('conflict');
-      if (
-        inspected &&
-        (inspected.binding.teamId !== s.binding.teamId || inspected.binding.slackUserId !== s.binding.slackUserId)
-      )
-        throw new AccessDenied();
-      const state = input.action === 'remove' ? 'removed' : input.action === 'pause' ? 'paused' : 'active';
-      await tx.client.query(
-        `UPDATE ${table(tx, 'sources')} SET state=$2,access_epoch=access_epoch+1,removed_at=CASE WHEN $2='removed' THEN clock_timestamp() ELSE NULL END,retain_until=CASE WHEN $2='removed' THEN clock_timestamp()+interval '30 days' ELSE NULL END WHERE id=$1`,
-        [sourceId, state],
-      );
-      if (state === 'removed')
+    return memberTransaction(
+      workspaceId,
+      userId,
+      async (tx, actor) => {
+        const s = await manager(tx, actor, sourceId);
+        const again = await replayed(tx, s);
+        if (again) return again;
+        if (s.state === 'removed') throw new KnowledgeError('conflict');
+        if (
+          inspected &&
+          (inspected.binding.teamId !== s.binding.teamId || inspected.binding.slackUserId !== s.binding.slackUserId)
+        )
+          throw new AccessDenied();
+        const state = input.action === 'remove' ? 'removed' : input.action === 'pause' ? 'paused' : 'active';
         await tx.client.query(
-          `UPDATE ${table(tx, 'documents')} SET tombstoned_at=clock_timestamp(),retain_until=clock_timestamp()+interval '30 days',lexical_publication_id=NULL WHERE source_id=$1`,
+          `UPDATE ${table(tx, 'sources')} SET state=$2,access_epoch=access_epoch+1,removed_at=CASE WHEN $2='removed' THEN clock_timestamp() ELSE NULL END,retain_until=CASE WHEN $2='removed' THEN clock_timestamp()+interval '30 days' ELSE NULL END WHERE id=$1`,
+          [sourceId, state],
+        );
+        if (state === 'removed')
+          await tx.client.query(
+            `UPDATE ${table(tx, 'documents')} SET tombstoned_at=clock_timestamp(),retain_until=clock_timestamp()+interval '30 days',lexical_publication_id=NULL WHERE source_id=$1`,
+            [sourceId],
+          );
+        await invalidate(tx, sourceId, null);
+        await tx.client.query(
+          `UPDATE ${table(tx, 'slack_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=clock_timestamp(),sync_state='queued',failure=NULL WHERE source_id=$1`,
           [sourceId],
         );
-      await invalidate(tx, sourceId, null);
-      await tx.client.query(
-        `UPDATE ${table(tx, 'slack_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=clock_timestamp(),sync_state='queued',failure=NULL WHERE source_id=$1`,
-        [sourceId],
-      );
-      if (inspected) {
-        await tx.client.query(`UPDATE ${table(tx, 'slack_sources')} SET binding=$2 WHERE source_id=$1`, [
+        if (inspected) {
+          await tx.client.query(`UPDATE ${table(tx, 'slack_sources')} SET binding=$2 WHERE source_id=$1`, [
+            sourceId,
+            inspected.binding,
+          ]);
+          for (const c of inspected.conversations)
+            await tx.client.query(
+              `UPDATE ${table(tx, 'slack_conversations')} SET state='active',failure=NULL,kind=$3,title=$4 WHERE source_id=$1 AND conversation_id=$2`,
+              [sourceId, c.conversationId, c.kind, c.title.slice(0, 512) || c.conversationId],
+            );
+          await store.source(tx, actor, sourceId, true);
+        }
+        await tx.client.query(`INSERT INTO ${table(tx, 'slack_commands')} VALUES ($1,$2,$3)`, [
+          input.commandId,
           sourceId,
-          inspected.binding,
+          fingerprint,
         ]);
-        for (const c of inspected.conversations)
-          await tx.client.query(
-            `UPDATE ${table(tx, 'slack_conversations')} SET state='active',failure=NULL,kind=$3,title=$4 WHERE source_id=$1 AND conversation_id=$2`,
-            [sourceId, c.conversationId, c.kind, c.title.slice(0, 512) || c.conversationId],
-          );
-        await store.source(tx, actor, sourceId, true);
-      }
-      await tx.client.query(`INSERT INTO ${table(tx, 'slack_commands')} VALUES ($1,$2,$3)`, [
-        input.commandId,
-        sourceId,
-        fingerprint,
-      ]);
-      return dto(tx, await source(tx, sourceId));
-    });
+        return dto(tx, await source(tx, sourceId));
+      },
+      true,
+    );
   }
   // One authoritative membership check with the reader's own linked Slack identity. Failures never renew evidence.
   async function check(
@@ -491,56 +501,61 @@ export function createSlackKnowledge({
     conversationId: string,
     owner: boolean,
   ) {
-    const captured = await memberTransaction(workspaceId, actor.userId, async (tx, human) => {
-      if (human.membershipId !== actor.membershipId) throw new AccessDenied();
-      const s = await source(tx, sourceId);
-      await store.source(tx, human, sourceId);
-      if (owner && s.owner_membership_id !== human.membershipId) throw new AccessDenied();
-      const c = conversationSchema
-        .optional()
-        .parse(
-          (
-            await tx.client.query(
-              `SELECT conversation_id,kind,title,state,failure FROM ${table(tx, 'slack_conversations')} WHERE source_id=$1 AND conversation_id=$2`,
-              [sourceId, conversationId],
-            )
-          ).rows[0],
+    const captured = await memberTransaction(
+      workspaceId,
+      actor.userId,
+      async (tx, human) => {
+        if (human.membershipId !== actor.membershipId) throw new AccessDenied();
+        const s = await source(tx, sourceId);
+        await store.source(tx, human, sourceId);
+        if (owner && s.owner_membership_id !== human.membershipId) throw new AccessDenied();
+        const c = conversationSchema
+          .optional()
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT conversation_id,kind,title,state,failure FROM ${table(tx, 'slack_conversations')} WHERE source_id=$1 AND conversation_id=$2`,
+                [sourceId, conversationId],
+              )
+            ).rows[0],
+          );
+        if (!c) throw new AccessDenied();
+        const reader = readerSchema
+          .optional()
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT identity_id,installation_id,installation_generation,slack_user_id,scopes,authorization_version FROM ${table(tx, 'slack_readers')} WHERE source_id=$1 AND membership_id=$2`,
+                [sourceId, human.membershipId],
+              )
+            ).rows[0],
+          );
+        if (!reader) throw new AccessDenied();
+        const binding = slackCorpusBindingSchema.parse({
+          installationId: reader.installation_id,
+          installationGeneration: reader.installation_generation,
+          identityId: reader.identity_id,
+          slackUserId: reader.slack_user_id,
+          teamId: s.binding.teamId,
+        });
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'slack_access')} (source_id,conversation_id,membership_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+          [sourceId, conversationId, human.membershipId],
         );
-      if (!c) throw new AccessDenied();
-      const reader = readerSchema
-        .optional()
-        .parse(
-          (
-            await tx.client.query(
-              `SELECT identity_id,installation_id,installation_generation,slack_user_id,scopes,authorization_version FROM ${table(tx, 'slack_readers')} WHERE source_id=$1 AND membership_id=$2`,
-              [sourceId, human.membershipId],
-            )
-          ).rows[0],
-        );
-      if (!reader) throw new AccessDenied();
-      const binding = slackCorpusBindingSchema.parse({
-        installationId: reader.installation_id,
-        installationGeneration: reader.installation_generation,
-        identityId: reader.identity_id,
-        slackUserId: reader.slack_user_id,
-        teamId: s.binding.teamId,
-      });
-      await tx.client.query(
-        `INSERT INTO ${table(tx, 'slack_access')} (source_id,conversation_id,membership_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
-        [sourceId, conversationId, human.membershipId],
-      );
-      const fence = z
-        .object({ generation: z.string() })
-        .parse(
-          (
-            await tx.client.query(
-              `SELECT generation FROM ${table(tx, 'slack_access')} WHERE source_id=$1 AND conversation_id=$2 AND membership_id=$3`,
-              [sourceId, conversationId, human.membershipId],
-            )
-          ).rows[0],
-        ).generation;
-      return { s, c, binding, fence, authorizationVersion: reader.authorization_version };
-    });
+        const fence = z
+          .object({ generation: z.string() })
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT generation FROM ${table(tx, 'slack_access')} WHERE source_id=$1 AND conversation_id=$2 AND membership_id=$3`,
+                [sourceId, conversationId, human.membershipId],
+              )
+            ).rows[0],
+          ).generation;
+        return { s, c, binding, fence, authorizationVersion: reader.authorization_version };
+      },
+      true,
+    );
     if (!owner && captured.c.state !== 'active') return false;
     let observed;
     try {
@@ -552,7 +567,7 @@ export function createSlackKnowledge({
         throw new SlackCorpusError('wrong-kind');
     } catch (error) {
       if (denial(error))
-        await transaction(workspaceId, async tx => {
+        await transaction(workspaceId, 'write', async tx => {
           if (owner && conversationDenials.includes(error.code))
             await unavailable(tx, sourceId, conversationId, error.code);
           else await invalidate(tx, sourceId, conversationId, actor.membershipId);
@@ -560,59 +575,64 @@ export function createSlackKnowledge({
       throw error;
     }
     const result = observed;
-    return memberTransaction(workspaceId, actor.userId, async (tx, human) => {
-      const s = await source(tx, sourceId);
-      await store.source(tx, human, sourceId);
-      if (s.access_epoch !== captured.s.access_epoch || !['active', 'paused'].includes(s.state))
-        throw new KnowledgeError('superseded');
-      const current = await tx.client.query(
-        `SELECT 1 FROM ${table(tx, 'slack_readers')} WHERE source_id=$1 AND membership_id=$2 AND identity_id=$3 AND installation_id=$4 AND installation_generation=$5 AND slack_user_id=$6 AND authorization_version=$7`,
-        [
-          sourceId,
-          human.membershipId,
-          captured.binding.identityId,
-          captured.binding.installationId,
-          captured.binding.installationGeneration,
-          captured.binding.slackUserId,
-          captured.authorizationVersion,
-        ],
-      );
-      if (!current.rowCount) throw new AccessDenied();
-      const checked = new Date(result.accessedAt);
-      const now = z
-        .object({ now: z.date() })
-        .parse((await tx.client.query('SELECT clock_timestamp() AS now')).rows[0]).now;
-      if (!Number.isFinite(checked.getTime()) || checked > now || checked.getTime() + 300000 <= now.getTime())
-        throw new KnowledgeError('permission-expired');
-      const advanced = await tx.client.query(
-        `UPDATE ${table(tx, 'slack_access')} SET binding=$5,observed_at=$4,expires_at=$4::timestamptz+interval '5 minutes' WHERE source_id=$1 AND conversation_id=$2 AND membership_id=$3 AND generation=$6 AND (observed_at IS NULL OR observed_at<=$4)`,
-        [
-          sourceId,
-          conversationId,
-          human.membershipId,
-          checked,
-          { ...captured.binding, authorizationVersion: captured.authorizationVersion },
-          captured.fence,
-        ],
-      );
-      if (!advanced.rowCount) throw new KnowledgeError('superseded');
-      if (owner)
-        await tx.client.query(
-          `UPDATE ${table(tx, 'slack_conversations')} SET state='active',failure=NULL,kind=$3,title=$4 WHERE source_id=$1 AND conversation_id=$2`,
-          [sourceId, conversationId, result.kind, result.title.slice(0, 512) || conversationId],
+    return memberTransaction(
+      workspaceId,
+      actor.userId,
+      async (tx, human) => {
+        const s = await source(tx, sourceId);
+        await store.source(tx, human, sourceId);
+        if (s.access_epoch !== captured.s.access_epoch || !['active', 'paused'].includes(s.state))
+          throw new KnowledgeError('superseded');
+        const current = await tx.client.query(
+          `SELECT 1 FROM ${table(tx, 'slack_readers')} WHERE source_id=$1 AND membership_id=$2 AND identity_id=$3 AND installation_id=$4 AND installation_generation=$5 AND slack_user_id=$6 AND authorization_version=$7`,
+          [
+            sourceId,
+            human.membershipId,
+            captured.binding.identityId,
+            captured.binding.installationId,
+            captured.binding.installationGeneration,
+            captured.binding.slackUserId,
+            captured.authorizationVersion,
+          ],
         );
-      const c = conversationSchema.parse(
-        (
+        if (!current.rowCount) throw new AccessDenied();
+        const checked = new Date(result.accessedAt);
+        const now = z
+          .object({ now: z.date() })
+          .parse((await tx.client.query('SELECT clock_timestamp() AS now')).rows[0]).now;
+        if (!Number.isFinite(checked.getTime()) || checked > now || checked.getTime() + 300000 <= now.getTime())
+          throw new KnowledgeError('permission-expired');
+        const advanced = await tx.client.query(
+          `UPDATE ${table(tx, 'slack_access')} SET binding=$5,observed_at=$4,expires_at=$4::timestamptz+interval '5 minutes' WHERE source_id=$1 AND conversation_id=$2 AND membership_id=$3 AND generation=$6 AND (observed_at IS NULL OR observed_at<=$4)`,
+          [
+            sourceId,
+            conversationId,
+            human.membershipId,
+            checked,
+            { ...captured.binding, authorizationVersion: captured.authorizationVersion },
+            captured.fence,
+          ],
+        );
+        if (!advanced.rowCount) throw new KnowledgeError('superseded');
+        if (owner)
           await tx.client.query(
-            `SELECT conversation_id,kind,title,state,failure FROM ${table(tx, 'slack_conversations')} WHERE source_id=$1 AND conversation_id=$2`,
-            [sourceId, conversationId],
-          )
-        ).rows[0],
-      );
-      if (c.state !== 'active' || c.kind !== result.kind) return false;
-      await project(tx, sourceId, conversationId, human.membershipId);
-      return true;
-    });
+            `UPDATE ${table(tx, 'slack_conversations')} SET state='active',failure=NULL,kind=$3,title=$4 WHERE source_id=$1 AND conversation_id=$2`,
+            [sourceId, conversationId, result.kind, result.title.slice(0, 512) || conversationId],
+          );
+        const c = conversationSchema.parse(
+          (
+            await tx.client.query(
+              `SELECT conversation_id,kind,title,state,failure FROM ${table(tx, 'slack_conversations')} WHERE source_id=$1 AND conversation_id=$2`,
+              [sourceId, conversationId],
+            )
+          ).rows[0],
+        );
+        if (c.state !== 'active' || c.kind !== result.kind) return false;
+        await project(tx, sourceId, conversationId, human.membershipId);
+        return true;
+      },
+      true,
+    );
   }
   async function renew(workspaceId: string, userId: string, sourceId: string, limit: number, staleOnly: boolean) {
     const captured = await memberRead(workspaceId, userId, async (tx, actor) => {
@@ -655,7 +675,7 @@ export function createSlackKnowledge({
   }
   async function due(workspaceId: string): Promise<SlackKnowledgeWork[]> {
     const held = gate ? await gate(workspaceId) : [];
-    return transaction(workspaceId, async tx => {
+    return transaction(workspaceId, 'write', async tx => {
       await tx.client.query(
         `UPDATE ${table(tx, 'slack_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL WHERE lease_until<=clock_timestamp()`,
       );
@@ -677,7 +697,7 @@ export function createSlackKnowledge({
     token: string,
     operation: (tx: Tx, s: Source, actor: HumanActor) => Promise<T>,
   ) {
-    return transaction(work.workspaceId, async tx => {
+    return transaction(work.workspaceId, 'write', async tx => {
       const s = await source(tx, work.sourceId);
       const owned = await tx.client.query(
         `SELECT 1 FROM ${table(tx, 'slack_sources')} WHERE source_id=$1 AND generation=$2 AND lease_token=$3 AND lease_until>clock_timestamp()`,
@@ -924,7 +944,7 @@ export function createSlackKnowledge({
     const work = slackKnowledgeWorkSchema.parse(value);
     const token = randomUUID();
     if (gate && (await gate(work.workspaceId)).includes(work.sourceId)) return { disposition: 'stale' };
-    const claim = await transaction(work.workspaceId, async tx => {
+    const claim = await transaction(work.workspaceId, 'write', async tx => {
       const s = await source(tx, work.sourceId);
       if (s.generation !== work.generation || !['active', 'paused'].includes(s.state)) return 'stale' as const;
       if (s.lease_token) return 'busy' as const;
@@ -940,7 +960,7 @@ export function createSlackKnowledge({
       try {
         await renew(work.workspaceId, claim.owner_user_id, claim.source_id, 50, true);
       } finally {
-        await transaction(work.workspaceId, tx =>
+        await transaction(work.workspaceId, 'write', tx =>
           tx.client.query(
             `UPDATE ${table(tx, 'slack_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=clock_timestamp()+interval '1 minute' WHERE source_id=$1 AND generation=$2 AND lease_token=$3`,
             [work.sourceId, work.generation, token],
@@ -1076,7 +1096,7 @@ export function createSlackKnowledge({
       });
       return { disposition: 'retry' };
     } catch (error) {
-      return transaction(work.workspaceId, async tx => {
+      return transaction(work.workspaceId, 'write', async tx => {
         const current = await source(tx, work.sourceId);
         if (current.generation !== work.generation || current.lease_token !== token)
           return { disposition: 'stale' as const };

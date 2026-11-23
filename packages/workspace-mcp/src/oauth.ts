@@ -56,141 +56,168 @@ export function oauthMethods(options: WorkspaceMcpOptions, store: McpStore) {
         .strictObject({ sessionId: z.string().min(16).max(4096), material: jsonObjectSchema })
         .parse(input);
       const material = bounded(value.material, 64 * 1024);
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
-        const row = await store.load(tx, id);
-        await store.permit(tx, actor, row, 'manage');
-        if (row.lifecycle === 'deleted') throw new McpError('conflict');
-        const recommendations = await watchIntegrationRecommendations(tx, id, () => mcpRecommendations(tx, id));
-        await store.invalidate(tx, row);
-        const state = randomBytes(32).toString('base64url');
-        const attemptId = randomUUID();
-        const version = row.secret_version + 1;
-        const encrypted = store.cipher.encrypt({ workspaceId, integrationId: id, version, purpose: 'oauth' }, material);
-        await tx.client.query(
-          `UPDATE ${table(tx, 'integrations')} SET lifecycle='authorizing',credential=NULL,secret_version=$2,version=version+1,auth_method='oauth',credential_expires_at=NULL WHERE id=$1`,
-          [id, version],
-        );
-        await tx.client.query(
-          `INSERT INTO ${table(tx, 'oauth_attempts')} (id,integration_id,authorization_epoch,secret_version,membership_id,state_hash,session_hash,material,state) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending')`,
-          [
-            attemptId,
-            id,
-            row.authorization_epoch + 1,
-            version,
-            actor.membershipId,
-            digest(state),
-            digest(value.sessionId),
-            encrypted,
-          ],
-        );
-        await recommendations();
-        return { attemptId, state, authorizationEpoch: row.authorization_epoch + 1 };
-      });
+      return store.authorized(
+        workspaceId,
+        principal,
+        async (tx, actor) => {
+          const row = await store.load(tx, id);
+          await store.permit(tx, actor, row, 'manage');
+          if (row.lifecycle === 'deleted') throw new McpError('conflict');
+          const recommendations = await watchIntegrationRecommendations(tx, id, () => mcpRecommendations(tx, id));
+          await store.invalidate(tx, row);
+          const state = randomBytes(32).toString('base64url');
+          const attemptId = randomUUID();
+          const version = row.secret_version + 1;
+          const encrypted = store.cipher.encrypt(
+            { workspaceId, integrationId: id, version, purpose: 'oauth' },
+            material,
+          );
+          await tx.client.query(
+            `UPDATE ${table(tx, 'integrations')} SET lifecycle='authorizing',credential=NULL,secret_version=$2,version=version+1,auth_method='oauth',credential_expires_at=NULL WHERE id=$1`,
+            [id, version],
+          );
+          await tx.client.query(
+            `INSERT INTO ${table(tx, 'oauth_attempts')} (id,integration_id,authorization_epoch,secret_version,membership_id,state_hash,session_hash,material,state) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending')`,
+            [
+              attemptId,
+              id,
+              row.authorization_epoch + 1,
+              version,
+              actor.membershipId,
+              digest(state),
+              digest(value.sessionId),
+              encrypted,
+            ],
+          );
+          await recommendations();
+          return { attemptId, state, authorizationEpoch: row.authorization_epoch + 1 };
+        },
+        'write',
+      );
     },
     consumeOAuth(workspaceId: string, principal: McpPrincipal, input: unknown) {
       const value = z
         .strictObject({ state: z.string().min(32).max(1024), sessionId: z.string().min(16).max(4096) })
         .parse(input);
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
-        const attempt = attemptSchema
-          .optional()
-          .parse(
-            (
-              await tx.client.query(
-                `SELECT * FROM ${table(tx, 'oauth_attempts')} WHERE state_hash=$1 AND session_hash=$2 AND membership_id=$3 AND state='pending' AND expires_at>clock_timestamp()`,
-                [digest(value.state), digest(value.sessionId), actor.membershipId],
-              )
-            ).rows[0],
-          );
-        if (!attempt) throw new McpError('oauth-conflict');
-        const row = await store.load(tx, attempt.integration_id);
-        await store.permit(tx, actor, row, 'manage');
-        if (
-          row.authorization_epoch !== attempt.authorization_epoch ||
-          row.secret_version !== attempt.secret_version ||
-          row.lifecycle !== 'authorizing'
-        )
-          throw new McpError('oauth-conflict');
-        const material = jsonObjectSchema.parse(
-          JSON.parse(
-            store.cipher.decrypt(
-              { workspaceId, integrationId: row.id, version: attempt.secret_version, purpose: 'oauth' },
-              attempt.material,
+      return store.authorized(
+        workspaceId,
+        principal,
+        async (tx, actor) => {
+          const attempt = attemptSchema
+            .optional()
+            .parse(
+              (
+                await tx.client.query(
+                  `SELECT * FROM ${table(tx, 'oauth_attempts')} WHERE state_hash=$1 AND session_hash=$2 AND membership_id=$3 AND state='pending' AND expires_at>clock_timestamp()`,
+                  [digest(value.state), digest(value.sessionId), actor.membershipId],
+                )
+              ).rows[0],
+            );
+          if (!attempt) throw new McpError('oauth-conflict');
+          const row = await store.load(tx, attempt.integration_id);
+          await store.permit(tx, actor, row, 'manage');
+          if (
+            row.authorization_epoch !== attempt.authorization_epoch ||
+            row.secret_version !== attempt.secret_version ||
+            row.lifecycle !== 'authorizing'
+          )
+            throw new McpError('oauth-conflict');
+          const material = jsonObjectSchema.parse(
+            JSON.parse(
+              store.cipher.decrypt(
+                { workspaceId, integrationId: row.id, version: attempt.secret_version, purpose: 'oauth' },
+                attempt.material,
+              ),
             ),
-          ),
-        );
-        await tx.client.query(
-          `UPDATE ${table(tx, 'oauth_attempts')} SET state='exchanging',material=NULL WHERE id=$1`,
-          [attempt.id],
-        );
-        return { attemptId: attempt.id, integrationId: row.id, endpoint: row.endpoint, material };
-      });
+          );
+          await tx.client.query(
+            `UPDATE ${table(tx, 'oauth_attempts')} SET state='exchanging',material=NULL WHERE id=$1`,
+            [attempt.id],
+          );
+          return { attemptId: attempt.id, integrationId: row.id, endpoint: row.endpoint, material };
+        },
+        'write',
+      );
     },
     completeOAuth(workspaceId: string, principal: McpPrincipal, attemptId: string, input: unknown) {
       const credential = oauthCredentialSchema.parse(input);
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
-        const attempt = attemptSchema
-          .optional()
-          .parse(
-            (
-              await tx.client.query(
-                `SELECT * FROM ${table(tx, 'oauth_attempts')} WHERE id=$1 AND membership_id=$2 AND state='exchanging' AND expires_at>clock_timestamp()`,
-                [z.uuid().parse(attemptId), actor.membershipId],
-              )
-            ).rows[0],
+      return store.authorized(
+        workspaceId,
+        principal,
+        async (tx, actor) => {
+          const attempt = attemptSchema
+            .optional()
+            .parse(
+              (
+                await tx.client.query(
+                  `SELECT * FROM ${table(tx, 'oauth_attempts')} WHERE id=$1 AND membership_id=$2 AND state='exchanging' AND expires_at>clock_timestamp()`,
+                  [z.uuid().parse(attemptId), actor.membershipId],
+                )
+              ).rows[0],
+            );
+          if (!attempt) throw new McpError('oauth-conflict');
+          const row = await store.load(tx, attempt.integration_id);
+          await store.permit(tx, actor, row, 'manage');
+          if (
+            row.authorization_epoch !== attempt.authorization_epoch ||
+            row.secret_version !== attempt.secret_version ||
+            row.lifecycle !== 'authorizing'
+          )
+            throw new McpError('oauth-conflict');
+          if (credential.resource !== row.endpoint) throw new McpError('oauth-conflict');
+          rejectReflectedSecrets({ endpoint: row.endpoint, name: row.name }, credential);
+          const encrypted = store.cipher.encrypt(
+            { workspaceId, integrationId: row.id, version: row.secret_version, purpose: 'credential' },
+            JSON.stringify(credential),
           );
-        if (!attempt) throw new McpError('oauth-conflict');
-        const row = await store.load(tx, attempt.integration_id);
-        await store.permit(tx, actor, row, 'manage');
-        if (
-          row.authorization_epoch !== attempt.authorization_epoch ||
-          row.secret_version !== attempt.secret_version ||
-          row.lifecycle !== 'authorizing'
-        )
-          throw new McpError('oauth-conflict');
-        if (credential.resource !== row.endpoint) throw new McpError('oauth-conflict');
-        rejectReflectedSecrets({ endpoint: row.endpoint, name: row.name }, credential);
-        const encrypted = store.cipher.encrypt(
-          { workspaceId, integrationId: row.id, version: row.secret_version, purpose: 'credential' },
-          JSON.stringify(credential),
-        );
-        const recommendations = await watchIntegrationRecommendations(tx, row.id, () => mcpRecommendations(tx, row.id));
-        await tx.client.query(
-          `UPDATE ${table(tx, 'integrations')} SET credential=$2,lifecycle='active',version=version+1,credential_expires_at=$3 WHERE id=$1`,
-          [row.id, encrypted, credential.expiresAt],
-        );
-        await tx.client.query(`UPDATE ${table(tx, 'oauth_attempts')} SET state='consumed',material=NULL WHERE id=$1`, [
-          attempt.id,
-        ]);
-        await recommendations();
-        return store.metadata(tx, actor, await store.load(tx, row.id));
-      });
+          const recommendations = await watchIntegrationRecommendations(tx, row.id, () =>
+            mcpRecommendations(tx, row.id),
+          );
+          await tx.client.query(
+            `UPDATE ${table(tx, 'integrations')} SET credential=$2,lifecycle='active',version=version+1,credential_expires_at=$3 WHERE id=$1`,
+            [row.id, encrypted, credential.expiresAt],
+          );
+          await tx.client.query(
+            `UPDATE ${table(tx, 'oauth_attempts')} SET state='consumed',material=NULL WHERE id=$1`,
+            [attempt.id],
+          );
+          await recommendations();
+          return store.metadata(tx, actor, await store.load(tx, row.id));
+        },
+        'write',
+      );
     },
     failOAuth(workspaceId: string, principal: McpPrincipal, attemptId: string) {
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
-        const attempt = attemptSchema
-          .optional()
-          .parse(
-            (
-              await tx.client.query(`SELECT * FROM ${table(tx, 'oauth_attempts')} WHERE id=$1 AND membership_id=$2`, [
-                z.uuid().parse(attemptId),
-                actor.membershipId,
-              ])
-            ).rows[0],
-          );
-        if (!attempt) throw new AccessDenied();
-        const row = await store.load(tx, attempt.integration_id);
-        await store.permit(tx, actor, row, 'manage');
-        await tx.client.query(`UPDATE ${table(tx, 'oauth_attempts')} SET state='consumed',material=NULL WHERE id=$1`, [
-          attempt.id,
-        ]);
-        if (row.authorization_epoch === attempt.authorization_epoch && row.lifecycle === 'authorizing')
+      return store.authorized(
+        workspaceId,
+        principal,
+        async (tx, actor) => {
+          const attempt = attemptSchema
+            .optional()
+            .parse(
+              (
+                await tx.client.query(`SELECT * FROM ${table(tx, 'oauth_attempts')} WHERE id=$1 AND membership_id=$2`, [
+                  z.uuid().parse(attemptId),
+                  actor.membershipId,
+                ])
+              ).rows[0],
+            );
+          if (!attempt) throw new AccessDenied();
+          const row = await store.load(tx, attempt.integration_id);
+          await store.permit(tx, actor, row, 'manage');
           await tx.client.query(
-            `UPDATE ${table(tx, 'integrations')} SET lifecycle='reconnect-required',credential=NULL WHERE id=$1`,
-            [row.id],
+            `UPDATE ${table(tx, 'oauth_attempts')} SET state='consumed',material=NULL WHERE id=$1`,
+            [attempt.id],
           );
-        return { integrationId: row.id };
-      });
+          if (row.authorization_epoch === attempt.authorization_epoch && row.lifecycle === 'authorizing')
+            await tx.client.query(
+              `UPDATE ${table(tx, 'integrations')} SET lifecycle='reconnect-required',credential=NULL WHERE id=$1`,
+              [row.id],
+            );
+          return { integrationId: row.id };
+        },
+        'write',
+      );
     },
     async claimRefresh(workspaceId: string, principal: McpPrincipal, id: string) {
       const result = await store.acting.authorized(workspaceId, principal, async (tx, actor) => {

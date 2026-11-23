@@ -121,9 +121,13 @@ export function createSecrets(options: SecretsOptions) {
     if (!capabilities().enabled) throw new SecretError('disabled');
   }
 
-  async function transaction<T>(workspaceId: string, operation: (tx: AuthorizationTransaction) => Promise<T>) {
+  async function transaction<T>(
+    workspaceId: string,
+    mode: 'read' | 'write',
+    operation: (tx: AuthorizationTransaction) => Promise<T>,
+  ) {
     return options.runtime.transaction(z.uuid().parse(workspaceId), commonCompatibility, async tx => {
-      await lockAuthorization(tx, 'write');
+      await lockAuthorization(tx, mode);
       return operation(tx);
     });
   }
@@ -132,7 +136,7 @@ export function createSecrets(options: SecretsOptions) {
     principal: SecretsPrincipal,
     operation: (tx: AuthorizationTransaction, actor: HumanActor, role: 'admin' | 'member') => Promise<T>,
   ) {
-    return transaction(workspaceId, async tx => {
+    return transaction(workspaceId, 'write', async tx => {
       const actor = typeof principal === 'string' ? await resolveHuman(tx, principal) : principal;
       const member = await currentMember(tx, actor);
       return operation(tx, actor, member.role);
@@ -849,7 +853,7 @@ export function createSecrets(options: SecretsOptions) {
 
     /** Deletes every secret past its expiry. Run by the worker sweep. */
     async sweepExpired(workspaceId: string) {
-      return transaction(workspaceId, async tx => {
+      return transaction(workspaceId, 'write', async tx => {
         const rows = z.array(rowSchema).parse(
           (
             await tx.client.query(

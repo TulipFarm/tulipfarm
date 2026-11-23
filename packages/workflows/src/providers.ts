@@ -61,7 +61,7 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
   async function transaction<T>(
     workspaceId: string,
     operation: (tx: WorkflowTransaction) => Promise<T>,
-    mode: 'read' | 'write' = 'write',
+    mode: 'read' | 'write',
   ) {
     return workflowTransaction(runtime, workspaceId, operation, mode);
   }
@@ -70,7 +70,7 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
     workspaceId: string,
     user: string,
     operation: (tx: WorkflowTransaction) => Promise<T>,
-    mode: 'read' | 'write' = 'write',
+    mode: 'read' | 'write',
   ) {
     return workflowTransaction(runtime, workspaceId, operation, mode, user);
   }
@@ -110,11 +110,16 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
   }
   async function check(workspaceId: string, user: string, value: unknown) {
     const trigger = z.union([providerTriggerSchema, identifiedProviderTriggerSchema]).parse(value);
-    return memberTransaction(workspaceId, user, async tx => {
-      const actor = await workflowMember(tx, user);
-      const row = await authorize(tx, trigger, actor.membershipId);
-      return { id: row.id, name: row.name, source: row.source };
-    });
+    return memberTransaction(
+      workspaceId,
+      user,
+      async tx => {
+        const actor = await workflowMember(tx, user);
+        const row = await authorize(tx, trigger, actor.membershipId);
+        return { id: row.id, name: row.name, source: row.source };
+      },
+      'write',
+    );
   }
   async function audit(tx: AuthorizationTransaction, membershipId: string, id: string, operation: string) {
     await tx.client.query(
@@ -183,292 +188,331 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
       if (counts.member >= workflowLimits.member) throw new WorkflowLimitReached('member');
       if (counts.workspace >= workflowLimits.workspace) throw new WorkflowLimitReached('workspace');
     }
-    const preflight = await memberTransaction(workspaceId, user, async tx => {
-      const actor = await workflowMember(tx, user);
-      const existing = (
-        await tx.client.query(
-          `SELECT creation_digest,membership_id FROM ${table(tx, 'tf_provider_integrations')} WHERE id=$1`,
-          [value.id],
-        )
-      ).rows[0];
-      if (!existing) {
-        await capacity(tx, actor.membershipId);
-        return { replay: false, membershipId: actor.membershipId };
-      }
-      await requireGrant(tx, actor.membershipId, value.id, 'manage', 'provider');
-      if (existing.creation_digest !== digest || existing.membership_id !== actor.membershipId)
-        throw new ProviderFailure('source-invalid');
-      return { replay: true, membershipId: actor.membershipId };
-    });
-    if (preflight.replay) return { saved: true };
-    await discovery.test({ source: value.source, token: value.token });
-    return memberTransaction(workspaceId, user, async tx => {
-      const actor = await workflowMember(tx, user);
-      if (actor.membershipId !== preflight.membershipId) throw new AccessDenied();
-      const existing = (
-        await tx.client.query(
-          `SELECT creation_digest,membership_id FROM ${table(tx, 'tf_provider_integrations')} WHERE id=$1`,
-          [value.id],
-        )
-      ).rows[0];
-      if (existing) {
+    const preflight = await memberTransaction(
+      workspaceId,
+      user,
+      async tx => {
+        const actor = await workflowMember(tx, user);
+        const existing = (
+          await tx.client.query(
+            `SELECT creation_digest,membership_id FROM ${table(tx, 'tf_provider_integrations')} WHERE id=$1`,
+            [value.id],
+          )
+        ).rows[0];
+        if (!existing) {
+          await capacity(tx, actor.membershipId);
+          return { replay: false, membershipId: actor.membershipId };
+        }
         await requireGrant(tx, actor.membershipId, value.id, 'manage', 'provider');
         if (existing.creation_digest !== digest || existing.membership_id !== actor.membershipId)
           throw new ProviderFailure('source-invalid');
+        return { replay: true, membershipId: actor.membershipId };
+      },
+      'write',
+    );
+    if (preflight.replay) return { saved: true };
+    await discovery.test({ source: value.source, token: value.token });
+    return memberTransaction(
+      workspaceId,
+      user,
+      async tx => {
+        const actor = await workflowMember(tx, user);
+        if (actor.membershipId !== preflight.membershipId) throw new AccessDenied();
+        const existing = (
+          await tx.client.query(
+            `SELECT creation_digest,membership_id FROM ${table(tx, 'tf_provider_integrations')} WHERE id=$1`,
+            [value.id],
+          )
+        ).rows[0];
+        if (existing) {
+          await requireGrant(tx, actor.membershipId, value.id, 'manage', 'provider');
+          if (existing.creation_digest !== digest || existing.membership_id !== actor.membershipId)
+            throw new ProviderFailure('source-invalid');
+          return { saved: true };
+        }
+        await capacity(tx, actor.membershipId);
+        const credential = { generation: 1, envelope: cipher.encrypt(workspaceId, value.id, 1, value.token) };
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'tf_provider_integrations')} (id,name,source,membership_id,credential,creation_digest) VALUES ($1,$2,$3,$4,$5,$6)`,
+          [value.id, value.name, JSON.stringify(value.source), actor.membershipId, JSON.stringify(credential), digest],
+        );
+        await initializeManager(tx, value.id, actor.membershipId, 'provider');
+        await audit(tx, actor.membershipId, value.id, 'consent');
         return { saved: true };
-      }
-      await capacity(tx, actor.membershipId);
-      const credential = { generation: 1, envelope: cipher.encrypt(workspaceId, value.id, 1, value.token) };
-      await tx.client.query(
-        `INSERT INTO ${table(tx, 'tf_provider_integrations')} (id,name,source,membership_id,credential,creation_digest) VALUES ($1,$2,$3,$4,$5,$6)`,
-        [value.id, value.name, JSON.stringify(value.source), actor.membershipId, JSON.stringify(credential), digest],
-      );
-      await initializeManager(tx, value.id, actor.membershipId, 'provider');
-      await audit(tx, actor.membershipId, value.id, 'consent');
-      return { saved: true };
-    });
+      },
+      'write',
+    );
   }
   async function update(workspaceId: string, user: string, id: string, input: unknown) {
     const value = providerUpdateSchema.parse(input);
     if (value.token) {
-      const preflight = await memberTransaction(workspaceId, user, async tx => {
-        const actor = await workflowMember(tx, user);
-        await requireGrant(tx, actor.membershipId, id, 'manage', 'provider');
-        const row = await integration(tx, id);
-        if (actor.membershipId !== row.membership_id || (value.enabled && !row.authorized)) throw new AccessDenied();
-        const replay = await administrativeReplay(tx, {
-          ...value,
-          generation: row.generation,
-          membershipId: actor.membershipId,
-          operation: 'provider-update',
-          target: row.id,
-          request: value,
-        });
-        return { replay, source: row.source };
-      });
+      const preflight = await memberTransaction(
+        workspaceId,
+        user,
+        async tx => {
+          const actor = await workflowMember(tx, user);
+          await requireGrant(tx, actor.membershipId, id, 'manage', 'provider');
+          const row = await integration(tx, id);
+          if (actor.membershipId !== row.membership_id || (value.enabled && !row.authorized)) throw new AccessDenied();
+          const replay = await administrativeReplay(tx, {
+            ...value,
+            generation: row.generation,
+            membershipId: actor.membershipId,
+            operation: 'provider-update',
+            target: row.id,
+            request: value,
+          });
+          return { replay, source: row.source };
+        },
+        'write',
+      );
       if (preflight.replay) return { saved: true };
       await discovery.test({ source: preflight.source, token: value.token });
     }
-    return memberTransaction(workspaceId, user, async tx => {
-      const actor = await workflowMember(tx, user);
-      await requireGrant(tx, actor.membershipId, id, 'manage', 'provider');
-      const row = await integration(tx, id);
-      if (value.token && actor.membershipId !== row.membership_id) throw new AccessDenied();
-      if (value.enabled && !row.authorized) throw new AccessDenied();
-      await administrativeCommand(
-        tx,
-        {
-          ...value,
-          generation: row.generation,
-          membershipId: actor.membershipId,
-          operation: 'provider-update',
-          target: row.id,
-          request: value,
-        },
-        async () => {
-          const previous = credentialVersion(row);
-          const credential =
-            !value.enabled && !value.token
-              ? previous
-              : {
-                  generation: row.generation + 1,
-                  envelope: cipher.encrypt(
-                    workspaceId,
-                    id,
-                    row.generation + 1,
-                    value.token ?? cipher.decrypt(workspaceId, id, previous.generation, previous.envelope),
-                  ),
-                };
-          await tx.client.query(
-            `UPDATE ${table(tx, 'tf_provider_integrations')} SET enabled=$2,generation=generation+1,credential=$3 WHERE id=$1`,
-            [id, value.enabled, JSON.stringify(credential)],
-          );
-          await tx.client.query(
-            `UPDATE ${table(tx, 'tf_provider_polls')} SET fence=$2,next_poll=clock_timestamp() WHERE integration_id=$1`,
-            [id, randomUUID()],
-          );
-          if (!value.enabled)
+    return memberTransaction(
+      workspaceId,
+      user,
+      async tx => {
+        const actor = await workflowMember(tx, user);
+        await requireGrant(tx, actor.membershipId, id, 'manage', 'provider');
+        const row = await integration(tx, id);
+        if (value.token && actor.membershipId !== row.membership_id) throw new AccessDenied();
+        if (value.enabled && !row.authorized) throw new AccessDenied();
+        await administrativeCommand(
+          tx,
+          {
+            ...value,
+            generation: row.generation,
+            membershipId: actor.membershipId,
+            operation: 'provider-update',
+            target: row.id,
+            request: value,
+          },
+          async () => {
+            const previous = credentialVersion(row);
+            const credential =
+              !value.enabled && !value.token
+                ? previous
+                : {
+                    generation: row.generation + 1,
+                    envelope: cipher.encrypt(
+                      workspaceId,
+                      id,
+                      row.generation + 1,
+                      value.token ?? cipher.decrypt(workspaceId, id, previous.generation, previous.envelope),
+                    ),
+                  };
             await tx.client.query(
-              `UPDATE ${table(tx, 'tf_workflow_runs')} r SET status='blocked',error='provider-disabled' FROM ${table(tx, 'tf_workflow_revisions')} d WHERE d.workflow_id=r.workflow_id AND d.id=r.revision AND EXISTS (SELECT 1 FROM jsonb_array_elements(d.definition->'triggers') t WHERE t->>'kind'='provider' AND t->>'integrationId'=$1) AND r.status IN ('queued','running','waiting')`,
-              [id],
+              `UPDATE ${table(tx, 'tf_provider_integrations')} SET enabled=$2,generation=generation+1,credential=$3 WHERE id=$1`,
+              [id, value.enabled, JSON.stringify(credential)],
             );
-          await audit(tx, actor.membershipId, id, !value.enabled ? 'disable' : value.token ? 'rotate' : 'enable');
-        },
-      );
-      return { saved: true };
-    });
+            await tx.client.query(
+              `UPDATE ${table(tx, 'tf_provider_polls')} SET fence=$2,next_poll=clock_timestamp() WHERE integration_id=$1`,
+              [id, randomUUID()],
+            );
+            if (!value.enabled)
+              await tx.client.query(
+                `UPDATE ${table(tx, 'tf_workflow_runs')} r SET status='blocked',error='provider-disabled' FROM ${table(tx, 'tf_workflow_revisions')} d WHERE d.workflow_id=r.workflow_id AND d.id=r.revision AND EXISTS (SELECT 1 FROM jsonb_array_elements(d.definition->'triggers') t WHERE t->>'kind'='provider' AND t->>'integrationId'=$1) AND r.status IN ('queued','running','waiting')`,
+                [id],
+              );
+            await audit(tx, actor.membershipId, id, !value.enabled ? 'disable' : value.token ? 'rotate' : 'enable');
+          },
+        );
+        return { saved: true };
+      },
+      'write',
+    );
   }
   async function status(workspaceId: string, user: string, workflowId: string) {
-    return memberTransaction(workspaceId, user, async tx => {
-      const actor = await workflowMember(tx, user);
-      await requireGrant(tx, actor.membershipId, workflowId, 'manage');
-      const row = (
-        await tx.client.query(
-          `SELECT min(p.last_success)::text AS "lastSuccess",(array_agg(p.error ORDER BY p.trigger_id) FILTER (WHERE p.error IS NOT NULL))[1] AS error,min(p.next_poll)::text AS "nextPoll",(SELECT count(*)::integer FROM ${table(tx, 'tf_provider_events')} e WHERE e.workflow_id=$1 AND e.revision=w.active_revision AND NOT e.admitted) AS pending FROM ${table(tx, 'tf_provider_polls')} p JOIN ${table(tx, 'tf_workflows')} w ON w.id=p.workflow_id AND w.active_revision=p.revision WHERE p.workflow_id=$1 GROUP BY w.active_revision`,
-          [idSchema.parse(workflowId)],
-        )
-      ).rows[0];
-      return providerStatusSchema.parse(row ?? { lastSuccess: null, error: null, pending: 0, nextPoll: null });
-    });
+    return memberTransaction(
+      workspaceId,
+      user,
+      async tx => {
+        const actor = await workflowMember(tx, user);
+        await requireGrant(tx, actor.membershipId, workflowId, 'manage');
+        const row = (
+          await tx.client.query(
+            `SELECT min(p.last_success)::text AS "lastSuccess",(array_agg(p.error ORDER BY p.trigger_id) FILTER (WHERE p.error IS NOT NULL))[1] AS error,min(p.next_poll)::text AS "nextPoll",(SELECT count(*)::integer FROM ${table(tx, 'tf_provider_events')} e WHERE e.workflow_id=$1 AND e.revision=w.active_revision AND NOT e.admitted) AS pending FROM ${table(tx, 'tf_provider_polls')} p JOIN ${table(tx, 'tf_workflows')} w ON w.id=p.workflow_id AND w.active_revision=p.revision WHERE p.workflow_id=$1 GROUP BY w.active_revision`,
+            [idSchema.parse(workflowId)],
+          )
+        ).rows[0];
+        return providerStatusSchema.parse(row ?? { lastSuccess: null, error: null, pending: 0, nextPoll: null });
+      },
+      'write',
+    );
   }
   async function poll(workspaceId: string) {
-    const claim = await transaction(workspaceId, async tx => {
-      const rows = (
-        await tx.client.query(
-          `SELECT p.workflow_id,p.trigger_id,p.revision,p.cursor,r.definition FROM ${table(tx, 'tf_provider_polls')} p JOIN ${table(tx, 'tf_workflows')} w ON w.id=p.workflow_id AND w.active_revision=p.revision JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=p.revision JOIN ${table(tx, 'tf_workflow_triggers')} t ON t.workflow_id=p.workflow_id AND t.trigger_id=p.trigger_id WHERE w.enabled AND t.enabled AND p.next_poll<=clock_timestamp() ORDER BY p.next_poll,p.workflow_id,p.trigger_id LIMIT 1`,
-        )
-      ).rows;
-      const row = rows[0];
-      if (!row) return null;
-      const workflowId = idSchema.parse(row.workflow_id),
-        revision = idSchema.parse(row.revision),
-        definition = definitionSchema.parse(row.definition),
-        trigger = definition.triggers.find(item => item.id === row.trigger_id);
-      if (trigger?.kind !== 'provider') return null;
-      // Triggers reading the same source see the same events; one event starts one run that lists all of them.
-      const order = definition.triggers
-        .filter(
-          item =>
-            item.kind === 'provider' && item.integrationId === trigger.integrationId && item.event === trigger.event,
-        )
-        .map(item => item.id);
-      try {
-        const sponsor = await requireSponsor(tx, workflowId);
-        const source = await authorize(tx, trigger, sponsor.sponsor_membership_id);
-        const pending = z
-          .number()
-          .parse(
-            (
-              await tx.client.query(
-                `SELECT count(*)::integer AS count FROM ${table(tx, 'tf_provider_events')} WHERE workflow_id=$1 AND revision=$2 AND NOT admitted`,
-                [workflowId, revision],
-              )
-            ).rows[0]?.count,
+    const claim = await transaction(
+      workspaceId,
+      async tx => {
+        const rows = (
+          await tx.client.query(
+            `SELECT p.workflow_id,p.trigger_id,p.revision,p.cursor,r.definition FROM ${table(tx, 'tf_provider_polls')} p JOIN ${table(tx, 'tf_workflows')} w ON w.id=p.workflow_id AND w.active_revision=p.revision JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=p.revision JOIN ${table(tx, 'tf_workflow_triggers')} t ON t.workflow_id=p.workflow_id AND t.trigger_id=p.trigger_id WHERE w.enabled AND t.enabled AND p.next_poll<=clock_timestamp() ORDER BY p.next_poll,p.workflow_id,p.trigger_id LIMIT 1`,
+          )
+        ).rows;
+        const row = rows[0];
+        if (!row) return null;
+        const workflowId = idSchema.parse(row.workflow_id),
+          revision = idSchema.parse(row.revision),
+          definition = definitionSchema.parse(row.definition),
+          trigger = definition.triggers.find(item => item.id === row.trigger_id);
+        if (trigger?.kind !== 'provider') return null;
+        // Triggers reading the same source see the same events; one event starts one run that lists all of them.
+        const order = definition.triggers
+          .filter(
+            item =>
+              item.kind === 'provider' && item.integrationId === trigger.integrationId && item.event === trigger.event,
+          )
+          .map(item => item.id);
+        try {
+          const sponsor = await requireSponsor(tx, workflowId);
+          const source = await authorize(tx, trigger, sponsor.sponsor_membership_id);
+          const pending = z
+            .number()
+            .parse(
+              (
+                await tx.client.query(
+                  `SELECT count(*)::integer AS count FROM ${table(tx, 'tf_provider_events')} WHERE workflow_id=$1 AND revision=$2 AND NOT admitted`,
+                  [workflowId, revision],
+                )
+              ).rows[0]?.count,
+            );
+          if (pending >= 1000) throw new ProviderFailure('source-invalid');
+          const fence = randomUUID();
+          await tx.client.query(
+            `UPDATE ${table(tx, 'tf_provider_polls')} SET fence=$2,next_poll=clock_timestamp()+interval '5 minutes' WHERE workflow_id=$1 AND trigger_id=$3`,
+            [workflowId, fence, trigger.id],
           );
-        if (pending >= 1000) throw new ProviderFailure('source-invalid');
-        const fence = randomUUID();
-        await tx.client.query(
-          `UPDATE ${table(tx, 'tf_provider_polls')} SET fence=$2,next_poll=clock_timestamp()+interval '5 minutes' WHERE workflow_id=$1 AND trigger_id=$3`,
-          [workflowId, fence, trigger.id],
-        );
-        return {
-          workflowId,
-          revision,
-          trigger,
-          order,
-          source,
-          sponsor,
-          fence,
-          cursor: providerCursorSchema.parse(row.cursor),
-        };
-      } catch (error) {
-        await disableAutomatically(
-          tx,
-          workflowId,
-          error instanceof AccessDenied ? 'workflow.disable.sponsor-access-lost' : 'workflow.disable.provider-backlog',
-        );
-        await tx.client.query(
-          `UPDATE ${table(tx, 'tf_provider_polls')} SET error='authority-or-capacity',next_poll=clock_timestamp()+interval '1 minute' WHERE workflow_id=$1 AND trigger_id=$2`,
-          [workflowId, trigger.id],
-        );
-        return null;
-      }
-    });
+          return {
+            workflowId,
+            revision,
+            trigger,
+            order,
+            source,
+            sponsor,
+            fence,
+            cursor: providerCursorSchema.parse(row.cursor),
+          };
+        } catch (error) {
+          await disableAutomatically(
+            tx,
+            workflowId,
+            error instanceof AccessDenied
+              ? 'workflow.disable.sponsor-access-lost'
+              : 'workflow.disable.provider-backlog',
+          );
+          await tx.client.query(
+            `UPDATE ${table(tx, 'tf_provider_polls')} SET error='authority-or-capacity',next_poll=clock_timestamp()+interval '1 minute' WHERE workflow_id=$1 AND trigger_id=$2`,
+            [workflowId, trigger.id],
+          );
+          return null;
+        }
+      },
+      'write',
+    );
     if (!claim) return;
     try {
       const saved = credentialVersion(claim.source);
       const credential = cipher.decrypt(workspaceId, claim.source.id, saved.generation, saved.envelope);
       const page = await adapters.poll(claim.source.source, credential, claim.cursor);
-      await transaction(workspaceId, async tx => {
-        const sponsor = await requireSponsor(tx, claim.workflowId);
-        if (sponsor.sponsorship_id !== claim.sponsor.sponsorship_id) return;
-        const source = await authorize(tx, claim.trigger, sponsor.sponsor_membership_id);
-        if (source.generation !== claim.source.generation) return;
-        const live = (
-          await tx.client.query(
-            `SELECT 1 FROM ${table(tx, 'tf_provider_polls')} p JOIN ${table(tx, 'tf_workflows')} w ON w.id=p.workflow_id WHERE p.workflow_id=$1 AND p.trigger_id=$4 AND p.fence=$2 AND p.revision=$3 AND w.enabled AND w.active_revision=$3`,
-            [claim.workflowId, claim.fence, claim.revision, claim.trigger.id],
-          )
-        ).rowCount;
-        if (!live) return;
-        const pending = z
-          .number()
-          .parse(
-            (
-              await tx.client.query(
-                `SELECT count(*)::integer AS count FROM ${table(tx, 'tf_provider_events')} WHERE workflow_id=$1 AND revision=$2 AND NOT admitted`,
-                [claim.workflowId, claim.revision],
-              )
-            ).rows[0]?.count,
-          );
-        if (pending + page.events.filter(item => item.kind === claim.trigger.event).length > 1000)
-          throw new ProviderFailure('source-invalid');
-        for (const item of page.events) {
-          if (item.kind !== claim.trigger.event) continue;
-          const queued = (
+      await transaction(
+        workspaceId,
+        async tx => {
+          const sponsor = await requireSponsor(tx, claim.workflowId);
+          if (sponsor.sponsorship_id !== claim.sponsor.sponsorship_id) return;
+          const source = await authorize(tx, claim.trigger, sponsor.sponsor_membership_id);
+          if (source.generation !== claim.source.generation) return;
+          const live = (
             await tx.client.query(
-              `SELECT fired_trigger_ids AS fired,admitted FROM ${table(tx, 'tf_provider_events')} WHERE workflow_id=$1 AND revision=$2 AND event_key=$3 AND trigger_id=ANY($4::text[]) FOR UPDATE`,
-              [claim.workflowId, claim.revision, item.key, claim.order],
+              `SELECT 1 FROM ${table(tx, 'tf_provider_polls')} p JOIN ${table(tx, 'tf_workflows')} w ON w.id=p.workflow_id WHERE p.workflow_id=$1 AND p.trigger_id=$4 AND p.fence=$2 AND p.revision=$3 AND w.enabled AND w.active_revision=$3`,
+              [claim.workflowId, claim.fence, claim.revision, claim.trigger.id],
             )
-          ).rows[0] as { fired: string[]; admitted: boolean } | undefined;
-          if (!queued)
-            await tx.client.query(
-              `INSERT INTO ${table(tx, 'tf_provider_events')} (workflow_id,revision,trigger_id,fired_trigger_ids,event_key,payload) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,
-              [
-                claim.workflowId,
-                claim.revision,
-                claim.trigger.id,
-                [claim.trigger.id],
-                item.key,
-                JSON.stringify(payloadSchema.parse(item.payload)),
-              ],
+          ).rowCount;
+          if (!live) return;
+          const pending = z
+            .number()
+            .parse(
+              (
+                await tx.client.query(
+                  `SELECT count(*)::integer AS count FROM ${table(tx, 'tf_provider_events')} WHERE workflow_id=$1 AND revision=$2 AND NOT admitted`,
+                  [claim.workflowId, claim.revision],
+                )
+              ).rows[0]?.count,
             );
-          else if (!queued.admitted && !queued.fired.includes(claim.trigger.id))
-            await tx.client.query(
-              `UPDATE ${table(tx, 'tf_provider_events')} SET fired_trigger_ids=$4 WHERE workflow_id=$1 AND revision=$2 AND event_key=$3 AND trigger_id=ANY($5::text[])`,
-              [
-                claim.workflowId,
-                claim.revision,
-                item.key,
-                claim.order.filter(id => id === claim.trigger.id || queued.fired.includes(id)),
-                claim.order,
-              ],
-            );
-        }
-        await tx.client.query(
-          `UPDATE ${table(tx, 'tf_provider_polls')} SET cursor=$2,last_success=clock_timestamp(),error=NULL,next_poll=clock_timestamp()+$3*interval '1 second' WHERE workflow_id=$1 AND trigger_id=$4`,
-          [
-            claim.workflowId,
-            JSON.stringify(page.cursor),
-            page.cursor.page ? 60 : claim.trigger.minutes * 60,
-            claim.trigger.id,
-          ],
-        );
-      });
+          if (pending + page.events.filter(item => item.kind === claim.trigger.event).length > 1000)
+            throw new ProviderFailure('source-invalid');
+          for (const item of page.events) {
+            if (item.kind !== claim.trigger.event) continue;
+            const queued = (
+              await tx.client.query(
+                `SELECT fired_trigger_ids AS fired,admitted FROM ${table(tx, 'tf_provider_events')} WHERE workflow_id=$1 AND revision=$2 AND event_key=$3 AND trigger_id=ANY($4::text[]) FOR UPDATE`,
+                [claim.workflowId, claim.revision, item.key, claim.order],
+              )
+            ).rows[0] as { fired: string[]; admitted: boolean } | undefined;
+            if (!queued)
+              await tx.client.query(
+                `INSERT INTO ${table(tx, 'tf_provider_events')} (workflow_id,revision,trigger_id,fired_trigger_ids,event_key,payload) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,
+                [
+                  claim.workflowId,
+                  claim.revision,
+                  claim.trigger.id,
+                  [claim.trigger.id],
+                  item.key,
+                  JSON.stringify(payloadSchema.parse(item.payload)),
+                ],
+              );
+            else if (!queued.admitted && !queued.fired.includes(claim.trigger.id))
+              await tx.client.query(
+                `UPDATE ${table(tx, 'tf_provider_events')} SET fired_trigger_ids=$4 WHERE workflow_id=$1 AND revision=$2 AND event_key=$3 AND trigger_id=ANY($5::text[])`,
+                [
+                  claim.workflowId,
+                  claim.revision,
+                  item.key,
+                  claim.order.filter(id => id === claim.trigger.id || queued.fired.includes(id)),
+                  claim.order,
+                ],
+              );
+          }
+          await tx.client.query(
+            `UPDATE ${table(tx, 'tf_provider_polls')} SET cursor=$2,last_success=clock_timestamp(),error=NULL,next_poll=clock_timestamp()+$3*interval '1 second' WHERE workflow_id=$1 AND trigger_id=$4`,
+            [
+              claim.workflowId,
+              JSON.stringify(page.cursor),
+              page.cursor.page ? 60 : claim.trigger.minutes * 60,
+              claim.trigger.id,
+            ],
+          );
+        },
+        'write',
+      );
     } catch (error) {
       const failure = error instanceof ProviderFailure ? error : new ProviderFailure('unavailable');
-      await transaction(workspaceId, async tx => {
-        await tx.client.query(
-          `UPDATE ${table(tx, 'tf_provider_polls')} SET error=$3,next_poll=clock_timestamp()+$4*interval '1 second' WHERE workflow_id=$1 AND trigger_id=$5 AND fence=$2`,
-          [claim.workflowId, claim.fence, failure.code, failure.retrySeconds, claim.trigger.id],
-        );
-      });
+      await transaction(
+        workspaceId,
+        async tx => {
+          await tx.client.query(
+            `UPDATE ${table(tx, 'tf_provider_polls')} SET error=$3,next_poll=clock_timestamp()+$4*interval '1 second' WHERE workflow_id=$1 AND trigger_id=$5 AND fence=$2`,
+            [claim.workflowId, claim.fence, failure.code, failure.retrySeconds, claim.trigger.id],
+          );
+        },
+        'write',
+      );
     }
   }
   const grants = (workspaceId: string, user: string, id: string) =>
-    memberTransaction(workspaceId, user, tx => listGrants(tx, user, id, 'provider'));
+    memberTransaction(workspaceId, user, tx => listGrants(tx, user, id, 'provider'), 'write');
   const share = (workspaceId: string, user: string, id: string, value: unknown) =>
-    memberTransaction(workspaceId, user, tx => changeGrant(tx, user, id, value, 'provider'));
+    memberTransaction(workspaceId, user, tx => changeGrant(tx, user, id, value, 'provider'), 'write');
   async function test(workspaceId: string, user: string, input: unknown) {
-    await memberTransaction(workspaceId, user, tx => workflowMember(tx, user));
+    await memberTransaction(workspaceId, user, tx => workflowMember(tx, user), 'write');
     const result = await discovery.test(input);
-    await memberTransaction(workspaceId, user, tx => workflowMember(tx, user));
+    await memberTransaction(workspaceId, user, tx => workflowMember(tx, user), 'write');
     return result;
   }
   async function resources(workspaceId: string, user: string, input: unknown) {
-    await memberTransaction(workspaceId, user, tx => workflowMember(tx, user));
+    await memberTransaction(workspaceId, user, tx => workflowMember(tx, user), 'write');
     const result = await discovery.resources(input);
-    await memberTransaction(workspaceId, user, tx => workflowMember(tx, user));
+    await memberTransaction(workspaceId, user, tx => workflowMember(tx, user), 'write');
     return result;
   }
   return {

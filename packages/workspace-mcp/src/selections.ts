@@ -116,36 +116,43 @@ export function selectionMethods(options: WorkspaceMcpOptions, store: McpStore) 
             .max(20),
         })
         .parse(input);
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
-        const authority = await authorize(tx, actor, value.origin);
-        const result = await store.command(
-          tx,
-          actor,
-          value.requestId,
-          'selection',
-          value,
-          selectionSchema,
-          async () => {
-            const old = await load(tx, actor, value.origin);
-            if (old.version !== value.expectedVersion || old.claimed_task_id) throw new McpError('conflict');
-            const bindings = [];
-            for (const binding of value.bindings) {
-              const row = await store.load(tx, binding.integrationId);
-              bindings.push({ ...binding, authorizationEpoch: row.authorization_epoch });
-            }
-            if (new Set(bindings.map(binding => `${binding.integrationId}:${binding.slotId}`)).size !== bindings.length)
-              throw new McpError('invalid-input');
-            await validate(tx, actor, value.origin, authority, bindings);
-            await tx.client.query(
-              `INSERT INTO ${table(tx, 'selections')} (membership_id,origin_key,version,bindings,subject) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (membership_id,origin_key) DO UPDATE SET version=EXCLUDED.version,bindings=EXCLUDED.bindings`,
-              [actor.membershipId, key(value.origin), old.version + 1, JSON.stringify(bindings), value.origin],
-            );
-            return { version: old.version + 1, bindings };
-          },
-        );
-        await validate(tx, actor, value.origin, authority, result.bindings);
-        return result;
-      });
+      return store.authorized(
+        workspaceId,
+        principal,
+        async (tx, actor) => {
+          const authority = await authorize(tx, actor, value.origin);
+          const result = await store.command(
+            tx,
+            actor,
+            value.requestId,
+            'selection',
+            value,
+            selectionSchema,
+            async () => {
+              const old = await load(tx, actor, value.origin);
+              if (old.version !== value.expectedVersion || old.claimed_task_id) throw new McpError('conflict');
+              const bindings = [];
+              for (const binding of value.bindings) {
+                const row = await store.load(tx, binding.integrationId);
+                bindings.push({ ...binding, authorizationEpoch: row.authorization_epoch });
+              }
+              if (
+                new Set(bindings.map(binding => `${binding.integrationId}:${binding.slotId}`)).size !== bindings.length
+              )
+                throw new McpError('invalid-input');
+              await validate(tx, actor, value.origin, authority, bindings);
+              await tx.client.query(
+                `INSERT INTO ${table(tx, 'selections')} (membership_id,origin_key,version,bindings,subject) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (membership_id,origin_key) DO UPDATE SET version=EXCLUDED.version,bindings=EXCLUDED.bindings`,
+                [actor.membershipId, key(value.origin), old.version + 1, JSON.stringify(bindings), value.origin],
+              );
+              return { version: old.version + 1, bindings };
+            },
+          );
+          await validate(tx, actor, value.origin, authority, result.bindings);
+          return result;
+        },
+        'write',
+      );
     },
     async claimTaskSelection(
       transaction: AuthorizationTransaction,

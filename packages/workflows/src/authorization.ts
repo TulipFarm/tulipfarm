@@ -26,7 +26,7 @@ export function workflowTransaction<T>(
   runtime: WorkflowRuntime,
   workspaceId: string,
   operation: (tx: WorkflowTransaction) => Promise<T>,
-  mode: 'read' | 'write' = 'write',
+  mode: 'read' | 'write',
   user?: string,
 ) {
   return runtime.transaction(idSchema.parse(workspaceId), workflowCompatibility, async tx => {

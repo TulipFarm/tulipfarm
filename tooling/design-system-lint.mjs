@@ -1,3 +1,4 @@
+import { authorizationLockMode } from './authorization-lock-lint.mjs';
 import { memoryCoreBoundary } from './memory-core-lint.mjs';
 
 const nativeControls = new Map([
@@ -24,6 +25,7 @@ const nativeControls = new Map([
 export default {
   meta: { name: 'tulipfarm' },
   rules: {
+    'authorization-lock-mode': authorizationLockMode,
     'memory-core-boundary': memoryCoreBoundary,
     'product-copy': {
       meta: { type: 'problem', schema: [] },

@@ -71,10 +71,11 @@ export function createSkillObjects(
   async function transaction<T>(
     workspaceId: string,
     actor: HumanActor,
+    mode: 'read' | 'write',
     operation: (tx: AgentTransaction) => Promise<T>,
   ) {
     return runtime.transaction(uuidSchema.parse(workspaceId), skillPackageCompatibility, async tx => {
-      await lockAuthorization(tx, 'write');
+      await lockAuthorization(tx, mode);
       await currentMember(tx, actor);
       return operation(tx);
     });
@@ -90,7 +91,7 @@ export function createSkillObjects(
     const { definition, files } = buildSkillPackage(input);
     const pkg = definition.package;
     const sources = sourceDependenciesSchema.parse(origin);
-    await transaction(workspaceId, actor, async tx => {
+    await transaction(workspaceId, actor, 'write', async tx => {
       await requireNoMcpDerived(tx, sources);
       await requireOwnDefinitionSources(tx, actor, sources, true);
       await lockQuota(tx);
@@ -145,7 +146,7 @@ export function createSkillObjects(
     });
     for (const file of files) {
       const digest = skillBytesDigest(file.bytes);
-      await transaction(workspaceId, actor, async tx => {
+      await transaction(workspaceId, actor, 'write', async tx => {
         await requireOwnDefinitionSources(tx, actor, sources, true);
         if (
           !(
@@ -162,7 +163,7 @@ export function createSkillObjects(
       const stored = await objects.read(keyFor(workspaceId, digest), file.bytes.byteLength, signal);
       if (skillBytesDigest(stored) !== digest) throw new SkillPackageError('package-mismatch');
     }
-    await transaction(workspaceId, actor, async tx => {
+    await transaction(workspaceId, actor, 'write', async tx => {
       await requireNoMcpDerived(tx, sources);
       await requireOwnDefinitionSources(tx, actor, sources, true);
       const changed = await tx.client.query(
@@ -186,7 +187,7 @@ export function createSkillObjects(
   }
   async function readPrepared(workspaceId: string, actor: HumanActor, id: string) {
     id = uuidSchema.parse(id);
-    const pkg = await transaction(workspaceId, actor, async tx => {
+    const pkg = await transaction(workspaceId, actor, 'write', async tx => {
       const row = (
         await tx.client.query(
           `SELECT digest,manifest,sources FROM ${relation(tx, 'tf_skill_packages')}
@@ -199,7 +200,7 @@ export function createSkillObjects(
       return skillPackageSchema.parse({ digest: row.digest, manifest: row.manifest });
     });
     const files = await readFiles(workspaceId, pkg);
-    await transaction(workspaceId, actor, tx => requireStoredSkillPackage(tx, actor, pkg, id));
+    await transaction(workspaceId, actor, 'write', tx => requireStoredSkillPackage(tx, actor, pkg, id));
     return { package: pkg, files };
   }
   async function readFile(workspaceId: string, pkg: SkillPackage, path: string) {
