@@ -7,10 +7,8 @@ import { Sheet, SheetBody, SheetContent, SheetFooter, SheetHeader, SheetTitle } 
 import { googleApi } from '@/lib/google-workspace';
 import { githubApi, githubConsent } from '@/lib/github';
 import { atlassianApi } from '@/lib/atlassian';
-import { consentUrl } from '@/features/atlassian/accounts';
 import { useMcpApi, useMcpCapabilities, useMcpIntegrations } from '@/features/workspace-mcp/queries';
 import { useAtlassianAccounts, useGitHubAccounts, useGoogleIntegration, useSlackIntegration } from './queries';
-import { slackInstallUrl } from './slack';
 import { useFeatureContext } from '@/lib/query/provider';
 import { mcpPagePrefix } from './mcp-page';
 import { authorizationAttention, type AuthorizationSources } from './authorization-attention';
@@ -102,6 +100,7 @@ export function ReauthorizationBanner({ workspaceId, slug }: { workspaceId: stri
           throw new Error('Unexpected consent destination');
         if (active()) window.location.assign(url.href);
       } else if (target.kind === 'slack') {
+        const { slackInstallUrl } = await import('./slack');
         const url = await slackInstallUrl(workspaceId);
         if (active()) window.location.assign(url);
       } else if (target.kind === 'slack-user') {
@@ -111,7 +110,10 @@ export function ReauthorizationBanner({ workspaceId, slug }: { workspaceId: stri
         const result = await githubApi.reconnect(workspaceId, target.accountId);
         if (active()) githubConsent(result.url);
       } else if (target.kind === 'atlassian') {
-        const result = await atlassianApi.reconnect(workspaceId, target.accountId);
+        const [result, { consentUrl }] = await Promise.all([
+          atlassianApi.reconnect(workspaceId, target.accountId),
+          import('@/features/atlassian/accounts'),
+        ]);
         if (active()) window.location.assign(consentUrl(result.url));
       } else {
         await navigate({

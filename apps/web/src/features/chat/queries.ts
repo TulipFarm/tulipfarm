@@ -5,13 +5,13 @@ import { scopeKey } from '@/lib/query/scope';
 import { creditKeys } from '@/lib/credit-keys';
 import { modelKeys } from '@/features/models/queries';
 import { editChat, editList, type ChatEdit } from './chat-edits';
-import {
-  type Chat,
-  type ChatHistoryPage,
-  type ChatListPage,
-  type ConversationApi,
-  type ConversationCommand,
-  type ConversationHistory,
+import type {
+  Chat,
+  ChatHistoryPage,
+  ChatListPage,
+  ConversationApi,
+  ConversationCommand,
+  ConversationHistory,
 } from './conversation-api';
 import type { AuthoringProposal } from '@tulipfarm/agents/draft-contracts';
 import { createPageReuse } from './page-reuse';

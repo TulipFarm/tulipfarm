@@ -3,7 +3,7 @@ import { featureKey, featureReadOptions, useFeatureChanges, useFeatureRead } fro
 import { useFeatureContext } from '@/lib/query/provider';
 import { concealQueries, useProviderAuthority } from '@/features/integrations/query-authority';
 import { conversationKeys } from '@/features/chat/queries';
-import { taskKeys } from '@/features/tasks/queries';
+import { taskKeys } from '@/features/tasks/keys';
 import { mcpAccessEvent, mcpApi, type McpApi, type PrepareMcpChat } from './api';
 import type { SelectionOrigin } from './contracts';
 import { actionsSchema } from './contracts';
