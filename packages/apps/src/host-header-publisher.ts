@@ -66,6 +66,17 @@ function requestKey(releaseId: string, path: string) {
   return safeSegments(file) ? `releases/${releaseId}/${file}` : null;
 }
 
+/** The released file a request path addresses, or null when there is none. `path` is still percent-encoded. */
+export async function readReleaseFile(
+  storage: Pick<AppSiteStorage, 'get'>,
+  releaseId: string,
+  path: string,
+  signal: AbortSignal,
+) {
+  const key = requestKey(releaseIdSchema.parse(releaseId), path);
+  return key ? storage.get(key, signal) : null;
+}
+
 const listPage = 500;
 
 /**
@@ -169,8 +180,7 @@ export function hostHeaderPublisher(options: {
       // Server apps are reached through the gateway, which this publisher does not run.
       if (current.status !== 'active' || current.kind !== 'static' || !current.releaseId)
         return { kind: 'unavailable' };
-      const key = requestKey(current.releaseId, request.path);
-      const object = key && (await storage.get(key, signal));
+      const object = await readReleaseFile(storage, current.releaseId, request.path, signal);
       return object ? { kind: 'file', object } : { kind: 'not-found' };
     },
   };

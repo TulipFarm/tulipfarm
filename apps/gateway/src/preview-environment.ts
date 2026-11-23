@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { previewHosts } from '@tulipfarm/apps';
 import { readAppObject, readPreviewSession, readPreviewTarget, redeemPreviewTicket } from '@tulipfarm/apps/store';
 import { AppHostUnavailableError, appHost } from '@tulipfarm/extensions';
 import { isFeatureEnabled } from '@tulipfarm/observability';
@@ -20,9 +21,9 @@ export function previewGatewayFromEnvironment(
   shellOrigin: string,
   storage: () => PreviewStorage | undefined,
 ): PreviewGatewayDependencies | null {
-  const domain = env.TULIPFARM_APP_PREVIEW_DOMAIN?.toLowerCase();
   const bucket = env.TULIPFARM_OBJECT_STORAGE_APPS_BUCKET;
-  if (!domain || !bucket) return null;
+  if (!env.TULIPFARM_APP_PREVIEW_DOMAIN?.trim() || !bucket) return null;
+  const { domain, prefix } = previewHosts(env.TULIPFARM_APP_PREVIEW_DOMAIN, env.TULIPFARM_APP_SITES_DOMAIN);
   const objects = { client: objectStorageClient(env), bucket };
   const ready = () => {
     const found = storage();
@@ -31,6 +32,7 @@ export function previewGatewayFromEnvironment(
   };
   return {
     domain,
+    prefix,
     shellOrigin,
     redeem: (previewKey, ticket) => redeemPreviewTicket(ready().pool, previewKey, ticket),
     session: (previewKey, token) => readPreviewSession(ready().pool, previewKey, token),

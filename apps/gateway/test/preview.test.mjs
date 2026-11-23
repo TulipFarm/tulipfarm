@@ -68,6 +68,13 @@ test('preview hosts are recognised by their key alone', () => {
   assert.equal(previewKeyOf(`x.${key}.preview.tulipfarm.test`, 'preview.tulipfarm.test'), null);
 });
 
+test('previews that share the public apps domain are told apart by their prefix', () => {
+  assert.equal(previewKeyOf(`pv-${key}.apps.tulipfarm.test`, 'apps.tulipfarm.test', 'pv-'), key);
+  assert.equal(previewKeyOf('pv-nope.apps.tulipfarm.test', 'apps.tulipfarm.test', 'pv-'), null);
+  assert.equal(previewKeyOf('acme-api.apps.tulipfarm.test', 'apps.tulipfarm.test', 'pv-'), undefined);
+  assert.equal(previewKeyOf(`${key}.apps.tulipfarm.test`, 'apps.tulipfarm.test', 'pv-'), undefined);
+});
+
 test('preview paths match the public edge', () => {
   assert.equal(previewFilePath('/'), 'index.html');
   assert.equal(previewFilePath('/docs/'), 'docs/index.html');

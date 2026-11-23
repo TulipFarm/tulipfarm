@@ -539,6 +539,54 @@ test('names that lead nowhere get 404, stopped apps and a missing host get 503',
   });
 });
 
+test('a static app is served from its live release', async t => {
+  const files = { 'index.html': 'home', 'assets/app.js': 'code' };
+  const read = [];
+  const route = { name: 'acme-api', kind: 'static', releaseId, status: 'active', version: 4 };
+  const { http } = buildPublicAppsGateway(
+    {
+      domain: 'apps.tulipfarm.test',
+      route: async name => (name === 'acme-api' ? { workspaceId, appId, route } : null),
+      enabled: async () => true,
+      host: {},
+      async files(release, path) {
+        read.push([release, path]);
+        const body = files[decodeURIComponent(path).slice(1) || 'index.html'];
+        if (body === undefined) return null;
+        return { body: [Buffer.from(body)], contentType: 'text/plain', bytes: body.length };
+      },
+    },
+    {},
+  );
+  t.after(() => http.close());
+  const home = await http.inject({ url: '/?q=1', headers: { host } });
+  assert.equal(home.statusCode, 200);
+  assert.equal(home.body, 'home');
+  assert.equal(home.headers['cache-control'], 'public, max-age=60');
+  assert.equal((await http.inject({ url: '/assets/app.js', headers: { host } })).body, 'code');
+  assert.deepEqual(read, [
+    [releaseId, '/'],
+    [releaseId, '/assets/app.js'],
+  ]);
+  assert.equal((await http.inject({ url: '/missing.js', headers: { host } })).statusCode, 404);
+  assert.equal((await http.inject({ method: 'POST', url: '/', headers: { host } })).statusCode, 405);
+});
+
+test('a static app is left to the edge when the gateway has no released files', async t => {
+  const route = { name: 'acme-api', kind: 'static', releaseId, status: 'active', version: 4 };
+  const { http } = buildPublicAppsGateway(
+    {
+      domain: 'apps.tulipfarm.test',
+      route: async () => ({ workspaceId, appId, route }),
+      enabled: async () => true,
+      host: {},
+    },
+    {},
+  );
+  t.after(() => http.close());
+  assert.equal((await http.inject({ url: '/', headers: { host } })).statusCode, 404);
+});
+
 test('one client is limited to 1,200 requests a minute', async t => {
   const { http } = buildPublicAppsGateway(
     { domain: 'apps.tulipfarm.test', route: async () => null, enabled: async () => true, host: {} },
