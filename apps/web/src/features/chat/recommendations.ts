@@ -8,6 +8,7 @@ import { useFeatureContext } from '@/lib/query/provider';
 import { onReconnect, useOffline } from '@/lib/online';
 import { onWindowReturn } from '@/lib/window-return';
 import { createRecommendationStream } from './recommendation-stream';
+import { recommendationKeys } from './recommendation-keys';
 
 const recommendationSchema = z.object({
   id: z.string(),
@@ -28,12 +29,7 @@ export type Recommendation = z.infer<typeof recommendationSchema>;
 export type Recommendations = z.infer<typeof recommendationsSchema> &
   Partial<Pick<z.infer<typeof recommendationListSchema>, 'status' | 'version'>>;
 
-export const recommendationKeys = { all: () => ['recommendations'] as const };
-export const sourcePickerHash = {
-  github: 'github-accounts',
-  slack: 'slack-account',
-  google: 'google-workspace',
-} as const;
+export { recommendationKeys, sourcePickerHash } from './recommendation-keys';
 
 class RecommendationRequestError extends Error {
   constructor(readonly status: number) {
