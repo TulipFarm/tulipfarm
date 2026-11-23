@@ -31,7 +31,7 @@ import type { agentApi } from '@/features/agents/api';
 import { useFeatureContext } from '@/lib/query/provider';
 import { featureReadOptions, freshness, type QueryKey } from '@/lib/query';
 import { conversationKeys } from '@/features/chat/queries';
-import { recommendationKeys } from '@/features/chat/recommendations';
+import { recommendationKeys } from '@/features/chat/recommendation-keys';
 import { onWindowReturn } from '@/lib/window-return';
 
 function useReadResult<T>(read: ReturnType<typeof useFeatureRead<T>>, key: QueryKey) {

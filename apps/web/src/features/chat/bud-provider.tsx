@@ -31,8 +31,7 @@ import { PopoverClose } from '@/components/ui/popover-close';
 import { Bud } from './bud';
 import { BudContext, type BudCommand } from './bud-context';
 import { ChatHeaderContext } from './header-context';
-import { createRecommendationStream } from './recommendation-stream';
-import { sourcePickerHash } from './recommendations';
+import { sourcePickerHash } from './recommendation-keys';
 import { budCornerClasses, nearestBudCorner, useBudPosition } from './bud-position';
 import { useConversationChanges } from './queries';
 
@@ -183,27 +182,35 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
     [workspace.id, current, runtime, scope],
   );
   useEffect(() => {
-    const stream = createRecommendationStream(
-      `${apiOrigin}/v1/workspaces/${workspace.id}/recommendations/events`,
-      { workspaceId: workspace.id, membershipId: scope.kind === 'workspace' ? scope.membershipId : '' },
-      kind => {
-        if (!current()) return;
-        if (kind === 'conceal')
-          runtime.client.setQueryData<BudState>(featureKey(scope, key), previous =>
-            previous ? { ...previous, nudge: null } : previous,
-          );
-        void runtime.applyChange(scope, { kind: 'change', keys: [key] });
-      },
-    );
+    // The stream loads after first paint; nudges are not needed to show the page.
+    let stream: ReturnType<typeof import('./recommendation-stream').createRecommendationStream> | undefined;
+    let closed = false;
     const sync = () => {
+      if (!stream) return;
       if (document.visibilityState === 'hidden') stream.stop();
       else if (current()) stream.start();
     };
-    sync();
+    void import('./recommendation-stream').then(({ createRecommendationStream }) => {
+      if (closed) return;
+      stream = createRecommendationStream(
+        `${apiOrigin}/v1/workspaces/${workspace.id}/recommendations/events`,
+        { workspaceId: workspace.id, membershipId: scope.kind === 'workspace' ? scope.membershipId : '' },
+        kind => {
+          if (!current()) return;
+          if (kind === 'conceal')
+            runtime.client.setQueryData<BudState>(featureKey(scope, key), previous =>
+              previous ? { ...previous, nudge: null } : previous,
+            );
+          void runtime.applyChange(scope, { kind: 'change', keys: [key] });
+        },
+      );
+      sync();
+    });
     document.addEventListener('visibilitychange', sync);
     return () => {
+      closed = true;
       document.removeEventListener('visibilitychange', sync);
-      stream.stop();
+      stream?.stop();
     };
   }, [workspace.id, scope, current, runtime]);
   useEffect(
