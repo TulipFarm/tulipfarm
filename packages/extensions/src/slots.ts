@@ -41,11 +41,15 @@ export type CreditEntry = {
  * The workspace credit account. TulipFarm meters every model call itself (a reservation, then a
  * settlement at provider cost, kept in the workspace schema) and asks the gate to fund it. Amounts
  * are credit units (10^12 per credit). The default, `unlimitedCredits`, funds everything and stores nothing.
+ *
+ * A gate may let a workspace keep working for a while below zero, on grace credits. Then `available()`, the amount
+ * TulipFarm refuses new work on, is the spendable amount: the balance plus the grace left. `balance()` reports the
+ * true balance, which may be negative, and the grace separately.
  */
 export type CreditGate = {
   /**
-   * Credit units the workspace may still spend, or null when unlimited. With `lock`, the account stays
-   * locked until the transaction ends; TulipFarm refuses work that does not fit and debits in the same transaction.
+   * Credit units the workspace may still spend, including any grace, or null when unlimited. With `lock`, the account
+   * stays locked until the transaction ends; TulipFarm refuses work that does not fit and debits in the same transaction.
    */
   available(tx: CreditTransaction, options?: { readonly lock?: boolean }): Promise<bigint | null>;
   /** Takes units from the account. A negative amount returns units, as when a settlement costs less than its reservation. */
@@ -56,26 +60,65 @@ export type CreditGate = {
    */
   provision?(tx: CreditTransaction): Promise<void>;
   /**
-   * Optional. The balance shown in credit summaries: units the workspace may still spend and units granted so far,
-   * or null when unlimited. Without it, summaries show `available()` and no granted total.
+   * Optional. The balance shown in credit summaries and checked by credit alerts, or null when unlimited. Without it,
+   * summaries show `available()` with no granted total or grace, and no credit alerts are sent.
    */
-  balance?(tx: CreditTransaction): Promise<{ readonly available: bigint; readonly granted: bigint | null } | null>;
+  balance?(tx: CreditTransaction): Promise<CreditBalance | null>;
+};
+
+/** A workspace's credit account, in credit units. */
+export type CreditBalance = {
+  /** The true balance. Negative once charges recorded after the work, such as storage, overdraw the account. */
+  readonly available: bigint;
+  /** Units granted so far in total, or null when the gate does not track it. */
+  readonly granted: bigint | null;
+  /**
+   * Optional. The grace allowance: how far below zero the workspace may spend, so `available()` is `available` plus
+   * this, and the grace left once the balance is below zero is `available + grace`. Null or omitted when the gate gives
+   * no grace.
+   */
+  readonly grace?: bigint | null;
 };
 
 /**
- * Converts metered provider cost to credit units (10^12 per credit). TulipFarm multiplies each call's
- * provider cost in pico-USD by `unitsPerPicoUsd`, sums it per aggregate (a chat or task flow, or the
- * workspace's knowledge total), and charges `round(aggregate)`. The default, `providerCostPricing`,
- * charges provider cost with no markup or rounding: 100 units per pico-USD, one credit per $0.01.
+ * Converts metered cost to credit units (10^12 per credit). TulipFarm multiplies each call's provider cost in pico-USD
+ * by `unitsPerPicoUsd`, sums it per aggregate (a chat or task flow, or the workspace's knowledge total), and charges
+ * `round(aggregate)`. The default, `providerCostPricing`, charges provider cost with no markup or rounding: 100 units
+ * per pico-USD, one credit per $0.01, and nothing for calls on a member's plan or own API key.
+ *
+ * Each kind of use has its own rate, so an extension can price them separately. Read them resolved, with their
+ * defaults, through `creditRates()`.
  */
 export type CreditPricing = {
-  /** Credit units per pico-USD of provider cost. A positive integer. */
+  /** Credit units per pico-USD of provider cost, for model calls paid with credits. A positive integer. */
   readonly unitsPerPicoUsd: bigint;
+  /**
+   * Optional. Credit units per pico-USD of list-price value, for model calls paid by a member's plan or an own API key:
+   * a fee on what the call would have cost at the listed model's rates. Zero or more; 0, the default, charges nothing.
+   */
+  readonly planUnitsPerPicoUsd?: bigint;
+  /** Optional. Credit units per pico-USD of compute, such as run steps on shared workers. Positive; defaults to `unitsPerPicoUsd`. */
+  readonly computeUnitsPerPicoUsd?: bigint;
+  /** Optional. Credit units per pico-USD of storage. Positive; defaults to `unitsPerPicoUsd`. */
+  readonly storageUnitsPerPicoUsd?: bigint;
   /** Rounds an aggregate charge in credit units. Must map 0 to 0, never return less than its input, and never decrease as its input grows. */
   round(units: bigint): bigint;
 };
 
-/** Prices for storage and shared-worker compute, in pico-USD. TulipFarm converts them with `CreditPricing.unitsPerPicoUsd`. */
+/** Every `CreditPricing` rate with its default applied. */
+export type CreditRates = {
+  /** Model calls paid with credits. */
+  readonly models: bigint;
+  /** List-price value of model calls paid by a member's plan or an own API key. May be 0. */
+  readonly plan: bigint;
+  readonly compute: bigint;
+  readonly storage: bigint;
+};
+
+/**
+ * Prices for storage and shared-worker compute, in pico-USD. TulipFarm converts storage with the storage rate and
+ * run steps with the compute rate of `CreditPricing`, without rounding.
+ */
 export type ResourcePricing = {
   /** Per GiB-month of the workspace's Postgres tables and their indexes. */
   readonly databasePicoUsdPerGibMonth: bigint;
@@ -95,8 +138,9 @@ export type ResourceWindow = { readonly start: string; readonly end: string };
 export type ResourceMeter = {
   readonly pricing: ResourcePricing;
   /**
-   * Optional. Sandbox compute per workspace for a closed hour, already priced in credit units. Throws while the
-   * provider has not settled the hour, so it is asked again later.
+   * Optional. Sandbox compute per workspace for a closed hour, already priced in credit units (use
+   * `creditRates().compute` to convert a provider cost). Throws while the provider has not settled the hour, so it is
+   * asked again later.
    */
   computeUsage?(
     window: ResourceWindow,

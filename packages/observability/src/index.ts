@@ -1544,6 +1544,7 @@ export const backgroundJobs = [
   'app-usage',
   'resource-compute',
   'resource-storage',
+  'credit-alerts',
   'row-assignments',
   'chat-recall-delivery',
 ] as const;

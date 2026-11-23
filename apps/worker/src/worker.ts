@@ -78,6 +78,7 @@ import { createSocialPublisherComposition } from './social-publisher-composition
 import { createSecretsSweep } from './secrets-sweep.ts';
 import { createAppComposition, repeatFromStart } from './app-composition.ts';
 import { createResourceBilling } from './resource-billing.ts';
+import { createCreditAlerts } from './credit-alerts.ts';
 import { appEditingFromEnvironment, createAppBuildDispatcher } from './app-editing-composition.ts';
 import { workerRole, workerTelemetryService } from './worker-role.ts';
 import { workspaceSchemaPending } from '@tulipfarm/workspace-storage/runtime';
@@ -299,6 +300,26 @@ async function run() {
             ),
           );
         }
+      }
+      const flagContext = coreResources.flagContext;
+      const creditAlerts = createCreditAlerts({
+        runtime: coreResources.runtime,
+        discover: coreResources.readyTaskWorkspaces,
+        profiles: coreResources.memberProfiles,
+        workspace: async workspaceId => (await flagContext({ workspaceId })).workspace,
+      });
+      if (creditAlerts) {
+        const job = createBackgroundJob('credit-alerts', 300);
+        sweepTelemetry.push(job);
+        appJobs.push(
+          repeatFromStart(
+            () =>
+              job
+                .run(() => creditAlerts.run(appAbort.signal))
+                .catch(error => Runtime.instance().logger.error('Credit alerts failed', errorAttributes(error))),
+            300 * 1000,
+          ),
+        );
       }
     }
     if (

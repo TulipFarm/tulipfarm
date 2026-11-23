@@ -39,22 +39,22 @@ export default defineExtension({
 });
 ```
 
-| Slot                 | Kind            | Default                                                                              | Read by                                                                                                  |
-| -------------------- | --------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `creditGate`         | one per process | `unlimitedCredits`: funds all work, stores no balance                                | the credit meter in `@tulipfarm/workspace-storage/credits`                                               |
-| `creditPricing`      | one per process | `providerCostPricing`: one credit per $0.01 of provider cost, no markup, no rounding | `creditUnitsForProviderCost`, the credit meter, knowledge credits, the model catalog's credit rates      |
-| `resourceMeter`      | one per process | none: storage and compute are not charged                                            | the worker's hourly `resource-storage` and `resource-compute` jobs                                       |
-| `flagProvider`       | one per process | none: each flag's env override, then its declared default (see below)                | `isFeatureEnabled`, `featureFlagSnapshot` in `@tulipfarm/observability`                                  |
-| `socialPlatformApps` | one per process | none: operator `SOCIAL_<PLATFORM>_*` settings supply platform apps                   | social platform-app resolution in `@tulipfarm/social`; when set, X and Reddit need a workspace's own app |
-| `executionBackend`   | one per process | none: execution is unavailable                                                       | API/core-worker startup preflight when `TULIPFARM_EXECUTION_BACKEND=extension`                           |
-| `appBuilder`         | one per process | none: apps build with no extension builder                                           | app publishing, through `appBuilder()`                                                                   |
-| `appPublisher`       | one per process | none: `hostHeaderPublisher` from `@tulipfarm/apps/host-header-publisher` once wired  | app publishing and edge reconciliation, through `appPublisher()`                                         |
-| `appHost`            | one per process | `unavailableAppHost`: every call fails with `AppHostUnavailableError`                | server apps, through `appHost()`                                                                         |
-| `usageSink`          | many            | none                                                                                 | `recordUsage(usage)`                                                                                     |
-| `analytics`          | many            | none                                                                                 | `captureEvent`, `observeInference` in `@tulipfarm/observability`                                         |
-| `errorReporter`      | many            | none                                                                                 | `captureException` in `@tulipfarm/observability`                                                         |
-| `hooks`              | many            | none                                                                                 | `emitHook(event, payload)`                                                                               |
-| `migrations`         | many            | none                                                                                 | `extensionMigrations()`                                                                                  |
+| Slot                 | Kind            | Default                                                                              | Read by                                                                                                                              |
+| -------------------- | --------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `creditGate`         | one per process | `unlimitedCredits`: funds all work, stores no balance                                | the credit meter in `@tulipfarm/workspace-storage/credits`                                                                           |
+| `creditPricing`      | one per process | `providerCostPricing`: one credit per $0.01 of provider cost, no markup, no rounding | `creditUnitsForProviderCost`, `creditRates`, the credit meter, knowledge credits, resource billing, the model catalog's credit rates |
+| `resourceMeter`      | one per process | none: storage and compute are not charged                                            | the worker's hourly `resource-storage` and `resource-compute` jobs                                                                   |
+| `flagProvider`       | one per process | none: each flag's env override, then its declared default (see below)                | `isFeatureEnabled`, `featureFlagSnapshot` in `@tulipfarm/observability`                                                              |
+| `socialPlatformApps` | one per process | none: operator `SOCIAL_<PLATFORM>_*` settings supply platform apps                   | social platform-app resolution in `@tulipfarm/social`; when set, X and Reddit need a workspace's own app                             |
+| `executionBackend`   | one per process | none: execution is unavailable                                                       | API/core-worker startup preflight when `TULIPFARM_EXECUTION_BACKEND=extension`                                                       |
+| `appBuilder`         | one per process | none: apps build with no extension builder                                           | app publishing, through `appBuilder()`                                                                                               |
+| `appPublisher`       | one per process | none: `hostHeaderPublisher` from `@tulipfarm/apps/host-header-publisher` once wired  | app publishing and edge reconciliation, through `appPublisher()`                                                                     |
+| `appHost`            | one per process | `unavailableAppHost`: every call fails with `AppHostUnavailableError`                | server apps, through `appHost()`                                                                                                     |
+| `usageSink`          | many            | none                                                                                 | `recordUsage(usage)`                                                                                                                 |
+| `analytics`          | many            | none                                                                                 | `captureEvent`, `observeInference` in `@tulipfarm/observability`                                                                     |
+| `errorReporter`      | many            | none                                                                                 | `captureException` in `@tulipfarm/observability`                                                                                     |
+| `hooks`              | many            | none                                                                                 | `emitHook(event, payload)`                                                                                                           |
+| `migrations`         | many            | none                                                                                 | `extensionMigrations()`                                                                                                              |
 
 A second extension setting a single slot fails startup. Failures inside
 analytics, error reporters, usage sinks, and hook subscribers never reach the
@@ -148,19 +148,26 @@ converts them to credit units:
 
 ```ts
 interface CreditPricing {
-  readonly unitsPerPicoUsd: bigint; // credit units charged per pico-USD
+  readonly unitsPerPicoUsd: bigint; // model calls paid with credits
+  readonly planUnitsPerPicoUsd?: bigint; // list-price value of calls on a member's plan or own API key; default 0n
+  readonly computeUnitsPerPicoUsd?: bigint; // run steps; default unitsPerPicoUsd
+  readonly storageUnitsPerPicoUsd?: bigint; // storage; default unitsPerPicoUsd
   round(units: bigint): bigint; // applied once per aggregate
 }
 ```
 
-The rate applies to each call; `round` applies once to an aggregate (a flow's
-total in `settleCredits`, a workspace's knowledge total), never per
+Each rate applies to each call or charge; `round` applies once to an aggregate
+(a flow's total in `settleCredits`, a workspace's knowledge total), never per
 call. It must map 0 to 0, never return less than its input, and be monotonic.
 Reservations use the same pricing, so a reservation still covers its settlement.
+`unitsPerPicoUsd` must be positive, as must the compute and storage rates when
+set; the plan rate may be 0. `creditRates()` returns all four with their
+defaults applied, as `{ models, plan, compute, storage }`.
 
 The default, `providerCostPricing`, is `{ unitsPerPicoUsd: 100n, round: units =>
-units }`: one credit per $0.01, no markup, fractional credits kept. A hosted
-deployment adding a 50% markup and whole-credit rounding registers:
+units }`: one credit per $0.01, no markup, fractional credits kept, and nothing
+for calls on a member's plan. A deployment adding a 50% markup and whole-credit
+rounding registers:
 
 ```ts
 const credit = 1_000_000_000_000n;
@@ -171,7 +178,41 @@ slots.creditPricing({
 ```
 
 `creditUnitsForProviderCost(picoUsd)` returns `round(picoUsd × unitsPerPicoUsd)`.
+Converting units back to provider cost, as when a call whose usage stayed
+unknown settles at its reservation, also uses `unitsPerPicoUsd`.
 Task budgets (`limits.credits`) and the credit gate count the same units.
+
+**Plan fee.** A chat call paid by a member's ChatGPT, Claude or GitHub Copilot
+plan costs no provider credits. With a `planUnitsPerPicoUsd` above 0 it is
+charged that rate on its list-price value: what the same tokens would cost at
+the rates of the catalog model the plan model is listed as. A call whose list
+price can't be worked out is charged nothing. The reply's credit hold reserves
+each plan call's worst case at that fee, so a plan call is refused when credits
+run out, like any other model call. Within a flow, credit-paid calls (provider
+cost × `unitsPerPicoUsd`) and plan fees add up before one `round`. The ledger
+keeps `provider_pico_usd` as the real provider cost, 0 for a plan call, and the
+unrounded fee in `fee_units`. The same rate is meant for calls paid with a
+member's own API key (`paidBy: 'key'`), which nothing produces yet.
+
+### Credit balance and grace
+
+A gate's optional `balance()` returns `{ available, granted, grace? }` in credit
+units, or null when unlimited:
+
+- `available` is the true balance. Storage and compute are charged after the
+  work and never refused, so it can go below zero.
+- `granted` is everything granted so far, or null.
+- `grace`, when set, is how far below zero the workspace may spend. The gate's
+  `available()`, which TulipFarm refuses new work on, is then `available +
+  grace`; once that reaches zero, model calls, agent runs and sandboxes stop.
+
+The credit summary (`GET /v1/workspaces/:id/credits`) and the Usage report's
+`balance` return the same three values in credits. The web app shows every
+member a banner when 10% or less of the granted credits are left, when the
+workspace is spending grace credits, and when work has stopped. With a
+`balance()`, the worker's `credit-alerts` job also emails workspace admins once
+at each of those three crossings, and again after a top-up lifts the balance
+back above a level.
 
 ### Resource metering
 
@@ -193,8 +234,11 @@ interface ResourceMeter {
 }
 ```
 
-Prices are provider cost in pico-USD; the `creditPricing` rate converts them,
-without `round`, so a small daily charge is not rounded up to a whole credit.
+Prices are provider cost in pico-USD. The `creditPricing` storage rate converts
+storage and its compute rate converts run steps, without `round`, so a small
+daily charge is not rounded up to a whole credit. Sandbox compute arrives
+already priced; an extension can convert its provider cost with
+`creditRates().compute`.
 
 - **Storage**, once per UTC day for each workspace: database bytes (its tables,
   indexes and TOAST), object bytes under its key prefix in the files, soul and
@@ -210,7 +254,8 @@ without `round`, so a small daily charge is not rounded up to a whole credit.
 Every charge has a fixed id, so a retry or a second worker charges it once.
 Charges are `storage` and `compute` activities with their own flows, and are
 never refused: the work already happened, so a gate's balance may go below
-zero. While `available()` is zero or less, new model calls, workflow steps and
+zero (see [Credit balance and grace](#credit-balance-and-grace)). While
+`available()` is zero or less, new model calls, workflow steps and
 hosted MCP servers wait or fail until the workspace adds credits.
 
 Feature flags are declared once in `@tulipfarm/config/feature-flags` with a

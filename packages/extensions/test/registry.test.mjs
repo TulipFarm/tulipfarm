@@ -6,6 +6,7 @@ import {
   configuredExecutionBackend,
   creditGate,
   creditPricing,
+  creditRates,
   creditUnitsForProviderCost,
   defineExtension,
   emitHook,
@@ -470,6 +471,38 @@ test('credit pricing defaults to provider cost and is a single slot', async () =
         context,
       ),
       /positive bigint unitsPerPicoUsd/,
+    );
+  assert.equal(creditPricing(), providerCostPricing);
+});
+
+test('credit rates default from the models rate and validate each optional rate', async () => {
+  assert.deepEqual(creditRates(), { models: 100n, plan: 0n, compute: 100n, storage: 100n });
+  const register = pricing =>
+    registerExtension(
+      {
+        name: 'rates',
+        register(slots) {
+          slots.creditPricing(pricing);
+        },
+      },
+      context,
+    );
+  await register({ unitsPerPicoUsd: 150n, computeUnitsPerPicoUsd: 120n, round: x => x });
+  assert.deepEqual(creditRates(), { models: 150n, plan: 0n, compute: 120n, storage: 150n });
+  resetExtensions();
+  await register({ unitsPerPicoUsd: 150n, planUnitsPerPicoUsd: 0n, storageUnitsPerPicoUsd: 90n, round: x => x });
+  assert.deepEqual(creditRates(), { models: 150n, plan: 0n, compute: 150n, storage: 90n });
+  resetExtensions();
+  for (const bad of [
+    { planUnitsPerPicoUsd: -1n },
+    { planUnitsPerPicoUsd: 10 },
+    { computeUnitsPerPicoUsd: 0n },
+    { storageUnitsPerPicoUsd: 0n },
+    { storageUnitsPerPicoUsd: 5 },
+  ])
+    await assert.rejects(
+      register({ unitsPerPicoUsd: 100n, round: x => x, ...bad }),
+      /non-negative bigint planUnitsPerPicoUsd and positive bigint compute and storage rates/,
     );
   assert.equal(creditPricing(), providerCostPricing);
 });

@@ -26,7 +26,7 @@ import {
   requireResultSources,
 } from '@tulipfarm/conversations/source-access';
 import { turnRequester } from '@tulipfarm/conversations/turn-requester';
-import { recordUsage } from '@tulipfarm/extensions';
+import { creditPricing, creditRates, recordUsage } from '@tulipfarm/extensions';
 import { billingSource, errorSite, log, observeChatDetail } from '@tulipfarm/observability';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
 import {
@@ -57,8 +57,17 @@ type Call = {
   pricingRevision: string;
   /** The call's worst-case charge in credit units: what its own reservation held before. */
   worst: bigint;
+  /** For a call on a member's plan: the listed model's rates that value it, or null when no catalog model lists it. */
+  listed: ListedModel | null;
+  /** The call's worst-case plan fee in credit units, unrounded; 0 when no plan fee applies. */
+  worstFee: bigint;
   started: number;
-  usage?: { providerPicoUsd: string; tokens: Parameters<typeof usageTokenCounts>[0] };
+  usage?: {
+    providerPicoUsd: string;
+    tokens: Parameters<typeof usageTokenCounts>[0];
+    /** A plan call's value at the listed model's rates, or null when it can't be worked out. */
+    listPicoUsd: string | null;
+  };
   /** The provider refused the request before generating anything, so the call costs nothing. */
   rejected?: boolean;
   milliseconds?: number;
@@ -71,6 +80,9 @@ export type PlanSource = () => {
   switched: { from: string; failure: PlanFailure } | null;
 };
 type Hold = { id: string; held: bigint; calls: Call[] };
+type ListedModel = NonNullable<ReturnType<typeof planListModel>>;
+/** A call's worst case: its provider cost, which a plan admission checks, and its charge in credit units, plan fee included. */
+type Worst = { cost: bigint; units: bigint; fee: bigint };
 type Plan = { attemptId: string; remainingUnits: bigint; remainingMilliseconds: number };
 
 /** Renews the reply's lease while model calls run. Each renewal is one short transaction. */
@@ -98,25 +110,59 @@ function promptBound(attempt: Pick<Parameters<ToolModelMeter>[0], 'inputBytes' |
   return Math.min(bytes, previous.inputTokens + added + followUpSlackTokens);
 }
 const units = (providerPicoUsd: string) => creditUnitsForProviderCost(BigInt(providerPicoUsd));
-/** A call's worst-case provider cost, as its own reservation quoted it. */
-const quote = (model: ConversationModel, maxInputTokens: number, maxOutputTokens: number) =>
+/** A call's worst-case provider cost at `rates`, its model's own unless given, as its own reservation quoted it. */
+const quote = (
+  model: ConversationModel,
+  maxInputTokens: number,
+  maxOutputTokens: number,
+  rates: ConversationModel['price']['rates'] = model.price.rates,
+) =>
   BigInt(
     reserveModelCost({
       modelId: model.price.modelId,
       pricingRevision: model.price.pricingRevision,
-      rates: model.price.rates,
+      rates,
       maxInputTokens,
       maxOutputTokens,
       date: new Date().toISOString().slice(0, 10),
     }),
   );
-/** A call's worst case for an estimated request size, within the model's limits. */
-const estimate = (model: ConversationModel, inputBytes: number, maxOutputTokens = model.price.maxOutputTokens) =>
-  quote(
-    model,
-    Math.min(inputBytes + 4096, model.price.maxInputTokens),
-    Math.min(maxOutputTokens, model.price.maxOutputTokens),
-  );
+/** A plan call's value at the listed model's rates, or null when it can't be worked out. */
+export function listCost(
+  call: Pick<Call, 'modelId' | 'pricingRevision'>,
+  listed: ListedModel,
+  tokens: Parameters<typeof usageTokenCounts>[0],
+) {
+  try {
+    const cost = calculateUsageCost({
+      modelId: call.modelId,
+      pricingRevision: call.pricingRevision,
+      rates: listed.rates,
+      maxInputTokens: Number.MAX_SAFE_INTEGER,
+      maxOutputTokens: Number.MAX_SAFE_INTEGER,
+      usage: { kind: 'known', tokens },
+      date: new Date().toISOString().slice(0, 10),
+    });
+    return cost.kind === 'known' ? cost.providerPicoUsd : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A plan call's fee in credit units, unrounded: `planRate` on its list value, never above its worst case. Nothing when
+ * refused or when its list value can't be worked out, the whole worst case while usage is unknown.
+ */
+export function planFee(
+  call: Pick<Call, 'worstFee' | 'rejected'> & { usage?: Pick<NonNullable<Call['usage']>, 'listPicoUsd'> },
+  planRate: bigint,
+) {
+  if (!call.worstFee || call.rejected) return 0n;
+  if (!call.usage) return call.worstFee;
+  if (call.usage.listPicoUsd === null) return 0n;
+  const value = planRate * BigInt(call.usage.listPicoUsd);
+  return value < call.worstFee ? value : call.worstFee;
+}
 
 /**
  * One reply's database work. The start transaction reads what every round reuses (requester, Slack destinations,
@@ -155,9 +201,30 @@ export async function beginReplySession(input: {
 }) {
   const { runtime, fence, chat, externalContext } = input;
   const chatId = (step: number) => `chat:${fence.turnId}:${fence.generation}:${fence.epoch}:${step}`;
+  const planRate = creditRates().plan;
+  const listedModels = new Map<ConversationModel, ListedModel | null>();
+  /** The listed model that values a call on a member's plan, or null for a call paid with credits or none listed. */
+  const listedFor = (model: ConversationModel) => {
+    if (!isPlanProvider(model.route.provider)) return null;
+    if (!listedModels.has(model)) listedModels.set(model, planListModel(model.route.model));
+    return listedModels.get(model)!;
+  };
+  /**
+   * A call's worst case. A call on a member's plan costs no provider credits, but is charged the plan rate on its value
+   * at the listed model's rates; with a zero rate, or no listed model, it is free.
+   */
+  const worstCase = (model: ConversationModel, maxInputTokens: number, maxOutputTokens: number): Worst => {
+    const cost = quote(model, maxInputTokens, maxOutputTokens);
+    const listed = planRate > 0n ? listedFor(model) : null;
+    const fee = listed ? planRate * quote(model, maxInputTokens, maxOutputTokens, listed.rates) : 0n;
+    return { cost, units: units(cost.toString()) + creditPricing().round(fee), fee };
+  };
+  /** A call's worst case for an estimated request size, within the model's limits. */
+  const estimate = (model: ConversationModel, inputBytes: number) =>
+    worstCase(model, Math.min(inputBytes + 4096, model.price.maxInputTokens), model.price.maxOutputTokens);
   // A greeting makes a reply call and a completion check; its title is billed separately after delivery. Longer replies
   // top up or roll the hold.
-  const preferred = (bytes: number) => 2n * units(estimate(chat, bytes + holdSlackBytes).toString());
+  const preferred = (bytes: number) => 2n * estimate(chat, bytes + holdSlackBytes).units;
   // Every request carries a 4096-token allowance, so a balance below this cannot pay for any first call.
   const minimum = estimate(chat, 0);
   const withCatalog = Boolean(input.mcp) && !externalContext;
@@ -190,9 +257,14 @@ export async function beginReplySession(input: {
 
   const contextSources = () => mergeSources([...catalogSources, ...inventorySources]);
   const keyOf = (sources: readonly SourceDependency[]) => canonicalJson(mergeSources([...sources]));
+  const fee = (call: Call) => planFee(call, planRate);
   /** An upper bound on a call's charge: its known cost, nothing when refused, or its whole reservation while usage is unknown. */
   const charge = (call: Call) =>
-    (call.usage ? units(call.usage.providerPicoUsd) : call.rejected ? 0n : call.worst) + 1n;
+    (call.usage
+      ? units(call.usage.providerPicoUsd) + creditPricing().round(fee(call))
+      : call.rejected
+        ? 0n
+        : call.worst) + 1n;
   const consumed = () => (hold?.calls ?? []).reduce((total, call) => total + charge(call), 0n);
   const unflushed = () =>
     [...settledCalls, ...(hold?.calls ?? [])].reduce((total, call) => total + (call.milliseconds ?? 0), 0) -
@@ -279,7 +351,11 @@ export async function beginReplySession(input: {
         id: call.id,
         modelId: call.modelId,
         pricingRevision: call.pricingRevision,
-        providerPicoUsd: call.usage?.providerPicoUsd ?? (call.rejected ? '0' : providerCostAtUnits(call.worst)),
+        // An unknown plan call is charged its worst-case fee, so its unknown provider cost is the plan's, nothing.
+        providerPicoUsd:
+          call.usage?.providerPicoUsd ??
+          (call.rejected ? '0' : providerCostAtUnits(call.worst - creditPricing().round(call.worstFee))),
+        feeUnits: fee(call),
         planMilliseconds: plan && call.milliseconds !== undefined ? Math.ceil(call.milliseconds) : null,
       })),
       () => {
@@ -329,25 +405,9 @@ export async function beginReplySession(input: {
     let modelId = call.modelId;
     let listPicoUsd: string | null = usage.providerPicoUsd;
     if (call.source.paidBy === 'plan') {
-      const listed = planListModel(call.source.providerModel);
-      listPicoUsd = null;
-      if (listed) {
-        modelId = listed.modelId;
-        try {
-          const cost = calculateUsageCost({
-            modelId: call.modelId,
-            pricingRevision: call.pricingRevision,
-            rates: listed.rates,
-            maxInputTokens: Number.MAX_SAFE_INTEGER,
-            maxOutputTokens: Number.MAX_SAFE_INTEGER,
-            usage: { kind: 'known', tokens: usage.tokens },
-            date: new Date().toISOString().slice(0, 10),
-          });
-          if (cost.kind === 'known') listPicoUsd = cost.providerPicoUsd;
-        } catch {
-          // A plan call whose list price can't be worked out shows no plan value.
-        }
-      }
+      // A plan call whose list price can't be worked out shows no plan value.
+      listPicoUsd = usage.listPicoUsd;
+      if (call.listed) modelId = call.listed.modelId;
     }
     return {
       id: call.id,
@@ -408,9 +468,9 @@ export async function beginReplySession(input: {
    * Opens the hold that funds the reply from `step`, admitting the plan as that call's reservation did. Its id is
    * the call's id, so the call reuses its row. Throws {@link CreditsExhausted} before the model is called.
    */
-  async function openHold(tx: Tx, step: number, model: ConversationModel, needCost: bigint, bytes: number) {
-    const need = units(needCost.toString());
-    const nextPlan = await coordinatorReplyBudget(tx, fence, needCost);
+  async function openHold(tx: Tx, step: number, model: ConversationModel, need: Worst, bytes: number) {
+    // The plan admission prices provider cost; a plan fee is checked against its remaining credits in `reserve`.
+    const nextPlan = await coordinatorReplyBudget(tx, fence, need.cost);
     let wanted = preferred(bytes);
     if (nextPlan && nextPlan.remainingUnits < wanted) wanted = nextPlan.remainingUnits;
     // A hold that funded no call keeps its row, so the next hold for the same call needs its own id.
@@ -421,7 +481,7 @@ export async function beginReplySession(input: {
       modelId: model.price.modelId,
       activity: 'chat',
       pricingRevision: model.price.pricingRevision,
-      minimum: need,
+      minimum: need.units,
       preferred: wanted,
       planAttemptId: nextPlan?.attemptId ?? null,
     });
@@ -509,7 +569,7 @@ export async function beginReplySession(input: {
   if (lease.lost !== undefined) throw lease.lost;
 
   /** Funds a call the hold cannot: settles what the hold paid for and opens the next hold, in one transaction. */
-  async function topUp(step: number, model: ConversationModel, needCost: bigint, bytes: number) {
+  async function topUp(step: number, model: ConversationModel, need: Worst, bytes: number) {
     const startedAt = Date.now();
     const result = await observeChatDetail('credit-top-up', () =>
       runtime.transaction(fence.workspaceId, commonCompatibility, async tx => {
@@ -517,7 +577,7 @@ export async function beginReplySession(input: {
         await renewConversationReplyLease(tx, fence);
         const flushed = await flushPlanTime(tx);
         await settleHold(tx, hold);
-        return { opened: await openHold(tx, step, model, needCost, bytes), flushed };
+        return { opened: await openHold(tx, step, model, need, bytes), flushed };
       }),
     );
     lease.renewed(startedAt);
@@ -542,13 +602,14 @@ export async function beginReplySession(input: {
     // Image data is left out of the bytes and bounded by the model's image token limit instead.
     const inputBound = attempt.inputBytes + attempt.imageInputTokens;
     const maxInputTokens = Math.min(promptBound(attempt), model.price.maxInputTokens);
-    const needCost = quote(model, maxInputTokens, attempt.maxOutputTokens);
-    const need = units(needCost.toString());
+    const worst = worstCase(model, maxInputTokens, attempt.maxOutputTokens);
+    const needCost = worst.cost;
+    const need = worst.units;
     const overPlan =
       plan !== null && (plan.remainingUnits < consumed() + need || plan.remainingMilliseconds <= unflushed());
-    // A call on a member's own plan costs no credits, so any open hold funds it.
+    // A call on a member's own plan with no plan fee costs no credits, so any open hold funds it.
     const short = need > 0n && hold !== undefined && hold.held - consumed() < need + 1n;
-    if (!hold || short || overPlan) await topUp(attempt.step, model, needCost, inputBound);
+    if (!hold || short || overPlan) await topUp(attempt.step, model, worst, inputBound);
     const stepId = chatId(attempt.step);
     // The first call of a hold opened for its step settles into the hold's own row, which may carry a suffix.
     const ownsHold = !hold!.calls.length && (hold!.id === stepId || hold!.id.startsWith(`${stepId}:`));
@@ -557,6 +618,8 @@ export async function beginReplySession(input: {
       modelId: model.price.modelId,
       pricingRevision: model.price.pricingRevision,
       worst: need,
+      listed: listedFor(model),
+      worstFee: worst.fee,
       started: performance.now(),
       source: callSource(model, attempt),
     };
@@ -588,8 +651,12 @@ export async function beginReplySession(input: {
         attempt,
       );
       if (cost.kind === 'known') {
-        call.usage = { providerPicoUsd: cost.providerPicoUsd, tokens };
-        spent?.(Number(units(cost.providerPicoUsd)) / 1e12);
+        call.usage = {
+          providerPicoUsd: cost.providerPicoUsd,
+          tokens,
+          listPicoUsd: call.listed ? listCost(call, call.listed, tokens) : null,
+        };
+        spent?.(Number(units(cost.providerPicoUsd) + creditPricing().round(fee(call))) / 1e12);
       }
     };
   };

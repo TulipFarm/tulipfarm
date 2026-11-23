@@ -35,7 +35,8 @@ export type UsageQuery = z.infer<typeof usageQuerySchema>;
 
 /**
  * Measures of a group. `billedUsd` is the list price of calls paid with credits or API keys; `planValueUsd` is the list
- * price of calls a member's plan answered, which nobody is billed for.
+ * price of calls a member's plan answered, which the provider bills to the plan. `credits` includes any plan fee the
+ * deployment charges on that value.
  */
 export const usageMeasuresSchema = z.object({
   requests: z.number().nonnegative(),
@@ -68,8 +69,12 @@ export type UsageConnection = z.infer<typeof usageConnectionSchema>;
 
 export const usageReportSchema = z.object({
   viewer: z.object({ membershipId: z.string(), admin: z.boolean() }),
-  /** Workspace credits; null when credits are unlimited. */
-  balance: z.object({ available: z.number().nullable(), granted: z.number().nullable() }),
+  /** Workspace credits; null when credits are unlimited. `grace` is how far below zero it may spend, null without grace. */
+  balance: z.object({
+    available: z.number().nullable(),
+    granted: z.number().nullable(),
+    grace: z.number().nonnegative().nullable().optional(),
+  }),
   /** Grouped rows: `keys` holds one value per group level. */
   rows: z.array(usageMeasuresSchema.extend({ keys: z.array(z.string()) })),
   /** Each day by the first group level, for the chart over time. */

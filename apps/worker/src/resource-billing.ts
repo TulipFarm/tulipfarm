@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { Context } from '@temporalio/activity';
 import { Runtime } from '@temporalio/worker';
-import { creditGate, creditPricing, resourceMeter, type ResourceMeter } from '@tulipfarm/extensions';
+import { creditGate, creditRates, resourceMeter, type ResourceMeter } from '@tulipfarm/extensions';
 import { errorAttributes } from '@tulipfarm/observability';
 import { objectStorageClient } from '@tulipfarm/workspaces/object-storage';
 import {
@@ -180,7 +180,7 @@ export function createResourceBilling(options: {
      * does not stop the others; the run then throws.
      */
     async meterCompute(signal: AbortSignal, now = Date.now()) {
-      const unitsPerPicoUsd = creditPricing().unitsPerPicoUsd;
+      const unitsPerPicoUsd = creditRates().compute;
       const failures: unknown[] = [];
       for await (const workspaceId of workspaces()) {
         signal.throwIfAborted();
@@ -252,7 +252,7 @@ export function createResourceBilling(options: {
         const needs = (source: StorageSource) => [...pending.values()].some(missing => missing.includes(source));
         const objects = needs('objects') ? await unread(() => objectBytes(new Set(pending.keys()), signal)) : undefined;
         const releases = needs('apps') ? await unread(() => heldReleases(signal)) : undefined;
-        const unitsPerPicoUsd = creditPricing().unitsPerPicoUsd;
+        const unitsPerPicoUsd = creditRates().storage;
         const { databasePicoUsdPerGibMonth: database, objectPicoUsdPerGibMonth: object } = meter.pricing;
         for (const [workspaceId, missing] of pending) {
           signal.throwIfAborted();

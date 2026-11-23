@@ -10,7 +10,7 @@ import {
 import webExtensions from 'virtual:tulipfarm-web-extensions';
 
 /** A workspace credit balance; `null` means the deployment does not meter that value. */
-export type CreditBalance = { available: number | null; granted: number | null };
+export type CreditBalance = { available: number | null; granted: number | null; grace?: number | null };
 export type SidebarCreditsProps = { workspaceId: string; slug: string };
 
 export const creditsAreUnlimited = (balance: CreditBalance) => balance.available === null || balance.granted === null;

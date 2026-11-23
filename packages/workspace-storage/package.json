@@ -31,6 +31,10 @@
       "types": "./dist/credits-contracts.d.ts",
       "default": "./dist/credits-contracts.js"
     },
+    "./credit-alerts": {
+      "types": "./dist/credit-alerts.d.ts",
+      "default": "./dist/credit-alerts.js"
+    },
     "./resource-credits": {
       "types": "./dist/resource-credits.d.ts",
       "default": "./dist/resource-credits.js"

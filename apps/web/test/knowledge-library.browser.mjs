@@ -97,6 +97,7 @@ async function environment(t, { entries = [], enabled = true, otherMember = fals
       });
     else if (new Map(workspaceShellReads(workspace.id)).has(path))
       response = answer(new Map(workspaceShellReads(workspace.id)).get(path));
+    else if (path === `${base}/credits`) response = answer({ available: null, granted: null, grace: null });
     else if (path === `${base}/conversations/pinned`) response = answer({ chats: [] });
     else if (path === `${base}/conversations`) response = answer({ chats: [], nextCursor: null });
     else if (path === `${base}/agents/recent`) response = answer([]);
