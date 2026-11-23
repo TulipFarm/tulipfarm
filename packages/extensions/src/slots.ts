@@ -56,7 +56,8 @@ export type CreditGate = {
   debit(tx: CreditTransaction, units: bigint, entry: CreditEntry): Promise<void>;
   /**
    * Optional. Creates the gate's per-workspace state while TulipFarm provisions a workspace, in the provisioning
-   * transaction, as the workspace schema owner. Provisioning retries, so it must be idempotent.
+   * transaction, as the workspace schema owner. Workspace rollout calls it again for every ready workspace, in that
+   * workspace's rollout transaction, to backfill and upgrade existing workspaces, so it must be idempotent.
    */
   provision?(tx: CreditTransaction): Promise<void>;
   /**

@@ -6,6 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { isDeepStrictEqual } from 'node:util';
 import { Client, escapeIdentifier } from 'pg';
 import { z } from 'zod';
+import { creditGate } from '@tulipfarm/extensions';
 import { qualified, workspaceNames } from './names.ts';
 import { inTransaction, type SqlClient } from './transactions.ts';
 
@@ -300,13 +301,18 @@ export async function rolloutCommonMigrations(options: {
                   [target, workspaceId],
                 );
               try {
-                if (await commonMigrationsCurrent(client, workspaceId, options.migrations)) await applied(client);
+                const gate = creditGate();
+                const current = await commonMigrationsCurrent(client, workspaceId, options.migrations);
+                if (current && !gate.provision) await applied(client);
                 else
                   await retryLockWaits(() =>
                     inTransaction(
                       client,
                       async transaction => {
-                        await applyCommonMigrations(transaction, workspaceId, options.migrations);
+                        if (current) await lockWorkspaceMigration(transaction, workspaceId);
+                        else await applyCommonMigrations(transaction, workspaceId, options.migrations);
+                        // Workspaces provisioned before the gate was registered, or by an older gate, get its state.
+                        await gate.provision?.({ client: transaction, schema: workspaceNames(workspaceId).schema });
                         await applied(transaction);
                       },
                       rolloutTransactionSettings,
