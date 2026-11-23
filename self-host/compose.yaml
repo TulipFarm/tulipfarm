@@ -291,6 +291,7 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_PASSWORD_FILE: ${SMTP_PASSWORD_FILE:-}
       SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-}
+      SUPPORT_EMAIL: ${TULIPFARM_SUPPORT_EMAIL:-}
 
   storage-worker:
     <<: *runtime

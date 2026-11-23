@@ -60,7 +60,7 @@ function select(message: EmailMessage) {
         ),
       };
     case 'credit-alert': {
-      const { level, workspaceName, available, granted, grace, url } = message.props;
+      const { level, workspaceName, available, granted, grace, url, supportEmail } = message.props;
       return {
         subject: creditAlertSubject(message.props),
         element: (
@@ -71,6 +71,7 @@ function select(message: EmailMessage) {
             granted={granted}
             grace={grace}
             url={url}
+            supportEmail={supportEmail ?? null}
           />
         ),
       };

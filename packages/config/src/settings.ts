@@ -308,7 +308,8 @@ export const settings: readonly Setting[] = [
     usedBy: 'web build',
     requirement: 'optional',
     secret: false,
-    description: 'Support address on the Help page (web `VITE_SUPPORT_EMAIL`). Unset hides the contact section.',
+    description:
+      'Support address on the Help page (web `VITE_SUPPORT_EMAIL`) and for adding credits (worker `SUPPORT_EMAIL`). Unset hides the contact section.',
     selfHost: { section: 'optional', example: 'support@example.com', commented: true },
   },
   {
@@ -1364,6 +1365,15 @@ export const settings: readonly Setting[] = [
     requirementNote: 'With SMTP',
     description: 'SMTP server host name.',
     selfHost: { section: 'sign-in', example: 'smtp.example.com', commented: true },
+  },
+  {
+    name: 'SUPPORT_EMAIL',
+    group: 'Email',
+    services: ['worker'],
+    requirement: 'optional',
+    secret: false,
+    description:
+      'Address that credit alert emails tell admins to write to for more credits. Unset links to Settings → Usage instead. Self-host: `TULIPFARM_SUPPORT_EMAIL`.',
   },
   {
     name: 'SMTP_PORT',

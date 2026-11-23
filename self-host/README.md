@@ -219,7 +219,8 @@ is offered; keep the SMTP password only on the worker.
 The web image is built by Compose and calls the API on the same origin, so it needs
 no API URL of its own. One optional build setting in `self-host/.env` changes it:
 `TULIPFARM_SUPPORT_EMAIL` shows a support address on the Help page. Unset hides
-the contact section.
+the contact section. When a credit extension reports balances, the low-credit
+banner and alert emails also tell admins to write to it for more credits.
 
 Rebuild the web image after changing it: `docker compose up -d --build web`.
 

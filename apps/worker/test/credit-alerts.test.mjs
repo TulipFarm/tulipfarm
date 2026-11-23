@@ -61,7 +61,7 @@ function alerts(send = async () => {}) {
     discover: async after => (after ? [] : [workspaceId]),
     profiles: { read: async (_workspaceId, ids) => ids.map(id => ({ id, email: `${id}@example.com` })) },
     workspace: async () => ({ slug: 'acme', name: 'Acme' }),
-    env: { WEB_ORIGIN: 'https://app.example.com' },
+    env: { WEB_ORIGIN: 'https://app.example.com', SUPPORT_EMAIL: 'help@example.com' },
     send: async (to, message) => {
       await send(to, message);
       sent.push([to, message.subject, message.text]);
@@ -87,6 +87,7 @@ test('admins are emailed once per crossing, again after a top-up, and only the h
   assert.equal(to, `${admin}@example.com`);
   assert.match(text, /10 credits/);
   assert.match(text, /https:\/\/app\.example\.com\/acme\/settings\/usage/);
+  assert.match(text, /To add credits, email help@example\.com/);
 
   account.available = -1n * credit;
   await run();

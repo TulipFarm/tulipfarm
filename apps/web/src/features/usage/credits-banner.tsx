@@ -4,6 +4,7 @@ import { NoticeBanner } from '@tulipfarm/sprout/notice-banner';
 import { useOwnMembership } from '@/features/governance/queries';
 import { creditLevel, useCreditBalance } from '@/lib/credit-balance';
 
+const supportEmail = import.meta.env.VITE_SUPPORT_EMAIL;
 const amount = (value: number) => value.toLocaleString(undefined, { maximumFractionDigits: 1 });
 const plural = (value: number) => `${amount(value)} ${value === 1 ? 'credit' : 'credits'}`;
 
@@ -17,17 +18,18 @@ export function CreditsBanner({ workspaceId, slug }: { workspaceId: string; slug
   if (level === 'unlimited' || level === 'ok' || data.available === null) return null;
   const admin = membership.state.kind === 'ready' && membership.state.data.role === 'admin';
   const ask = 'Ask a workspace admin to add credits.';
+  const add = supportEmail ? 'Contact us to add credits' : 'Add credits';
   const [headline, detail] =
     level === 'low'
-      ? [`${plural(data.available)} left.`, admin ? 'Add credits to keep work running.' : ask]
+      ? [`${plural(data.available)} left.`, admin ? `${add} to keep work running.` : ask]
       : level === 'grace'
         ? [
             'Out of credits.',
-            `Work continues on grace credits, ${amount(data.available + (data.grace ?? 0))} left. ${admin ? 'Add credits before they run out.' : ask}`,
+            `Work continues on grace credits, ${amount(data.available + (data.grace ?? 0))} left. ${admin ? `${add} before they run out.` : ask}`,
           ]
         : [
             'Work is paused: out of credits.',
-            `Model calls, agent runs and sandboxes are paused until credits are added. ${admin ? '' : ask}`.trim(),
+            `Model calls, agent runs and sandboxes are paused until credits are added. ${admin ? (supportEmail ? `${add}.` : '') : ask}`.trim(),
           ];
   return (
     <NoticeBanner
@@ -39,9 +41,15 @@ export function CreditsBanner({ workspaceId, slug }: { workspaceId: string; slug
             variant={level === 'low' ? 'outline' : 'default'}
             size="sm"
             nativeButton={false}
-            render={<Link to="/$workspaceSlug/settings/usage" params={{ workspaceSlug: slug }} />}
+            render={
+              supportEmail ? (
+                <a href={`mailto:${supportEmail}?subject=${encodeURIComponent(`Add credits: ${slug}`)}`} />
+              ) : (
+                <Link to="/$workspaceSlug/settings/usage" params={{ workspaceSlug: slug }} />
+              )
+            }
           >
-            Add credits
+            {add}
           </Button>
         )
       }
