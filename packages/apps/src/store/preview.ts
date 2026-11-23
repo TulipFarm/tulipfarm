@@ -11,8 +11,7 @@ import { failed, rows, table, type AppResult, type AppTransaction, type SqlClien
 export const previewTicketSeconds = 60;
 export const previewSessionSeconds = 12 * 60 * 60;
 
-/** The random label of an app's preview host, as `createApp` makes it. */
-export const previewKeyPattern = /^[a-z2-7]{26}$/;
+export { previewKeyPattern } from '../names.ts';
 
 export type PreviewHost = { readonly previewKey: string; readonly workspaceId: string; readonly appId: AppId };
 

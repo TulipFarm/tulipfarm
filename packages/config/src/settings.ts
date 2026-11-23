@@ -428,7 +428,7 @@ export const settings: readonly Setting[] = [
     secret: false,
     default: 'direct',
     description:
-      '`direct`, `reverse-proxy` (one load balancer), or `cloudfront` (CloudFront, then a load balancer): which forwarded hops the gateway trusts for the client address.',
+      '`direct`, `reverse-proxy` (one proxy, such as a load balancer or a Cloudflare Tunnel connector), or `cloudfront` (CloudFront, then a load balancer): which forwarded hops the gateway trusts for the client address.',
   },
   {
     name: 'GATEWAY_PREVIEW_PROXY_MODE',
@@ -495,7 +495,7 @@ export const settings: readonly Setting[] = [
     requirement: 'optional',
     secret: false,
     description:
-      'Domain that serves published apps as subdomains; point a wildcard record at the API. It must differ from the web app domain. Unset leaves apps unpublished unless an extension serves them. The gateway answers apps that run a server on it.',
+      'Domain that serves published apps as subdomains. It must differ from the web app domain. Unset leaves apps unpublished unless an extension serves them. Point a wildcard record at the gateway, which answers apps that run a server and, from the apps bucket, apps that build files. The API also answers apps that build files.',
   },
   {
     name: 'WEB_ORIGIN',
@@ -875,7 +875,7 @@ export const settings: readonly Setting[] = [
     requirement: 'optional',
     secret: false,
     description:
-      'Parent domain for draft builds, served at <app host key>.<domain> by the gateway. Point the wildcard record at the gateway. The gateway requires it, and the API uses it for the links that open draft builds.',
+      'Parent domain for draft builds, served at <app host key>.<domain> by the gateway. Set it to `TULIPFARM_APP_SITES_DOMAIN` to serve drafts at pv-<app host key>.<domain> instead, so one wildcard record and certificate cover drafts and published apps. Point the wildcard record at the gateway. The gateway requires it, and the API uses it for the links that open draft builds.',
   },
   {
     name: 'R2_ENDPOINT',

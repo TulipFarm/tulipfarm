@@ -51,7 +51,7 @@ import { protectExpectedSession } from './authenticated-routes.ts';
 import { registerApps } from './apps.ts';
 import { appHostingFromEnvironment, temporalAppWorkflows } from './apps-hosting.ts';
 import { routeAppSites } from './apps-sites.ts';
-import { appBuilders } from '@tulipfarm/apps';
+import { appBuilders, previewHosts } from '@tulipfarm/apps';
 import { appKeyRoot, requestHandleKey } from '@tulipfarm/apps/store';
 import { appBuilder, appHost } from '@tulipfarm/extensions';
 import type { Pool } from 'pg';
@@ -77,7 +77,8 @@ export function buildApp(
   const appHosting = appHostingFromEnvironment(process.env, () => appPlatform);
   if (appHosting?.sites) routeAppSites(app, appHosting.sites);
   // The gateway serves draft builds; the API only issues the tickets that open them.
-  const previewDomain = appHosting && process.env.TULIPFARM_APP_PREVIEW_DOMAIN?.toLowerCase();
+  const previewDomain = appHosting && process.env.TULIPFARM_APP_PREVIEW_DOMAIN?.trim();
+  const preview = previewDomain ? previewHosts(previewDomain, process.env.TULIPFARM_APP_SITES_DOMAIN) : undefined;
   registerObservability(app);
   registerSecurity(app, authConfig().webOrigin);
   const temporal = createTemporalClient();
@@ -142,8 +143,8 @@ export function buildApp(
             builders: () => appBuilders(appBuilder(), appHost()),
             sitesDomain: appHosting?.domain ?? null,
           });
-          if (previewDomain)
-            registerPreviewTickets(business, auth.auth, { pool: auth.pool, runtime: storage }, previewDomain, start);
+          if (preview)
+            registerPreviewTickets(business, auth.auth, { pool: auth.pool, runtime: storage }, preview, start);
         }
         registerFeatureFlags(
           business,

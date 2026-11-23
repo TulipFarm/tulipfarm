@@ -10,8 +10,8 @@ import Fastify, {
 } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import { z } from 'zod';
+import { previewKeyOf as previewKeyOfHost } from '@tulipfarm/apps';
 import {
-  previewKeyPattern,
   previewSessionSeconds,
   type AppResult,
   type DraftServer,
@@ -34,8 +34,10 @@ const expiredMessage = 'preview-expired';
 
 /** What the gateway reads. Every call is made per request, so a revoked grant blocks the next one. */
 export type PreviewGatewayDependencies = {
-  /** Parent domain of preview hosts: `<previewKey>.<domain>`. */
+  /** Parent domain of preview hosts: `<prefix><previewKey>.<domain>`. */
   readonly domain: string;
+  /** Set when previews share the public apps domain, such as `pv-`; empty by default. */
+  readonly prefix?: string;
   /** The only origin allowed to frame a preview and to receive its messages. */
   readonly shellOrigin: string;
   readonly redeem: (previewKey: string, ticket: string) => Promise<{ readonly token: string } | null>;
@@ -59,11 +61,8 @@ export type PreviewGatewayDependencies = {
  * Returns the preview key of a preview host, null for any other name under the preview domain, and undefined for a
  * host the gateway does not own.
  */
-export function previewKeyOf(host: string | undefined, domain: string): string | null | undefined {
-  const name = host?.toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '');
-  if (!name?.endsWith(`.${domain}`)) return undefined;
-  const key = name.slice(0, -domain.length - 1);
-  return previewKeyPattern.test(key) ? key : null;
+export function previewKeyOf(host: string | undefined, domain: string, prefix = ''): string | null | undefined {
+  return previewKeyOfHost(host, { domain, prefix });
 }
 
 const manifestSchema = z.array(
@@ -203,6 +202,7 @@ function timeout<T>(work: Promise<T>, ms: number): Promise<T> {
  */
 export function buildPreviewGateway(dependencies: PreviewGatewayDependencies, serverOptions: FastifyServerOptions) {
   const { domain, shellOrigin } = dependencies;
+  const prefix = dependencies.prefix ?? '';
   const recheckMs = dependencies.recheckMs ?? 15_000;
   const checkTimeoutMs = Math.min(recheckMs, 5_000);
   const gateway = Fastify({
@@ -229,9 +229,9 @@ export function buildPreviewGateway(dependencies: PreviewGatewayDependencies, se
     return files;
   }
 
-  const keyOf = (request: FastifyRequest) => previewKeyOf(request.headers.host, domain)!;
+  const keyOf = (request: FastifyRequest) => previewKeyOf(request.headers.host, domain, prefix)!;
   async function sessionOf(headers: IncomingHttpHeaders) {
-    const key = previewKeyOf(headers.host, domain);
+    const key = previewKeyOf(headers.host, domain, prefix);
     const token = cookieValue(headers.cookie, previewCookie);
     return key && token ? dependencies.session(key, token) : null;
   }
@@ -303,7 +303,7 @@ export function buildPreviewGateway(dependencies: PreviewGatewayDependencies, se
       .header('Content-Security-Policy', `frame-ancestors ${shellOrigin}`)
       .header('X-Content-Type-Options', 'nosniff')
       .header('Referrer-Policy', 'no-referrer');
-    if (!previewKeyOf(request.headers.host, domain))
+    if (!previewKeyOf(request.headers.host, domain, prefix))
       return page(reply, shellOrigin, 404, 'There is no draft at this address');
     if (request.headers['service-worker'] === 'script')
       return page(reply, shellOrigin, 403, 'Drafts cannot install service workers');
@@ -456,9 +456,9 @@ export type PreviewGateway = ReturnType<typeof buildPreviewGateway>;
  * Hands every request for a preview host to the gateway before the host server's routes see it. Requests for other
  * hosts reach the host server unchanged.
  */
-export function routePreviewHosts(app: FastifyInstance, gateway: FastifyInstance, domain: string) {
+export function routePreviewHosts(app: FastifyInstance, gateway: FastifyInstance, domain: string, prefix = '') {
   app.addHook('onRequest', async (request, reply) => {
-    if (previewKeyOf(request.headers.host, domain) === undefined) return;
+    if (previewKeyOf(request.headers.host, domain, prefix) === undefined) return;
     reply.hijack();
     gateway.routing(request.raw, reply.raw);
     return reply;

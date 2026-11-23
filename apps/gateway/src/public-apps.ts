@@ -2,8 +2,16 @@ import type { EventEmitter } from 'node:events';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import rateLimit from '@fastify/rate-limit';
-import Fastify, { LogController, type FastifyInstance, type FastifyServerOptions } from 'fastify';
+import Fastify, {
+  LogController,
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+  type FastifyServerOptions,
+} from 'fastify';
+import { Readable } from 'node:stream';
 import { appNameSchema } from '@tulipfarm/apps';
+import type { AppSiteObject } from '@tulipfarm/apps/host-header-publisher';
 import type { CurrentAppRoute } from '@tulipfarm/apps/store';
 import { AppHostUnavailableError, type AppHost } from '@tulipfarm/extensions';
 import { clientHeaders, type Client } from './forward.ts';
@@ -18,6 +26,13 @@ export type PublicAppsDependencies = {
   readonly route: (name: string) => Promise<CurrentAppRoute | null>;
   readonly enabled: (workspaceId: string) => Promise<boolean>;
   readonly host: Pick<AppHost, 'connect'>;
+  /**
+   * Reads a static app's released file; `path` is still percent-encoded. Without it static apps are left to the edge
+   * in front of the gateway, and their hosts answer 404 here.
+   */
+  readonly files?:
+    | ((releaseId: string, path: string, signal: AbortSignal) => Promise<AppSiteObject | null>)
+    | undefined;
   /** How long a request that may wake an app waits for it before the client is told it is starting. */
   readonly wakeBudgetMs?: number;
   /** How long a WebSocket may carry nothing from the app before the gateway sends the client a keepalive frame. */
@@ -34,8 +49,9 @@ export type PublicAppsDependencies = {
     | undefined;
 };
 
-/** What a public name leads to. Static apps are served by the edge, so the gateway has nothing for them. */
+/** What a public name leads to. */
 type PublicApp =
+  | { readonly kind: 'static'; readonly releaseId: string }
   | { readonly kind: 'missing' }
   | { readonly kind: 'unavailable' }
   | { readonly kind: 'server'; readonly app: ServedApp; readonly dataViews: boolean };
@@ -83,8 +99,11 @@ export function buildPublicAppsGateway(dependencies: PublicAppsDependencies, ser
   const lookups = cached<PublicApp>(lookupMs);
   const findApp = async (name: string): Promise<PublicApp> => {
     const found = await dependencies.route(name);
-    if (found?.route?.kind !== 'server' || !(await dependencies.enabled(found.workspaceId))) return { kind: 'missing' };
+    const served = found?.route?.kind === 'server' || (found?.route?.kind === 'static' && dependencies.files);
+    if (!found?.route || !served || !(await dependencies.enabled(found.workspaceId))) return { kind: 'missing' };
     if (found.route.status !== 'active') return { kind: 'unavailable' };
+    if (found.route.kind === 'static')
+      return found.route.releaseId ? { kind: 'static', releaseId: found.route.releaseId } : { kind: 'unavailable' };
     const app = { workspaceId: found.workspaceId, appId: found.appId };
     return { kind: 'server', app, dataViews: await hasDataViews(app) };
   };
@@ -127,6 +146,25 @@ export function buildPublicAppsGateway(dependencies: PublicAppsDependencies, ser
     log: error => gateway.log.error({ err: error }, 'App upgrade failed'),
   });
 
+  async function staticFile(request: FastifyRequest, reply: FastifyReply, releaseId: string) {
+    if (request.method !== 'GET' && request.method !== 'HEAD')
+      return reply.code(405).header('Allow', 'GET, HEAD').header('Cache-Control', 'no-store').send();
+    const controller = new AbortController();
+    request.raw.once('close', () => controller.abort());
+    const file = await dependencies.files!(releaseId, request.url.split('?')[0]!, controller.signal);
+    if (!file) return answer(request, reply, 'not-found', { frameAncestors: unframed });
+    reply
+      .code(200)
+      .header('Content-Type', file.contentType)
+      .header('Content-Length', String(file.bytes))
+      // Short, because a publish changes what a path serves and shared caches key on the path alone.
+      .header('Cache-Control', 'public, max-age=60')
+      .header('X-Content-Type-Options', 'nosniff');
+    if (request.method !== 'HEAD') return reply.send(Readable.from(file.body));
+    if (file.body instanceof Readable) file.body.destroy();
+    return reply.send();
+  }
+
   // Routes go in a plugin after the rate limit so its global hook reaches them.
   gateway.register(async routes => {
     routes.route({
@@ -135,6 +173,7 @@ export function buildPublicAppsGateway(dependencies: PublicAppsDependencies, ser
       exposeHeadRoute: false,
       async handler(request, reply) {
         const app = await resolve(request.headers.host);
+        if (app.kind === 'static') return staticFile(request, reply, app.releaseId);
         if (app.kind !== 'server')
           return answer(request, reply, app.kind === 'missing' ? 'not-found' : 'unavailable', {
             frameAncestors: unframed,
@@ -180,7 +219,7 @@ export function buildPublicAppsGateway(dependencies: PublicAppsDependencies, ser
       gateway.log.error({ err: error }, 'App upgrade failed');
       return rawAnswer(socket, 'unavailable');
     }
-    if (app.kind !== 'server') return rawAnswer(socket, app.kind === 'missing' ? 'not-found' : 'unavailable');
+    if (app.kind !== 'server') return rawAnswer(socket, app.kind === 'unavailable' ? 'unavailable' : 'not-found');
     const gone = () => socket.destroyed || !socket.readable;
     const opened = liveRequest(app, socket, gone);
     const handle = (await opened?.handle) ?? null;

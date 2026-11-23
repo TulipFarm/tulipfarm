@@ -6,6 +6,8 @@ import {
   appBuilders,
   appNameSchema,
   appSlugSchema,
+  previewHostOf,
+  previewHosts,
   commitSchema,
   edgeStatus,
   readAppRecipe,
@@ -27,6 +29,20 @@ test('app names are DNS labels that are not reserved and never read as punycode'
   for (const name of ['ab', 'Acme', '-acme', 'acme-', 'acme_orders', 'a'.repeat(64)])
     assert.equal(appNameSchema.safeParse(name).success, false, name);
   assert.equal(appNameSchema.parse('a'.repeat(63)), 'a'.repeat(63));
+});
+
+test('a draft host label sharing the sites domain cannot be taken as an app name', () => {
+  const key = 'a'.repeat(26);
+  assert.equal(appNameSchema.safeParse(`pv-${key}`).error?.issues[0].message, 'Reserved app name');
+  assert.equal(appNameSchema.parse('pv-orders'), 'pv-orders');
+  assert.equal(
+    previewHostOf(previewHosts('Apps.Example.test', 'apps.example.test'), key),
+    `pv-${key}.apps.example.test`,
+  );
+  assert.equal(
+    previewHostOf(previewHosts('drafts.example.test', 'apps.example.test'), key),
+    `${key}.drafts.example.test`,
+  );
 });
 
 test('app slugs are short path segments other than the new-app route', () => {

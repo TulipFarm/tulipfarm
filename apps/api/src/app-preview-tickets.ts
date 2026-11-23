@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { AppId } from '@tulipfarm/apps';
+import { previewHostOf, type AppId, type PreviewHosts } from '@tulipfarm/apps';
 import { admitPreview, issuePreviewTicket, registerPreviewHost, requestDraftHost } from '@tulipfarm/apps/store';
 import { previewEnterPath } from '@tulipfarm/gateway/preview';
 import type { PreviewStorage } from '@tulipfarm/gateway/preview-environment';
@@ -24,7 +24,7 @@ export function registerPreviewTickets(
   app: FastifyInstance,
   auth: { api: Pick<ReturnType<typeof registerAuth>['auth']['api'], 'getSession'> },
   storage: PreviewStorage,
-  domain: string,
+  hosts: PreviewHosts,
   start: AppRouteDependencies['start'],
 ) {
   app.post(
@@ -62,7 +62,7 @@ export function registerPreviewTickets(
           authSessionId: session.session.id,
           membershipId: admitted.membershipId,
         });
-        return { ticket, entryUrl: `https://${admitted.previewKey}.${domain}${previewEnterPath}` };
+        return { ticket, entryUrl: `https://${previewHostOf(hosts, admitted.previewKey)}${previewEnterPath}` };
       } catch (error) {
         if (requestBoundaryError(error, reply)) return reply;
         throw error;

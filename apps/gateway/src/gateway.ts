@@ -32,11 +32,11 @@ export function buildGateway({
     logController: new LogController({ disableRequestLogging: true }),
   });
   const drafts = buildPreviewGateway(preview, previewServerOptions);
-  routePreviewHosts(server, drafts.http, preview.domain);
+  routePreviewHosts(server, drafts.http, preview.domain, preview.prefix);
   const publicApps = apps ? buildPublicAppsGateway(apps, serverOptions) : null;
   if (apps && publicApps) routePublicAppHosts(server, publicApps.http, apps.domain);
   server.server.on('upgrade', (request: IncomingMessage, socket: Duplex, head: Buffer) => {
-    if (previewKeyOf(request.headers.host, preview.domain))
+    if (previewKeyOf(request.headers.host, preview.domain, preview.prefix))
       return void drafts.upgrade(request, socket, head, clientOf(request, previewServerOptions.trustProxy));
     if (apps && publicApps && appNameOf(request.headers.host, apps.domain) !== undefined)
       return void publicApps.upgrade(request, socket, head, clientOf(request, serverOptions.trustProxy));
