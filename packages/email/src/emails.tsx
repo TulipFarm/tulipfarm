@@ -3,6 +3,7 @@ import { MagicLinkEmail, type MagicLinkEmailProps } from './templates/magic-link
 import { TestEmail, type TestEmailProps } from './templates/test-email.tsx';
 import { InvitationEmail, type InvitationEmailProps } from './templates/invitation-email.tsx';
 import { PasswordResetEmail, type PasswordResetEmailProps } from './templates/password-reset-email.tsx';
+import { CreditAlertEmail, creditAlertSubject, type CreditAlertEmailProps } from './templates/credit-alert-email.tsx';
 
 export interface RenderedEmail {
   subject: string;
@@ -14,7 +15,8 @@ export type EmailMessage =
   | { template: 'test'; props: TestEmailProps }
   | { template: 'invitation'; props: InvitationEmailProps }
   | { template: 'magic-link'; props: MagicLinkEmailProps }
-  | { template: 'password-reset'; props: PasswordResetEmailProps };
+  | { template: 'password-reset'; props: PasswordResetEmailProps }
+  | { template: 'credit-alert'; props: CreditAlertEmailProps };
 
 function select(message: EmailMessage) {
   switch (message.template) {
@@ -57,6 +59,22 @@ function select(message: EmailMessage) {
           />
         ),
       };
+    case 'credit-alert': {
+      const { level, workspaceName, available, granted, grace, url } = message.props;
+      return {
+        subject: creditAlertSubject(message.props),
+        element: (
+          <CreditAlertEmail
+            level={level}
+            workspaceName={workspaceName}
+            available={available}
+            granted={granted}
+            grace={grace}
+            url={url}
+          />
+        ),
+      };
+    }
   }
 }
 

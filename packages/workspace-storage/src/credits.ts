@@ -1,12 +1,18 @@
 import { z } from 'zod';
-import { creditGate, creditPricing, creditUnitsForProviderCost, emitHook } from '@tulipfarm/extensions';
+import {
+  creditGate,
+  creditPricing,
+  creditUnitsForProviderCost,
+  emitHook,
+  type CreditBalance,
+} from '@tulipfarm/extensions';
 import { observeChatDetail } from '@tulipfarm/observability';
 import { qualified, workspaceIdFromSchema } from './names.ts';
 import { afterCommit, type SqlClient } from './transactions.ts';
 import { pipelinedAll } from './transaction-reads.ts';
 import { creditActivitySchema, creditSummarySchema } from './credits-contracts.ts';
 
-type Transaction = { client: SqlClient; schema: string };
+type Transaction = { client: SqlClient; schema: string; commonVersion?: number };
 const units = z.string().regex(/^(0|[1-9]\d{0,29})$/);
 // What a ledger row is charged as; the image activities exist only in summaries.
 const ledgerActivitySchema = creditActivitySchema.exclude(['image-generation', 'image-recognition']);
@@ -21,6 +27,35 @@ const row = z.object({
 const table = (tx: Transaction, name: string) => qualified(tx.schema, name);
 const credits = (value: string) => Number(BigInt(value)) / 1_000_000_000_000;
 export { creditUnitsForProviderCost };
+
+// The common migration that adds fee_units: the plan fee of calls paid by a member's plan or an own API key.
+const feeUnitsVersion = 108;
+const hasFeeUnits = (tx: Transaction) => (tx.commonVersion ?? 0) >= feeUnitsVersion;
+
+/**
+ * A flow's running charge, before the current call: its provider cost of calls paid with credits, its plan fees in
+ * unrounded units, and what it has been charged. Each new charge is `round(cost × models rate + fees) - charged`.
+ */
+async function flowTotals(tx: Transaction, flowId: string) {
+  const fees = hasFeeUnits(tx) ? ', COALESCE(sum(fee_units),0)::text AS fees' : '';
+  const total = z
+    .object({ cost: units, fees: units.default('0'), charged: units })
+    .parse(
+      (
+        await tx.client.query(
+          `SELECT COALESCE(sum(provider_pico_usd),0)::text AS cost, COALESCE(sum(charged),0)::text AS charged${fees} FROM ${table(tx, 'tf_credit_usage')} WHERE flow_id=$1`,
+          [flowId],
+        )
+      ).rows[0],
+    );
+  return { cost: BigInt(total.cost), fees: BigInt(total.fees), charged: BigInt(total.charged) };
+}
+
+/** Credit units for a flow's aggregate: provider cost at the models rate plus unrounded plan fees, rounded once. */
+function flowUnits(cost: bigint, fees: bigint) {
+  const pricing = creditPricing();
+  return pricing.round(cost * pricing.unitsPerPicoUsd + fees);
+}
 
 export class CreditsExhausted extends Error {
   constructor() {
@@ -117,17 +152,8 @@ export async function settleCredits(tx: Transaction, id: string, providerPicoUsd
     );
   if (!previous || previous.charged !== null) return null;
   const cost = units.parse(providerPicoUsd);
-  const total = z
-    .object({ cost: units, charged: units })
-    .parse(
-      (
-        await tx.client.query(
-          `SELECT COALESCE(sum(provider_pico_usd),0)::text AS cost, COALESCE(sum(charged),0)::text AS charged FROM ${table(tx, 'tf_credit_usage')} WHERE flow_id=$1`,
-          [previous.flow_id],
-        )
-      ).rows[0],
-    );
-  const charged = creditUnitsForProviderCost(BigInt(total.cost) + BigInt(cost)) - BigInt(total.charged);
+  const total = await flowTotals(tx, previous.flow_id);
+  const charged = flowUnits(total.cost + BigInt(cost), total.fees) - total.charged;
   if (charged > BigInt(previous.reserved)) throw new Error('credit-reservation-exceeded');
   await tx.client.query(`UPDATE ${table(tx, 'tf_credit_usage')} SET charged=$2,provider_pico_usd=$3 WHERE id=$1`, [
     id,
@@ -228,13 +254,19 @@ export type ReplyCreditCall = {
   id: string;
   modelId: string;
   pricingRevision: string;
+  /** The real provider cost, 0 for a call paid by a member's plan or an own API key. */
   providerPicoUsd: string;
+  /**
+   * The unrounded fee, in credit units, for a call paid by a member's plan or an own API key: its list-price value
+   * at the plan rate. Ignored, so the call is free, on workspaces before the migration that records it.
+   */
+  feeUnits?: bigint;
   planMilliseconds: number | null;
 };
 
 /**
  * Settles a reply hold with every call it funded, in call order, exactly as one settlement per call would: each
- * charge rounds the flow's running provider cost. The first call reuses the hold row when it has the hold's id;
+ * charge rounds the flow's running provider cost and plan fees. The first call reuses the hold row when it has the hold's id;
  * every other call gets its own row. The gate is debited once for the difference from the hold. Returns the
  * charges, or null when the hold was missing or already settled (for example by crash recovery).
  */
@@ -259,35 +291,34 @@ export async function settleReplyCredits(
       ).rows[0],
     );
   if (!hold || hold.charged !== null) return null;
-  const total = z
-    .object({ cost: units, charged: units })
-    .parse(
-      (
-        await tx.client.query(
-          `SELECT COALESCE(sum(provider_pico_usd),0)::text AS cost, COALESCE(sum(charged),0)::text AS charged FROM ${table(tx, 'tf_credit_usage')} WHERE flow_id=$1`,
-          [hold.flow_id],
-        )
-      ).rows[0],
-    );
-  let cost = BigInt(total.cost);
-  let charged = BigInt(total.charged);
+  const fees = hasFeeUnits(tx);
+  let { cost, fees: feeTotal, charged } = await flowTotals(tx, hold.flow_id);
   const charges = calls.map(call => {
+    const fee = fees ? (call.feeUnits ?? 0n) : 0n;
+    if (fee < 0n) throw new Error('credit-fee-negative');
     cost += BigInt(units.parse(call.providerPicoUsd));
-    const charge = creditUnitsForProviderCost(cost) - charged;
+    feeTotal += fee;
+    const charge = flowUnits(cost, feeTotal) - charged;
     charged += charge;
-    return { ...call, charged: charge };
+    return { ...call, feeUnits: fee, charged: charge };
   });
   const sum = charges.reduce((n, call) => n + call.charged, 0n);
   if (sum > BigInt(hold.reserved)) throw new Error('credit-reservation-exceeded');
   const first = charges[0]?.id === holdId ? charges[0] : undefined;
   const rest = first ? charges.slice(1) : charges;
   await tx.client.query(
-    `UPDATE ${table(tx, 'tf_credit_usage')} SET charged=$2,provider_pico_usd=$3,plan_milliseconds=COALESCE($4,plan_milliseconds) WHERE id=$1`,
-    [holdId, (first?.charged ?? 0n).toString(), first?.providerPicoUsd ?? '0', first?.planMilliseconds ?? null],
+    `UPDATE ${table(tx, 'tf_credit_usage')} SET charged=$2,provider_pico_usd=$3,plan_milliseconds=COALESCE($4,plan_milliseconds)${fees ? ',fee_units=$5' : ''} WHERE id=$1`,
+    [
+      holdId,
+      (first?.charged ?? 0n).toString(),
+      first?.providerPicoUsd ?? '0',
+      first?.planMilliseconds ?? null,
+      ...(fees ? [(first?.feeUnits ?? 0n).toString()] : []),
+    ],
   );
   for (const call of rest)
     await tx.client.query(
-      `INSERT INTO ${table(tx, 'tf_credit_usage')} (id,flow_id,model_id,agent_id,activity,reserved,charged,provider_pico_usd,pricing_revision,plan_attempt_id,plan_milliseconds) VALUES ($1,$2,$3,$4,$5,$6,$6,$7,$8,$9,$10)`,
+      `INSERT INTO ${table(tx, 'tf_credit_usage')} (id,flow_id,model_id,agent_id,activity,reserved,charged,provider_pico_usd,pricing_revision,plan_attempt_id,plan_milliseconds${fees ? ',fee_units' : ''}) VALUES ($1,$2,$3,$4,$5,$6,$6,$7,$8,$9,$10${fees ? ',$11' : ''})`,
       [
         call.id,
         hold.flow_id,
@@ -299,6 +330,7 @@ export async function settleReplyCredits(
         call.pricingRevision,
         hold.plan_attempt_id,
         call.planMilliseconds,
+        ...(fees ? [call.feeUnits.toString()] : []),
       ],
     );
   await creditGate().debit(tx, sum - BigInt(hold.reserved), { id: holdId, activity: hold.activity });
@@ -378,15 +410,16 @@ function knowledgeActivity(tx: Transaction & { commonVersion?: number }, view: C
 /** The workspace's credit balance from the registered credit gate; both null when credits are unlimited (the default gate). */
 export async function creditBalance(tx: Transaction) {
   const gate = creditGate();
-  const account = gate.balance
+  const account: CreditBalance | null = gate.balance
     ? await gate.balance(tx)
     : await gate.available(tx).then(available => (available === null ? null : { available, granted: null }));
   return account
     ? {
         available: credits(account.available.toString()),
         granted: account.granted === null ? null : credits(account.granted.toString()),
+        grace: account.grace == null ? null : credits(account.grace.toString()),
       }
-    : { available: null, granted: null };
+    : { available: null, granted: null, grace: null };
 }
 
 export async function creditSummary(tx: Transaction & { commonVersion?: number }, view?: CreditUsageView) {

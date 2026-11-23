@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { pricedUsage } from '../src/reply-session.ts';
+import { listCost, planFee, pricedUsage } from '../src/reply-session.ts';
 
 const quote = {
   modelId: 'copilot-claude-sonnet-5',
@@ -110,4 +110,24 @@ test('reported usage priced above the held worst case is charged the worst case'
     model: 'grok-4.3',
   });
   assert.equal(cost.providerPicoUsd, '1000');
+});
+
+test('a plan call is valued at the listed model rates, or not at all when they cannot price it', () => {
+  const call = { modelId: quote.modelId, pricingRevision: 'test' };
+  const listed = {
+    modelId: 'claude-sonnet-5',
+    rates: [{ ...quote.rates[0], usdPerMillionTokens: { input: 3, output: 15, cacheRead: 0, cacheWrite: 0 } }],
+  };
+  assert.equal(listCost(call, listed, tokens(1000, 100)), '4500000000');
+  assert.equal(listCost(call, { ...listed, rates: [] }, tokens(1000, 100)), null);
+});
+
+test('a plan call is charged the plan rate on its list value, within its worst-case fee', () => {
+  const worstFee = 1_000_000n;
+  assert.equal(planFee({ worstFee, usage: { listPicoUsd: '2000' } }, 30n), 60_000n);
+  assert.equal(planFee({ worstFee, usage: { listPicoUsd: '2000000' } }, 30n), worstFee, 'never above its worst case');
+  assert.equal(planFee({ worstFee }, 30n), worstFee, 'unknown usage is charged its worst case');
+  assert.equal(planFee({ worstFee, usage: { listPicoUsd: null } }, 30n), 0n, 'an unpriced call is free');
+  assert.equal(planFee({ worstFee, rejected: true }, 30n), 0n, 'a refused call is free');
+  assert.equal(planFee({ worstFee: 0n, usage: { listPicoUsd: '2000' } }, 0n), 0n, 'the default plan rate is free');
 });

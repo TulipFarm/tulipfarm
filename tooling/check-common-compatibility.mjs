@@ -9,7 +9,7 @@ for await (const path of glob(['packages/*/src/**/*.ts', 'apps/api/src/**/*.ts',
   cwd: new URL('../', import.meta.url),
 })) {
   const source = await readFile(new URL(`../${path}`, import.meta.url), 'utf8');
-  for (const match of source.matchAll(/minimum:\s*\d+,\s*maximum:\s*(\d+)/g))
+  for (const match of source.matchAll(/minimum:\s*\d+,\s*maximum:\s*(\d+)\s*[,})]/g))
     assert.equal(Number(match[1]), stream.length, path);
 }
 console.log(`Common compatibility matches ${stream.length} immutable migration receipts.`);

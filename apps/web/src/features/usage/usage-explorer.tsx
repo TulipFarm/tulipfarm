@@ -50,6 +50,7 @@ import { Table, type TableColumn, type TableState } from '@tulipfarm/sprout/tabl
 import { Tabs, TabsList, TabsTrigger } from '@tulipfarm/sprout/tabs';
 import { ToggleGroup, ToggleGroupItem } from '@tulipfarm/sprout/toggle-group';
 import { ModelRead } from '@/features/models/read';
+import { creditLevel } from '@/lib/credit-balance';
 import { planLabels, planUsageUrls } from '@/features/chat/reply-failure-copy';
 import { timeAgo } from '@/features/chat/plan-usage';
 import { useMemberDirectory } from '@/features/secrets/queries';
@@ -259,8 +260,9 @@ function Explorer({
           </p>
         )}
         <p>
-          Est. cost uses each model’s list price. Plan value is not billed: members’ own ChatGPT, Claude, and GitHub
-          Copilot plans cover those requests.
+          Est. cost uses each model’s list price. Plan value is what requests on members’ own ChatGPT, Claude, and
+          GitHub Copilot plans would cost at list price. Those plans pay the provider; any TulipFarm fee for those
+          requests shows as credits.
         </p>
         <p>
           {report.detailSince
@@ -309,7 +311,7 @@ function SourceSummary({ context }: { context: Context }) {
         icon={<WalletIcon size="sm" aria-hidden />}
         title="TulipFarm credits"
         value={balance.available === null ? 'Unlimited' : formatNumber(balance.available)}
-        caption={`${balance.available !== null && balance.available < 0 ? 'Overdrawn · ' : balance.available !== null && balance.granted !== null ? `left of ${formatNumber(balance.granted)} · ` : ''}${measureInfo.credits.format(credits.credits).replace('—', '0')} used in ${days} days`}
+        caption={`${balanceCaption(balance)}${measureInfo.credits.format(credits.credits).replace('—', '0')} used in ${days} days`}
         onOpen={() => open('credits')}
         openLabel="See credit usage"
       />
@@ -319,7 +321,7 @@ function SourceSummary({ context }: { context: Context }) {
         value={measureInfo.requests.format(plans.requests)}
         caption={
           connections.length
-            ? `requests on ${connections.length} ${connections.length === 1 ? 'plan' : 'plans'} · ≈ ${formatUsd(plans.planValueUsd)} value, not billed`
+            ? `requests on ${connections.length} ${connections.length === 1 ? 'plan' : 'plans'} · ≈ ${formatUsd(plans.planValueUsd)} value, ${plans.credits > 0 ? `${measureInfo.credits.format(plans.credits)} credits charged` : 'no credits charged'}`
             : 'requests · no plan used in this range'
         }
         onOpen={() => open('plan')}
@@ -352,6 +354,22 @@ function SourceSummary({ context }: { context: Context }) {
       />
     </section>
   );
+}
+
+/** The start of the credits card caption: how the balance stands against what was granted, or the grace left. */
+function balanceCaption(balance: UsageReport['balance']) {
+  if (balance.available === null) return '';
+  if (balance.grace == null)
+    return balance.available < 0
+      ? 'Overdrawn · '
+      : balance.granted !== null
+        ? `left of ${formatNumber(balance.granted)} · `
+        : '';
+  const level = creditLevel(balance);
+  if (level === 'stopped') return 'Paused: out of credits · ';
+  if (level === 'grace')
+    return `Grace · ${formatNumber(balance.available + balance.grace)} of ${formatNumber(balance.grace)} grace credits left · `;
+  return balance.granted !== null ? `left of ${formatNumber(balance.granted)} · ` : '';
 }
 
 function SourceCard({
@@ -787,7 +805,9 @@ function ExplorerChart({ context }: { context: Context }) {
         </div>
       </div>
       {measure === 'planValueUsd' && (
-        <p className="text-xs text-muted-foreground">Value at list price. Not billed; members’ plans cover it.</p>
+        <p className="text-xs text-muted-foreground">
+          Value at list price. Members’ plans pay the provider; any TulipFarm fee shows as credits.
+        </p>
       )}
       {mode === 'time' ? (
         <CategoryChart
@@ -823,9 +843,13 @@ function ConnectionStatus({ value, context }: { value: string; context: Context 
       <span className="text-xs text-muted-foreground">
         {report.balance.available === null
           ? 'Unlimited'
-          : report.balance.available < 0
-            ? `${formatNumber(-report.balance.available)} credits overdrawn`
-            : `${formatNumber(report.balance.available)} credits left`}
+          : report.balance.grace != null && creditLevel(report.balance) === 'stopped'
+            ? 'Paused: out of credits'
+            : report.balance.grace != null && creditLevel(report.balance) === 'grace'
+              ? `${formatNumber(report.balance.available + report.balance.grace)} grace credits left`
+              : report.balance.available < 0
+                ? `${formatNumber(-report.balance.available)} credits overdrawn`
+                : `${formatNumber(report.balance.available)} credits left`}
       </span>
     );
   const connection = report.labels.connections[value];

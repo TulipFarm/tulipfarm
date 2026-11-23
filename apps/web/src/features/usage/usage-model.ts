@@ -45,7 +45,7 @@ export const measureInfo: Record<UsageMeasure, { label: string; hint?: string; f
   totalTokens: { label: 'Total tokens', format: formatTokens },
   credits: {
     label: 'Credits',
-    hint: 'TulipFarm credits charged. Plans and API keys use none.',
+    hint: 'TulipFarm credits charged, including any fee for requests on members’ plans or API keys.',
     format: value => (value ? formatCredits(value) : '—'),
   },
   billedUsd: {
@@ -55,7 +55,7 @@ export const measureInfo: Record<UsageMeasure, { label: string; hint?: string; f
   },
   planValueUsd: {
     label: 'Plan value',
-    hint: 'What requests on members’ own plans would cost at list price. Not billed: each member’s plan covers them.',
+    hint: 'What requests on members’ own plans would cost at list price. Each member’s plan pays the provider; any TulipFarm fee shows as credits.',
     format: value => (value ? `≈ ${formatUsd(value)}` : '—'),
   },
   fallbacks: {

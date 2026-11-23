@@ -100,6 +100,7 @@ import { useWorkspaceSettings } from '@/features/settings/queries';
 import { useSecretsCapabilities } from '@/features/secrets/queries';
 import type { RecentSection } from '@/features/navigation/recent-queries';
 import { ReauthorizationBanner } from '@/features/integrations/reauthorization-banner';
+import { CreditsBanner } from '@/features/usage/credits-banner';
 import { ReconnectBanner } from '@/features/workspaces/reconnect-banner';
 import { InboxCount, InboxList } from '@/features/inbox/inbox';
 
@@ -863,6 +864,9 @@ function WorkspaceShellContent() {
             {workspaceStale && <ReconnectBanner showMessage={!onIntegrations} />}
             {workspace.status === 'ready' && (
               <ReauthorizationBanner key={workspace.id} workspaceId={workspace.id} slug={workspace.slug} />
+            )}
+            {membershipId && workspace.status === 'ready' && (
+              <CreditsBanner key={workspace.id} workspaceId={workspace.id} slug={workspace.slug} />
             )}
             <header
               aria-label="Workspace header"

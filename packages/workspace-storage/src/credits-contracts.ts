@@ -27,6 +27,9 @@ export const creditSummarySchema = z.object({
   // Negative when storage or compute charged after the work overdrew the account.
   available: z.number().nullable(),
   granted: z.number().nonnegative().nullable(),
+  // How far below zero the workspace may spend (its grace allowance); null when the billing extension gives no
+  // grace. Work stops once available plus grace reaches zero.
+  grace: z.number().nonnegative().nullable().optional(),
   used: z.number().nonnegative(),
   held: z.number().nonnegative(),
   unfunded: z.number().nonnegative().optional(),

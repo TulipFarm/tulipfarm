@@ -9,6 +9,7 @@ export {
   configuredExecutionBackend,
   creditGate,
   creditPricing,
+  creditRates,
   creditUnitsForProviderCost,
   emitHook,
   executionBackend,

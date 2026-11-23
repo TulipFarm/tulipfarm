@@ -18,8 +18,9 @@ credit price, markup, or rounding.
 
 Converting provider cost to credits is the `creditPricing` slot of
 [`@tulipfarm/extensions`](../extensions/README.md#credit-pricing). The default is one
-credit per $0.01 of provider cost, with no markup and no rounding. A deployment can
-register its own rate and rounding.
+credit per $0.01 of provider cost, with no markup and no rounding, and no charge for
+calls on a member's own plan. A deployment can register its own rates (for models,
+plan calls, compute and storage) and rounding.
 
 ## Model entries
 

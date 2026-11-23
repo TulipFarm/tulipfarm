@@ -13,6 +13,7 @@ import type {
   AnalyticsPerson,
   CreditGate,
   CreditPricing,
+  CreditRates,
   ErrorReporter,
   ExtensionContext,
   ExtensionMigrations,
@@ -201,12 +202,22 @@ export async function registerExtension(extension: ServerExtension, context: Ext
     creditPricing: guard(pricing => {
       single('creditPricing', 'credit pricing');
       if (
-        typeof pricing.unitsPerPicoUsd !== 'bigint' ||
+        typeof pricing?.unitsPerPicoUsd !== 'bigint' ||
         pricing.unitsPerPicoUsd <= 0n ||
         typeof pricing.round !== 'function'
       )
         throw new ExtensionRegistrationError(
           `Extension "${extension.name}" credit pricing needs a positive bigint unitsPerPicoUsd and a round function`,
+        );
+      const optional = (rate: unknown, minimum: bigint) =>
+        rate === undefined || (typeof rate === 'bigint' && rate >= minimum);
+      if (
+        !optional(pricing.planUnitsPerPicoUsd, 0n) ||
+        !optional(pricing.computeUnitsPerPicoUsd, 1n) ||
+        !optional(pricing.storageUnitsPerPicoUsd, 1n)
+      )
+        throw new ExtensionRegistrationError(
+          `Extension "${extension.name}" credit pricing needs a non-negative bigint planUnitsPerPicoUsd and positive bigint compute and storage rates`,
         );
       staged.creditPricing = wrap(pricing);
     }),
@@ -324,7 +335,18 @@ export function creditPricing(): CreditPricing {
   return state().creditPricing?.value ?? providerCostPricing;
 }
 
-/** Credit units charged for an aggregate provider cost in pico-USD, under the registered pricing. */
+/** The registered pricing's rates, with defaults applied: compute and storage default to the models rate, plan to 0. */
+export function creditRates(): CreditRates {
+  const pricing = creditPricing();
+  return {
+    models: pricing.unitsPerPicoUsd,
+    plan: pricing.planUnitsPerPicoUsd ?? 0n,
+    compute: pricing.computeUnitsPerPicoUsd ?? pricing.unitsPerPicoUsd,
+    storage: pricing.storageUnitsPerPicoUsd ?? pricing.unitsPerPicoUsd,
+  };
+}
+
+/** Credit units charged for an aggregate provider cost in pico-USD of model calls paid with credits, under the registered pricing. */
 export function creditUnitsForProviderCost(picoUsd: bigint): bigint {
   const pricing = creditPricing();
   return pricing.round(picoUsd * pricing.unitsPerPicoUsd);
