@@ -101,7 +101,7 @@ import { useSecretsCapabilities } from '@/features/secrets/queries';
 import type { RecentSection } from '@/features/navigation/recent-queries';
 import { ReauthorizationBanner } from '@/features/integrations/reauthorization-banner';
 import { ReconnectBanner } from '@/features/workspaces/reconnect-banner';
-import { InboxCount, InboxList } from '@/features/inbox/inbox';
+import { InboxCount } from '@/features/inbox/inbox';
 
 export type WorkspacePath =
   | '/$workspaceSlug/settings/soul'
@@ -141,6 +141,7 @@ const SearchPalette = lazy(() =>
 const InviteMembersPrompt = lazy(() =>
   import('@/features/governance/invite-members-prompt').then(module => ({ default: module.InviteMembersPrompt })),
 );
+const InboxList = lazy(() => import('@/features/inbox/inbox-list').then(module => ({ default: module.InboxList })));
 const SidebarNavItem = lazy(() =>
   import('@/features/navigation/sidebar-nav-item').then(module => ({ default: module.SidebarNavItem })),
 );
@@ -941,7 +942,11 @@ export function InboxPage() {
   const params = { workspaceSlug: workspace.slug };
   const assignable = useFlag('assignable-tasks');
   if (assignable && workspace.status === 'ready')
-    return <InboxList workspaceId={workspace.id} workspaceSlug={workspace.slug} />;
+    return (
+      <Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Loading Inbox…</p>}>
+        <InboxList workspaceId={workspace.id} workspaceSlug={workspace.slug} />
+      </Suspense>
+    );
   return (
     <section aria-label={inbox.label} className="flex min-h-0 flex-1 items-center justify-center overflow-auto">
       <StatePanel

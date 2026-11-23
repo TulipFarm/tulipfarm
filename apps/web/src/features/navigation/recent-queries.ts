@@ -1,11 +1,10 @@
 import { useMemo } from 'react';
 import { z } from 'zod';
 import { fileSuggestionsPageSchema } from '@tulipfarm/files/contracts';
-import { conversationApi } from '@/features/chat/conversation-api';
+import { chatListReads, conversationRequest } from '@/features/chat/chat-list-api';
 import { conversationKeys } from '@/features/chat/queries';
 import { projectApi } from '@/features/projects/api';
 import { projectKeys } from '@/features/projects/queries';
-import { tableApi } from '@/features/tables/api';
 import { TableRequestError, type ReadState } from '@/features/tables/request-state';
 import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson, requestSignal } from '@/lib/http';
@@ -48,12 +47,14 @@ export async function loadRecentItems(
   signal: AbortSignal,
 ): Promise<RecentItem[]> {
   const bounded = requestSignal(signal);
-  if (section === 'tables')
+  if (section === 'tables') {
+    const { tableApi } = await import('@/features/tables/api');
     return (
       await tableApi(workspaceId).list(undefined, bounded, undefined, false, { by: 'changed', direction: 'desc' })
     ).tables
       .slice(0, 3)
       .map(table => ({ id: table.id, name: table.definition.label }));
+  }
   if (section !== 'files') return recentSchema.parse(await recentRequest(workspaceId, section, bounded));
   const items = new Map<string, RecentItem>();
   let after: string | undefined;
@@ -75,9 +76,11 @@ export function useRecentItems(workspaceId: string, section: RecentSection, enab
   const own = (ownRecentSections as readonly string[]).includes(section) ? (section as OwnRecentSection) : null;
   const chats = useMemo(
     () =>
-      conversationApi(workspaceId, status => {
-        throw new TableRequestError(status, 'recent-chats-unavailable', 'Recent chats are unavailable.');
-      }),
+      chatListReads(
+        conversationRequest(workspaceId, status => {
+          throw new TableRequestError(status, 'recent-chats-unavailable', 'Recent chats are unavailable.');
+        }),
+      ),
     [workspaceId],
   );
   const projects = useMemo(() => projectApi(workspaceId), [workspaceId]);
