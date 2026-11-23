@@ -1,18 +1,23 @@
 #!/usr/bin/env node
-// Checks that each migration stream is numbered 0001, 0002, ... with no duplicates or gaps.
-// With --base <ref>, it checks the tree that merging HEAD into <ref> would produce, so a pull
-// request is checked against the latest main rather than the main it branched from.
+// Each stream's LATEST file names its newest migration. Two pull requests that add the same number both rewrite that
+// one line, so git refuses to merge the second instead of both landing.
 import { execFileSync } from 'node:child_process';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 export const streams = ['apps/database/migrations', 'packages/workspace-storage/common'];
 
 const migrationName = /^(\d{4})_[a-z0-9_]+\.sql$/;
 
-/** Returns one message per problem in a stream's file names; an empty list means the stream is valid. */
-export function migrationProblems(stream, names) {
+export function migrationProblems(stream, names, latest) {
   const files = names.filter(name => name.endsWith('.sql')).sort();
-  const problems = files.filter(name => !migrationName.test(name)).map(name => `${stream}/${name}: invalid name`);
+  const newest = files.at(-1);
+  const problems = [];
+  if (newest && latest?.trim() !== newest)
+    problems.push(
+      `${stream}/LATEST: names ${latest?.trim() || 'nothing'}, but the newest migration is ${newest}; write ${newest} to it`,
+    );
+  problems.push(...files.filter(name => !migrationName.test(name)).map(name => `${stream}/${name}: invalid name`));
   const byNumber = Map.groupBy(
     files.filter(name => migrationName.test(name)),
     name => Number(name.slice(0, 4)),
@@ -41,21 +46,31 @@ function mergedTree(base) {
   }
 }
 
-function listStream(tree, stream) {
-  return git('ls-tree', '--name-only', `${tree}:${stream}`).split('\n').filter(Boolean);
+function readStream(tree, stream) {
+  if (!tree) {
+    const names = readdirSync(stream);
+    return { names, latest: names.includes('LATEST') ? readFileSync(`${stream}/LATEST`, 'utf8') : undefined };
+  }
+  const names = git('ls-tree', '--name-only', `${tree}:${stream}`).split('\n').filter(Boolean);
+  return { names, latest: names.includes('LATEST') ? git('show', `${tree}:${stream}/LATEST`) : undefined };
 }
 
 function main(argv) {
   const baseIndex = argv.indexOf('--base');
   const base = baseIndex === -1 ? undefined : argv[baseIndex + 1];
   if (baseIndex !== -1 && !base) throw new Error('--base needs a git ref');
-  const tree = base ? mergedTree(base) : 'HEAD';
-  const problems = streams.flatMap(stream => migrationProblems(stream, listStream(tree, stream)));
-  const scope = base ? `HEAD merged into ${base}` : 'HEAD';
+  const tree = base ? mergedTree(base) : undefined;
+  const problems = streams.flatMap(stream => {
+    const { names, latest } = readStream(tree, stream);
+    return migrationProblems(stream, names, latest);
+  });
+  const scope = base ? `HEAD merged into ${base}` : 'the working tree';
   if (problems.length) {
     console.error(`Migration numbers are invalid in ${scope}:`);
     for (const problem of problems) console.error(`  ${problem}`);
-    console.error('Renumber the new migration to follow the highest number on main.');
+    console.error(
+      "Renumber the new migration to follow the highest number on main, and write its file name to the stream's LATEST.",
+    );
     process.exitCode = 1;
   } else {
     console.log(`Migration numbers are valid in ${scope}.`);
