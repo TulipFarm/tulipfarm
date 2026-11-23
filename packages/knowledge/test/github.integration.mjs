@@ -356,6 +356,47 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       );
 
       await t.test(
+        'a listing over several pages checks the owner once and leaves current proofs as they are',
+        async () => {
+          const list = provider.list;
+          provider.list = async (...input) => {
+            const listed = await list(...input);
+            const at = Number(input[5] ?? 0);
+            return {
+              ...listed,
+              observations: listed.observations.slice(at, at + 1),
+              nextCursor: at + 1 < listed.observations.length ? String(at + 1) : null,
+            };
+          };
+          try {
+            await sync();
+            const checked = checks.length;
+            const listed = lists.filter(l => l.id === '7001').length;
+            assert.equal((await sync()).disposition, 'ready');
+            assert.ok(
+              lists.filter(l => l.id === '7001').length - listed >= 2,
+              'the repository lists over several pages',
+            );
+            assert.equal(
+              checks.slice(checked).filter(c => c.userId === ws.userId && c.id === '7001').length,
+              1,
+              'one owner check per pass, not one per page',
+            );
+            const versions = await db.platform.query(
+              `SELECT DISTINCT xmin::text AS v FROM (
+              SELECT p.xmin FROM ${table('access_proofs')} p JOIN ${table('github_items')} i ON i.document_id=p.document_id
+              WHERE i.source_id=$1 AND i.repository_id='7001' AND p.membership_id=$2
+              UNION ALL SELECT xmin FROM ${table('github_access')} WHERE source_id=$1 AND repository_id='7001' AND membership_id=$2) v`,
+              [sourceId, ws.membershipId],
+            );
+            assert.equal(versions.rowCount, 1, 'only the owner check rewrites the owner proofs');
+          } finally {
+            provider.list = list;
+          }
+        },
+      );
+
+      await t.test(
         'a revision fetched newer than the listing is indexed immediately under its own identity',
         async () => {
           const nativeId = 'doc:7001:docs/supplier.md';

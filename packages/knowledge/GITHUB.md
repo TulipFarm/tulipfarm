@@ -223,7 +223,8 @@ It expires five minutes after the provider observation time, recorded before the
 request. A fence generation rejects a check that started before a later denial.
 Failed, rate-limited or timed-out checks never write. Per-document
 `tf_knowledge_access_proofs` rows copy that observation time and expiry and also
-bind the current revision.
+bind the current revision. A proof that already matches the check is left as it is,
+so projecting the same check again writes nothing.
 
 A reader with several connected accounts is checked with up to three of them; the
 first that can read the repository becomes the binding for that row. A 401 from
@@ -299,7 +300,9 @@ exported as the gauges `cloud_knowledge_reconnect_sources`,
 A run claims the source for a 15-minute lease and works in a time-boxed loop of at
 most five minutes. Each step lists one provider page of 100 items (the GitHub
 maximum for REST lists, comments, commits and GraphQL discussions) for one
-repository, after an owner check, or re-reads one batch of 100 unseen items. Items in
+repository, after an owner check, or re-reads one batch of 100 unseen items. The first
+step for a repository in a run asks GitHub; later steps reuse that owner check while
+it has more than a minute left, and ask again once it does not. Items in
 a step are fetched with bounded concurrency (four at a time). The provider cursor
 encodes the phase (`docs:{commit}:{offset}`, `docs:{commit}:w{index path}` while
 walking directories, `issues:{updatedAt}` or `issues:{updatedAt}/{page}` inside a
