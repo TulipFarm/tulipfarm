@@ -129,6 +129,10 @@ One version identifies all apps and images of a release.
 
 ### Fixed
 
+- GitHub Knowledge no longer downloads new files when the workspace is at its
+  50,000-document limit. Those files are recorded as `resource-limited` and are
+  read once there is room. Before, every sync downloaded each one again, only
+  for the document store to refuse it.
 - GitHub Knowledge no longer downloads an oversized file on every sync. A file
   whose Markdown is over 1 MiB, or whose title is over 512 characters, is
   recorded as `too-large` and skipped until it changes. Before, each pass

@@ -44,7 +44,8 @@ import {
 } from '../github-contracts.ts';
 import { KnowledgeParseError, KnowledgeParserBusy } from '../parser.ts';
 import { parseKnowledgeDocument } from './parse-document.ts';
-import { citationSchema, KnowledgeError, lexicalInput, revisionInput } from './contracts.ts';
+import { citationSchema, KnowledgeError, knowledgeLimits, lexicalInput, revisionInput } from './contracts.ts';
+import { tracksKnowledgeUsage } from '../storage-ports.ts';
 import { importStatus } from './import-status.ts';
 import { publicationSeed, recordParse } from './media.ts';
 import { createKnowledgeStore, type KnowledgeOptions, type ExternalSource } from './store.ts';
@@ -311,6 +312,30 @@ export function createGitHubKnowledge({
   const store = createKnowledgeStore({ runtime, ...authority });
   // Common migration 0005 adds `github_items.path`; a workspace not yet migrated keeps working without it.
   const storesPath = (tx: Tx) => ((tx as { commonVersion?: number }).commonVersion ?? 0) >= 5;
+  // A workspace at its document limit refuses every new document, so reading one from GitHub would only be wasted.
+  const documentsFull = async (tx: Tx) =>
+    z
+      .object({ documents: z.coerce.number() })
+      .parse(
+        (
+          await tx.client.query(
+            tracksKnowledgeUsage(tx as { commonVersion?: number })
+              ? `SELECT documents FROM ${table(tx, 'usage')} WHERE id=1`
+              : `SELECT count(*) AS documents FROM ${table(tx, 'documents')}`,
+          )
+        ).rows[0] ?? { documents: 0 },
+      ).documents >= knowledgeLimits.documents;
+  // An item with no document waits, marked resource-limited, without a read while the workspace is full.
+  const waitsForRoom = async (tx: Tx, sourceId: string, nativeId: string, documentId: string) => {
+    if ((await tx.client.query(`SELECT 1 FROM ${table(tx, 'documents')} WHERE id=$1`, [documentId])).rowCount)
+      return false;
+    if (!(await documentsFull(tx))) return false;
+    await tx.client.query(
+      `UPDATE ${table(tx, 'github_items')} SET failure='resource-limited' WHERE source_id=$1 AND native_id=$2`,
+      [sourceId, nativeId],
+    );
+    return true;
+  };
   // Common migration 0006 allows commit items and records each repository's indexed commit head; until a workspace
   // is migrated, its sources index every selected kind except commits.
   const storesCommits = (tx: Tx) => ((tx as { commonVersion?: number }).commonVersion ?? 0) >= 7;
@@ -1417,6 +1442,7 @@ export function createGitHubKnowledge({
       if (item.coverage !== 'supported') return undefined;
       // A revision whose document was too large stays too large; reading it again only downloads it again.
       if (prior?.source_revision === item.sourceRevision && prior.failure === 'too-large') return 'too-large' as const;
+      if (await waitsForRoom(tx, s.source_id, item.nativeId, documentId)) return 'full' as const;
       return z
         .object({ id: uuidSchema, source_revision: z.string(), lexical_publication_id: uuidSchema.nullable() })
         .optional()
@@ -1429,7 +1455,7 @@ export function createGitHubKnowledge({
           ).rows[0],
         );
     });
-    if (item.coverage !== 'supported' || previous === 'too-large') return false;
+    if (item.coverage !== 'supported' || previous === 'too-large' || previous === 'full') return false;
     if (previous?.source_revision === item.sourceRevision && previous.lexical_publication_id) return false;
     return !(
       previous?.source_revision === item.sourceRevision &&
@@ -2088,6 +2114,8 @@ export function createGitHubKnowledge({
           if (documentId) await fenced(work, token, tx => clear(tx, documentId));
           return;
         }
+        const itemDocument = identity(`${claim.source_id}:github:${row.native_id}`);
+        if (await fenced(work, token, tx => waitsForRoom(tx, claim.source_id, row.native_id, itemDocument))) return;
         if (row.kind === 'doc' || row.kind === 'code') {
           // Every unseen part of a file is read again from one download, the first time any of its parts comes up.
           const file = { repositoryId: row.repository_id, nativeId: fileOf(row.native_id) };
