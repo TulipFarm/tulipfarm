@@ -16,6 +16,17 @@ const pages = {
     </form>
     <a href="/popup" target="_blank">Open help</a>`,
   '/popup': `<!doctype html><title>Help</title><p>Help centre</p>`,
+  // Starts a download in an iframe and removes the iframe as soon as the server starts sending the file.
+  '/frame-download': `<!doctype html><title>Frame download</title>
+    <button onclick="start()">Download in a frame</button>
+    <script>
+      function start() {
+        const frame = document.createElement('iframe');
+        frame.src = '/stream.bin?frame';
+        document.body.append(frame);
+        fetch('/download-started').then(() => frame.remove());
+      }
+    </script>`,
   '/files': `<!doctype html><title>Files</title>
     <a href="/report.csv">Download report</a>
     <a href="/big.bin">Download archive</a>
@@ -42,6 +53,8 @@ const pages = {
 
 let site;
 let origin;
+/** Responses held until a framed download starts. */
+const downloadStarted = [];
 /** Endless downloads the browser stopped, by path. */
 const stopped = [];
 let internal;
@@ -157,6 +170,8 @@ before(async () => {
         'content-type': 'application/octet-stream',
         'content-disposition': `attachment; filename="${url.pathname.slice(1)}"`,
       });
+      response.flushHeaders();
+      if (url.search === '?frame') for (const waiting of downloadStarted.splice(0)) waiting.end();
       const fast = url.pathname === '/stream.bin';
       const timer = setInterval(() => response.write(Buffer.alloc(fast ? 64 * 1024 : 1, 1)), fast ? 5 : 200);
       response.on('close', () => {
@@ -188,6 +203,7 @@ before(async () => {
       response.writeHead(200, { 'content-type': 'text/html', 'set-cookie': 'big=1; Path=/' });
       return response.end(pages['/files']);
     }
+    if (url.pathname === '/download-started') return void downloadStarted.push(response);
     if (url.pathname === '/done') {
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       return response.end(
@@ -676,6 +692,24 @@ test('a download a new tab starts is also stopped while it transfers', async t =
   assert.equal(result.downloads, undefined);
   assert.match(result.notice ?? '', /"stream.bin" was not saved: files are limited to 0 MiB/);
   assert.ok(stopped.includes('/stream.bin?tab'), 'the browser stopped receiving it');
+  assert.ok(Date.now() - started < 3000, 'without waiting for it to finish');
+});
+
+test('a download is held to its limits after the iframe that started it is removed', async t => {
+  const host = await createBrowserHost({
+    ...options,
+    allowPrivateNetworks: true,
+    maxDownloadBytes: 256 * 1024,
+    downloadWaitMs: 3000,
+  });
+  t.after(() => host.shutdown());
+  await host.open(sessionId);
+  let result = await host.act(sessionId, { action: 'navigate', url: `${origin}/frame-download` });
+  const started = Date.now();
+  result = await host.act(sessionId, { action: 'click', ref: ref(result.snapshot, /button "Download in a frame"/) });
+  assert.equal(result.downloads, undefined);
+  assert.match(result.notice ?? '', /"stream.bin" was not saved: files are limited to 0 MiB/);
+  assert.ok(stopped.includes('/stream.bin?frame'), 'the browser stopped receiving it');
   assert.ok(Date.now() - started < 3000, 'without waiting for it to finish');
 });
 

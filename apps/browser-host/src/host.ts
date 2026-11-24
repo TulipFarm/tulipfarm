@@ -371,18 +371,49 @@ export async function createBrowserHost(options: HostOptions) {
 
   // Downloads in progress the browser reported whose session is still being found, by the browser's id.
   const unclaimed = new Map<string, { url: string; name: string; received: number }>();
+  // The browser context of every page and frame the host has seen, kept after the frame is gone, so a download is
+  // traced to its session even when the frame that started it was removed straight away.
+  const frameContexts = new Map<string, string>();
+  // Downloads stopped because no session could be found for them, by address and file name, so the session
+  // Playwright reports them to gets the reason.
+  const untraced = new Set<string>();
   // The browser's own download events cover every context and tab, so a download a new tab starts before the host
   // could watch that tab is still stopped mid-transfer.
   let monitor: Promise<{ cdp: CDPSession; downloadsPath: string }> | undefined;
 
-  function watchDownloads(cdp: CDPSession) {
+  const sessionIn = (contextId: string | undefined) =>
+    contextId ? [...sessions.values()].find(session => session.contextId === contextId) : undefined;
+
+  async function watchDownloads(cdp: CDPSession, downloadsPath: string) {
+    cdp.on('Target.targetCreated', ({ targetInfo }) => {
+      if (targetInfo.browserContextId) frameContexts.set(targetInfo.targetId, targetInfo.browserContextId);
+    });
     cdp.on('Browser.downloadWillBegin', event => {
       const transfer = { url: event.url, name: event.suggestedFilename, received: 0 };
+      const known = sessionIn(frameContexts.get(event.frameId));
+      if (known) {
+        known.transfers.set(event.guid, transfer);
+        link(known);
+        return;
+      }
       unclaimed.set(event.guid, transfer);
       void ownerOf(cdp, event.frameId).then(owner => {
-        if (!unclaimed.delete(event.guid) || !owner) return;
-        owner.transfers.set(event.guid, transfer);
-        link(owner);
+        if (!unclaimed.delete(event.guid)) return;
+        if (owner) {
+          owner.transfers.set(event.guid, transfer);
+          link(owner);
+          return;
+        }
+        // A download no session can be found for is never let through unbounded.
+        untraced.add(`${transfer.url}\n${transfer.name}`);
+        const contexts = new Set([...sessions.values()].map(session => session.contextId));
+        const contextId = frameContexts.get(event.frameId);
+        if (contextId) contexts.add(contextId);
+        void Promise.allSettled(
+          [...contexts].map(browserContextId =>
+            cdp.send('Browser.cancelDownload', { guid: event.guid, browserContextId }),
+          ),
+        ).then(() => rm(join(downloadsPath, event.guid), { force: true }));
       });
     });
     cdp.on('Browser.downloadProgress', event => {
@@ -397,18 +428,19 @@ export async function createBrowserHost(options: HostOptions) {
       transfer.received = Math.max(event.receivedBytes, event.totalBytes);
       if (owner) checkTransfer(owner, transfer);
     });
+    await cdp.send('Target.setDiscoverTargets', { discover: true });
   }
 
   /**
-   * Finds the session whose browser context the frame that started a download belongs to. A page or an iframe in
-   * its own process is a browser target; any other iframe is looked up in its page's frame tree.
+   * Finds the session a download's frame belongs to when it wasn't seen being created: a page or an iframe in its
+   * own process is a browser target, and any other iframe is looked up in its page's frame tree.
    */
   async function ownerOf(cdp: CDPSession, frameId: string) {
-    const bySession = (contextId: string | undefined) =>
-      [...sessions.values()].find(session => session.contextId === contextId);
+    const known = sessionIn(frameContexts.get(frameId));
+    if (known) return known;
     const { targetInfos } = await cdp.send('Target.getTargets').catch(() => ({ targetInfos: [] }));
     const target = targetInfos.find(info => info.targetId === frameId);
-    if (target) return bySession(target.browserContextId);
+    if (target) return sessionIn(target.browserContextId);
     for (const session of sessions.values())
       for (const page of session.context.pages()) {
         const pageCdp = await session.context.newCDPSession(page).catch(() => undefined);
@@ -418,6 +450,21 @@ export async function createBrowserHost(options: HostOptions) {
         if (frameTree && hasFrame(frameTree, frameId)) return session;
       }
     return undefined;
+  }
+
+  /** Records the context of a page's frames as they are attached, including ones already there. */
+  async function trackFrames(context: BrowserContext, contextId: string, page: Page) {
+    const cdp = await context.newCDPSession(page).catch(() => undefined);
+    if (!cdp) return;
+    cdp.on('Page.frameAttached', event => frameContexts.set(event.frameId, contextId));
+    cdp.on('Page.frameNavigated', event => frameContexts.set(event.frame.id, contextId));
+    await cdp.send('Page.enable').catch(() => undefined);
+    const { frameTree } = await cdp.send('Page.getFrameTree').catch(() => ({ frameTree: undefined }));
+    const add = (tree: FrameTree) => {
+      frameContexts.set(tree.frame.id, contextId);
+      for (const child of tree.childFrames ?? []) add(child);
+    };
+    if (frameTree) add(frameTree);
   }
 
   const launch = () => {
@@ -442,12 +489,13 @@ export async function createBrowserHost(options: HostOptions) {
         browser = undefined;
         monitor = undefined;
         unclaimed.clear();
+        frameContexts.clear();
         void rm(downloadsPath, { recursive: true, force: true });
         for (const session of sessions.values()) void session.close();
         sessions.clear();
       });
-      monitor = started.newBrowserCDPSession().then(cdp => {
-        watchDownloads(cdp);
+      monitor = started.newBrowserCDPSession().then(async cdp => {
+        await watchDownloads(cdp, downloadsPath);
         return { cdp, downloadsPath };
       });
       await monitor;
@@ -540,11 +588,16 @@ export async function createBrowserHost(options: HostOptions) {
     const contextId = await watchContextDownloads(context, page);
     session = new Session(sessionId, context, page, now());
     session.contextId = contextId;
+    await trackFrames(context, contextId, page);
+    context.on('close', () => {
+      for (const [frameId, owner] of frameContexts) if (owner === contextId) frameContexts.delete(frameId);
+    });
     const opened = session;
     const watch = (watched: Page) => watched.on('download', download => keep(opened, download));
     watch(page);
     context.on('page', added => {
       watch(added);
+      void trackFrames(context, contextId, added);
       // A tab opened only to download a file never shows a page and can't be captured, so follow a tab once it
       // shows something.
       if (added.url()) void opened.switchTo(added);
@@ -645,11 +698,14 @@ export async function createBrowserHost(options: HostOptions) {
         if (!path || stopped) {
           await download.delete().catch(() => undefined);
           const failed = stopped ? null : await download.failure().catch(() => 'failed');
+          const traced = !untraced.delete(`${download.url()}\n${download.suggestedFilename()}`);
           session.downloadNotices.push(
             stopped ??
-              (failed === 'canceled'
-                ? `The download of "${name}" took too long and was stopped.`
-                : `The download of "${name}" failed.`),
+              (!traced
+                ? notSaved(name, 'the browser couldn’t tell which page started it.')
+                : failed === 'canceled'
+                  ? `The download of "${name}" took too long and was stopped.`
+                  : `The download of "${name}" failed.`),
           );
           return;
         }
