@@ -83,7 +83,7 @@ export async function startEgressProxy(options: EgressOptions) {
     if (response.headersSent) return response.destroy();
     response
       .writeHead(status, { 'content-type': 'text/plain; charset=utf-8' })
-      .end(status === 403 ? 'This agent isn’t allowed to open this site.' : 'This site couldn’t be reached.');
+      .end(status === 403 ? 'This agent isn’t allowed to open this site.' : 'This page couldn’t load.');
   }
 
   server.on('connect', (request: IncomingMessage, client: Socket, head: Buffer) => {

@@ -237,7 +237,7 @@ async function upload(
     return refusal(
       'files-unavailable',
       browser.mode === 'task'
-        ? 'Runs cannot upload files, so nothing was uploaded.'
+        ? 'Runs cannot upload files, so nothing was uploaded. Finish without the upload and say why in your result.'
         : 'Files is not available here, so nothing was uploaded.',
     );
   const state = await browser.client.state(sessionId);

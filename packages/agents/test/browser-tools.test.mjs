@@ -394,7 +394,10 @@ test('A run is not offered uploads, and its downloads are reported as not saved'
   assert.match(step.result.downloadInstruction, /not saved in runs/);
   const refused = await runBrowserCall(run, { tool: 'browser.upload', file: 'f', ref: 'e2' });
   assert.equal(refused.result.error, 'files-unavailable');
-  assert.match(refused.result.instruction, /Runs cannot upload files/);
+  assert.equal(
+    refused.result.instruction,
+    'Runs cannot upload files, so nothing was uploaded. Finish without the upload and say why in your result.',
+  );
   assert.equal(
     calls.some(call => call[0] === 'upload' || call[0] === 'download'),
     false,
