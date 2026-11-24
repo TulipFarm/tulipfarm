@@ -1146,6 +1146,49 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         }
       });
 
+      await t.test('a workspace at its document limit does not download new documents', async () => {
+        const nativeId = 'doc:7002:overflow.md';
+        const items = state.repos.get('7002').items;
+        items.set(nativeId, {
+          kind: 'doc',
+          title: 'acme/leadership: overflow.md',
+          text: 'snapdragon',
+          revision: 'blob:40',
+        });
+        const downloads = () => [...reads, ...fileReads].filter(read => read.nativeId === nativeId).length;
+        const usage = table('usage');
+        const { documents } = (await db.platform.query(`SELECT documents FROM ${usage} WHERE id=1`)).rows[0];
+        try {
+          reads.length = 0;
+          fileReads.length = 0;
+          await db.platform.query(`UPDATE ${usage} SET documents=50000 WHERE id=1`);
+          await sync();
+          assert.equal(downloads(), 0, 'a full workspace refuses the document before it is downloaded');
+          assert.equal(await itemFailure(nativeId), 'resource-limited');
+          state.lister = () => ({ observations: [], nextCursor: null });
+          try {
+            await db.platform.query(
+              `UPDATE ${table('github_sources')} SET next_attempt_at=clock_timestamp() WHERE source_id=$1`,
+              [sourceId],
+            );
+            const work = (await github.due(ws.id)).find(w => w.sourceId === sourceId);
+            assert.equal((await github.process(work)).disposition, 'ready');
+          } finally {
+            state.lister = null;
+          }
+          assert.equal(downloads(), 0, 'an incremental retry waits for room too');
+          await db.platform.query(`UPDATE ${usage} SET documents=$1 WHERE id=1`, [documents]);
+          await sync();
+          assert.equal(downloads(), 1, 'once there is room the document is read');
+          assert.equal(await itemFailure(nativeId), null);
+          assert.equal((await query(ownerActor, 'snapdragon')).hits.length, 1);
+        } finally {
+          await db.platform.query(`UPDATE ${usage} SET documents=$1 WHERE id=1`, [documents]);
+          items.delete(nativeId);
+          await sync();
+        }
+      });
+
       await t.test('a repository GitHub keeps failing is set aside for the pass without tombstones', async () => {
         const before = await live();
         state.listError = id => (id === '7002' ? new GitHubCorpusError('transient') : null);
