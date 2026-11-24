@@ -722,6 +722,7 @@ const agentFieldLabels: Record<AgentDefinitionField, string> = {
   skills: 'Skills',
   responseRule: 'Response rule',
   mcp: 'Connected app permissions',
+  browser: 'Browser settings',
 };
 
 const badges = {

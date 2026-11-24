@@ -415,7 +415,7 @@ function LiveBrowserItem({ workspaceId, chatId }: { workspaceId: string; chatId:
   return (
     <LiveBrowserCanvas
       workspaceId={workspaceId}
-      chatId={chatId}
+      target={{ kind: 'chat', chatId }}
       onHandBack={prompt => canvas.requestComposer(prompt, [], { caretAtPrompt: true })}
     />
   );

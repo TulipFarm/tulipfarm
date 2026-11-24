@@ -13,6 +13,7 @@ import {
   browserFrameSchema,
   browserSessionStateSchema,
   type BrowserSessionState,
+  type BrowserTarget,
 } from './api';
 import { loadedLoginPrompt, SaveLoginDialog, SignInPicker } from './login-picker';
 import { siteOfPage } from './logins';
@@ -30,17 +31,27 @@ type Live =
 
 const buttons = ['left', 'middle', 'right'] as const;
 
-/** The live screen of a chat's browser. The member can take over to act on the page, then hand back. */
+/**
+ * The live screen of a chat's or a run's browser. The member can take over to act on the page, then hand back.
+ * Handing back a chat's browser sends the agent a prompt; handing back a run's browser wakes the run on the server.
+ */
 export function LiveBrowserCanvas({
   workspaceId,
-  chatId,
+  target,
   onHandBack,
 }: {
   workspaceId: string;
-  chatId: string;
-  onHandBack: (prompt: string) => void;
+  target: BrowserTarget;
+  onHandBack?: (prompt: string) => void;
 }) {
-  const api = useMemo(() => browserApi(workspaceId, chatId), [workspaceId, chatId]);
+  const kind = target.kind;
+  const ownerId = target.kind === 'chat' ? target.chatId : target.taskId;
+  const api = useMemo(
+    () =>
+      browserApi(workspaceId, kind === 'chat' ? { kind: 'chat', chatId: ownerId } : { kind: 'run', taskId: ownerId }),
+    [workspaceId, kind, ownerId],
+  );
+  const chatId = target.kind === 'chat' ? target.chatId : null;
   const [live, setLive] = useState<Live>({ kind: 'connecting' });
   const [frame, setFrame] = useState<{ data: string; width: number; height: number } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -117,7 +128,8 @@ export function LiveBrowserCanvas({
       if (next) setLive({ kind: 'open', state: next });
       if (controller === 'person') signingIn.current = signIn;
       if (controller === 'agent') {
-        onHandBack(handBackPrompt);
+        onHandBack?.(handBackPrompt);
+        if (!chatId) return;
         const site = signingIn.current;
         signingIn.current = null;
         if (site && !state?.logins.some(login => login.site === site)) setSaving(site);
@@ -211,7 +223,11 @@ export function LiveBrowserCanvas({
           kind="unavailable"
           heading="h3"
           title="The browser has closed"
-          description="It closes after 10 minutes without use. Ask the agent to open it again."
+          description={
+            chatId
+              ? 'It closes after 10 minutes without use. Ask the agent to open it again.'
+              : 'It closes when the run ends, and opens the first time the agent uses it.'
+          }
         />
       </CanvasSection>
     );
@@ -239,7 +255,7 @@ export function LiveBrowserCanvas({
       meta={page.url}
       actions={
         <>
-          {siteOfPage(page.url) && (
+          {chatId && siteOfPage(page.url) && (
             <Button variant="ghost" size="sm" disabled={busy} onClick={() => setSaving(siteOfPage(page.url))}>
               Save login
             </Button>
@@ -257,10 +273,10 @@ export function LiveBrowserCanvas({
       }
     >
       <div className="flex flex-col gap-3">
-        {saving !== null && (
+        {chatId && saving !== null && (
           <SaveLoginDialog workspaceId={workspaceId} chatId={chatId} site={saving} close={() => setSaving(null)} />
         )}
-        {page.signIn && page.needsPerson && !inControl && (
+        {chatId && page.signIn && page.needsPerson && !inControl && (
           <SignInPicker
             workspaceId={workspaceId}
             chatId={chatId}
@@ -270,11 +286,11 @@ export function LiveBrowserCanvas({
             onTakeOver={() => void decide('person')}
             onLoaded={next => {
               setLive({ kind: 'open', state: next });
-              onHandBack(loadedLoginPrompt(page.signIn ?? ''));
+              onHandBack?.(loadedLoginPrompt(page.signIn ?? ''));
             }}
           />
         )}
-        {page.needsPerson && !page.signIn && !inControl && (
+        {page.needsPerson && !(chatId && page.signIn) && !inControl && (
           <Alert>
             <AlertTitle>The agent needs you</AlertTitle>
             <AlertDescription>{page.needsPerson} Take over, finish this step, then hand back.</AlertDescription>
