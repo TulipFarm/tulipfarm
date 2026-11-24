@@ -259,6 +259,16 @@ export function withGitHubSourceAuthorization<T extends AccountRuntime>(
   // Checks deferred by `deferRemoteSourceChecks` read the credential in short transactions of their own.
   const outside = createGitHubAccounts({ runtime, configuration, keyring });
   let batches: ReturnType<typeof createGitHubBatches> | undefined;
+  // Concurrent calls that defer the same check, such as the requests of one page load, share one GitHub reread.
+  const inFlight = new Map<string, Promise<void>>();
+  const once = (key: string, check: () => Promise<void>) => {
+    let pending = inFlight.get(key);
+    if (!pending) {
+      pending = check().finally(() => inFlight.delete(key));
+      inFlight.set(key, pending);
+    }
+    return pending;
+  };
   // Deferred batch checks need this wrapped runtime, so the batch's own GitHub sources are checked too.
   const outsideBatches = () =>
     (batches ??= createGitHubBatches({
@@ -288,12 +298,14 @@ export function withGitHubSourceAuthorization<T extends AccountRuntime>(
         const accounts = createGitHubAccounts({ runtime: bound, configuration, keyring });
         const checked = new Set<string>();
         let attempts = 0;
-        const deadline = Date.now() + 10000;
+        // Starts with the first inline GitHub check, so time spent waiting for database locks does not count.
+        let deadline: number | undefined;
         const check =
           (mode: 'snapshot' | 'access'): NonNullable<AuthorizationTransaction['requireGitHubSource']> =>
           async (actor, source) => {
             const key = JSON.stringify([mode, actor, source]);
-            if (Date.now() >= deadline) throw new GitHubSourceUnavailable('github-unavailable');
+            if (deadline !== undefined && Date.now() >= deadline)
+              throw new GitHubSourceUnavailable('github-unavailable');
             if (checked.has(key)) return;
             if (source.origin === 'task' && source.proof && mode === 'snapshot') {
               const rows = await tx.client.query(
@@ -382,13 +394,15 @@ export function withGitHubSourceAuthorization<T extends AccountRuntime>(
               throw new AccessDenied();
             const remoteKey = personalCheckKey(workspaceId, actor, source);
             const remote = remoteSourceCheck(remoteKey, () =>
-              verifyGitHubProof(
-                source,
-                proof,
-                bindings,
-                operation =>
-                  outside.withReadCredential(workspaceId, actor, source.accountId, operation, source.generation),
-                { attempts: 0, deadline: remoteSourceCheckDeadline() },
+              once(remoteKey, () =>
+                verifyGitHubProof(
+                  source,
+                  proof,
+                  bindings,
+                  operation =>
+                    outside.withReadCredential(workspaceId, actor, source.accountId, operation, source.generation),
+                  { attempts: 0, deadline: remoteSourceCheckDeadline() },
+                ),
               ),
             );
             if (remote === 'deferred') {
@@ -398,6 +412,7 @@ export function withGitHubSourceAuthorization<T extends AccountRuntime>(
             if (remote === 'verified') {
               await requireUsable(accounts, workspaceId, actor, source);
             } else {
+              deadline ??= Date.now() + 10000;
               const limits = { attempts, deadline };
               try {
                 await verifyGitHubProof(

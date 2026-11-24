@@ -141,6 +141,19 @@ test('deferred checks share one deadline, so slow sources cannot add up their ti
   assert.equal(new Set(deadlines).size, 1, 'every check gets the same deadline, not a fresh one');
 });
 
+test('the shared deadline starts with the first remote check, so waiting for locks before it spends none', async t => {
+  t.after(() => Object.assign(remoteSourceCheckLimits, { milliseconds: 10_000 }));
+  remoteSourceCheckLimits.milliseconds = 60;
+  const log = [];
+  const result = await deferRemoteSourceChecks(async () => {
+    // A transaction that queued behind row locks for longer than the whole budget before checking anything.
+    await new Promise(resolve => setTimeout(resolve, 100));
+    return transaction(log, [['a', async () => {}]])();
+  });
+  assert.deepEqual(result, ['a:verified']);
+  assert.ok(log.includes('check a'));
+});
+
 test('after one source is unavailable, the rest are reported unavailable without being checked', async () => {
   const started = [];
   const checks = ['a', 'b', 'c'].map(key => [

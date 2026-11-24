@@ -33,6 +33,7 @@ import {
   AccessDenied,
   type AuthorizationTransaction,
   currentMember,
+  deferRemoteSourceChecks,
   type HumanActor,
   lockAndResolveHuman,
   prefetchConversationSources,
@@ -334,6 +335,22 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
       });
       return operation(bindFileSources(tx), actor);
     });
+  }
+  /**
+   * Runs a chat read. It changes nothing, so it can run again: its GitHub rereads happen between transactions rather
+   * than inside one, and its source checks take no row locks, so page loads and a running reply never queue behind it.
+   */
+  async function reader<T>(
+    workspaceId: string,
+    userId: string,
+    operation: (tx: AuthorizationTransaction & { commonVersion: number }, actor: HumanActor) => Promise<T>,
+  ) {
+    return deferRemoteSourceChecks(() =>
+      human(workspaceId, userId, (tx, actor) => {
+        tx.readOnly = true;
+        return operation(tx, actor);
+      }),
+    );
   }
 
   async function owned(
@@ -804,7 +821,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
 
   async function read(workspaceId: string, userId: string, chatId: string) {
     chatId = uuidSchema.parse(chatId);
-    return human(workspaceId, userId, async (tx, actor) => {
+    return reader(workspaceId, userId, async (tx, actor) => {
       const [chat] = await pipelinedAll(tx.client, [
         () => owned(tx, actor, chatId),
         () => requireConversationMcpSources(tx, actor, chatId),
@@ -816,7 +833,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
   async function compaction(workspaceId: string, userId: string, chatIdInput: string, compactionIdInput: string) {
     const chatId = uuidSchema.parse(chatIdInput);
     const compactionId = uuidSchema.parse(compactionIdInput);
-    return human(workspaceId, userId, async (tx, actor) => {
+    return reader(workspaceId, userId, async (tx, actor) => {
       await pipelinedAll(tx.client, [
         () => owned(tx, actor, chatId),
         () => requireConversationMcpSources(tx, actor, chatId),
@@ -849,7 +866,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
   async function history(workspaceId: string, userId: string, chatIdInput: string, value: unknown = {}) {
     const chatId = uuidSchema.parse(chatIdInput);
     const input = historyQuerySchema.parse(value);
-    return human(workspaceId, userId, async (tx, actor) => {
+    return reader(workspaceId, userId, async (tx, actor) => {
       const [chat] = await pipelinedAll(tx.client, [() => owned(tx, actor, chatId), () => warmConversationSources(tx)]);
       const [, messageRows, gitHubProposal] = await pipelinedAll(tx.client, [
         () => requireConversationMcpSources(tx, actor, chatId),
