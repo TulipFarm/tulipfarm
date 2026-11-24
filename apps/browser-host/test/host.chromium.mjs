@@ -16,6 +16,21 @@ const pages = {
     </form>
     <a href="/popup" target="_blank">Open help</a>`,
   '/popup': `<!doctype html><title>Help</title><p>Help centre</p>`,
+  '/files': `<!doctype html><title>Files</title>
+    <a href="/report.csv">Download report</a>
+    <a href="/big.bin">Download archive</a>
+    <label>Invoice <input id="invoice" type="file"></label>
+    <div role="button" aria-label="Upload photo" style="display:inline-block;padding:8px">Upload photo
+      <input type="file" style="display:none" id="photo"></div>
+    <label>Name <input name="name"></label>
+    <p id="chosen">No file chosen</p>
+    <script>
+      for (const input of document.querySelectorAll('input[type=file]'))
+        input.addEventListener('change', async () => {
+          const file = input.files[0];
+          document.getElementById('chosen').textContent = input.id + ': ' + file.name + ' ' + file.type + ' ' + (await file.text());
+        });
+    </script>`,
   '/slow': `<!doctype html><title>Slow</title>
     <button disabled onclick="document.title = 'Clicked'">Continue</button>
     <script>setTimeout(() => (document.querySelector('button').disabled = false), 1200)</script>`,
@@ -115,6 +130,20 @@ before(async () => {
           document.querySelector('input').addEventListener('input', () => (document.getElementById('leak').textContent = 'Frame got input'));
         </script>`,
       );
+    }
+    if (url.pathname === '/report.csv') {
+      response.writeHead(200, {
+        'content-type': 'text/csv',
+        'content-disposition': 'attachment; filename="report.csv"',
+      });
+      return response.end('month,total\nMay,42\n');
+    }
+    if (url.pathname === '/big.bin') {
+      response.writeHead(200, {
+        'content-type': 'application/octet-stream',
+        'content-disposition': 'attachment; filename="big.bin"',
+      });
+      return response.end(Buffer.alloc(4096, 1));
     }
     if (url.pathname === '/done') {
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
@@ -506,4 +535,66 @@ test('a secret is redacted in the forms the browser and the snapshot change it t
     assert.equal(shown.includes('DUMMY'), false, `${JSON.stringify(password)} in ${shown}`);
     assert.equal(shown.includes('ada@example.com'), false, JSON.stringify(username));
   }
+});
+
+test('a download is held for the agent once, and one over the size limit is refused', async t => {
+  const host = await createBrowserHost({ ...options, allowPrivateNetworks: true, maxDownloadBytes: 1024 });
+  t.after(() => host.shutdown());
+  await host.open(sessionId);
+  let result = await host.act(sessionId, { action: 'navigate', url: `${origin}/files` });
+  assert.equal(result.downloads, undefined);
+  result = await host.act(sessionId, { action: 'click', ref: ref(result.snapshot, /link "Download report"/) });
+  assert.equal(result.downloads?.length, 1, JSON.stringify(result));
+  const [download] = result.downloads;
+  assert.equal(download.name, 'report.csv');
+  assert.equal(download.size, 19);
+  assert.equal(result.state.title, 'Files');
+
+  const held = host.takeDownload(sessionId, download.id);
+  const chunks = [];
+  for await (const chunk of await held.read()) chunks.push(chunk);
+  await held.done();
+  assert.equal(Buffer.concat(chunks).toString(), 'month,total\nMay,42\n');
+  assert.throws(() => host.takeDownload(sessionId, download.id), { code: 'download-not-found' });
+  result = await host.act(sessionId, { action: 'snapshot' });
+  assert.equal(result.downloads, undefined);
+
+  result = await host.act(sessionId, { action: 'click', ref: ref(result.snapshot, /link "Download archive"/) });
+  assert.equal(result.downloads, undefined);
+  assert.match(result.notice ?? '', /"big.bin" was not saved: files are limited to 0 MiB/);
+  // Opening a file's address directly downloads it instead of failing the step.
+  result = await host.act(sessionId, { action: 'navigate', url: `${origin}/report.csv` });
+  assert.equal(result.downloads?.[0]?.name, 'report.csv');
+});
+
+test('the agent uploads a file only into a file input', async t => {
+  const host = await createBrowserHost({ ...options, allowPrivateNetworks: true });
+  t.after(() => host.shutdown());
+  await host.open(sessionId);
+  let result = await host.act(sessionId, { action: 'navigate', url: `${origin}/files` });
+  const file = { name: 'invoice.txt', mediaType: 'text/plain' };
+  await assert.rejects(
+    host.upload(sessionId, { ...file, ref: ref(result.snapshot, /textbox "Name"/) }, Buffer.from('x')),
+    { code: 'field-refused' },
+  );
+  await assert.rejects(host.upload(sessionId, { ...file, ref: 'e999' }, Buffer.from('x')), { code: 'ref-not-found' });
+  result = await host.upload(
+    sessionId,
+    { ...file, ref: ref(result.snapshot, /button "Invoice"/) },
+    Buffer.from('Total: 42'),
+  );
+  assert.match(result.snapshot, /invoice: invoice.txt text\/plain Total: 42/);
+  // A styled upload button with its input hidden inside it.
+  result = await host.upload(
+    sessionId,
+    { name: 'photo.txt', mediaType: 'text/plain', ref: ref(result.snapshot, /button "Upload photo"/) },
+    Buffer.from('smile'),
+  );
+  assert.match(result.snapshot, /photo: photo.txt text\/plain smile/);
+
+  await host.control(sessionId, { controller: 'person', memberId: 'member-1' });
+  await assert.rejects(
+    host.upload(sessionId, { ...file, ref: ref(result.snapshot, /button "Invoice"/) }, Buffer.from('x')),
+    { code: 'person-in-control' },
+  );
 });

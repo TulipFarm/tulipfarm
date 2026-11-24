@@ -1,7 +1,18 @@
+import { randomUUID } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
+import { stat } from 'node:fs/promises';
 import { isIP } from 'node:net';
-import { chromium, type Browser, type BrowserContext, type CDPSession, type Page, type Request } from 'playwright-core';
 import {
+  chromium,
+  type Browser,
+  type BrowserContext,
+  type CDPSession,
+  type Download,
+  type Page,
+  type Request,
+} from 'playwright-core';
+import {
+  browserFileBytes,
   browserViewport,
   type BrowserAction,
   type BrowserActionResult,
@@ -16,6 +27,7 @@ import {
   type BrowserSessionState,
   type BrowserSiteState,
   type BrowserTypeSecret,
+  type BrowserUpload,
   browserSiteOf,
   siteAllows,
   siteIncludes,
@@ -47,6 +59,12 @@ export type HostOptions = {
   allowAddress?: (address: string) => boolean;
   /** Most characters of snapshot returned to the agent. */
   snapshotChars?: number;
+  /** Largest download kept. Defaults to the largest file in Files. */
+  maxDownloadBytes?: number;
+  /** How long a step waits for the downloads it started to finish before it returns. */
+  downloadWaitMs?: number;
+  /** How long a download may take before it is cancelled. */
+  downloadTimeoutMs?: number;
   now?: () => number;
 };
 
@@ -87,6 +105,12 @@ class Session {
   lastUsed: number;
   notice: string | undefined;
   title = '';
+  /** Finished downloads, kept on disk until the agent's tool takes them to save in Files. */
+  readonly downloads = new Map<string, { id: string; name: string; size: number; download: Download }>();
+  /** Downloads still in progress. */
+  readonly downloading = new Set<Promise<void>>();
+  /** What happened to downloads since the agent's last step, such as one too large to keep. */
+  downloadNotices: string[] = [];
   /** Every form of the secrets typed in this session, longest first, to keep out of what the host returns. */
   private typed: string[] = [];
   private cdp: CDPSession | undefined;
@@ -246,9 +270,13 @@ class Session {
 
   async close() {
     this.listeners.clear();
+    this.downloads.clear();
     await this.context.close().catch(() => undefined);
   }
 }
+
+/** Downloads a session may hold at once that the agent has not taken yet. */
+const heldDownloads = 20;
 
 const markerPrefix = '__tulipfarm_login_';
 const loadMarker = `${markerPrefix}load`;
@@ -275,6 +303,9 @@ export function blockedNotice(origin: string, sites: readonly string[]) {
 export async function createBrowserHost(options: HostOptions) {
   const now = options.now ?? Date.now;
   const snapshotChars = options.snapshotChars ?? 24_000;
+  const maxDownloadBytes = options.maxDownloadBytes ?? browserFileBytes;
+  const downloadWaitMs = options.downloadWaitMs ?? 30_000;
+  const downloadTimeoutMs = options.downloadTimeoutMs ?? 5 * 60_000;
   const sessions = new Map<string, Session>();
   const opening = new Map<string, Promise<Session>>();
   let browser: Promise<Browser> | undefined;
@@ -354,7 +385,7 @@ export async function createBrowserHost(options: HostOptions) {
       .newContext({
         ...(limit ? { proxy: { server: limit.server, bypass: '<-loopback>' } } : {}),
         viewport: browserViewport,
-        acceptDownloads: false,
+        acceptDownloads: true,
         serviceWorkers: 'block',
         locale: 'en-US',
         timezoneId: 'UTC',
@@ -392,7 +423,10 @@ export async function createBrowserHost(options: HostOptions) {
     const page = await context.newPage();
     session = new Session(sessionId, context, page, now());
     const opened = session;
+    const watch = (watched: Page) => watched.on('download', download => keep(opened, download));
+    watch(page);
     context.on('page', added => {
+      watch(added);
       void added.waitForLoadState('domcontentloaded').catch(() => undefined);
       void opened.switchTo(added);
       added.on('close', () => {
@@ -412,6 +446,42 @@ export async function createBrowserHost(options: HostOptions) {
       if (frame === opened.page.mainFrame()) void opened.emitState();
     });
     return session;
+  }
+
+  /** Keeps a page's download once it finishes, unless it is too large or the session already holds too many. */
+  function keep(session: Session, download: Download) {
+    const name = session.redact(download.suggestedFilename().trim()).slice(-255) || 'download';
+    const work = (async () => {
+      const timer = setTimeout(() => void download.cancel().catch(() => undefined), downloadTimeoutMs);
+      try {
+        const path = await download.path().catch(() => null);
+        const failed = path ? null : await download.failure().catch(() => 'failed');
+        if (!path) {
+          session.downloadNotices.push(
+            failed === 'canceled'
+              ? `The download of "${name}" took too long and was stopped.`
+              : `The download of "${name}" failed.`,
+          );
+          return;
+        }
+        const { size } = await stat(path);
+        if (size > maxDownloadBytes || session.downloads.size >= heldDownloads) {
+          await download.delete().catch(() => undefined);
+          session.downloadNotices.push(
+            size > maxDownloadBytes
+              ? `"${name}" was not saved: files are limited to ${Math.floor(maxDownloadBytes / 1024 / 1024)} MiB.`
+              : `"${name}" was not saved: too many downloads are waiting to be saved.`,
+          );
+          return;
+        }
+        const id = randomUUID();
+        session.downloads.set(id, { id, name, size, download });
+      } finally {
+        clearTimeout(timer);
+      }
+    })();
+    session.downloading.add(work);
+    void work.finally(() => session.downloading.delete(work));
   }
 
   /** Opens a session, or returns the open one. Allowed sites apply only when the session is created. */
@@ -438,6 +508,14 @@ export async function createBrowserHost(options: HostOptions) {
   async function result(session: Session): Promise<BrowserActionResult> {
     const page = session.page;
     await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined);
+    if (session.downloading.size) {
+      let timer: NodeJS.Timeout | undefined;
+      await Promise.race([
+        Promise.allSettled(session.downloading),
+        new Promise(resolve => (timer = setTimeout(resolve, downloadWaitMs))),
+      ]);
+      clearTimeout(timer);
+    }
     let snapshot = '';
     try {
       snapshot = await page.ariaSnapshot({ mode: 'ai', timeout: 10_000 });
@@ -456,15 +534,21 @@ export async function createBrowserHost(options: HostOptions) {
       session.notice && session.redact(session.notice),
       withheld &&
         'Screenshots are off in this browser after a sign-in with a secret. The accessibility snapshot still works.',
+      ...session.downloadNotices,
+      session.downloading.size > 0 &&
+        'A download is still in progress. Take a snapshot later to save it when it finishes.',
     ].filter(Boolean);
     session.notice = undefined;
+    session.downloadNotices = [];
     snapshot = session.redact(snapshot);
+    const downloads = [...session.downloads.values()].map(({ id, name, size }) => ({ id, name, size }));
     return {
       state: session.state(),
       snapshot: truncated ? `${snapshot.slice(0, snapshotChars)}\n… (snapshot truncated)` : snapshot,
       truncated,
       ...(screenshot ? { screenshot } : {}),
       ...(notices.length ? { notice: notices.join(' ') } : {}),
+      ...(downloads.length ? { downloads } : {}),
     };
   }
 
@@ -495,7 +579,8 @@ export async function createBrowserHost(options: HostOptions) {
       switch (action.action) {
         case 'navigate':
           await page.goto(action.url, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(error => {
-            if (!session.notice) throw error;
+            // An address that serves a file starts a download instead of a page.
+            if (!session.notice && !/Download is starting/i.test((error as Error).message)) throw error;
           });
           await page.waitForLoadState('load', { timeout: 5_000 }).catch(() => undefined);
           break;
@@ -656,6 +741,82 @@ export async function createBrowserHost(options: HostOptions) {
       await page.waitForTimeout(300);
       return result(session);
     });
+  }
+
+  /**
+   * Sets a file on a file input: the element `ref`, the input a label is for, or the only file input inside the
+   * element, as sites often hide the input inside a styled upload button. Nothing else is accepted.
+   */
+  async function upload(sessionId: string, input: BrowserUpload, bytes: Buffer): Promise<BrowserActionResult> {
+    const session = get(sessionId);
+    return session.run(async () => {
+      if (session.controller === 'person')
+        throw new HostError(
+          'person-in-control',
+          'A member has taken over this browser. Wait until they hand it back before acting.',
+          409,
+        );
+      session.needsPerson = null;
+      session.signIn = null;
+      const page = session.page;
+      const handle = await page
+        .locator(`aria-ref=${input.ref}`)
+        .elementHandle({ timeout: 2_000 })
+        .catch(() => null);
+      if (!handle) throw new HostError('ref-not-found', `No element has ref ${input.ref}. Take a new snapshot.`, 422);
+      const target = (
+        await handle
+          .evaluateHandle(element => {
+            type Node = {
+              tagName: string;
+              type?: string;
+              control?: Node | null;
+              querySelectorAll(selector: string): ArrayLike<Node>;
+            };
+            const fileInput = (node: Node | null | undefined) =>
+              node?.tagName === 'INPUT' && node.type?.toLowerCase() === 'file' ? node : null;
+            const node = element as unknown as Node;
+            const inside = node.querySelectorAll('input[type=file]');
+            return (
+              fileInput(node) ??
+              (node.tagName === 'LABEL' ? fileInput(node.control) : null) ??
+              (inside.length === 1 ? inside[0]! : null)
+            );
+          })
+          .catch(() => null)
+      )?.asElement();
+      if (!target)
+        throw new HostError(
+          'field-refused',
+          `Element ${input.ref} is not a file upload box. Point at the page's file input or its upload button.`,
+          422,
+        );
+      try {
+        await target.setInputFiles({ name: input.name, mimeType: input.mediaType, buffer: bytes }, { timeout: 10_000 });
+      } catch (error) {
+        throw new HostError(
+          'action-failed',
+          session.redact((error as Error).message.split('\n')[0] ?? 'The file could not be set.'),
+          422,
+        );
+      }
+      await page.waitForTimeout(300);
+      return result(session);
+    });
+  }
+
+  /** Hands a finished download over once. The caller deletes it with `done` after reading it. */
+  function takeDownload(sessionId: string, downloadId: string) {
+    const session = get(sessionId);
+    const held = session.downloads.get(downloadId);
+    if (!held) throw new HostError('download-not-found', 'No download with this ID is waiting.', 404);
+    session.downloads.delete(downloadId);
+    return {
+      name: held.name,
+      size: held.size,
+      read: () => held.download.createReadStream(),
+      done: () => held.download.delete().catch(() => undefined),
+    };
   }
 
   async function control(sessionId: string, input: BrowserControl): Promise<BrowserSessionState> {
@@ -850,6 +1011,8 @@ export async function createBrowserHost(options: HostOptions) {
     },
     act,
     typeSecret,
+    upload,
+    takeDownload,
     control,
     needsPerson,
     loadLogin,
