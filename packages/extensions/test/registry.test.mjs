@@ -702,6 +702,7 @@ test('resource metering is off until one extension sets a meter with valid price
     {},
     { pricing: { ...pricing, runPicoUsdPerHour: -1n } },
     { pricing: { ...pricing, objectPicoUsdPerGibMonth: 1 } },
+    { pricing: { ...pricing, browserPicoUsdPerHour: -1n } },
   ])
     await assert.rejects(register('bad', bad), /resource meter needs non-negative bigint prices/);
   assert.equal(resourceMeter(), undefined);

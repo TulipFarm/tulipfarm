@@ -1,10 +1,13 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { GlobeIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import { useCanvas } from '@/features/chat/canvas-state';
+import type { ConversationMessage } from '@/features/chat/conversation-api';
+import { outcomeSaved, succeeded } from '@/features/chat/live-tools';
+import { browserApi } from './api';
 import { isBrowserTool, liveBrowserCanvasId } from './live-browser';
 
-type Tool = { tool: string; status: string };
+const checkEveryMs = 1_500;
 
 function useShowBrowser(workspaceId: string, chatId: string) {
   const canvas = useCanvas();
@@ -16,19 +19,64 @@ function useShowBrowser(workspaceId: string, chatId: string) {
     });
 }
 
-/** Opens the live browser once per chat, when the agent starts using it or asks for a person. */
-export function useLiveBrowserOpening(workspaceId: string, chatId: string, tools: readonly Tool[], enabled: boolean) {
+/**
+ * Opens the live browser once per chat: when a saved hand-off asked for a person, or once a browser is open while the
+ * agent uses it, including during a hand-off. A browser call refused before any browser opened, such as one waiting for
+ * a free browser, opens nothing.
+ */
+export function useLiveBrowserOpening(
+  workspaceId: string,
+  chatId: string,
+  tools: ConversationMessage['tools'],
+  enabled: boolean,
+) {
   const show = useShowBrowser(workspaceId, chatId);
+  const api = useMemo(() => browserApi(workspaceId, { kind: 'chat', chatId }), [workspaceId, chatId]);
   const opened = useRef<string | null>(null);
-  const active = enabled && tools.some(tool => isBrowserTool(tool.tool) && tool.status === 'running');
-  const handoff = enabled && tools.some(tool => tool.tool === 'browser.handoff');
+  const wasActive = useRef(false);
+  // Until a browser call's receipt is saved, it may still open a browser or turn out to be refused, so keep checking.
+  const active = enabled && tools.some(tool => isBrowserTool(tool.tool) && !outcomeSaved(tool));
+  const handoff =
+    enabled && tools.some(tool => tool.tool === 'browser.handoff' && succeeded(tool) && !tool.browserNotOpened);
   useEffect(() => {
-    if (!(active || handoff) || opened.current === chatId) return;
-    opened.current = chatId;
-    show();
+    if (opened.current === chatId) return;
+    if (handoff) {
+      opened.current = chatId;
+      show();
+      return;
+    }
+    // A step that ended between checks may still have opened the browser, so look once more when it ends.
+    const finalCheck = !active && wasActive.current;
+    wasActive.current = active;
+    if (!active && !finalCheck) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const check = () =>
+      api.state(controller.signal).then(
+        state => {
+          if (controller.signal.aborted || opened.current === chatId) return;
+          if (state) {
+            opened.current = chatId;
+            show();
+          } else if (active) timer = setTimeout(check, checkEveryMs);
+        },
+        () => {
+          if (!controller.signal.aborted && active) timer = setTimeout(check, checkEveryMs);
+        },
+      );
+    void check();
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
     // `show` changes with every render; opening depends only on the chat and its activity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, handoff, chatId]);
+  }, [active, handoff, chatId, api]);
+}
+
+/** Whether a reply used a browser it can show: not one refused before any browser opened. */
+export function usedBrowser(tools: ConversationMessage['tools']) {
+  return tools.some(tool => isBrowserTool(tool.tool) && outcomeSaved(tool) && !tool.browserNotOpened);
 }
 
 /** Under a reply that used the browser, reopens the live view. */

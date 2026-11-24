@@ -6,6 +6,7 @@ import { creditGate, creditRates, resourceMeter, type ResourceMeter } from '@tul
 import { errorAttributes } from '@tulipfarm/observability';
 import { objectStorageClient } from '@tulipfarm/workspaces/object-storage';
 import {
+  chargeBrowserUsage,
   chargeComputeSteps,
   chargeComputeWindow,
   chargeStorageDay,
@@ -37,6 +38,11 @@ const lookbackHours = 24;
 const workspacePrefix = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 // A workflow step refused for lack of credits checks again after this long.
 const creditWaitSeconds = 300;
+
+/** A browser session's hourly price: the meter's, or four run steps', as a browser uses about four times the compute. */
+export function browserPicoUsdPerHour(pricing: ResourceMeter['pricing']) {
+  return pricing.browserPicoUsdPerHour ?? 4n * pricing.runPicoUsdPerHour;
+}
 
 /** Workspace that owns an object key: `<workspace>/…`, `workspaces/<workspace>/…` or `apps/<workspace>/…`. */
 export function objectWorkspace(key: string) {
@@ -175,7 +181,7 @@ export function createResourceBilling(options: {
     },
 
     /**
-     * Charges finished run steps, then each settled hour of sandbox compute in the last day that a workspace has not
+     * Charges finished run steps and closed browser sessions, then each settled hour of sandbox compute in the last day that a workspace has not
      * been charged for. An hour the provider cannot report yet is read again next time. A failing workspace or hour
      * does not stop the others; the run then throws.
      */
@@ -187,6 +193,14 @@ export function createResourceBilling(options: {
         try {
           await transact(workspaceId, tx =>
             chargeComputeSteps(tx, new Date(now), ms => runUnits(ms, meter.pricing.runPicoUsdPerHour, unitsPerPicoUsd)),
+          );
+        } catch (error) {
+          failures.push(error);
+        }
+        try {
+          const browser = browserPicoUsdPerHour(meter.pricing);
+          await transact(workspaceId, tx =>
+            chargeBrowserUsage(tx, new Date(now), ms => runUnits(ms, browser, unitsPerPicoUsd)),
           );
         } catch (error) {
           failures.push(error);

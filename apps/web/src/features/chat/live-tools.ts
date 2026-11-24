@@ -11,6 +11,11 @@ export function succeeded(tool: Tool) {
   return tool.status === 'completed' && tool.activityStatus !== 'failed' && !unsavedOutcomes.has(tool);
 }
 
+/** Whether the tool has ended and its saved receipt, with the outcome, has arrived. */
+export function outcomeSaved(tool: Tool) {
+  return tool.status !== 'running' && !unsavedOutcomes.has(tool);
+}
+
 export function reconcileLiveTools(
   messages: ConversationMessage[],
   updates?: ReadonlyMap<string, StreamTool>,
@@ -67,7 +72,14 @@ export function newestTools(
   messages: ConversationMessage[],
   updates?: ReadonlyMap<string, StreamTool>,
 ): ConversationMessage['tools'] {
-  const incoming = unclaimedTools(messages, updates).reverse();
+  // A turn not yet in the history has no saved receipts, so its ended tools' outcomes are unknown.
+  const incoming = unclaimedTools(messages, updates)
+    .reverse()
+    .map(update => {
+      const tool: Tool = { ...update };
+      if (update.status !== 'running') unsavedOutcomes.add(tool);
+      return tool;
+    });
   return [
     ...incoming,
     ...[...messages].sort((a, b) => b.sequence - a.sequence).flatMap(message => [...message.tools].reverse()),

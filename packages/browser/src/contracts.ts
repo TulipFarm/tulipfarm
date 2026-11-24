@@ -97,6 +97,8 @@ export function siteAllows(sites: readonly string[], hostname: string): boolean 
 
 export const browserOpenSchema = z.strictObject({
   sessionId: z.uuid(),
+  /** The workspace the session belongs to, so the host limits how many it runs at once. Absent, no workspace limit. */
+  workspaceId: z.uuid().optional(),
   /** Limits the session's pages to these sites. Applies when the session opens; absent, any public site. */
   allowedSites: browserAllowedSitesSchema.optional(),
 });
@@ -164,6 +166,12 @@ export const browserSessionStateSchema = z.strictObject({
   signIn: z.string().nullable(),
   /** The browser logins loaded into the session. */
   logins: z.array(browserLoadedLoginSchema),
+  /** When the host opened this session. A session that closes and opens again gets a new time. */
+  openedAt: z.string().optional(),
+  /** When something last used the session, by the host's clock. */
+  activeAt: z.string().optional(),
+  /** When the host closes the session if nothing uses it before then. */
+  closesAt: z.string().optional(),
 });
 export type BrowserSessionState = z.infer<typeof browserSessionStateSchema>;
 
@@ -273,7 +281,13 @@ export const browserHostErrorCodeSchema = z.enum([
   'download-not-found',
   'action-failed',
   'capacity',
+  'browser-busy',
   'invalid-request',
 ]);
 export type BrowserHostErrorCode = z.infer<typeof browserHostErrorCodeSchema>;
-export const browserHostErrorSchema = z.strictObject({ error: browserHostErrorCodeSchema, message: z.string() });
+export const browserHostErrorSchema = z.strictObject({
+  error: browserHostErrorCodeSchema,
+  message: z.string(),
+  /** For `browser-busy`: where the request was in its workspace's queue when it gave up waiting. */
+  position: z.int().positive().optional(),
+});

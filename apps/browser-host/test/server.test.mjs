@@ -77,6 +77,29 @@ test('host errors keep their code and status', async t => {
   assert.deepEqual(await response.json(), { error: 'person-in-control', message: 'A member has taken over.' });
 });
 
+test('a busy workspace’s open request gets its place in line, and a request that ends leaves the line', async t => {
+  const workspaceId = '00000000-0000-4000-8000-0000000000aa';
+  let signal;
+  const { server, call } = await serve({
+    open: async (id, sites, workspace, ended) => {
+      if (workspace !== workspaceId) throw new Error('no workspace');
+      signal = ended;
+      const error = new HostError('browser-busy', 'All 3 browsers for this workspace are in use.', 429);
+      error.position = 2;
+      throw error;
+    },
+  });
+  t.after(() => server.close());
+  const response = await call('/v1/sessions', { method: 'POST', body: JSON.stringify({ sessionId, workspaceId }) });
+  assert.equal(response.status, 429);
+  assert.deepEqual(await response.json(), {
+    error: 'browser-busy',
+    message: 'All 3 browsers for this workspace are in use.',
+    position: 2,
+  });
+  assert.equal(signal.aborted, true);
+});
+
 test('the live view streams state and frames as server-sent events', async t => {
   let unsubscribed = false;
   const { server, call } = await serve({

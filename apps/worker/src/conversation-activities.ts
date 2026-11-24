@@ -96,6 +96,7 @@ import { conversationTitleActivity } from './conversation-title.ts';
 import type { ConversationTitleWork } from '@tulipfarm/conversations/titles';
 import { conversationInventoryReads, type ConversationInventoryReads } from './conversation-inventory.ts';
 import { chatBrowserSecrets, secretsServices } from './secrets-composition.ts';
+import { chatBrowserMeter } from './browser-usage.ts';
 import { heldSecrets } from '@tulipfarm/secrets/send';
 import { resumeApiCall, type ApiCallFiles } from '@tulipfarm/api-calls';
 import type { AppPages } from '@tulipfarm/agents/app-page-tools';
@@ -379,6 +380,7 @@ export function meteredReply(
               client: createBrowserHostClient(browserHost),
               imageInput: routeCapabilities(validatedRoute).imageInput,
               secrets: chatBrowserSecrets(secretServices),
+              meter: chatBrowserMeter(runtime),
             }
           : undefined
         : undefined;

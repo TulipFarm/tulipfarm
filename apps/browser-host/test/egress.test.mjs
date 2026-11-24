@@ -37,6 +37,17 @@ test('the egress proxy opens only allowed addresses, for plain requests and tunn
   for await (const chunk of reached) body += chunk;
   assert.equal(body, `host site.test:${port}`);
 
+  const gone = createServer();
+  gone.listen(0, '127.0.0.1');
+  await once(gone, 'listening');
+  const gonePort = gone.address().port;
+  gone.close();
+  const failed = await viaProxy(proxy, { path: `http://site.test:${gonePort}/` });
+  assert.equal(failed.statusCode, 502);
+  let failure = '';
+  for await (const chunk of failed) failure += chunk;
+  assert.equal(failure, 'This page couldn’t load.');
+
   for (const host of ['private.test', 'mixed.test', 'missing.test', '[::1]']) {
     const refused = await viaProxy(proxy, { path: `http://${host}:${port}/` });
     assert.equal(refused.statusCode, 403, host);

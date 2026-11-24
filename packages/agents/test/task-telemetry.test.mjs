@@ -18,7 +18,7 @@ const workspaceId = randomUUID(),
   agentId = randomUUID(),
   activationId = randomUUID(),
   membershipId = randomUUID();
-const compatibility = { minimum: 1, maximum: 111 };
+const compatibility = { minimum: 1, maximum: 112 };
 const result = (rows = []) => ({ rows, rowCount: rows.length });
 const transaction = query => ({ schema: 'telemetry_fixture', commonVersion: 1, client: { query } });
 

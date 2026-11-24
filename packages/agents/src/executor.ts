@@ -93,7 +93,7 @@ import { readOnlyCall, toolObservation, type KnowledgeToolsFactory } from './too
 import { invokeBoundedKnowledge, withKnowledgeRetrieveGrant } from './knowledge-retrieval.ts';
 import { withBrowserGrant } from './tool-capabilities.ts';
 import { browserSessionId, type BrowserHostClient } from '@tulipfarm/browser';
-import { runBrowserCall, type BrowserSecrets } from './browser-tools.ts';
+import { runBrowserCall, type BrowserMeter, type BrowserSecrets } from './browser-tools.ts';
 import { browserToolResultSchema, type AgentBrowserSettings } from './contracts.ts';
 import { knowledgeTaskSpend } from '@tulipfarm/workspace-storage/knowledge-credits';
 import { createAgentTasks } from './tasks.ts';
@@ -145,6 +145,8 @@ export type TaskBrowser = {
   secrets?:
     | ((holder: { workspaceId: string; actor: HumanActor; origin: TaskSecretOrigin }) => BrowserSecrets)
     | undefined;
+  /** Meters the run's browser time; absent when resources are not metered. */
+  meter?: ((run: { workspaceId: string; taskId: string; sessionId: string }) => BrowserMeter | undefined) | undefined;
   /** Loads a browser login into a session; throws when the run's owner may not use it. */
   loadLogin?:
     | ((input: { workspaceId: string; actor: HumanActor; sessionId: string; loginId: string }) => Promise<void>)
@@ -264,6 +266,7 @@ export function createAgentExecutor(options: Options) {
   ): Promise<ExecutionStatus> {
     const browser = options.browser;
     const sessionId = browserSessionId(ids.workspaceId, { runId: task.taskId });
+    const meter = browser?.meter?.({ workspaceId: ids.workspaceId, taskId: task.taskId, sessionId });
     const settle = (status: 'completed' | 'waiting', result: unknown, waitingUntil?: string, failure?: string) =>
       executionTransaction(ids, async tx => {
         await taskOutputAllowed(tx, ids.workspaceId, ids.runId, true);
@@ -305,6 +308,7 @@ export function createAgentExecutor(options: Options) {
       const handedBack = task.handedBackAt !== undefined && Date.parse(task.handedBackAt) <= deadline;
       const stop = async (failure: string) => {
         await browser.client.close(sessionId).catch(() => undefined);
+        await meter?.end();
         return settle(
           'completed',
           { error: 'needs-a-person', instruction: 'No person handed the browser back in time.' },
@@ -321,6 +325,7 @@ export function createAgentExecutor(options: Options) {
         // The host is unreachable: keep waiting, and check again on the next wake.
         if (!handedBack) return 'waiting';
       }
+      if (state) await meter?.record(state);
       if (handedBack || (state && state.controller === 'agent' && !state.needsPerson))
         return settle('completed', {
           status: 'handed-back',
@@ -337,6 +342,8 @@ export function createAgentExecutor(options: Options) {
       {
         client: browser.client,
         sessionId,
+        workspaceId: ids.workspaceId,
+        meter,
         mode: 'task',
         imageInput: false,
         allowedSites: task.settings?.sites,

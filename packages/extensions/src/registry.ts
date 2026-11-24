@@ -228,6 +228,8 @@ export async function registerExtension(extension: ServerExtension, context: Ext
         meter.pricing.objectPicoUsdPerGibMonth,
         meter.pricing.runPicoUsdPerHour,
       ];
+      const browser = meter?.pricing?.browserPicoUsdPerHour;
+      if (browser !== undefined) prices?.push(browser);
       if (!prices?.every(price => typeof price === 'bigint' && price >= 0n))
         throw new ExtensionRegistrationError(
           `Extension "${extension.name}" resource meter needs non-negative bigint prices`,

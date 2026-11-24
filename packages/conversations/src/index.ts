@@ -18,6 +18,7 @@ import { z } from 'zod';
 import { withoutTrailingControlMarker } from './reply-text.ts';
 import { transcriptOrder } from './transcript-order.ts';
 import { googleToolActivity } from './google-tool-activity.ts';
+import { browserNotOpened } from './browser-receipts.ts';
 import { apiCallReceipt, executionReceipt, toolPresentation } from './tool-activity.ts';
 import { storedToolActivity, storedToolPresentation, waitingRowDraft } from './tool-activity-history.ts';
 import { publicWebReceiptForHistory } from './public-web-history.ts';
@@ -1142,6 +1143,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
                   : apiCallReceipt(row.tool, row.output, row.tool === 'api.request' && digestedApiCalls.has(row.id)),
                 execution: hidden.size ? null : executionReceipt(row.tool, row.call, row.output),
                 ...(recordedCodingRuns.has(row.id) ? { codingRun: true } : {}),
+                ...browserNotOpened(row),
                 knowledge: await knowledgeActivityForHistory(tx, actor, {
                   ...(chat.projectId ? { projectChatId: chatId } : {}),
                   tool: row.tool,

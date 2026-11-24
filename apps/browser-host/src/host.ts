@@ -41,6 +41,8 @@ import { startEgressProxy } from './egress.ts';
 export class HostError extends Error {
   readonly code: BrowserHostErrorCode;
   readonly status: number;
+  /** For `browser-busy`: the request's place in its workspace's queue when it stopped waiting. */
+  position: number | undefined;
   constructor(code: BrowserHostErrorCode, message: string, status: number) {
     super(message);
     this.code = code;
@@ -52,6 +54,10 @@ export type HostOptions = {
   executablePath?: string | undefined;
   sandbox?: boolean;
   maxSessions: number;
+  /** Sessions one workspace may run at once. Opening another waits in the workspace's queue. */
+  maxSessionsPerWorkspace?: number;
+  /** How long opening a session waits in its workspace's queue before it fails with `browser-busy`. */
+  queueWaitMs?: number;
   /** A session nobody used for this long is closed, unless it waits for a person. */
   idleMs: number;
   /** How long a session that needs a person waits for one. */
@@ -75,6 +81,16 @@ export type HostOptions = {
   /** Most bytes a session's held and in-progress downloads may take on disk together. */
   maxHeldDownloadBytes?: number;
   now?: () => number;
+};
+
+type Waiter = {
+  sessionId: string;
+  allowedSites: readonly string[] | undefined;
+  /** Open requests for this session waiting in line; the place is given up when the last one ends. */
+  requests: number;
+  admitted: Promise<{ session: Promise<Session> }>;
+  admit(session: Promise<Session>): void;
+  fail(error: Error): void;
 };
 
 export type SessionEvent = { type: 'frame'; frame: BrowserFrame } | { type: 'state'; state: BrowserSessionState };
@@ -102,6 +118,8 @@ function yamlEscape(text: string): string {
 
 class Session {
   readonly id: string;
+  readonly workspaceId: string | undefined;
+  readonly openedAt: number;
   readonly context: BrowserContext;
   page: Page;
   controller: 'agent' | 'person' = 'agent';
@@ -136,12 +154,28 @@ class Session {
   private lastFrame: BrowserFrame | undefined;
   private readonly listeners = new Set<Listener>();
   private queue: Promise<unknown> = Promise.resolve();
+  private readonly limits: { idleMs: number; holdMs: number };
 
-  constructor(id: string, context: BrowserContext, page: Page, now: number) {
+  constructor(
+    id: string,
+    workspaceId: string | undefined,
+    context: BrowserContext,
+    page: Page,
+    now: number,
+    limits: { idleMs: number; holdMs: number },
+  ) {
     this.id = id;
+    this.workspaceId = workspaceId;
     this.context = context;
     this.page = page;
     this.lastUsed = now;
+    this.openedAt = now;
+    this.limits = limits;
+  }
+
+  /** How long the session stays open unused: longer while it waits for a person or one has taken over. */
+  get idleLimit() {
+    return this.needsPerson || this.controller === 'person' ? this.limits.holdMs : this.limits.idleMs;
   }
 
   /** Agent actions, a person's input and control changes run one at a time, so a takeover waits for the agent's action. */
@@ -236,6 +270,9 @@ class Session {
       controlledBy: this.controlledBy,
       signIn: this.signIn,
       logins: [...this.logins.values()],
+      openedAt: new Date(this.openedAt).toISOString(),
+      activeAt: new Date(this.lastUsed).toISOString(),
+      closesAt: new Date(this.lastUsed + this.idleLimit).toISOString(),
     };
   }
 
@@ -363,7 +400,11 @@ export async function createBrowserHost(options: HostOptions) {
   const maxHeldDownloadBytes = options.maxHeldDownloadBytes ?? 2 * maxDownloadBytes;
   const tooLarge = `files are limited to ${Math.floor(maxDownloadBytes / 1024 / 1024)} MiB.`;
   const sessions = new Map<string, Session>();
-  const opening = new Map<string, Promise<Session>>();
+  const opening = new Map<string, { workspaceId: string | undefined; session: Promise<Session> }>();
+  const perWorkspace = options.maxSessionsPerWorkspace ?? Number.POSITIVE_INFINITY;
+  const queueWaitMs = options.queueWaitMs ?? 60_000;
+  /** Each workspace's requests to open a session, first come first served, while all its browsers are in use. */
+  const queues = new Map<string, Waiter[]>();
   let browser: Promise<Browser> | undefined;
   const allowAddress = options.allowAddress ?? publicAddress;
   const egress = options.allowPrivateNetworks ? undefined : await startEgressProxy({ allowed: allowAddress });
@@ -552,6 +593,7 @@ export async function createBrowserHost(options: HostOptions) {
         void rm(downloadsPath, { recursive: true, force: true });
         for (const session of sessions.values()) void session.close();
         sessions.clear();
+        for (const workspaceId of queues.keys()) admitNext(workspaceId);
       });
       monitor = started.newBrowserCDPSession().then(async cdp => {
         await watchDownloads(cdp, downloadsPath);
@@ -592,7 +634,11 @@ export async function createBrowserHost(options: HostOptions) {
     return session;
   }
 
-  async function create(sessionId: string, allowedSites: readonly string[] | undefined): Promise<Session> {
+  async function create(
+    sessionId: string,
+    workspaceId: string | undefined,
+    allowedSites: readonly string[] | undefined,
+  ): Promise<Session> {
     if (sessions.size + opening.size >= options.maxSessions)
       throw new HostError('capacity', 'The browser host is running as many sessions as it can. Try again soon.', 503);
     const started = await launch();
@@ -645,7 +691,7 @@ export async function createBrowserHost(options: HostOptions) {
     });
     const page = await context.newPage();
     const contextId = await watchContextDownloads(context, page);
-    session = new Session(sessionId, context, page, now());
+    session = new Session(sessionId, workspaceId, context, page, now(), options);
     session.contextId = contextId;
     await trackFrames(context, contextId, page);
     context.on('close', () => {
@@ -809,25 +855,134 @@ export async function createBrowserHost(options: HostOptions) {
     }
   }
 
-  /** Opens a session, or returns the open one. Allowed sites apply only when the session is created. */
-  async function open(sessionId: string, allowedSites?: readonly string[]): Promise<BrowserSessionState> {
+  /** Sessions a workspace runs or is opening. */
+  function inUse(workspaceId: string) {
+    let count = 0;
+    for (const session of sessions.values()) if (session.workspaceId === workspaceId) count += 1;
+    for (const pending of opening.values()) if (pending.workspaceId === workspaceId) count += 1;
+    return count;
+  }
+
+  function start(sessionId: string, workspaceId: string | undefined, allowedSites: readonly string[] | undefined) {
+    const session = create(sessionId, workspaceId, allowedSites).then(
+      created => {
+        sessions.set(sessionId, created);
+        return created;
+      },
+      error => {
+        throw error;
+      },
+    );
+    opening.set(sessionId, { workspaceId, session });
+    // A session that failed to open frees its place for the next in line.
+    void session
+      .finally(() => {
+        opening.delete(sessionId);
+        if (workspaceId) admitNext(workspaceId);
+      })
+      .catch(() => undefined);
+    return session;
+  }
+
+  /** Opens sessions for the first in a workspace's queue while it has browsers free. */
+  function admitNext(workspaceId: string) {
+    const queue = queues.get(workspaceId);
+    while (queue?.length && inUse(workspaceId) < perWorkspace) {
+      const waiter = queue.shift()!;
+      waiter.admit(start(waiter.sessionId, workspaceId, waiter.allowedSites));
+    }
+    if (!queue?.length) queues.delete(workspaceId);
+  }
+
+  /** Waits in the workspace's queue until a browser is free, the wait runs out, or the request ends. */
+  async function queued(
+    sessionId: string,
+    workspaceId: string,
+    allowedSites: readonly string[] | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<Session> {
+    const queue = queues.get(workspaceId) ?? [];
+    queues.set(workspaceId, queue);
+    // Requests to open the same session share one place in line.
+    let waiter = queue.find(entry => entry.sessionId === sessionId);
+    if (!waiter) {
+      let admit!: (session: Promise<Session>) => void;
+      let fail!: (error: Error) => void;
+      const admitted = new Promise<{ session: Promise<Session> }>((resolve, reject) => {
+        admit = session => resolve({ session });
+        fail = reject;
+      });
+      waiter = { sessionId, allowedSites, requests: 0, admitted, admit, fail };
+      queue.push(waiter);
+    }
+    const entry = waiter;
+    entry.requests += 1;
+    let timer: NodeJS.Timeout | undefined;
+    let onAbort: (() => void) | undefined;
+    const leave = () => {
+      entry.requests -= 1;
+      if (entry.requests > 0) return;
+      const index = queue.indexOf(entry);
+      if (index >= 0) queue.splice(index, 1);
+      if (!queue.length && queues.get(workspaceId) === queue) queues.delete(workspaceId);
+    };
+    try {
+      const { session } = await Promise.race([
+        entry.admitted,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            const position = queue.indexOf(entry) + 1;
+            leave();
+            reject(busy(position));
+          }, queueWaitMs);
+          onAbort = () => {
+            leave();
+            reject(new HostError('invalid-request', 'The request ended before a browser was free.', 499));
+          };
+          if (signal?.aborted) onAbort();
+          else signal?.addEventListener('abort', onAbort, { once: true });
+        }),
+      ]);
+      return await session;
+    } finally {
+      clearTimeout(timer);
+      if (onAbort) signal?.removeEventListener('abort', onAbort);
+    }
+  }
+
+  function busy(position: number) {
+    const browsers =
+      perWorkspace === 1
+        ? 'The browser for this workspace is in use.'
+        : `All ${perWorkspace} browsers for this workspace are in use.`;
+    const error = new HostError('browser-busy', `${browsers} This step is number ${position} in line.`, 429);
+    error.position = position;
+    return error;
+  }
+
+  /**
+   * Opens a session, or returns the open one. Allowed sites apply only when the session is created. A new session for a
+   * workspace that runs all the browsers it may waits in that workspace's queue; an open one never waits.
+   */
+  async function open(
+    sessionId: string,
+    allowedSites?: readonly string[],
+    workspaceId?: string,
+    signal?: AbortSignal,
+  ): Promise<BrowserSessionState> {
     const existing = sessions.get(sessionId);
     if (existing) {
       existing.lastUsed = now();
       return existing.state();
     }
-    let pending = opening.get(sessionId);
-    if (!pending) {
-      pending = create(sessionId, allowedSites);
-      opening.set(sessionId, pending);
-    }
-    try {
-      const session = await pending;
-      sessions.set(sessionId, session);
-      return session.state();
-    } finally {
-      opening.delete(sessionId);
-    }
+    const pending = opening.get(sessionId)?.session;
+    if (pending) return (await pending).state();
+    if (!workspaceId) return (await start(sessionId, undefined, allowedSites)).state();
+    const free = !queues.get(workspaceId)?.length && inUse(workspaceId) < perWorkspace;
+    const session = free
+      ? await start(sessionId, workspaceId, allowedSites)
+      : await queued(sessionId, workspaceId, allowedSites, signal);
+    return session.state();
   }
 
   async function result(session: Session): Promise<BrowserActionResult> {
@@ -1313,6 +1468,7 @@ export async function createBrowserHost(options: HostOptions) {
   async function close(sessionId: string): Promise<void> {
     const session = get(sessionId);
     sessions.delete(sessionId);
+    if (session.workspaceId) admitNext(session.workspaceId);
     await session.close();
   }
 
@@ -1321,9 +1477,9 @@ export async function createBrowserHost(options: HostOptions) {
     forgetFrames();
     for (const [id, session] of sessions) {
       expireDownloads(session);
-      const limit = session.needsPerson || session.controller === 'person' ? options.holdMs : options.idleMs;
-      if (now() - session.lastUsed >= limit) {
+      if (now() - session.lastUsed >= session.idleLimit) {
         sessions.delete(id);
+        if (session.workspaceId) admitNext(session.workspaceId);
         await session.close();
         closed += 1;
       }
@@ -1354,6 +1510,10 @@ export async function createBrowserHost(options: HostOptions) {
     /** How many pages and frames the host is tracking, so tests can see removed ones are forgotten. */
     trackedFrames: () => frameContexts.size,
     async shutdown() {
+      for (const queue of queues.values())
+        for (const waiter of queue)
+          waiter.fail(new HostError('capacity', 'The browser host is shutting down. Try again soon.', 503));
+      queues.clear();
       for (const session of sessions.values()) await session.close();
       sessions.clear();
       await (await browser?.catch(() => undefined))?.close();

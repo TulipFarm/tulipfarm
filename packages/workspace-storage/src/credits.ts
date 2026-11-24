@@ -35,6 +35,7 @@ const hasFeeUnits = (tx: Transaction) => (tx.commonVersion ?? 0) >= feeUnitsVers
 /**
  * A flow's running charge, before the current call: its provider cost of calls paid with credits, its plan fees in
  * unrounded units, and what it has been charged. Each new charge is `round(cost × models rate + fees) - charged`.
+ * Charges priced in units, such as the flow's browser time, are not model calls and stay out of the sum.
  */
 async function flowTotals(tx: Transaction, flowId: string) {
   const fees = hasFeeUnits(tx) ? ', COALESCE(sum(fee_units),0)::text AS fees' : '';
@@ -43,7 +44,7 @@ async function flowTotals(tx: Transaction, flowId: string) {
     .parse(
       (
         await tx.client.query(
-          `SELECT COALESCE(sum(provider_pico_usd),0)::text AS cost, COALESCE(sum(charged),0)::text AS charged${fees} FROM ${table(tx, 'tf_credit_usage')} WHERE flow_id=$1`,
+          `SELECT COALESCE(sum(provider_pico_usd),0)::text AS cost, COALESCE(sum(charged),0)::text AS charged${fees} FROM ${table(tx, 'tf_credit_usage')} WHERE flow_id=$1 AND pricing_revision IS DISTINCT FROM 'units'`,
           [flowId],
         )
       ).rows[0],

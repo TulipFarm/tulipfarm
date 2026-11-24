@@ -127,6 +127,8 @@ export type ResourcePricing = {
   readonly objectPicoUsdPerGibMonth: bigint;
   /** Per hour an agent task step or workflow step runs on a shared worker. */
   readonly runPicoUsdPerHour: bigint;
+  /** Per hour a browser session is open, charged in whole minutes. Four times `runPicoUsdPerHour` when absent. */
+  readonly browserPicoUsdPerHour?: bigint;
 };
 
 /** One closed hour, as ISO 8601 times: `start` inclusive, `end` exclusive. */

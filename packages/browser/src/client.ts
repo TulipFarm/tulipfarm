@@ -19,11 +19,14 @@ import {
 export class BrowserHostError extends Error {
   readonly code: BrowserHostErrorCode | 'unavailable';
   readonly status: number;
-  constructor(code: BrowserHostErrorCode | 'unavailable', message: string, status = 0) {
+  /** For `browser-busy`: the request's place in its workspace's queue when it stopped waiting. */
+  readonly position: number | undefined;
+  constructor(code: BrowserHostErrorCode | 'unavailable', message: string, status = 0, position?: number) {
     super(message);
     this.name = 'BrowserHostError';
     this.code = code;
     this.status = status;
+    this.position = position;
   }
 }
 
@@ -88,7 +91,8 @@ export function createBrowserHostClient(connection: BrowserHostConnection, fetch
       if (response.status === 401 || response.status === 403)
         throw new BrowserHostError('unavailable', 'The browser host refused this service', response.status);
       const parsed = browserHostErrorSchema.safeParse(json);
-      if (parsed.success) throw new BrowserHostError(parsed.data.error, parsed.data.message, response.status);
+      if (parsed.success)
+        throw new BrowserHostError(parsed.data.error, parsed.data.message, response.status, parsed.data.position);
       throw new BrowserHostError('unavailable', `The browser host answered ${response.status}`, response.status);
     }
     return json;
@@ -97,16 +101,27 @@ export function createBrowserHostClient(connection: BrowserHostConnection, fetch
   const session = (sessionId: string) => `/v1/sessions/${encodeURIComponent(sessionId)}`;
 
   return {
-    /** Opens the session, or returns it when open. `allowedSites` limits a new session's pages to those sites. */
+    /**
+     * Opens the session, or returns it when open. `allowedSites` limits a new session's pages to those sites. With
+     * `workspaceId`, a new session waits up to a minute for one of the workspace's browsers to free up, then fails with
+     * `browser-busy`.
+     */
     async open(
       sessionId: string,
-      options: { allowedSites?: readonly string[] | undefined } = {},
+      options: { allowedSites?: readonly string[] | undefined; workspaceId?: string | undefined } = {},
     ): Promise<BrowserSessionState> {
       return browserSessionStateSchema.parse(
-        await call('POST', '/v1/sessions', {
-          sessionId,
-          ...(options.allowedSites?.length ? { allowedSites: options.allowedSites } : {}),
-        }),
+        await call(
+          'POST',
+          '/v1/sessions',
+          {
+            sessionId,
+            ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+            ...(options.allowedSites?.length ? { allowedSites: options.allowedSites } : {}),
+          },
+          // Longer than the host's minute in the queue plus the time to open a browser.
+          120_000,
+        ),
       );
     },
     async state(sessionId: string): Promise<BrowserSessionState | null> {

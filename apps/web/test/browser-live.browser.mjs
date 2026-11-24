@@ -61,7 +61,15 @@ const chat = {
  * `handle(path, method, request)` answers extra requests; return `undefined` to fall through.
  */
 async function openChat(
-  { browser: initial, started: startedAtOpen = true, handle = () => undefined, page: pagePath },
+  {
+    browser: initial,
+    started: startedAtOpen = true,
+    handle = () => undefined,
+    page: pagePath,
+    history = chatHistory(),
+    opens = !pagePath,
+    events,
+  },
   run,
 ) {
   const { workspace, session } = createWorkspaceFixture();
@@ -85,7 +93,6 @@ async function openChat(
   });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  const history = chatHistory();
   const live = {
     state: { sessionId, ...initial },
     started: startedAtOpen,
@@ -93,6 +100,7 @@ async function openChat(
     controls: [],
     inputs: [],
     inputRequests: 0,
+    stateReads: 0,
   };
   const base = `/v1/workspaces/${workspace.id}/conversations/${chatId}/browser`;
   const shell = new Map([
@@ -140,6 +148,7 @@ async function openChat(
         });
       }
       if (path === base && method === 'GET') {
+        live.stateReads++;
         // The browser starts while the panel is waiting for it.
         if (live.refusedStreams.length > 0) live.started = true;
         return route.fulfill({ json: { browser: live.started ? live.state : null } });
@@ -176,14 +185,17 @@ async function openChat(
         if (rest === '/messages')
           return route.fulfill({ json: { messages: history, nextBefore: null, hasGitHubProposals: false } });
         if (!rest) return route.fulfill({ json: chat });
-        if (rest === '/events') return route.fulfill({ status: 204 });
+        if (rest === '/events')
+          return events
+            ? route.fulfill({ status: 200, contentType: 'text/event-stream', body: `retry: 60000\n${events}` })
+            : route.fulfill({ status: 204 });
         return route.fulfill({ json: [] });
       }
       if (method === 'GET') return route.fulfill({ status: 404, json: { error: 'not-found' } });
       throw new Error(`Unexpected API request ${method} ${path}`);
     });
     await page.goto(`${server.resolvedUrls.local[0]}${workspace.slug}/${pagePath ?? `chat/${chatId}`}`);
-    if (!pagePath)
+    if (opens)
       await page
         .getByRole('application', { name: /Browser screen/ })
         .locator('img')
@@ -323,6 +335,121 @@ test(
         assert.deepEqual(live.controls, [], 'loading a login needs no take over');
         await page.getByRole('button', { name: 'Take over' }).waitFor();
         assert.equal(await page.getByRole('button', { name: 'Use this login' }).count(), 0);
+      },
+    );
+  },
+);
+
+for (const running of ['browser.act', 'browser.handoff'])
+  test(
+    `a browser call refused before any browser opened shows no browser, and a running ${running} opens it once it is open`,
+    { timeout: 120000 },
+    async () => {
+      const step = (id, status, extra = {}, tool = 'browser.act') => ({
+        id,
+        tool,
+        status,
+        activity: null,
+        presentation: { label: 'Using the browser', brand: null },
+        web: null,
+        ...extra,
+      });
+      const message = (id, sequence, author, text, turn, tools) => ({
+        id,
+        sequence,
+        author,
+        createdAt: `2026-11-24T10:00:0${sequence}.000Z`,
+        parts: [{ kind: 'text', text }],
+        turn,
+        tools,
+        calendarResults: [],
+      });
+      const history = [
+        message('0c9a7b6e-1d2f-4e3a-8b5c-7d6e5f4a3b21', 1, 'human', 'Check the Orchid Club opening hours', null, [
+          step('4e5f6a7b-8c9d-4e0f-a1b2-c3d4e5f6a7b8', 'completed', {
+            activityStatus: 'failed',
+            browserNotOpened: true,
+          }),
+        ]),
+        message(
+          '1d0b8c7f-2e3a-4f4b-9c6d-8e7f6a5b4c32',
+          2,
+          'assistant',
+          'All browsers for this workspace are in use. I’ll try again shortly.',
+          null,
+          [],
+        ),
+        message(
+          '2e1c9d8a-3f4b-4a5c-8d7e-9f8a7b6c5d43',
+          3,
+          'human',
+          'Try again now',
+          { id: '3f2d0e9b-4a5c-4b6d-9e8f-0a9b8c7d6e54', status: 'processing', generation: 1 },
+          [step('5f6a7b8c-9d0e-4f1a-b2c3-d4e5f6a7b8c9', 'running', {}, running)],
+        ),
+      ];
+      const browser = {
+        url: 'https://orchid.example/hours',
+        title: 'Orchid Club hours',
+        controller: 'agent',
+        needsPerson: null,
+        controlledBy: null,
+        signIn: null,
+        logins: [],
+      };
+      await openChat({ browser, started: false, history, opens: false }, async ({ page, live }) => {
+        await page.getByText('All browsers for this workspace are in use. I’ll try again shortly.').waitFor();
+        // While the agent waits for a browser, none is open: the chat checks for one but shows nothing.
+        await new Promise(resolve => setTimeout(resolve, 4000));
+        assert.ok(live.stateReads >= 2, `the chat checked for an open browser (${live.stateReads})`);
+        assert.equal(live.refusedStreams.length, 0, 'the panel did not open');
+        assert.equal(await page.getByRole('button', { name: 'Show the browser' }).count(), 0);
+        assert.equal(await page.getByText('The browser has closed').count(), 0);
+
+        live.started = true;
+        await page
+          .getByRole('application', { name: /Browser screen/ })
+          .locator('img')
+          .waitFor();
+      });
+    },
+  );
+
+test(
+  'a hand-off streamed for a turn not yet in the history opens the browser only once one exists',
+  { timeout: 120000 },
+  async () => {
+    // The refusal's receipt hasn't been saved, so the completed event alone says nothing about whether a browser opened.
+    const handoff = {
+      turnId: '6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d',
+      generation: 0,
+      epoch: 1,
+      id: '7b8c9d0e-1f2a-4b3c-9d4e-5f6a7b8c9d0e',
+      tool: 'browser.handoff',
+      sequence: 1,
+      status: 'completed',
+      presentation: { label: 'Asking you to take over the browser', brand: null },
+    };
+    const history = chatHistory().slice(1);
+    const browser = {
+      url: 'https://orchid.example/join',
+      title: 'Orchid Club sign up',
+      controller: 'agent',
+      needsPerson: 'Tick the terms box to accept the Orchid Club terms.',
+      controlledBy: null,
+      signIn: null,
+      logins: [],
+    };
+    await openChat(
+      { browser, started: false, history, opens: false, events: `event: tool\ndata: ${JSON.stringify(handoff)}\n\n` },
+      async ({ page, live }) => {
+        await page.getByText('Please tick the terms box in the browser, then hand it back.').waitFor();
+        await new Promise(resolve => setTimeout(resolve, 4000));
+        assert.ok(live.stateReads >= 2, `the chat checked for an open browser (${live.stateReads})`);
+        assert.equal(live.refusedStreams.length, 0, 'the panel did not open');
+
+        live.started = true;
+        await page.getByText('The agent needs you').waitFor();
       },
     );
   },

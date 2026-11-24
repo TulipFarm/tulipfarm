@@ -35,6 +35,7 @@ import { integrationCredentialKeyring } from '@tulipfarm/integrations';
 import type { TaskBrowser } from '@tulipfarm/agents/task-runtime';
 import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
 import { endRunBrowser } from './browser-logins.ts';
+import { taskBrowserMeter } from './browser-usage.ts';
 
 export function createTaskComposition(
   storage: Parameters<typeof createTaskRuntime>[0],
@@ -61,6 +62,7 @@ export function createTaskComposition(
         client: createBrowserHostClient(browserHost),
         enabled: workspaceId => isFeatureEnabled('browser-use', null, { id: workspaceId }),
         secrets: taskBrowserSecrets(secrets),
+        meter: taskBrowserMeter(runtime),
         loadLogin: async ({ workspaceId, actor, sessionId, loginId }) => {
           const login = await browserLogins.use(workspaceId, actor, loginId);
           await browser!.client.loadLogin(sessionId, { id: login.id, site: login.site, state: login.state });
@@ -112,11 +114,12 @@ export function createTaskComposition(
   /** When a run ends, its browser saves its logins back as the run's owner and closes. */
   async function endTaskBrowser(workspaceId: string, taskId: string) {
     if (!browser) return;
+    const sessionId = browserSessionId(workspaceId, { runId: taskId });
     await endRunBrowser({
       client: browser.client,
       logins: browserLogins,
       workspaceId,
-      sessionId: browserSessionId(workspaceId, { runId: taskId }),
+      sessionId,
       owner: () =>
         runtime.transaction(workspaceId, commonCompatibility, async tx => {
           const row = await tx.client.query<{ owner_user_id: string }>(
@@ -126,6 +129,7 @@ export function createTaskComposition(
           return row.rows[0]?.owner_user_id;
         }),
     });
+    await browser.meter?.({ workspaceId, taskId, sessionId })?.end();
   }
   const progress = createTaskProgress(runtime);
   async function processAgentTaskStep(workspaceId: string, taskId: string): Promise<TaskProgress> {
