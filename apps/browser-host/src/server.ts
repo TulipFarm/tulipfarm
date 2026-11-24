@@ -9,6 +9,7 @@ import {
   browserLoadLoginSchema,
   browserSiteStateRequestSchema,
   browserSessionIdSchema,
+  browserTypeSecretSchema,
 } from '@tulipfarm/browser/contracts';
 import { HostError, type BrowserHost } from './host.ts';
 
@@ -94,6 +95,12 @@ export function createBrowserHostServer(host: BrowserHost, token: string): Serve
         return send(response, 204);
       case 'POST actions':
         return send(response, 200, await host.act(sessionId, parse(browserActionSchema, await readJson(request))));
+      case 'POST secrets':
+        return send(
+          response,
+          200,
+          await host.typeSecret(sessionId, parse(browserTypeSecretSchema, await readJson(request))),
+        );
       case 'POST control':
         return send(response, 200, await host.control(sessionId, parse(browserControlSchema, await readJson(request))));
       case 'POST needs-person':

@@ -53,6 +53,24 @@ before(async () => {
         `<!doctype html><title>Account of ${member}</title><p id="cart"></p><script>document.getElementById('cart').textContent = 'Cart: ' + localStorage.getItem('cart')</script>`,
       );
     }
+    if (url.pathname === '/login') {
+      response.writeHead(200, { 'content-type': 'text/html' });
+      const other = `http://localhost:${site.address().port}/frame`;
+      return response.end(
+        `<!doctype html><title>Sign in</title>
+        <form action="/done">
+          <label>Email <input name="user" type="email"></label>
+          <label>Password <input name="pass" type="password"></label>
+          <label>Notes <input name="notes"></label>
+          <button type="submit">Sign in</button>
+        </form>
+        <iframe title="Other site" src="${other}"></iframe>`,
+      );
+    }
+    if (url.pathname === '/frame') {
+      response.writeHead(200, { 'content-type': 'text/html' });
+      return response.end(`<!doctype html><label>Frame password <input type="password"></label>`);
+    }
     if (url.pathname === '/done') {
       response.writeHead(200, { 'content-type': 'text/html' });
       return response.end(
@@ -278,4 +296,39 @@ test('loading another login for a site replaces the sign-in, and reloading one a
   assert.match(result.snapshot, /Cart: 5 items/, 'a login loaded again replaces the storage it set before');
   result = await host.act(next, { action: 'navigate', url: `${origin}/account` });
   assert.match(result.snapshot, /Cart: 5 items/, 'an earlier load’s storage never comes back');
+});
+
+test('a secret is typed only into sign-in fields on its own site and never shown back', async t => {
+  const host = await createBrowserHost({ ...options, allowPrivateNetworks: true });
+  t.after(() => host.shutdown());
+  await host.open(sessionId);
+  const page = await host.act(sessionId, { action: 'navigate', url: `${origin}/login` });
+  const user = ref(page.snapshot, /textbox "Email"/);
+  const pass = ref(page.snapshot, /textbox "Password"/);
+  const notes = ref(page.snapshot, /textbox "Notes"/);
+  const framed = ref(page.snapshot, /textbox "Frame password"/);
+  const submit = ref(page.snapshot, /button "Sign in"/);
+  const secret = { username: 'ada@example.com', password: 'p@ss w0rd!' };
+  const fields = (username, password) => [
+    { ref: username, kind: 'username', value: secret.username },
+    { ref: password, kind: 'password', value: secret.password },
+  ];
+  const refused = async (input, code) =>
+    assert.rejects(host.typeSecret(sessionId, input), error => error.code === code, code);
+  await refused({ hosts: ['example.com'], fields: fields(user, pass) }, 'destination-denied');
+  await refused({ hosts: ['127.0.0.1'], fields: fields(user, notes) }, 'field-refused');
+  await refused({ hosts: ['127.0.0.1'], fields: fields(pass, pass) }, 'field-refused');
+  await refused({ hosts: ['127.0.0.1'], fields: fields(user, framed) }, 'destination-denied');
+  const unchanged = await host.act(sessionId, { action: 'snapshot' });
+  assert.equal(unchanged.snapshot.includes(secret.username), false);
+
+  const done = await host.typeSecret(sessionId, { hosts: ['127.0.0.1'], fields: fields(user, pass), submit });
+  assert.equal(done.state.title, 'Welcome');
+  const shown = JSON.stringify({ ...done, screenshot: '' });
+  for (const value of [secret.username, secret.password, encodeURIComponent(secret.password), 'p%40ss+w0rd%21'])
+    assert.equal(shown.includes(value), false, value);
+  assert.match(done.snapshot, /user=•••• pass=••••/);
+  assert.match(done.state.url, /user=••••&pass=••••/);
+  const later = await host.act(sessionId, { action: 'snapshot' });
+  assert.equal(later.snapshot.includes(secret.password), false);
 });
