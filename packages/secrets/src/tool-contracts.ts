@@ -58,13 +58,21 @@ export const placementSchema = z.discriminatedUnion('kind', [
     format: z.enum(['json', 'form']),
     fields: z.array(bodyFieldSchema).min(1).max(2),
   }),
+  // Typed into a site's sign-in form in the chat's browser, never sent in an HTTP request.
+  z.strictObject({ kind: z.literal('browser') }),
 ]);
 export type Placement = z.infer<typeof placementSchema>;
 export type PlacementKind = Placement['kind'];
-export const placementKinds = ['bearer', 'basic', 'header', 'cookie', 'query', 'body'] as const;
+export const placementKinds = ['bearer', 'basic', 'header', 'cookie', 'query', 'body', 'browser'] as const;
+/** The placements an HTTP request can carry. */
+export const requestPlacementKinds = ['bearer', 'basic', 'header', 'cookie', 'query', 'body'] as const;
 
-/** A username-and-password secret needs two body fields; every other kind needs one. */
+/**
+ * A username-and-password secret needs two body fields; every other kind needs one. Only a password, with or without
+ * a username, can be typed into a browser.
+ */
 export function placementFits(kind: SecretKind, placement: Placement): boolean {
+  if (placement.kind === 'browser') return kind === 'password' || kind === 'username-password';
   if (placement.kind === 'body') {
     const fields = new Set(placement.fields);
     if (fields.size !== placement.fields.length) return false;
@@ -99,7 +107,7 @@ export const secretsRequestCallSchema = z
       .min(1)
       .max(5)
       .describe(
-        'What to ask for. Set placement only when the API documentation or an authentication hint shows how the secret is sent; otherwise the member chooses.',
+        'What to ask for. Set placement only when the API documentation or an authentication hint shows how the secret is sent; otherwise the member chooses. For a website sign-in in the browser, ask for a username-password (or password) field with placement {"kind":"browser"}.',
       ),
     destinations: z
       .array(destinationInputSchema)

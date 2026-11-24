@@ -91,6 +91,8 @@ export function applyPlacement(
       headers['content-type'] ??= 'application/json';
       return { ...request, headers, body: JSON.stringify(json) };
     }
+    case 'browser':
+      throw new SecretError('placement-unsupported');
   }
 }
 

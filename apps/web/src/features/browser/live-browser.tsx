@@ -332,4 +332,5 @@ export function LiveBrowserCanvas({
 }
 
 export const liveBrowserCanvasId = (chatId: string) => `live-browser:${chatId}`;
-export const isBrowserTool = (tool: string) => tool === 'browser.act' || tool === 'browser.handoff';
+export const isBrowserTool = (tool: string) =>
+  tool === 'browser.act' || tool === 'browser.handoff' || tool === 'browser.signIn';

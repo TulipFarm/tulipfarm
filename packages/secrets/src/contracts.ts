@@ -25,6 +25,7 @@ export {
   type Placement,
   type PlacementKind,
   placementKinds,
+  requestPlacementKinds,
   placementFits,
   destinationInputSchema,
   type DestinationInput,

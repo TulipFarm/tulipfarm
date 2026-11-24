@@ -248,7 +248,7 @@ test('admin team enrollment supplies bounded table authority and keeps the activ
   const actor = { kind: 'human', userId: f.user, membershipId: f.member };
   const admin = { kind: 'human', userId: f.w.userId, membershipId: f.w.membershipId };
   const allowed = (who = admin, permission = 'table.row.read') =>
-    f.runtime.transaction(f.w.id, { minimum: 1, maximum: 110 }, tx =>
+    f.runtime.transaction(f.w.id, { minimum: 1, maximum: 111 }, tx =>
       canUseAgentEnrollment(tx, who, f.agentId, customers.tableId, permission, receipt.activationId),
     );
   assert.equal(await allowed(), true);
@@ -289,7 +289,7 @@ test('admin team enrollment supplies bounded table authority and keeps the activ
     await f.db.platform.query(`SELECT run_id FROM ${f.table('tf_agent_task_runs')} WHERE task_id=$1`, [task.id])
   ).rows[0].run_id;
   const runAllows = (assetId, permission) =>
-    f.runtime.transaction(f.w.id, { minimum: 1, maximum: 110 }, tx =>
+    f.runtime.transaction(f.w.id, { minimum: 1, maximum: 111 }, tx =>
       canAccessAsset(tx, { kind: 'agent', runId }, assetId, permission),
     );
   assert.equal(await runAllows(customers.tableId, 'table.row.update'), true);

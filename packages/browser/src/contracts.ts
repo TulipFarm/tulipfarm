@@ -33,6 +33,31 @@ export const browserActionSchema = z.discriminatedUnion('action', [
 ]);
 export type BrowserAction = z.infer<typeof browserActionSchema>;
 
+/** A field of a secret to type, and the sign-in form field it goes in. */
+export const browserSecretFieldSchema = z.strictObject({
+  ref: browserRefSchema,
+  kind: z.enum(['username', 'password']),
+  value: z.string().min(1).max(4096),
+});
+
+/**
+ * Types a secret into a sign-in form. The browser host types it only into a page and frame on one of `hosts`, the
+ * secret's host destinations, and keeps it out of everything it returns.
+ */
+export const browserTypeSecretSchema = z
+  .strictObject({
+    hosts: z.array(z.string().min(1).max(253)).min(1).max(10),
+    fields: z.array(browserSecretFieldSchema).min(1).max(2),
+    submit: browserRefSchema.optional(),
+  })
+  .refine(
+    input => new Set(input.fields.map(field => field.kind)).size === input.fields.length,
+    'Type at most one username and one password',
+  )
+  .refine(input => input.fields.some(field => field.kind === 'password'), 'A sign-in needs a password field')
+  .refine(input => new Set(input.fields.map(field => field.ref)).size === input.fields.length, 'Use a field once');
+export type BrowserTypeSecret = z.infer<typeof browserTypeSecretSchema>;
+
 /** Who drives the browser: the agent, or a member who took over. */
 export const browserControllerSchema = z.enum(['agent', 'person']);
 export type BrowserController = z.infer<typeof browserControllerSchema>;
@@ -131,8 +156,8 @@ export const browserActionResultSchema = z.strictObject({
   /** The page's accessibility snapshot, with refs for elements the agent can act on. Truncated when long. */
   snapshot: z.string(),
   truncated: z.boolean(),
-  /** A JPEG screenshot of the viewport, base64-encoded. */
-  screenshot: z.string(),
+  /** A JPEG screenshot of the viewport, base64-encoded. Left out when the page could show a typed secret. */
+  screenshot: z.string().optional(),
   /** What happened that the agent should know, such as a blocked address. */
   notice: z.string().optional(),
 });
@@ -198,6 +223,8 @@ export const browserHostErrorCodeSchema = z.enum([
   'person-in-control',
   'agent-in-control',
   'address-denied',
+  'destination-denied',
+  'field-refused',
   'ref-not-found',
   'action-failed',
   'capacity',

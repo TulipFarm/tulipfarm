@@ -1,7 +1,7 @@
 import {
   SecretError,
   applyPlacement,
-  placementKinds,
+  requestPlacementKinds,
   redactUrl,
   valueParts,
   type OutgoingRequest,
@@ -276,7 +276,7 @@ export async function prepareApiCall(
         throw new SecretError('conflict');
       if (secret.placement.kind === 'body' && (readMethods.has(call.method) || call.body?.kind === 'text'))
         throw new SecretError('placement-unsupported');
-      request = applyPlacement(request, secret.placement, secret.value, placementKinds);
+      request = applyPlacement(request, secret.placement, secret.value, requestPlacementKinds);
     } catch (error) {
       throw secretFailure(error, label);
     }

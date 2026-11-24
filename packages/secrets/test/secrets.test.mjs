@@ -101,6 +101,13 @@ test('placement rules follow the MCP header rules and the kind', () => {
   assert.equal(placementFits('username-password', { kind: 'body', format: 'form', fields: ['u', 'p'] }), true);
   assert.equal(placementFits('api-key', { kind: 'body', format: 'form', fields: ['u', 'p'] }), false);
   assert.equal(placementFits('api-key', { kind: 'body', format: 'form', fields: ['k'] }), true);
+  assert.equal(placementFits('username-password', { kind: 'browser' }), true);
+  assert.equal(placementFits('password', { kind: 'browser' }), true);
+  assert.equal(placementFits('api-key', { kind: 'browser' }), false);
+  assert.throws(
+    () => applyPlacement(request, { kind: 'browser' }, { username: 'ana', password: 'pw' }, [...all, 'browser']),
+    code('placement-unsupported'),
+  );
   assert.throws(() => parseValue('api-key', { username: 'a', password: 'b' }), code('invalid-input'));
   assert.throws(() => parseValue('password', { value: 'a\nb' }));
   assert.throws(() => parseValue('token', { value: 'x'.repeat(17 * 1024) }), code('invalid-input'));

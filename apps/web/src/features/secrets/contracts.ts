@@ -21,19 +21,21 @@ export const placementSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('cookie'), name: z.string() }),
   z.object({ kind: z.literal('query'), name: z.string() }),
   z.object({ kind: z.literal('body'), format: z.enum(['json', 'form']), fields: z.array(z.string()).min(1).max(2) }),
+  z.object({ kind: z.literal('browser') }),
 ]);
 export type Placement = z.infer<typeof placementSchema>;
 export type PlacementKind = Placement['kind'];
-export const placementKinds = ['bearer', 'basic', 'header', 'cookie', 'query', 'body'] as const;
+export const placementKinds = ['bearer', 'basic', 'header', 'cookie', 'query', 'body', 'browser'] as const;
 
 /** Plain names for each way to send a secret, with a short technical hint. */
 export const placementOptions: Record<PlacementKind, { label: string; hint: string }> = {
   bearer: { label: 'As a bearer token', hint: 'Most APIs. Authorization: Bearer …' },
   header: { label: 'In a header', hint: 'Like X-Api-Key' },
-  basic: { label: 'As a sign-in', hint: 'Username and password' },
+  basic: { label: 'As a basic sign-in', hint: 'Username and password' },
   query: { label: 'In the web address', hint: 'Like ?key=…' },
   cookie: { label: 'In a cookie', hint: 'For sites that sign in with a cookie' },
   body: { label: 'In the request body', hint: 'A JSON or form field' },
+  browser: { label: 'In the site’s sign-in form', hint: 'Typed in for you in the browser' },
 };
 
 const destinationSchema = z.object({
@@ -192,6 +194,8 @@ export function placementPhrase(placement: Placement) {
       return placement.name ? `in the ${placement.name} query parameter` : 'in the address';
     case 'body':
       return 'in the request body';
+    case 'browser':
+      return 'through the site’s sign-in form';
   }
 }
 
@@ -217,8 +221,12 @@ export function destinationLabel(destination: Destination) {
   return destination.kind === 'host' ? `${destination.value} (any address on this host)` : destination.value;
 }
 
-/** Mirrors the server: a username and password needs basic sign-in or two body fields; other kinds need one. */
+/**
+ * Mirrors the server: a username and password needs basic sign-in, two body fields or the browser; other kinds need
+ * one body field. Only a password, with or without a username, can be typed into the browser.
+ */
 export function placementFits(kind: SecretKind, placement: Placement) {
+  if (placement.kind === 'browser') return kind === 'password' || kind === 'username-password';
   if (placement.kind === 'body')
     return (
       new Set(placement.fields).size === placement.fields.length &&
@@ -271,7 +279,12 @@ export function placementError(kind: SecretKind, placement: Placement): string |
       return 'Use letters, numbers, hyphens and underscores. Use dots for nested fields.';
     if (new Set(placement.fields).size !== placement.fields.length) return 'Use two different field names.';
   }
-  if (!placementFits(kind, placement)) return 'Send a username and password with basic sign-in or two body fields.';
+  if (!placementFits(kind, placement))
+    return placement.kind === 'browser'
+      ? 'Only a password or a username and password can be typed into the sign-in form. Choose another way to send it.'
+      : kind === 'username-password'
+        ? 'Send a username and password as a basic sign-in, in two body fields or in the site’s sign-in form.'
+        : 'Send a username and password with basic sign-in or two body fields.';
   return null;
 }
 

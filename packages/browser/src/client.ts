@@ -11,6 +11,7 @@ import {
   type BrowserNeedsPerson,
   type BrowserSessionState,
   type BrowserSiteState,
+  type BrowserTypeSecret,
   browserSiteStateSchema,
 } from './contracts.ts';
 
@@ -82,6 +83,10 @@ export function createBrowserHostClient(connection: BrowserHostConnection, fetch
     },
     async act(sessionId: string, action: BrowserAction): Promise<BrowserActionResult> {
       return browserActionResultSchema.parse(await call('POST', `${session(sessionId)}/actions`, action, 90_000));
+    },
+    /** Types a secret into the page's sign-in form. The result never contains the secret. */
+    async typeSecret(sessionId: string, input: BrowserTypeSecret): Promise<BrowserActionResult> {
+      return browserActionResultSchema.parse(await call('POST', `${session(sessionId)}/secrets`, input, 90_000));
     },
     async control(sessionId: string, control: BrowserControl): Promise<BrowserSessionState> {
       return browserSessionStateSchema.parse(await call('POST', `${session(sessionId)}/control`, control));

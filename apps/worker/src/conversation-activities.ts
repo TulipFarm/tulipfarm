@@ -95,7 +95,7 @@ import type { Subscriptions } from '@tulipfarm/integrations/subscriptions';
 import { conversationTitleActivity } from './conversation-title.ts';
 import type { ConversationTitleWork } from '@tulipfarm/conversations/titles';
 import { conversationInventoryReads, type ConversationInventoryReads } from './conversation-inventory.ts';
-import { secretsServices } from './secrets-composition.ts';
+import { chatBrowserSecrets, secretsServices } from './secrets-composition.ts';
 import { heldSecrets } from '@tulipfarm/secrets/send';
 import { resumeApiCall, type ApiCallFiles } from '@tulipfarm/api-calls';
 import type { AppPages } from '@tulipfarm/agents/app-page-tools';
@@ -375,7 +375,11 @@ export function meteredReply(
         ? (await observeChatDetail('feature-flag', () =>
             isFeatureEnabled('browser-use', null, { id: fence.workspaceId }),
           ))
-          ? { client: createBrowserHostClient(browserHost), imageInput: routeCapabilities(validatedRoute).imageInput }
+          ? {
+              client: createBrowserHostClient(browserHost),
+              imageInput: routeCapabilities(validatedRoute).imageInput,
+              secrets: chatBrowserSecrets(secretServices),
+            }
           : undefined
         : undefined;
     const appChat =

@@ -14,6 +14,7 @@ import {
   type BrowserNeedsPerson,
   type BrowserSessionState,
   type BrowserSiteState,
+  type BrowserTypeSecret,
   browserSiteOf,
   siteIncludes,
 } from '@tulipfarm/browser/contracts';
@@ -50,6 +51,26 @@ export type HostOptions = {
 export type SessionEvent = { type: 'frame'; frame: BrowserFrame } | { type: 'state'; state: BrowserSessionState };
 type Listener = (event: SessionEvent) => void;
 
+/** Escapes text as Playwright quotes it in a snapshot's YAML, without the surrounding quotes. */
+function yamlEscape(text: string): string {
+  const named: Record<string, string> = {
+    '\\': '\\\\',
+    '"': '\\"',
+    '\b': '\\b',
+    '\f': '\\f',
+    '\n': '\\n',
+    '\r': '\\r',
+    '\t': '\\t',
+  };
+  return [...text]
+    .map(c => {
+      const code = c.charCodeAt(0);
+      const control = code < 0x20 || (code >= 0x7f && code <= 0x9f);
+      return named[c] ?? (control ? `\\x${code.toString(16).padStart(2, '0')}` : c);
+    })
+    .join('');
+}
+
 class Session {
   readonly id: string;
   readonly context: BrowserContext;
@@ -64,6 +85,8 @@ class Session {
   lastUsed: number;
   notice: string | undefined;
   title = '';
+  /** Every form of the secrets typed in this session, longest first, to keep out of what the host returns. */
+  private typed: string[] = [];
   private cdp: CDPSession | undefined;
   private screencasting = false;
   private lastFrame: BrowserFrame | undefined;
@@ -84,11 +107,57 @@ class Session {
     return next;
   }
 
+  /** Whether a secret was typed in this session; from then on the agent gets no screenshots. */
+  get hasTypedSecret() {
+    return this.typed.length > 0;
+  }
+
+  /**
+   * Remembers a typed secret so `redact` removes it. A page or snapshot may show it changed: an input drops line
+   * breaks (and an email box trims), Playwright drops zero-width spaces and soft hyphens, trims and collapses white
+   * space. Each such form is also remembered as a snapshot's JSON and YAML quoting escapes it and as an address
+   * encodes it.
+   */
+  remember(value: string) {
+    const changes = [
+      (text: string) => text.replace(/[\r\n]/g, ''),
+      (text: string) => text.replace(/[\u200b\u00ad]/g, ''),
+      (text: string) => text.replace(/[\u200b-\u200d\u2060\ufeff\u00ad]/g, ''),
+      (text: string) => text.trim(),
+      (text: string) => text.replace(/\s+/g, ' '),
+    ];
+    const shown = new Set([value]);
+    // A set's loop also visits what is added during it, so this applies every combination of changes.
+    for (const text of shown) for (const change of changes) shown.add(change(text));
+    const forms = new Set<string>();
+    for (const text of shown) {
+      // A changed form too short to mean anything would blank out ordinary text.
+      if (text !== value && text.length < 4) continue;
+      const json = JSON.stringify(text).slice(1, -1);
+      forms.add(text);
+      forms.add(json);
+      forms.add(json.replace(/'/g, "''"));
+      forms.add(yamlEscape(text));
+      forms.add(encodeURIComponent(text));
+      forms.add(new URLSearchParams({ v: text }).toString().slice(2));
+    }
+    this.typed = [...new Set([...forms, ...this.typed])]
+      .filter(form => form.length)
+      .slice(0, 400)
+      .sort((a, b) => b.length - a.length);
+  }
+
+  redact(text: string): string {
+    let redacted = text;
+    for (const value of this.typed) redacted = redacted.split(value).join('••••');
+    return redacted;
+  }
+
   state(): BrowserSessionState {
     return {
       sessionId: this.id,
-      url: this.page.url(),
-      title: this.title,
+      url: this.redact(this.page.url()),
+      title: this.redact(this.title),
       controller: this.controller,
       needsPerson: this.needsPerson,
       controlledBy: this.controlledBy,
@@ -110,6 +179,7 @@ class Session {
     this.emit({ type: 'state', state: this.state() });
   }
 
+  /** Live frames are not redacted: they go to the chat's member, who gave TulipFarm any secret typed here. */
   async subscribe(listener: Listener): Promise<() => void> {
     this.listeners.add(listener);
     listener({ type: 'state', state: this.state() });
@@ -321,16 +391,26 @@ export async function createBrowserHost(options: HostOptions) {
       snapshot = '(The page could not be read. Take a snapshot again after it loads.)';
     }
     const truncated = snapshot.length > snapshotChars;
-    const screenshot = (await page.screenshot({ type: 'jpeg', quality: 55, timeout: 10_000 })).toString('base64');
+    // Redaction covers text, not pixels, and a page can draw a typed secret anywhere, so after one is typed the
+    // agent gets no screenshots from this browser.
+    const withheld = session.hasTypedSecret;
+    const screenshot = withheld
+      ? undefined
+      : (await page.screenshot({ type: 'jpeg', quality: 55, timeout: 10_000 })).toString('base64');
     await session.refreshTitle();
-    const notice = session.notice;
+    const notices = [
+      session.notice && session.redact(session.notice),
+      withheld &&
+        'Screenshots are off in this browser after a sign-in with a secret. The accessibility snapshot still works.',
+    ].filter(Boolean);
     session.notice = undefined;
+    snapshot = session.redact(snapshot);
     return {
       state: session.state(),
       snapshot: truncated ? `${snapshot.slice(0, snapshotChars)}\n… (snapshot truncated)` : snapshot,
       truncated,
-      screenshot,
-      ...(notice ? { notice } : {}),
+      ...(screenshot ? { screenshot } : {}),
+      ...(notices.length ? { notice: notices.join(' ') } : {}),
     };
   }
 
@@ -392,13 +472,136 @@ export async function createBrowserHost(options: HostOptions) {
           break;
       }
     } catch (error) {
-      const message = (error as Error).message.split('\n')[0] ?? 'The action failed.';
+      const message = session.redact((error as Error).message.split('\n')[0] ?? 'The action failed.');
       if ('ref' in action && /aria-ref|resolved to 0 elements|No node found/i.test((error as Error).message))
         throw new HostError('ref-not-found', `No element has ref ${action.ref}. Take a new snapshot.`, 422);
       throw new HostError('action-failed', message, 422);
     }
     await page.waitForTimeout(300);
     return result(session);
+  }
+
+  /** Whether a page or frame address is on one of a secret's hosts, over https or, in local tests, http. */
+  function onHosts(url: string, hosts: ReadonlySet<string>) {
+    try {
+      const { protocol, hostname } = new URL(url);
+      if (protocol !== 'https:' && !(protocol === 'http:' && options.allowPrivateNetworks)) return false;
+      return hosts.has(hostname.toLowerCase());
+    } catch {
+      return false;
+    }
+  }
+
+  async function typeSecret(sessionId: string, input: BrowserTypeSecret): Promise<BrowserActionResult> {
+    const session = get(sessionId);
+    return session.run(async () => {
+      if (session.controller === 'person')
+        throw new HostError(
+          'person-in-control',
+          'A member has taken over this browser. Wait until they hand it back before acting.',
+          409,
+        );
+      session.needsPerson = null;
+      session.signIn = null;
+      const page = session.page;
+      const hosts = new Set(input.hosts.map(host => host.toLowerCase()));
+      if (!onHosts(page.url(), hosts))
+        throw new HostError(
+          'destination-denied',
+          'This page is not on a site the secret may be used on, so nothing was typed.',
+          403,
+        );
+      // Every field is checked before anything is typed. Playwright's messages are never returned: they can echo a value.
+      const resolve = async (ref: string) => {
+        const handle = await page
+          .locator(`aria-ref=${ref}`)
+          .elementHandle({ timeout: 2_000 })
+          .catch(() => null);
+        if (!handle) throw new HostError('ref-not-found', `No element has ref ${ref}. Take a new snapshot.`, 422);
+        const frame = await handle.ownerFrame();
+        if (!frame || !onHosts(frame.url(), hosts))
+          throw new HostError(
+            'destination-denied',
+            `Element ${ref} is in a frame from another site, so nothing was typed.`,
+            403,
+          );
+        return handle;
+      };
+      const fields = [];
+      for (const field of input.fields) {
+        const handle = await resolve(field.ref);
+        const type = await handle
+          .evaluate(element =>
+            element.tagName === 'INPUT' ? (element as unknown as { type: string }).type.toLowerCase() : null,
+          )
+          .catch(() => null);
+        const fits =
+          field.kind === 'password' ? type === 'password' : type === 'text' || type === 'email' || type === 'tel';
+        if (!fits)
+          throw new HostError(
+            'field-refused',
+            field.kind === 'password'
+              ? `Element ${field.ref} is not a password box. Point at the page's password box.`
+              : `Element ${field.ref} is not a text box for the username. Point at the username or email box.`,
+            422,
+          );
+        fields.push({ handle, field });
+      }
+      const submit = input.submit === undefined ? undefined : await resolve(input.submit);
+      const http = Boolean(options.allowPrivateNetworks);
+      try {
+        for (const { handle, field } of fields) {
+          session.remember(field.value);
+          // Set in the element's own document in one step, not typed through the keyboard, so a frame that takes
+          // focus can't receive it. The checks repeat there in case the page changed since they first ran.
+          const typed = await handle.evaluate(
+            (element, { value, kind, hosts, http }) => {
+              const input = element as unknown as {
+                isConnected: boolean;
+                tagName: string;
+                type: string;
+                ownerDocument: { location: { protocol: string; hostname: string } } | null;
+                style: { setProperty(name: string, value: string): void };
+                dispatchEvent(event: unknown): boolean;
+              };
+              const location = input.ownerDocument?.location;
+              if (!input.isConnected || input.tagName !== 'INPUT' || !location) return false;
+              if (location.protocol !== 'https:' && !(http && location.protocol === 'http:')) return false;
+              if (!hosts.includes(location.hostname.toLowerCase())) return false;
+              const type = input.type.toLowerCase();
+              if (kind === 'password' ? type !== 'password' : !['text', 'email', 'tel'].includes(type)) return false;
+              const scope = globalThis as unknown as {
+                HTMLInputElement: { prototype: object };
+                Event: new (type: string, init: { bubbles: boolean }) => unknown;
+              };
+              // The native setter, so frameworks that track an input's value (React) see the change.
+              Object.getOwnPropertyDescriptor(scope.HTMLInputElement.prototype, 'value')?.set?.call(input, value);
+              input.dispatchEvent(new scope.Event('input', { bubbles: true }));
+              input.dispatchEvent(new scope.Event('change', { bubbles: true }));
+              // Hides the username in screenshots too; a password box already hides its value.
+              if (kind === 'username') input.style.setProperty('-webkit-text-security', 'disc');
+              return true;
+            },
+            { value: field.value, kind: field.kind, hosts: [...hosts], http },
+          );
+          if (!typed)
+            throw new HostError(
+              'action-failed',
+              'The sign-in form changed before the secret was typed. Take a new snapshot.',
+              422,
+            );
+        }
+        if (submit) {
+          await submit.click({ timeout: 10_000 });
+          await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => undefined);
+        }
+      } catch (error) {
+        if (error instanceof HostError) throw error;
+        throw new HostError('action-failed', 'The sign-in form could not be filled in or sent.', 422);
+      }
+      await page.waitForTimeout(300);
+      return result(session);
+    });
   }
 
   async function control(sessionId: string, input: BrowserControl): Promise<BrowserSessionState> {
@@ -590,6 +793,7 @@ export async function createBrowserHost(options: HostOptions) {
       return session.state();
     },
     act,
+    typeSecret,
     control,
     needsPerson,
     loadLogin,

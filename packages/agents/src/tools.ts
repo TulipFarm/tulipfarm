@@ -767,7 +767,7 @@ const descriptions: Record<ToolName, string> = {
   'present.choice':
     'Ask one question with selectable options immediately above the chat input. Required whenever you ask the human to choose between options; do not list options only in prose. Put the recommended option first and mark its label (Recommended). Set searchable to true when the options are teams, people, or any list that can grow past a handful; the human then searches a dropdown instead of seeing every option. When you ask which team should own a new table, set from to owner-teams and send no choices: the server lists the real teams, Everyone first. The human can also type an answer or skip. This pauses the reply until they respond. A choice is information, never permission, account selection, or approval to execute an action.',
   'secrets.request':
-    'Ask the person in this chat, or the owner of this task, for an API key, token, password or other secret through a private form, when a call needs one they have not given. You never see the value; you get references to use. Ask once for everything the work needs, then stop; a task waits until its owner answers. Set a field placement only when the API documentation or an authentication hint shows how the secret is sent; otherwise leave it out and the person chooses. Never ask for a secret in chat text. After a call is refused with a secret, make at most one new request rather than retrying the same secret.',
+    'Ask the person in this chat, or the owner of this task, for an API key, token, password or other secret through a private form, when a call needs one they have not given. You never see the value; you get references to use. Ask once for everything the work needs, then stop; a task waits until its owner answers. Set a field placement only when the API documentation or an authentication hint shows how the secret is sent; otherwise leave it out and the person chooses. To sign in to a website in the browser, ask for a username-password field (or password, when the site asks only for one) with placement {"kind":"browser"} and the sign-in page’s exact host as its destination, then use browser.signIn. Never ask for a secret in chat text. After a call is refused with a secret, make at most one new request rather than retrying the same secret.',
   'secrets.list':
     'List the secret references this chat or task run holds: name, kind, placement, allowed destinations and status, never values. Check it before asking for a secret again.',
   'github.personal.propose':
@@ -1154,6 +1154,7 @@ export function isExternalTool(tool: ToolName) {
     tool === 'images.generate' ||
     tool === 'agents.delegate' ||
     tool === 'api.request' ||
+    tool.startsWith('browser.') ||
     tool.startsWith('apps.') ||
     tool.startsWith('knowledge.') ||
     tool.startsWith('web.') ||
@@ -3023,6 +3024,7 @@ export function createChatTools(
       case 'agents.delegate':
       case 'browser.act':
       case 'browser.handoff':
+      case 'browser.signIn':
         // Sub-agents and the browser run outside a transaction through invokeWithSources.
         throw new AccessDenied();
       default:
@@ -3638,11 +3640,11 @@ export function createChatTools(
       );
       return { result, sources };
     }
-    if (call.tool === 'browser.act' || call.tool === 'browser.handoff') {
+    if (call.tool === 'browser.act' || call.tool === 'browser.handoff' || call.tool === 'browser.signIn') {
       if (!browser || !context.origin || telemetryRuntime !== 'chat') throw new AccessDenied();
       return invokeBrowser(
         browser,
-        { workspaceId: context.workspaceId, conversationId: context.origin.conversationId },
+        { workspaceId: context.workspaceId, conversationId: context.origin.conversationId, actor: context.actor },
         call,
       );
     }
