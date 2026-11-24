@@ -340,6 +340,76 @@ test(
   },
 );
 
+test('saved logins sharing a name say who saved them and when', { timeout: 120000 }, async () => {
+  const grace = governance.members[1];
+  // Twenty minutes apart at midday UTC, so the same local date in every time zone.
+  const mine = { ...savedLogin, createdAt: '2026-11-24T12:00:00.000Z' };
+  const mineLater = { ...savedLogin, id: crypto.randomUUID(), createdAt: '2026-11-24T12:20:00.000Z' };
+  const graces = {
+    ...savedLogin,
+    id: crypto.randomUUID(),
+    ownerMembershipId: grace.id,
+    status: 'needs-sign-in',
+    canManage: false,
+    createdAt: '2026-11-20T09:00:00.000Z',
+  };
+  const gone = { ...savedLogin, id: crypto.randomUUID(), ownerMembershipId: crypto.randomUUID() };
+  let release;
+  const directory = new Promise(resolve => (release = resolve));
+  await openChat(
+    {
+      browser: signInBrowser,
+      handle: async path => {
+        if (path === '/browser-logins') return { json: { enabled: true, logins: [mine, mineLater, graces, gone] } };
+        if (path === '/governance/directory') {
+          await directory;
+          return { json: { members: governance.members.map(member => ({ ...member, image: null })) } };
+        }
+      },
+    },
+    async ({ page }) => {
+      const date = iso =>
+        page.evaluate(
+          value => new Date(value).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }),
+          iso,
+        );
+      const time = iso =>
+        page.evaluate(value => new Date(value).toLocaleTimeString(undefined, { timeStyle: 'short' }), iso);
+      const logins = page.getByRole('list', { name: 'Saved logins for shop.example' });
+      const on = async login => `${await date(login.createdAt)}, ${await time(login.createdAt)}`;
+      await logins.getByText(`Saved on ${await date(graces.createdAt)}`).waitFor();
+      await logins.getByText(`Saved by you on ${await on(mine)}`).waitFor();
+      assert.equal(
+        await logins.getByText('a former member').count(),
+        0,
+        'no one is called a former member before names load',
+      );
+      release();
+      await logins.getByText(`Saved by you on ${await on(mineLater)}`).waitFor();
+      await logins.getByText(`Saved by Grace on ${await date(graces.createdAt)}`).waitFor();
+      await logins.getByText(`Saved by a former member on ${await date(gone.createdAt)}`).waitFor();
+      const buttons = logins.getByRole('button', { name: 'Use this login' });
+      assert.equal(await buttons.count(), 4);
+      assert.equal(
+        await buttons
+          .nth(2)
+          .getAttribute('aria-describedby')
+          .then(ids =>
+            page.evaluate(
+              list =>
+                list
+                  .split(' ')
+                  .map(id => document.getElementById(id)?.textContent)
+                  .join(', '),
+              ids,
+            ),
+          ),
+        `Orchid Shop team, Signed out, Saved by Grace on ${await date(graces.createdAt)}`,
+      );
+    },
+  );
+});
+
 for (const running of ['browser.act', 'browser.handoff'])
   test(
     `a browser call refused before any browser opened shows no browser, and a running ${running} opens it once it is open`,
