@@ -342,8 +342,9 @@ test(
 
 test('saved logins sharing a name say who saved them and when', { timeout: 120000 }, async () => {
   const grace = governance.members[1];
-  const mine = { ...savedLogin, createdAt: '2026-11-24T09:00:00.000Z' };
-  const mineLater = { ...savedLogin, id: crypto.randomUUID(), createdAt: '2026-11-24T15:30:00.000Z' };
+  // Twenty minutes apart at midday UTC, so the same local date in every time zone.
+  const mine = { ...savedLogin, createdAt: '2026-11-24T12:00:00.000Z' };
+  const mineLater = { ...savedLogin, id: crypto.randomUUID(), createdAt: '2026-11-24T12:20:00.000Z' };
   const graces = {
     ...savedLogin,
     id: crypto.randomUUID(),
