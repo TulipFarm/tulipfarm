@@ -469,7 +469,8 @@ function useTaskWait(workspaceId: string, task: TaskSummary) {
   const revision = `${task.status}/${task.toolCalls}/${task.activeMilliseconds}`;
   const secrets = useTaskSecretRequests(workspaceId, task.id, revision);
   const calls = useTaskApiCalls(workspaceId, task.id, revision);
-  if (task.status !== 'waiting-approval') return { label: taskStatusLabel(task), next: taskNextStep(task) };
+  if (task.status !== 'waiting-approval' || task.waitingOn === 'browser')
+    return { label: taskStatusLabel(task), next: taskNextStep(task) };
   if (secrets.state.kind === 'ready' && secrets.state.data.some(request => request.status === 'waiting'))
     return { label: 'Needs a secret', next: 'Provide or decline the secret request below.' };
   if (calls.state.kind === 'ready' && calls.state.data.some(call => call.status === 'awaiting-approval'))

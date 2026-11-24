@@ -214,6 +214,11 @@ test('an agent run uses one browser, waits for a person, and resumes or fails', 
     const deadline = Date.parse(waiting.result.waitingUntil) - Date.now();
     assert.ok(deadline > 23.9 * 3600000 && deadline <= 24 * 3600000, 'the run waits up to 24 hours');
     assert.deepEqual(await progress(w.id, task.id), { kind: 'waiting' });
+    assert.equal((await tasks.read(w.id, owner.userId, task.id)).waitingOn, 'browser', 'it waits on the browser');
+    assert.equal(
+      (await tasks.list(w.id, owner.userId, {})).tasks.find(listed => listed.id === task.id)?.waitingOn,
+      'browser',
+    );
 
     await engine.process(w.id, task.id);
     assert.equal((await toolCall(task.id, 'browser.handoff')).status, 'waiting', 'it keeps waiting for a person');
@@ -224,6 +229,7 @@ test('an agent run uses one browser, waits for a person, and resumes or fails', 
     assert.equal(resumed.status, 'completed');
     assert.equal(resumed.result.browser.status, 'handed-back');
     assert.equal(await settle(task.id), 'completed');
+    assert.equal((await tasks.read(w.id, owner.userId, task.id)).waitingOn, null);
     assert.ok(offered.every(Boolean), 'the model was offered the browser');
   });
 

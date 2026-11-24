@@ -6,7 +6,9 @@ import { Status } from '@tulipfarm/sprout/status';
 import { taskStatusLabel, taskStatusStates } from '@/features/tasks/status';
 import { workspaceRoute } from '@/router';
 
-const stateSchema = taskSummarySchema.pick({ status: true, pauseReason: true }).extend({ taskId: z.uuid() });
+const stateSchema = taskSummarySchema
+  .pick({ status: true, pauseReason: true, waitingOn: true })
+  .extend({ taskId: z.uuid() });
 
 export function AgentStepStatus({ output }: { output: unknown }) {
   const { workspaceSlug } = workspaceRoute.useParams();

@@ -25,13 +25,14 @@ test(
     const task = taskSummarySchema.parse({
       id: randomUUID(),
       agentId: randomUUID(),
-      agentLifecycle: 'archived',
+      agentLifecycle: 'active',
       activationId: randomUUID(),
       definitionRevision: 'b'.repeat(64),
       parentTaskId: null,
       delegationDepth: 0,
       generation: 0,
       status: 'waiting-approval',
+      waitingOn: 'browser',
       skills: [],
       scope: [],
       limits: { toolCalls: 100, activeMilliseconds: 300000, credits: 100 },
@@ -115,6 +116,13 @@ test(
       if (path === `${base}/agent-tasks/${task.id}/secret-requests`) return send({ requests: [] });
       if (path === `${base}/agent-tasks/${task.id}/api-calls`) return send({ calls: [] });
       if (path === `${base}/slack/tasks/${task.id}/actions`) return send({ actions: [] });
+      if (path === `${base}/github/tasks/${task.id}/batches`) return send({ batches: [] });
+      if (path === `${base}/github/tasks/${task.id}/selection`)
+        return send({ accountId: null, generation: null, version: 0 });
+      if (path === `${base}/github/tasks/${task.id}/investigation`)
+        return send({ investigation: false, version: 0, selected: null, choices: [] });
+      if (path === `${base}/agents/${task.agentId}`)
+        return route.fulfill({ status: 404, json: { error: 'not-found' } });
       if (path === `${base}/conversations`) return send({ chats: [], nextCursor: null });
       if (path.endsWith('/recent')) return send([]);
       if (shell.has(path)) return send(shell.get(path));
@@ -126,6 +134,14 @@ test(
       await page.goto(`${server.origin}/${fixture.workspace.slug}/agent-tasks/${task.id}`);
       await page.getByText('The agent needs you', { exact: true }).waitFor();
       await page.getByRole('img', { name: 'Live view of Renew your membership' }).waitFor();
+      // A run waiting on its browser asks for a hand back, not a review.
+      await page.getByText('Needs you in the browser', { exact: true }).first().waitFor();
+      await page
+        .getByText(
+          'The agent is waiting for someone to take over its browser. Take over, finish the step, then hand back.',
+        )
+        .waitFor();
+      assert.equal(await page.getByText('Needs your review').count(), 0);
       // Saving and loading logins belong to chats; a run's logins come from its agent.
       assert.equal(await page.getByRole('button', { name: 'Save login' }).count(), 0);
       await page.getByRole('button', { name: 'Take over', exact: true }).click();

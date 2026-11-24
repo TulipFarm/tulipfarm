@@ -119,6 +119,8 @@ export type TaskFailureReason = z.infer<typeof taskFailureReasonSchema>;
 export const taskSummarySchema = taskReceiptSchema.extend({
   pauseReason: taskPauseReasonSchema.nullish(),
   failureReason: taskFailureReasonSchema.nullish(),
+  /** What a task waiting for a person waits on, when it is not a review: `browser` while the agent's browser is handed off. */
+  waitingOn: z.enum(['browser']).nullish(),
   agentId: uuidSchema,
   agentLifecycle: z.enum(['active', 'deleted', 'archived']).default('active'),
   activationId: uuidSchema,
