@@ -42,7 +42,7 @@ import {
 } from '@tulipfarm/workflows/contracts';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { authConfig, type registerAuth } from './auth.ts';
-import { requestBoundaryError } from './security.ts';
+import { requestBoundaryError, sourceCheckUnavailable } from './security.ts';
 import { webhookRefusal } from './abuse.ts';
 import {
   providerTestInputSchema,
@@ -135,6 +135,7 @@ export function registerWorkflows(
           });
       }
       if (requestBoundaryError(failure, reply)) return;
+      if (sourceCheckUnavailable(failure, reply, 'workflows-unavailable')) return;
       if (failure instanceof AccessDenied) return reply.code(404).send({ error: 'workflow-not-found' });
       if (failure instanceof WorkflowConflict) return reply.code(409).send({ error: failure.message });
       if (failure instanceof ProviderFailure)

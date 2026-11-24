@@ -31,7 +31,7 @@ import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import { authConfig } from './auth.ts';
 import { authenticateRoutes } from './authenticated-routes.ts';
 import { routeValidation } from './route-validation.ts';
-import { requestBoundaryError } from './security.ts';
+import { requestBoundaryError, sourceCheckUnavailable } from './security.ts';
 
 export function registerAgentTasks(
   app: FastifyInstance,
@@ -77,6 +77,7 @@ export function registerAgentTasks(
     });
     routes.setErrorHandler((error, _request, reply) => {
       if (requestBoundaryError(error, reply)) return;
+      if (sourceCheckUnavailable(error, reply, 'task-operation-unavailable')) return;
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'task-not-found' });
       if (error instanceof StorageUnavailableError)
         return reply

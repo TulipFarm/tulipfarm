@@ -10,7 +10,7 @@ import { errorAttributes } from '@tulipfarm/observability';
 import { authConfig } from './auth.ts';
 import type { ApiCallsHttpAuth } from './api-calls.ts';
 import { routeValidation } from './route-validation.ts';
-import { requestBoundaryError } from './security.ts';
+import { requestBoundaryError, sourceCheckUnavailable } from './security.ts';
 import { requestSession } from './request-session.ts';
 
 const params = z.strictObject({ workspaceId: z.uuid(), runId: z.uuid() });
@@ -80,6 +80,7 @@ export function registerCodingRuns(app: FastifyInstance, auth: ApiCallsHttpAuth,
       if (error instanceof z.ZodError || (typeof error === 'object' && error !== null && 'validation' in error))
         return reply.code(400).send({ error: 'invalid-coding-run-decision' });
       if (requestBoundaryError(error, reply)) return;
+      if (sourceCheckUnavailable(error, reply, 'coding-runs-unavailable')) return;
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'coding-run-not-found' });
       if (error instanceof CodingRunDecisionConflict) return reply.code(409).send({ error: 'coding-run-conflict' });
       request.log.error(errorAttributes(error), 'coding_run_review_failed');

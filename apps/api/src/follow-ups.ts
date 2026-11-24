@@ -7,7 +7,7 @@ import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { authenticateRoutes } from './authenticated-routes.ts';
 import { routeValidation } from './route-validation.ts';
 import { authConfig, type registerAuth } from './auth.ts';
-import { requestBoundaryError } from './security.ts';
+import { requestBoundaryError, sourceCheckUnavailable } from './security.ts';
 
 const params = z.strictObject({ workspaceId: z.uuid(), chatId: z.uuid(), followUpId: z.uuid() });
 const errorSchema = {
@@ -50,6 +50,7 @@ export function registerFollowUps(
     const user = authenticateRoutes(routes, dependencies.auth, { origin: () => authConfig().webOrigin });
     routes.setErrorHandler((error, _request, reply) => {
       if (requestBoundaryError(error, reply)) return;
+      if (sourceCheckUnavailable(error, reply, 'follow-ups-unavailable')) return;
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'follow-up-not-found' });
       if (error instanceof StorageUnavailableError) return reply.code(503).send({ error: 'follow-ups-unavailable' });
       if (error instanceof z.ZodError || (typeof error === 'object' && error !== null && 'validation' in error))

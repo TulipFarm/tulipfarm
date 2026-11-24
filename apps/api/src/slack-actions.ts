@@ -28,6 +28,7 @@ import { slackFollowUpCancelAction, slackFollowUpCancelValueSchema } from '@tuli
 import { authConfig, type registerAuth } from './auth.ts';
 import { SlackSignatureError, verifySlackRequest } from './slack-request.ts';
 import { requestSession } from './request-session.ts';
+import { sourceCheckUnavailable } from './security.ts';
 
 // Tells only the person who pressed a button what happened; the thread itself stays unchanged.
 async function respondEphemeral(responseUrl: string | undefined, text: string) {
@@ -109,6 +110,7 @@ export function registerSlackActions(
     routes.setErrorHandler<FastifyError>((error, _request, reply) => {
       if (error.statusCode === 413 || error.statusCode === 415)
         return reply.code(error.statusCode).send({ error: 'invalid-request' });
+      if (sourceCheckUnavailable(error, reply, 'slack-action-unavailable')) return;
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'slack-action-unavailable' });
       if (error instanceof SlackSignatureError) return reply.code(401).send({ error: 'slack-signature-invalid' });
       if (error instanceof z.ZodError || error instanceof SyntaxError)

@@ -115,6 +115,20 @@ test('event streams require a session, conversation access, and a healthy hub', 
   assert.equal((await open(missing.url)).status, 503);
 });
 
+test('chat reads answer a retryable 503, not not-found, when a source check cannot reach its provider', async t => {
+  const service = fakeService();
+  service.read = async () => {
+    throw new SourceAuthorizationUnavailable();
+  };
+  const { url } = await start(t, { service, events: fakeHub() });
+  for (const target of [url.slice(0, -'/events'.length), url]) {
+    const response = await open(target);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get('retry-after'), '5');
+    assert.deepEqual(await response.json(), { error: 'conversations-unavailable' });
+  }
+});
+
 test('an event stream sends the snapshot, then live events, and unsubscribes when the reader leaves', async t => {
   const events = fakeHub({
     snapshot: [

@@ -12,7 +12,7 @@ import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import type { registerAuth } from './auth.ts';
 import { authenticateRoutes } from './authenticated-routes.ts';
 import { routeValidation } from './route-validation.ts';
-import { requestBoundaryError } from './security.ts';
+import { requestBoundaryError, sourceCheckUnavailable } from './security.ts';
 
 const params = z.strictObject({ workspaceId: z.uuid(), chatId: z.uuid() });
 const listQuery = z.strictObject({ after: z.string().max(4096).optional() });
@@ -43,6 +43,7 @@ export function registerExecutionFiles(
     const user = authenticateRoutes(routes, dependencies.auth);
     routes.setErrorHandler((error, _request, reply) => {
       if (requestBoundaryError(error, reply)) return;
+      if (sourceCheckUnavailable(error, reply, 'execution-unavailable')) return;
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'execution-not-found' });
       if (error instanceof ExecutionConflict) {
         const status = error.code === 'not-found' ? 404 : error.code === 'disabled' ? 503 : 409;
