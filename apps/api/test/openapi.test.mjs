@@ -474,6 +474,7 @@ test('isolated buildApp documents success responses for all route groups while d
         'Agents',
         'Atlassian accounts',
         'Atlassian operations',
+        'Browser logins',
         'Bud',
         'ChatGPT plan',
         'Claude plan',

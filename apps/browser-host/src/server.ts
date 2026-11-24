@@ -6,11 +6,15 @@ import {
   browserControlSchema,
   browserInputSchema,
   browserNeedsPersonSchema,
+  browserLoadLoginSchema,
+  browserSiteStateRequestSchema,
   browserSessionIdSchema,
 } from '@tulipfarm/browser/contracts';
 import { HostError, type BrowserHost } from './host.ts';
 
 const maxBody = 64 * 1024;
+// A browser login's cookies and storage, which the service caps at 2 MB.
+const maxLoginBody = 4 * 1024 * 1024;
 
 function send(response: ServerResponse, status: number, body?: unknown) {
   if (body === undefined) {
@@ -22,12 +26,12 @@ function send(response: ServerResponse, status: number, body?: unknown) {
   response.end(text);
 }
 
-async function readJson(request: IncomingMessage): Promise<unknown> {
+async function readJson(request: IncomingMessage, limit = maxBody): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
     size += (chunk as Buffer).length;
-    if (size > maxBody) throw new HostError('invalid-request', 'The request body is too large.', 413);
+    if (size > limit) throw new HostError('invalid-request', 'The request body is too large.', 413);
     chunks.push(chunk as Buffer);
   }
   if (!size) return {};
@@ -92,9 +96,21 @@ export function createBrowserHostServer(host: BrowserHost, token: string): Serve
         return send(response, 200, await host.act(sessionId, parse(browserActionSchema, await readJson(request))));
       case 'POST control':
         return send(response, 200, await host.control(sessionId, parse(browserControlSchema, await readJson(request))));
-      case 'POST needs-person': {
-        const { reason } = parse(browserNeedsPersonSchema, await readJson(request));
-        return send(response, 200, await host.needsPerson(sessionId, reason));
+      case 'POST needs-person':
+        return send(
+          response,
+          200,
+          await host.needsPerson(sessionId, parse(browserNeedsPersonSchema, await readJson(request))),
+        );
+      case 'POST logins':
+        return send(
+          response,
+          200,
+          await host.loadLogin(sessionId, parse(browserLoadLoginSchema, await readJson(request, maxLoginBody))),
+        );
+      case 'POST site-state': {
+        const { site } = parse(browserSiteStateRequestSchema, await readJson(request));
+        return send(response, 200, await host.siteState(sessionId, site));
       }
       case 'POST input':
         await host.input(sessionId, parse(browserInputSchema, await readJson(request)));

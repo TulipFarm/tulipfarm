@@ -167,7 +167,7 @@ export const featureFlags = {
   },
   'browser-use': {
     description:
-      'Chat offers a cloud browser: the agent opens websites, clicks and types to finish tasks no API covers, while members watch it live next to the chat and take over for captchas, sign-ins or consent. Needs a browser host (BROWSER_HOST_ENDPOINT).',
+      'Chat offers a cloud browser: the agent opens websites, clicks and types to finish tasks no API covers, while members watch it live next to the chat and take over for captchas, sign-ins or consent. Members save sign-ins as browser logins, reuse them in later chats and share them like secrets. Needs a browser host (BROWSER_HOST_ENDPOINT).',
     default: false,
     scope: 'workspace',
     env: 'FEATURE_FLAG_BROWSER_USE',

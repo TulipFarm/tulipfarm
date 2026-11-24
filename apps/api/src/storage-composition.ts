@@ -22,6 +22,8 @@ import { emailDeliveryKeys } from '@tulipfarm/workspaces/email-delivery';
 import { authConfig } from './auth.ts';
 import { registerConversations } from './conversations.ts';
 import { registerBrowserLive } from './browser-live.ts';
+import { registerBrowserLogins } from './browser-logins.ts';
+import { createBrowserLogins } from '@tulipfarm/browser/logins';
 import { createBrowserHostClient } from '@tulipfarm/browser';
 import { browserHostConfiguration } from '@tulipfarm/config/browser-host';
 import { registerFollowUps } from './follow-ups.ts';
@@ -277,10 +279,13 @@ export function registerStorageComposition(
     replies,
   });
   const browserHost = browserHostConfiguration();
-  registerBrowserLive(app, {
+  const browserClient = browserHost ? createBrowserHostClient(browserHost) : undefined;
+  registerBrowserLive(app, { auth: dependencies.auth, chats: conversations, client: browserClient });
+  registerBrowserLogins(app, {
     auth: dependencies.auth,
     chats: conversations,
-    client: browserHost ? createBrowserHostClient(browserHost) : undefined,
+    client: browserClient,
+    logins: createBrowserLogins({ runtime, keyring: () => integrationCredentialKeyring() }),
   });
   registerLayoutInteractions(app, {
     auth: dependencies.auth,
