@@ -6,7 +6,13 @@ import { fixture } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createWorkspaceRuntime, qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { AccessDenied } from '@tulipfarm/access';
 import { workspaceTableMigrations } from '../../workspaces/dist/table-migrations.js';
-import { createGitHubKnowledge, createSlackKnowledge, createLocalKnowledge, GitHubCorpusError } from '../dist/index.js';
+import {
+  createGitHubKnowledge,
+  createSlackKnowledge,
+  createLocalKnowledge,
+  GitHubCorpusError,
+  knowledgeLimits,
+} from '../dist/index.js';
 import { keepBackedSearch } from './fake-keep.mjs';
 import { createFiles } from '@tulipfarm/files';
 import { parseKnowledgeDocument, KnowledgeParseError } from '../dist/parser.js';
@@ -1161,7 +1167,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         try {
           reads.length = 0;
           fileReads.length = 0;
-          await db.platform.query(`UPDATE ${usage} SET documents=50000 WHERE id=1`);
+          await db.platform.query(`UPDATE ${usage} SET documents=$1 WHERE id=1`, [knowledgeLimits.documents]);
           await sync();
           assert.equal(downloads(), 0, 'a full workspace refuses the document before it is downloaded');
           assert.equal(await itemFailure(nativeId), 'resource-limited');
