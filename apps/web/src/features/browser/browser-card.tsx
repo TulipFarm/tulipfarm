@@ -34,7 +34,8 @@ export function useLiveBrowserOpening(
   const api = useMemo(() => browserApi(workspaceId, { kind: 'chat', chatId }), [workspaceId, chatId]);
   const opened = useRef<string | null>(null);
   const wasActive = useRef(false);
-  const active = enabled && tools.some(tool => isBrowserTool(tool.tool) && tool.status === 'running');
+  // Until a browser call's receipt is saved, it may still open a browser or turn out to be refused, so keep checking.
+  const active = enabled && tools.some(tool => isBrowserTool(tool.tool) && !outcomeSaved(tool));
   const handoff =
     enabled && tools.some(tool => tool.tool === 'browser.handoff' && succeeded(tool) && !tool.browserNotOpened);
   useEffect(() => {

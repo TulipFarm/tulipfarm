@@ -68,6 +68,7 @@ async function openChat(
     page: pagePath,
     history = chatHistory(),
     opens = !pagePath,
+    events,
   },
   run,
 ) {
@@ -184,7 +185,10 @@ async function openChat(
         if (rest === '/messages')
           return route.fulfill({ json: { messages: history, nextBefore: null, hasGitHubProposals: false } });
         if (!rest) return route.fulfill({ json: chat });
-        if (rest === '/events') return route.fulfill({ status: 204 });
+        if (rest === '/events')
+          return events
+            ? route.fulfill({ status: 200, contentType: 'text/event-stream', body: `retry: 60000\n${events}` })
+            : route.fulfill({ status: 204 });
         return route.fulfill({ json: [] });
       }
       if (method === 'GET') return route.fulfill({ status: 404, json: { error: 'not-found' } });
@@ -410,6 +414,46 @@ for (const running of ['browser.act', 'browser.handoff'])
       });
     },
   );
+
+test(
+  'a hand-off streamed for a turn not yet in the history opens the browser only once one exists',
+  { timeout: 120000 },
+  async () => {
+    // The refusal's receipt hasn't been saved, so the completed event alone says nothing about whether a browser opened.
+    const handoff = {
+      turnId: '6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d',
+      generation: 0,
+      epoch: 1,
+      id: '7b8c9d0e-1f2a-4b3c-9d4e-5f6a7b8c9d0e',
+      tool: 'browser.handoff',
+      sequence: 1,
+      status: 'completed',
+      presentation: { label: 'Asking you to take over the browser', brand: null },
+    };
+    const history = chatHistory().slice(1);
+    const browser = {
+      url: 'https://orchid.example/join',
+      title: 'Orchid Club sign up',
+      controller: 'agent',
+      needsPerson: 'Tick the terms box to accept the Orchid Club terms.',
+      controlledBy: null,
+      signIn: null,
+      logins: [],
+    };
+    await openChat(
+      { browser, started: false, history, opens: false, events: `event: tool\ndata: ${JSON.stringify(handoff)}\n\n` },
+      async ({ page, live }) => {
+        await page.getByText('Please tick the terms box in the browser, then hand it back.').waitFor();
+        await new Promise(resolve => setTimeout(resolve, 4000));
+        assert.ok(live.stateReads >= 2, `the chat checked for an open browser (${live.stateReads})`);
+        assert.equal(live.refusedStreams.length, 0, 'the panel did not open');
+
+        live.started = true;
+        await page.getByText('The agent needs you').waitFor();
+      },
+    );
+  },
+);
 
 test('a member who signs in themselves is offered to save the login on hand back', { timeout: 120000 }, async () => {
   const saved = [];

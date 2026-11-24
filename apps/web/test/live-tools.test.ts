@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { newestTools, reconcileLiveTools, succeeded, unclaimedToolTurns } from '../src/features/chat/live-tools.ts';
+import {
+  newestTools,
+  outcomeSaved,
+  reconcileLiveTools,
+  succeeded,
+  unclaimedToolTurns,
+} from '../src/features/chat/live-tools.ts';
 import type { ConversationMessage } from '../src/features/chat/conversation-api.ts';
 import type { StreamTool } from '@tulipfarm/conversations/events';
 
@@ -101,4 +107,12 @@ test('a live completion renders no result card until the saved receipt carries t
   );
   const running = { ...saved, status: 'running' as const };
   assert.equal(succeeded(reconcile({ ...message, tools: [running] }, done).tools[0]!), false);
+});
+
+test('a completion for a turn not yet in the history has no saved outcome, so it is not taken as a success', () => {
+  const completed: StreamTool = { ...update, turnId: 'unknown', tool: 'browser.handoff', status: 'completed' };
+  const [tool] = newestTools([message], new Map([[completed.id, completed]]));
+  assert.equal(tool?.status, 'completed');
+  assert.equal(succeeded(tool!), false);
+  assert.equal(outcomeSaved(tool!), false);
 });
