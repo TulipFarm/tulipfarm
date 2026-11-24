@@ -336,76 +336,80 @@ test(
   },
 );
 
-test(
-  'a browser call refused before any browser opened shows no browser, and a running one opens it once it is open',
-  { timeout: 120000 },
-  async () => {
-    const step = (id, status, extra = {}) => ({
-      id,
-      tool: 'browser.act',
-      status,
-      activity: null,
-      presentation: { label: 'Using the browser', brand: null },
-      web: null,
-      ...extra,
-    });
-    const message = (id, sequence, author, text, turn, tools) => ({
-      id,
-      sequence,
-      author,
-      createdAt: `2026-11-24T10:00:0${sequence}.000Z`,
-      parts: [{ kind: 'text', text }],
-      turn,
-      tools,
-      calendarResults: [],
-    });
-    const history = [
-      message('0c9a7b6e-1d2f-4e3a-8b5c-7d6e5f4a3b21', 1, 'human', 'Check the Orchid Club opening hours', null, [
-        step('4e5f6a7b-8c9d-4e0f-a1b2-c3d4e5f6a7b8', 'completed', { activityStatus: 'failed', browserNotOpened: true }),
-      ]),
-      message(
-        '1d0b8c7f-2e3a-4f4b-9c6d-8e7f6a5b4c32',
-        2,
-        'assistant',
-        'All browsers for this workspace are in use. I’ll try again shortly.',
-        null,
-        [],
-      ),
-      message(
-        '2e1c9d8a-3f4b-4a5c-8d7e-9f8a7b6c5d43',
-        3,
-        'human',
-        'Try again now',
-        { id: '3f2d0e9b-4a5c-4b6d-9e8f-0a9b8c7d6e54', status: 'processing', generation: 1 },
-        [step('5f6a7b8c-9d0e-4f1a-b2c3-d4e5f6a7b8c9', 'running')],
-      ),
-    ];
-    const browser = {
-      url: 'https://orchid.example/hours',
-      title: 'Orchid Club hours',
-      controller: 'agent',
-      needsPerson: null,
-      controlledBy: null,
-      signIn: null,
-      logins: [],
-    };
-    await openChat({ browser, started: false, history, opens: false }, async ({ page, live }) => {
-      await page.getByText('All browsers for this workspace are in use. I’ll try again shortly.').waitFor();
-      // While the agent waits for a browser, none is open: the chat checks for one but shows nothing.
-      await new Promise(resolve => setTimeout(resolve, 4000));
-      assert.ok(live.stateReads >= 2, `the chat checked for an open browser (${live.stateReads})`);
-      assert.equal(live.refusedStreams.length, 0, 'the panel did not open');
-      assert.equal(await page.getByRole('button', { name: 'Show the browser' }).count(), 0);
-      assert.equal(await page.getByText('The browser has closed').count(), 0);
+for (const running of ['browser.act', 'browser.handoff'])
+  test(
+    `a browser call refused before any browser opened shows no browser, and a running ${running} opens it once it is open`,
+    { timeout: 120000 },
+    async () => {
+      const step = (id, status, extra = {}, tool = 'browser.act') => ({
+        id,
+        tool,
+        status,
+        activity: null,
+        presentation: { label: 'Using the browser', brand: null },
+        web: null,
+        ...extra,
+      });
+      const message = (id, sequence, author, text, turn, tools) => ({
+        id,
+        sequence,
+        author,
+        createdAt: `2026-11-24T10:00:0${sequence}.000Z`,
+        parts: [{ kind: 'text', text }],
+        turn,
+        tools,
+        calendarResults: [],
+      });
+      const history = [
+        message('0c9a7b6e-1d2f-4e3a-8b5c-7d6e5f4a3b21', 1, 'human', 'Check the Orchid Club opening hours', null, [
+          step('4e5f6a7b-8c9d-4e0f-a1b2-c3d4e5f6a7b8', 'completed', {
+            activityStatus: 'failed',
+            browserNotOpened: true,
+          }),
+        ]),
+        message(
+          '1d0b8c7f-2e3a-4f4b-9c6d-8e7f6a5b4c32',
+          2,
+          'assistant',
+          'All browsers for this workspace are in use. I’ll try again shortly.',
+          null,
+          [],
+        ),
+        message(
+          '2e1c9d8a-3f4b-4a5c-8d7e-9f8a7b6c5d43',
+          3,
+          'human',
+          'Try again now',
+          { id: '3f2d0e9b-4a5c-4b6d-9e8f-0a9b8c7d6e54', status: 'processing', generation: 1 },
+          [step('5f6a7b8c-9d0e-4f1a-b2c3-d4e5f6a7b8c9', 'running', {}, running)],
+        ),
+      ];
+      const browser = {
+        url: 'https://orchid.example/hours',
+        title: 'Orchid Club hours',
+        controller: 'agent',
+        needsPerson: null,
+        controlledBy: null,
+        signIn: null,
+        logins: [],
+      };
+      await openChat({ browser, started: false, history, opens: false }, async ({ page, live }) => {
+        await page.getByText('All browsers for this workspace are in use. I’ll try again shortly.').waitFor();
+        // While the agent waits for a browser, none is open: the chat checks for one but shows nothing.
+        await new Promise(resolve => setTimeout(resolve, 4000));
+        assert.ok(live.stateReads >= 2, `the chat checked for an open browser (${live.stateReads})`);
+        assert.equal(live.refusedStreams.length, 0, 'the panel did not open');
+        assert.equal(await page.getByRole('button', { name: 'Show the browser' }).count(), 0);
+        assert.equal(await page.getByText('The browser has closed').count(), 0);
 
-      live.started = true;
-      await page
-        .getByRole('application', { name: /Browser screen/ })
-        .locator('img')
-        .waitFor();
-    });
-  },
-);
+        live.started = true;
+        await page
+          .getByRole('application', { name: /Browser screen/ })
+          .locator('img')
+          .waitFor();
+      });
+    },
+  );
 
 test('a member who signs in themselves is offered to save the login on hand back', { timeout: 120000 }, async () => {
   const saved = [];

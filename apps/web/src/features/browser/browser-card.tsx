@@ -3,11 +3,9 @@ import { GlobeIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import { useCanvas } from '@/features/chat/canvas-state';
 import type { ConversationMessage } from '@/features/chat/conversation-api';
-import { outcomeSaved } from '@/features/chat/live-tools';
+import { outcomeSaved, succeeded } from '@/features/chat/live-tools';
 import { browserApi } from './api';
 import { isBrowserTool, liveBrowserCanvasId } from './live-browser';
-
-type Tool = { tool: string; status: string; browserNotOpened?: true | undefined };
 
 const checkEveryMs = 1_500;
 
@@ -22,16 +20,23 @@ function useShowBrowser(workspaceId: string, chatId: string) {
 }
 
 /**
- * Opens the live browser once per chat: when the agent asks for a person, or once a browser is open while the agent
- * uses it. A browser call refused before any browser opened, such as one waiting for a free browser, opens nothing.
+ * Opens the live browser once per chat: when a saved hand-off asked for a person, or once a browser is open while the
+ * agent uses it, including during a hand-off. A browser call refused before any browser opened, such as one waiting for
+ * a free browser, opens nothing.
  */
-export function useLiveBrowserOpening(workspaceId: string, chatId: string, tools: readonly Tool[], enabled: boolean) {
+export function useLiveBrowserOpening(
+  workspaceId: string,
+  chatId: string,
+  tools: ConversationMessage['tools'],
+  enabled: boolean,
+) {
   const show = useShowBrowser(workspaceId, chatId);
   const api = useMemo(() => browserApi(workspaceId, { kind: 'chat', chatId }), [workspaceId, chatId]);
   const opened = useRef<string | null>(null);
   const wasActive = useRef(false);
   const active = enabled && tools.some(tool => isBrowserTool(tool.tool) && tool.status === 'running');
-  const handoff = enabled && tools.some(tool => tool.tool === 'browser.handoff' && !tool.browserNotOpened);
+  const handoff =
+    enabled && tools.some(tool => tool.tool === 'browser.handoff' && succeeded(tool) && !tool.browserNotOpened);
   useEffect(() => {
     if (opened.current === chatId) return;
     if (handoff) {

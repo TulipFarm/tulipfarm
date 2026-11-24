@@ -18,6 +18,7 @@ import { z } from 'zod';
 import { withoutTrailingControlMarker } from './reply-text.ts';
 import { transcriptOrder } from './transcript-order.ts';
 import { googleToolActivity } from './google-tool-activity.ts';
+import { browserNotOpened } from './browser-receipts.ts';
 import { apiCallReceipt, executionReceipt, toolPresentation } from './tool-activity.ts';
 import { storedToolActivity, storedToolPresentation, waitingRowDraft } from './tool-activity-history.ts';
 import { publicWebReceiptForHistory } from './public-web-history.ts';
@@ -263,14 +264,6 @@ function integrationCard(row: { tool: string; status: string; output?: unknown }
             : null,
   );
   return card.success ? { integration: card.data } : {};
-}
-/** A browser call refused before any browser opened, such as while all the workspace's browsers are in use. */
-function browserNotOpened(row: { tool: string; output?: unknown }) {
-  if (!row.tool.startsWith('browser.')) return {};
-  const output = z
-    .object({ result: z.object({ error: z.enum(['browser-busy', 'out-of-credits', 'credit-allowance-used']) }) })
-    .safeParse(row.output);
-  return output.success ? { browserNotOpened: true as const } : {};
 }
 function skillImportOutput(row: { tool: string; status: string; output?: unknown }) {
   if (
