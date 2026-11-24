@@ -21,6 +21,7 @@ const pages = {
     <a href="/big.bin">Download archive</a>
     <a href="/stream.bin">Download stream</a>
     <a href="/slow.bin">Download slowly</a>
+    <a href="/stream.bin?tab" target="_blank">Download in a new tab</a>
     <label>Invoice <input id="invoice" type="file"></label>
     <div role="button" aria-label="Upload photo" style="display:inline-block;padding:8px">Upload photo
       <input type="file" style="display:none" id="photo"></div>
@@ -159,7 +160,7 @@ before(async () => {
       const timer = setInterval(() => response.write(Buffer.alloc(fast ? 64 * 1024 : 1, 1)), fast ? 5 : 200);
       response.on('close', () => {
         clearInterval(timer);
-        stopped.push(url.pathname);
+        stopped.push(url.pathname + url.search);
       });
       return;
     }
@@ -633,6 +634,24 @@ test('a download is stopped while it transfers once it passes the size limit', a
   assert.equal(result.downloads, undefined);
   assert.match(result.notice ?? '', /"stream.bin" was not saved: files are limited to 0 MiB/);
   assert.ok(stopped.includes('/stream.bin'), 'the browser stopped receiving it');
+  assert.ok(Date.now() - started < 3000, 'without waiting for it to finish');
+});
+
+test('a download a new tab starts is also stopped while it transfers', async t => {
+  const host = await createBrowserHost({
+    ...options,
+    allowPrivateNetworks: true,
+    maxDownloadBytes: 256 * 1024,
+    downloadWaitMs: 3000,
+  });
+  t.after(() => host.shutdown());
+  await host.open(sessionId);
+  let result = await host.act(sessionId, { action: 'navigate', url: `${origin}/files` });
+  const started = Date.now();
+  result = await host.act(sessionId, { action: 'click', ref: ref(result.snapshot, /link "Download in a new tab"/) });
+  assert.equal(result.downloads, undefined);
+  assert.match(result.notice ?? '', /"stream.bin" was not saved: files are limited to 0 MiB/);
+  assert.ok(stopped.includes('/stream.bin?tab'), 'the browser stopped receiving it');
   assert.ok(Date.now() - started < 3000, 'without waiting for it to finish');
 });
 

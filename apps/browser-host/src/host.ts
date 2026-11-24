@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
-import { stat } from 'node:fs/promises';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { isIP } from 'node:net';
 import {
   chromium,
@@ -8,6 +10,7 @@ import {
   type BrowserContext,
   type CDPSession,
   type Download,
+  type Frame,
   type Page,
   type Request,
 } from 'playwright-core';
@@ -360,9 +363,37 @@ export async function createBrowserHost(options: HostOptions) {
   const egress = options.allowPrivateNetworks ? undefined : await startEgressProxy({ allowed: allowAddress });
   const resolved = new Map<string, { publicOnly: boolean; at: number }>();
 
+  // Downloads in progress the browser reported but Playwright has not yet handed to a session, by the browser's id.
+  const unclaimed = new Map<string, { url: string; name: string; received: number }>();
+  // The browser's own download events cover every context and tab, so a download a new tab starts before the host
+  // could watch that tab is still stopped mid-transfer.
+  let monitor: Promise<{ cdp: CDPSession; downloadsPath: string }> | undefined;
+
+  function watchDownloads(cdp: CDPSession) {
+    cdp.on('Browser.downloadWillBegin', event => {
+      unclaimed.set(event.guid, { url: event.url, name: event.suggestedFilename, received: 0 });
+      for (const session of sessions.values()) link(session);
+    });
+    cdp.on('Browser.downloadProgress', event => {
+      if (unclaimed.has(event.guid)) for (const session of sessions.values()) link(session);
+      const owner = [...sessions.values()].find(session => session.transfers.has(event.guid));
+      const transfer = owner?.transfers.get(event.guid) ?? unclaimed.get(event.guid);
+      if (!transfer) return;
+      if (event.state !== 'inProgress') {
+        unclaimed.delete(event.guid);
+        owner?.transfers.delete(event.guid);
+        return;
+      }
+      transfer.received = Math.max(event.receivedBytes, event.totalBytes);
+      if (owner) checkTransfer(owner, transfer);
+    });
+  }
+
   const launch = () => {
-    browser ??= chromium
-      .launch({
+    browser ??= (async () => {
+      const downloadsPath = await mkdtemp(join(tmpdir(), 'tulipfarm-downloads-'));
+      const started = await chromium.launch({
+        downloadsPath,
         ...(options.executablePath ? { executablePath: options.executablePath } : {}),
         chromiumSandbox: options.sandbox ?? false,
         // Every connection, loopback included, goes through the egress proxy. QUIC and direct WebRTC UDP would not.
@@ -375,19 +406,26 @@ export async function createBrowserHost(options: HostOptions) {
           '--disable-quic',
           '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
         ],
-      })
-      .then(started => {
-        started.on('disconnected', () => {
-          browser = undefined;
-          for (const session of sessions.values()) void session.close();
-          sessions.clear();
-        });
-        return started;
-      })
-      .catch(error => {
-        browser = undefined;
-        throw error;
       });
+      started.on('disconnected', () => {
+        browser = undefined;
+        monitor = undefined;
+        unclaimed.clear();
+        void rm(downloadsPath, { recursive: true, force: true });
+        for (const session of sessions.values()) void session.close();
+        sessions.clear();
+      });
+      monitor = started.newBrowserCDPSession().then(cdp => {
+        watchDownloads(cdp);
+        return { cdp, downloadsPath };
+      });
+      await monitor;
+      return started;
+    })().catch(error => {
+      browser = undefined;
+      monitor = undefined;
+      throw error;
+    });
     return browser;
   };
 
@@ -468,17 +506,24 @@ export async function createBrowserHost(options: HostOptions) {
       socket.connectToServer();
     });
     const page = await context.newPage();
+    await watchContextDownloads(context, page);
     session = new Session(sessionId, context, page, now());
     const opened = session;
-    const watch = (watched: Page) => {
-      watched.on('download', download => keep(opened, download));
-      void watchTransfers(opened, watched);
-    };
+    const watch = (watched: Page) => watched.on('download', download => keep(opened, download));
     watch(page);
     context.on('page', added => {
       watch(added);
-      void added.waitForLoadState('domcontentloaded').catch(() => undefined);
-      void opened.switchTo(added);
+      // A tab opened only to download a file never shows a page and can't be captured, so follow a tab once it
+      // shows something.
+      if (added.url()) void opened.switchTo(added);
+      else {
+        const follow = (frame: Frame) => {
+          if (frame !== added.mainFrame() || !frame.url()) return;
+          added.off('framenavigated', follow);
+          if (!added.isClosed()) void opened.switchTo(added);
+        };
+        added.on('framenavigated', follow);
+      }
       added.on('close', () => {
         const remaining = context.pages().filter(open => !open.isClosed());
         const last = remaining.at(-1);
@@ -499,41 +544,36 @@ export async function createBrowserHost(options: HostOptions) {
   }
 
   /**
-   * Follows the browser's progress events for a page's downloads, so a download is stopped as soon as it passes the
-   * size limit or the session's disk allowance, not after it finishes.
+   * Turns on the browser's download events for a new context before it opens anything, with the same settings
+   * Playwright uses, so its own download handling is unchanged.
    */
-  async function watchTransfers(session: Session, page: Page) {
-    try {
-      const cdp = await session.context.newCDPSession(page);
-      await cdp.send('Page.enable');
-      cdp.on('Page.downloadWillBegin', event => {
-        session.transfers.set(event.guid, { url: event.url, name: event.suggestedFilename, received: 0 });
-        link(session);
-      });
-      cdp.on('Page.downloadProgress', event => {
-        const transfer = session.transfers.get(event.guid);
-        if (!transfer) return;
-        if (event.state !== 'inProgress') return void session.transfers.delete(event.guid);
-        transfer.received = Math.max(event.receivedBytes, event.totalBytes);
-        checkTransfer(session, transfer);
-      });
-    } catch {
-      // The page closed first; the size is still checked when a download finishes.
-    }
+  async function watchContextDownloads(context: BrowserContext, page: Page) {
+    const { cdp, downloadsPath } = await (monitor ?? Promise.reject(new Error('The browser is not running.')));
+    const target = await context.newCDPSession(page);
+    const { targetInfo } = await target.send('Target.getTargetInfo');
+    await target.detach().catch(() => undefined);
+    if (!targetInfo.browserContextId) throw new Error('The browser did not report the page’s context.');
+    await cdp.send('Browser.setDownloadBehavior', {
+      behavior: 'allowAndName',
+      browserContextId: targetInfo.browserContextId,
+      downloadPath: downloadsPath,
+      eventsEnabled: true,
+    });
   }
 
   /** Pairs each download in progress with the browser's record of it, which Playwright reports separately. */
   function link(session: Session) {
     for (const download of session.downloading.keys()) {
-      const transfers = [...session.transfers.values()];
-      if (transfers.some(transfer => transfer.download === download)) continue;
-      const transfer = transfers.find(
-        candidate =>
-          !candidate.download && candidate.url === download.url() && candidate.name === download.suggestedFilename(),
+      if ([...session.transfers.values()].some(transfer => transfer.download === download)) continue;
+      const found = [...unclaimed].find(
+        ([, candidate]) => candidate.url === download.url() && candidate.name === download.suggestedFilename(),
       );
-      if (!transfer) continue;
-      transfer.download = download;
-      checkTransfer(session, transfer);
+      if (!found) continue;
+      const [guid, transfer] = found;
+      unclaimed.delete(guid);
+      const claimed = { ...transfer, download };
+      session.transfers.set(guid, claimed);
+      checkTransfer(session, claimed);
     }
   }
 
