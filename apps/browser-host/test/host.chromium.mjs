@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { after, before, test } from 'node:test';
-import { createBrowserHost } from '../src/host.ts';
+import { blockedNotice, createBrowserHost } from '../src/host.ts';
 
 const pages = {
   '/': `<!doctype html><title>Sign up</title>
@@ -24,6 +24,8 @@ const pages = {
 let site;
 let origin;
 let internal;
+// Requests that reached the site under its other name, localhost, which limited sessions must never reach.
+const otherSiteHits = [];
 before(async () => {
   internal = createServer((_request, response) => {
     response.writeHead(200, { 'content-type': 'text/html' });
@@ -33,6 +35,23 @@ before(async () => {
   await once(internal, 'listening');
   site = createServer((request, response) => {
     const url = new URL(request.url, 'http://x');
+    if (request.headers.host?.startsWith('localhost')) otherSiteHits.push(url.pathname);
+    if (url.pathname === '/mixed') {
+      const other = `http://localhost:${site.address().port}`;
+      response.writeHead(200, { 'content-type': 'text/html' });
+      return response.end(
+        `<!doctype html><title>Mixed</title>
+        <iframe title="Other frame" src="${other}/frame"></iframe>
+        <img alt="Other image" src="${other}/image">
+        <img alt="Own image" src="/own-image">
+        <a href="${other}/popup" target="_blank">Other help</a>
+        <script>
+          fetch('${other}/data').catch(() => undefined);
+          const socket = new WebSocket('ws://localhost:${site.address().port}/socket');
+          socket.onerror = () => undefined;
+        </script>`,
+      );
+    }
     if (url.pathname === '/redirect') {
       response.writeHead(302, { location: `http://[::1]:${internal.address().port}/` });
       return response.end();
@@ -97,6 +116,10 @@ before(async () => {
     }
     response.writeHead(pages[url.pathname] ? 200 : 404, { 'content-type': 'text/html' });
     response.end(pages[url.pathname] ?? 'missing');
+  });
+  site.on('upgrade', (request, socket) => {
+    if (request.headers.host?.startsWith('localhost')) otherSiteHits.push('websocket');
+    socket.destroy();
   });
   site.listen(0, '127.0.0.1');
   await once(site, 'listening');
@@ -199,15 +222,43 @@ test('a session limited to listed sites opens only their pages, while their page
   const allowed = await host.act(sessionId, { action: 'navigate', url: `${origin}/login` });
   assert.equal(allowed.state.title, 'Sign in');
   assert.equal(allowed.notice, undefined);
-  // The page's frame on another site still loads; only pages the agent or a link opens are limited.
-  assert.match(allowed.snapshot, /iframe/);
   const blocked = await host.act(sessionId, { action: 'navigate', url: `http://localhost:${site.address().port}/` });
-  assert.match(blocked.notice ?? '', /may only open 127\.0\.0\.1/);
+  assert.equal(
+    blocked.notice,
+    `Blocked http://localhost:${site.address().port}: this browser can only open 127.0.0.1.`,
+  );
   assert.notEqual(blocked.state.title, 'Sign up');
   // Opening the session again does not lift the limit.
   await host.open(sessionId);
   const again = await host.act(sessionId, { action: 'navigate', url: `http://localhost:${site.address().port}/` });
-  assert.match(again.notice ?? '', /may only open/);
+  assert.match(again.notice ?? '', /can only open/);
+});
+
+test('a limited session’s pages reach no other site: no frame, resource, fetch, WebSocket or popup', async t => {
+  const host = await createBrowserHost({ ...options, allowPrivateNetworks: true });
+  t.after(() => host.shutdown());
+  otherSiteHits.length = 0;
+  await host.open(sessionId, ['127.0.0.1']);
+  const page = await host.act(sessionId, { action: 'navigate', url: `${origin}/mixed` });
+  assert.equal(page.state.title, 'Mixed');
+  await host.act(sessionId, { action: 'click', ref: ref(page.snapshot, /link "Other help"/) });
+  await new Promise(resolve => setTimeout(resolve, 500));
+  assert.deepEqual(otherSiteHits, []);
+});
+
+test('the blocked notice names five sites, then how many more', () => {
+  assert.equal(
+    blockedNotice('https://x.example', [
+      'a.example',
+      'b.example',
+      'c.example',
+      'd.example',
+      'e.example',
+      'f.example',
+      'g.example',
+    ]),
+    'Blocked https://x.example: this browser can only open a.example, b.example, c.example, d.example, e.example and 2 more.',
+  );
 });
 
 test('a redirect to a blocked address is refused at every hop', async t => {

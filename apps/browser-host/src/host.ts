@@ -1,6 +1,6 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
-import { chromium, type Browser, type BrowserContext, type CDPSession, type Page } from 'playwright-core';
+import { chromium, type Browser, type BrowserContext, type CDPSession, type Page, type Request } from 'playwright-core';
 import {
   browserViewport,
   type BrowserAction,
@@ -256,6 +256,21 @@ const sitesOverlap = (a: string, b: string) => siteIncludes(a, b) || siteInclude
 
 export type BrowserHost = Awaited<ReturnType<typeof createBrowserHost>>;
 
+function frameOf(request: Request) {
+  try {
+    return request.frame();
+  } catch {
+    return undefined;
+  }
+}
+
+/** The notice for a page outside the allowed sites, naming up to five of them. */
+export function blockedNotice(origin: string, sites: readonly string[]) {
+  const named = sites.slice(0, 5).join(', ');
+  const more = sites.length > 5 ? ` and ${sites.length - 5} more` : '';
+  return `Blocked ${origin}: this browser can only open ${named}${more}.`;
+}
+
 export async function createBrowserHost(options: HostOptions) {
   const now = options.now ?? Date.now;
   const snapshotChars = options.snapshotChars ?? 24_000;
@@ -339,17 +354,25 @@ export async function createBrowserHost(options: HostOptions) {
       const url = new URL(route.request().url());
       if (url.protocol === 'data:' || url.protocol === 'blob:' || url.protocol === 'about:') return route.continue();
       const request = route.request();
-      // Limited to listed sites, no tab opens another site; a listed site's pages may still load their own resources.
-      const topLevel = request.isNavigationRequest() && !request.frame().parentFrame();
-      if (allowedSites && topLevel && !siteAllows(allowedSites, url.hostname)) {
-        if (session) session.notice = `Blocked ${url.origin}: this browser may only open ${allowedSites.join(', ')}.`;
+      // A popup's first request comes before its frame exists, so it counts as no frame.
+      const frame = request.isNavigationRequest() ? frameOf(request) : undefined;
+      // Limited to listed sites, nothing reaches another site: no page, popup, frame, or resource.
+      if (allowedSites && !siteAllows(allowedSites, url.hostname)) {
+        if (session && frame === session.page.mainFrame()) session.notice = blockedNotice(url.origin, allowedSites);
         return route.abort('blockedbyclient');
       }
       if ((url.protocol === 'http:' || url.protocol === 'https:') && (await publicHost(url.hostname)))
         return route.continue();
-      if (session && request.isNavigationRequest() && request.frame() === session.page.mainFrame())
+      if (session && frame === session.page.mainFrame())
         session.notice = `Blocked ${url.origin}: the browser only opens public websites.`;
       return route.abort('blockedbyclient');
+    });
+    // Page routes don't see WebSockets, so they get the same checks here.
+    await context.routeWebSocket(/.*/, async socket => {
+      const url = new URL(socket.url());
+      if (allowedSites && !siteAllows(allowedSites, url.hostname)) return socket.close();
+      if (!(await publicHost(url.hostname))) return socket.close();
+      socket.connectToServer();
     });
     const page = await context.newPage();
     session = new Session(sessionId, context, page, now());
