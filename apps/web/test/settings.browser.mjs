@@ -142,6 +142,15 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 36
         if (path === `${base}/workspace-mcp/capabilities`) return send({ enabled: false });
         if (path === `${base}/secrets/capabilities`) return send({ enabled: false });
         if (path === `${base}/knowledge/settings`) return send({ mediaRecognition: false, canManage: false });
+        if (path === `${base}/settings/action-review` && request.method === 'GET')
+          return send({
+            mode: 'auto',
+            revision: 0,
+            rule: null,
+            interpretation: null,
+            actions: [],
+            canManage: current.role === 'admin',
+          });
         if (path === `${base}/governance/directory`) return send({ members: [] });
         if (path === `${base}/subscriptions`) return send({ subscriptions: [] });
         // Model sources read the Claude and Copilot token plans, which are off here.
