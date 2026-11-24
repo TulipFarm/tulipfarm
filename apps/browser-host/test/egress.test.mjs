@@ -47,3 +47,24 @@ test('the egress proxy opens only allowed addresses, for plain requests and tunn
   const blocked = await viaProxy(proxy, { method: 'CONNECT', path: `private.test:443` });
   assert.equal(blocked.statusCode, 403);
 });
+
+test('a cancelled request closes its upstream request too', async t => {
+  let upstreamClosed;
+  const closed = new Promise(done => (upstreamClosed = done));
+  const site = createServer((incoming, response) => {
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    response.write('data: open\n\n');
+    incoming.once('close', upstreamClosed);
+  });
+  site.listen(0, '127.0.0.1');
+  await once(site, 'listening');
+  const proxy = await startEgressProxy({ allowed, resolve });
+  t.after(async () => {
+    site.close();
+    await proxy.close();
+  });
+  const streaming = await viaProxy(proxy, { path: `http://site.test:${site.address().port}/` });
+  assert.equal(streaming.statusCode, 200);
+  streaming.destroy();
+  await closed;
+});

@@ -26,6 +26,16 @@ export async function startEgressProxy(options: EgressOptions) {
     return addresses[0]!;
   }
 
+  // Upstream requests and tunnels, so a cancelled request or a shutdown never leaves one open.
+  const open = new Set<{ destroy: () => unknown }>();
+  function track<T extends { destroy: () => unknown; once: (event: 'close', listener: () => void) => unknown }>(
+    item: T,
+  ) {
+    open.add(item);
+    item.once('close', () => open.delete(item));
+    return item;
+  }
+
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
     void forward(request, response);
   });
@@ -38,21 +48,31 @@ export async function startEgressProxy(options: EgressOptions) {
     const headers = { ...request.headers };
     delete headers['proxy-connection'];
     delete headers['proxy-authorization'];
-    const upstream = httpRequest(
-      {
-        host: address,
-        port: Number(target.port || 80),
-        method: request.method,
-        path: `${target.pathname}${target.search}`,
-        headers,
-        setHost: false,
-      },
-      answer => {
-        response.writeHead(answer.statusCode ?? 502, answer.headers);
-        answer.pipe(response);
-      },
+    if (response.destroyed) return;
+    const upstream = track(
+      httpRequest(
+        {
+          host: address,
+          port: Number(target.port || 80),
+          method: request.method,
+          path: `${target.pathname}${target.search}`,
+          headers,
+          setHost: false,
+        },
+        answer => {
+          response.writeHead(answer.statusCode ?? 502, answer.headers);
+          answer.on('error', () => response.destroy());
+          answer.once('close', () => {
+            if (!answer.complete) response.destroy();
+          });
+          answer.pipe(response);
+        },
+      ),
     );
     upstream.on('error', () => refuse(response, 502));
+    response.once('close', () => {
+      if (!response.writableFinished) upstream.destroy();
+    });
     request.pipe(upstream);
   }
 
@@ -67,14 +87,20 @@ export async function startEgressProxy(options: EgressOptions) {
     void (async () => {
       const address = target ? await destination(target.hostname) : null;
       if (!target || !address) return client.end('HTTP/1.1 403 Forbidden\r\n\r\n');
-      const upstream = connect(Number(target.port || 443), address, () => {
-        client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-        if (head.length) upstream.write(head);
-        upstream.pipe(client);
-        client.pipe(upstream);
-      });
-      upstream.on('error', () => client.end('HTTP/1.1 502 Bad Gateway\r\n\r\n'));
-      client.on('close', () => upstream.destroy());
+      if (client.destroyed) return;
+      let established = false;
+      const upstream = track(
+        connect(Number(target.port || 443), address, () => {
+          established = true;
+          client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+          if (head.length) upstream.write(head);
+          upstream.pipe(client);
+          client.pipe(upstream);
+        }),
+      );
+      upstream.on('error', () => (established ? client.destroy() : client.end('HTTP/1.1 502 Bad Gateway\r\n\r\n')));
+      upstream.once('close', () => client.destroy());
+      client.once('close', () => upstream.destroy());
     })();
   });
   // Chromium tunnels websockets with CONNECT; a plain upgrade through the proxy is refused.
@@ -86,6 +112,7 @@ export async function startEgressProxy(options: EgressOptions) {
     server: `http://127.0.0.1:${port}`,
     close: () =>
       new Promise<void>(done => {
+        for (const item of open) item.destroy();
         server.closeAllConnections();
         server.close(() => done());
       }),

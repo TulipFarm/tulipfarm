@@ -109,7 +109,8 @@ export function createBrowserHostServer(host: BrowserHost, token: string): Serve
   async function frames(sessionId: string, request: IncomingMessage, response: ServerResponse) {
     let unsubscribe: (() => void) | undefined;
     let started = false;
-    let pendingFrame: string | undefined;
+    // While a slow viewer catches up, only the newest state and frame wait, so nothing piles up in memory.
+    const pending = new Map<string, string>();
     const write = (event: string, data: unknown) => {
       if (!started) {
         response.writeHead(200, {
@@ -121,20 +122,22 @@ export function createBrowserHostServer(host: BrowserHost, token: string): Serve
         started = true;
       }
       const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-      // A slow viewer gets only the newest frame once it catches up, so frames never pile up in memory.
-      if (event === 'frame' && response.writableNeedDrain) {
-        if (pendingFrame === undefined) response.once('drain', flush);
-        pendingFrame = message;
+      if (response.writableNeedDrain) {
+        if (!pending.size) response.once('drain', flush);
+        pending.set(event, message);
         return;
       }
       response.write(message);
     };
     const flush = () => {
-      const message = pendingFrame;
-      pendingFrame = undefined;
-      if (message !== undefined && !response.destroyed) response.write(message);
+      const messages = [...pending.values()];
+      pending.clear();
+      if (!response.destroyed) for (const message of messages) response.write(message);
     };
-    const heartbeat = setInterval(() => started && response.write(': keep-alive\n\n'), 15_000);
+    const heartbeat = setInterval(
+      () => started && !response.writableNeedDrain && response.write(': keep-alive\n\n'),
+      15_000,
+    );
     const stop = () => {
       clearInterval(heartbeat);
       unsubscribe?.();

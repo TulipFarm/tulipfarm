@@ -16,6 +16,7 @@ import {
 } from './api';
 
 const startingMs = 60_000;
+const maxRefusals = 5;
 
 export const handBackPrompt = 'I’ve finished in the browser. Continue.';
 
@@ -44,10 +45,10 @@ export function LiveBrowserCanvas({
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
   // The panel can open while the agent's first browser action is still starting the browser.
-  const opening = useRef({ since: 0, seen: false });
+  const opening = useRef({ since: 0, seen: false, refused: 0 });
 
   useEffect(() => {
-    opening.current = { since: Date.now(), seen: false };
+    opening.current = { since: Date.now(), seen: false, refused: 0 };
   }, [api]);
 
   useEffect(() => {
@@ -59,6 +60,7 @@ export function LiveBrowserCanvas({
       const parsed = browserSessionStateSchema.safeParse(JSON.parse((event as MessageEvent<string>).data));
       if (!parsed.success) return;
       opening.current.seen = true;
+      opening.current.refused = 0;
       setLive({ kind: 'open', state: parsed.data });
     });
     source.addEventListener('frame', event => {
@@ -71,7 +73,10 @@ export function LiveBrowserCanvas({
         state => {
           if (state) {
             // A refused stream does not reconnect by itself, though the browser has opened since.
-            if (source.readyState === EventSource.CLOSED) setAttempt(value => value + 1);
+            if (source.readyState !== EventSource.CLOSED) return;
+            const refused = ++opening.current.refused;
+            if (refused > maxRefusals) setLive({ kind: 'error', message: browserErrorMessage(null) });
+            else retry = setTimeout(() => setAttempt(value => value + 1), 1_000 * 2 ** (refused - 1));
             return;
           }
           source.close();
@@ -205,7 +210,7 @@ export function LiveBrowserCanvas({
           <Button
             variant="outline"
             onClick={() => {
-              opening.current = { since: Date.now(), seen: false };
+              opening.current = { since: Date.now(), seen: false, refused: 0 };
               setAttempt(value => value + 1);
             }}
           >
