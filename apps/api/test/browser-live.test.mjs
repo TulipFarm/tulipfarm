@@ -44,6 +44,8 @@ const state = sessionId => ({
   controller: 'agent',
   needsPerson: 'Tick the terms box',
   controlledBy: null,
+  signIn: null,
+  logins: [],
 });
 
 test('a reader sees the chat browser, takes it over as themselves and hands it back', async t => {

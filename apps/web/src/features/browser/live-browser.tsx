@@ -14,6 +14,8 @@ import {
   browserSessionStateSchema,
   type BrowserSessionState,
 } from './api';
+import { loadedLoginPrompt, SaveLoginDialog, SignInPicker } from './login-picker';
+import { siteOfPage } from './logins';
 
 const startingMs = 60_000;
 const maxRefusals = 5;
@@ -44,6 +46,9 @@ export function LiveBrowserCanvas({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
+  const [saving, setSaving] = useState<string | null>(null);
+  // The site a member took over to sign in to, so they can save the login when they hand back.
+  const signingIn = useRef<string | null>(null);
   // The panel can open while the agent's first browser action is still starting the browser.
   const opening = useRef({ since: 0, seen: false, refused: 0 });
 
@@ -107,9 +112,16 @@ export function LiveBrowserCanvas({
     setBusy(true);
     setError('');
     try {
+      const signIn = state?.signIn ?? null;
       const next = await api.control(controller);
       if (next) setLive({ kind: 'open', state: next });
-      if (controller === 'agent') onHandBack(handBackPrompt);
+      if (controller === 'person') signingIn.current = signIn;
+      if (controller === 'agent') {
+        onHandBack(handBackPrompt);
+        const site = signingIn.current;
+        signingIn.current = null;
+        if (site && !state?.logins.some(login => login.site === site)) setSaving(site);
+      }
     } catch (failure) {
       setError(browserErrorMessage(failure));
     } finally {
@@ -226,19 +238,43 @@ export function LiveBrowserCanvas({
       title={page.title || 'Browser'}
       meta={page.url}
       actions={
-        inControl ? (
-          <Button size="sm" disabled={busy} onClick={() => void decide('agent')}>
-            Hand back to the agent
-          </Button>
-        ) : (
-          <Button variant="outline" size="sm" disabled={busy} onClick={() => void decide('person')}>
-            Take over
-          </Button>
-        )
+        <>
+          {siteOfPage(page.url) && (
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => setSaving(siteOfPage(page.url))}>
+              Save login
+            </Button>
+          )}
+          {inControl ? (
+            <Button size="sm" disabled={busy} onClick={() => void decide('agent')}>
+              Hand back to the agent
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => void decide('person')}>
+              Take over
+            </Button>
+          )}
+        </>
       }
     >
       <div className="flex flex-col gap-3">
-        {page.needsPerson && !inControl && (
+        {saving !== null && (
+          <SaveLoginDialog workspaceId={workspaceId} chatId={chatId} site={saving} close={() => setSaving(null)} />
+        )}
+        {page.signIn && page.needsPerson && !inControl && (
+          <SignInPicker
+            workspaceId={workspaceId}
+            chatId={chatId}
+            site={page.signIn}
+            reason={page.needsPerson}
+            busy={busy}
+            onTakeOver={() => void decide('person')}
+            onLoaded={next => {
+              setLive({ kind: 'open', state: next });
+              onHandBack(loadedLoginPrompt(page.signIn ?? ''));
+            }}
+          />
+        )}
+        {page.needsPerson && !page.signIn && !inControl && (
           <Alert>
             <AlertTitle>The agent needs you</AlertTitle>
             <AlertDescription>{page.needsPerson} Take over, finish this step, then hand back.</AlertDescription>

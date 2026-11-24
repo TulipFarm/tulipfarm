@@ -37,6 +37,22 @@ before(async () => {
       response.writeHead(302, { location: `http://[::1]:${internal.address().port}/` });
       return response.end();
     }
+    if (url.pathname === '/sign-in') {
+      response.writeHead(200, {
+        'content-type': 'text/html',
+        'set-cookie': 'member=ada; Path=/; HttpOnly; Max-Age=3600',
+      });
+      return response.end(
+        `<!doctype html><title>Signed in</title><script>localStorage.setItem('cart', '3 items')</script>`,
+      );
+    }
+    if (url.pathname === '/account') {
+      response.writeHead(200, { 'content-type': 'text/html' });
+      const member = /member=(\w+)/.exec(request.headers.cookie ?? '')?.[1] ?? 'nobody';
+      return response.end(
+        `<!doctype html><title>Account of ${member}</title><p id="cart"></p><script>document.getElementById('cart').textContent = 'Cart: ' + localStorage.getItem('cart')</script>`,
+      );
+    }
     if (url.pathname === '/done') {
       response.writeHead(200, { 'content-type': 'text/html' });
       return response.end(
@@ -85,7 +101,7 @@ test('the agent fills a form and the person takes over to tick a box', async t =
     values: ['Team'],
   });
 
-  const waiting = await host.needsPerson(sessionId, 'Tick the terms box');
+  const waiting = await host.needsPerson(sessionId, { reason: 'Tick the terms box' });
   assert.equal(waiting.needsPerson, 'Tick the terms box');
 
   await assert.rejects(host.input(sessionId, { type: 'text', text: 'x' }), { code: 'agent-in-control' });
@@ -169,7 +185,7 @@ test('idle sessions close, and sessions waiting for a person are held longer', a
   const waiting = '00000000-0000-4000-8000-000000000002';
   await host.open(sessionId);
   await host.open(waiting);
-  await host.needsPerson(waiting, 'Solve the captcha');
+  await host.needsPerson(waiting, { reason: 'Solve the captcha' });
   clock = 2000;
   assert.equal(await host.sweep(), 1);
   assert.equal(await host.state(waiting).then(state => state.needsPerson), 'Solve the captcha');
@@ -183,4 +199,42 @@ test('the host refuses sessions beyond its capacity', async t => {
   t.after(() => host.shutdown());
   await host.open(sessionId);
   await assert.rejects(host.open('00000000-0000-4000-8000-000000000002'), { code: 'capacity' });
+});
+
+test('a saved login carries a site’s cookies and storage into a new session', async t => {
+  const host = await createBrowserHost({ ...options, allowPrivateNetworks: true });
+  t.after(() => host.shutdown());
+  const site = '127.0.0.1';
+  await host.open(sessionId);
+  await host.act(sessionId, { action: 'navigate', url: `${origin}/sign-in` });
+  const saved = await host.siteState(sessionId, site);
+  assert.deepEqual(
+    saved.cookies.map(cookie => [cookie.name, cookie.value, cookie.httpOnly]),
+    [['member', 'ada', true]],
+  );
+  assert.deepEqual(saved.origins, [{ origin, localStorage: [{ name: 'cart', value: '3 items' }] }]);
+  assert.deepEqual((await host.siteState(sessionId, 'example.com')).cookies, [], 'other sites are left out');
+  await host.close(sessionId);
+
+  const next = '00000000-0000-4000-8000-000000000002';
+  await host.open(next);
+  let result = await host.act(next, { action: 'navigate', url: `${origin}/account` });
+  assert.equal(result.state.title, 'Account of nobody', 'a new session starts signed out');
+  const login = '7d3f1e2a-4b5c-4d6e-8f70-1a2b3c4d5e6f';
+  const loaded = await host.loadLogin(next, { id: login, site, state: saved });
+  assert.deepEqual(loaded.logins, [{ id: login, site, signedOut: false }]);
+  result = await host.act(next, { action: 'navigate', url: `${origin}/account` });
+  assert.equal(result.state.title, 'Account of ada');
+  assert.match(result.snapshot, /Cart: 3 items/);
+  const exported = await host.siteState(next, site);
+  assert.deepEqual(exported.origins[0].localStorage, [{ name: 'cart', value: '3 items' }], 'the load marker stays out');
+
+  // Asked to sign in again, the loaded login has signed out until a person hands back.
+  let state = await host.needsPerson(next, { reason: 'Sign in again to continue.', signIn: site });
+  assert.equal(state.signIn, site);
+  assert.deepEqual(state.logins, [{ id: login, site, signedOut: true }]);
+  await host.control(next, { controller: 'person', memberId: 'member-1' });
+  state = await host.control(next, { controller: 'agent' });
+  assert.equal(state.signIn, null);
+  assert.deepEqual(state.logins, [{ id: login, site, signedOut: false }]);
 });

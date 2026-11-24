@@ -39,6 +39,77 @@ export type BrowserController = z.infer<typeof browserControllerSchema>;
 
 export const browserSessionIdSchema = z.uuid();
 
+const hostPattern = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$/;
+
+/** A website, named by its host without a leading `www.`, such as `amazon.com` or `accounts.google.com`. */
+export const browserSiteSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .transform(value => value.replace(/^www\./, ''))
+  .pipe(z.string().regex(hostPattern, 'Use a site such as amazon.com'));
+
+/** The site of a page, or null for pages that are not on a named public host. */
+export function browserSiteOf(url: string): string | null {
+  try {
+    const { protocol, hostname } = new URL(url);
+    if (protocol !== 'http:' && protocol !== 'https:') return null;
+    const parsed = browserSiteSchema.safeParse(hostname);
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether a cookie or storage domain belongs to a site: the site itself, a subdomain, or a parent it shares cookies with. */
+export function siteIncludes(site: string, domain: string): boolean {
+  const host = domain.toLowerCase().replace(/^\./, '');
+  return host === site || host.endsWith(`.${site}`) || (site.endsWith(`.${host}`) && host.includes('.'));
+}
+
+export const browserCookieSchema = z.object({
+  name: z.string().max(4096),
+  value: z.string().max(16_384),
+  domain: z.string().min(1).max(253),
+  path: z.string().max(2048),
+  /** Seconds since the epoch, or -1 for a cookie that ends with the session. */
+  expires: z.number(),
+  httpOnly: z.boolean(),
+  secure: z.boolean(),
+  sameSite: z.enum(['Strict', 'Lax', 'None']),
+});
+
+/** The signed-in state of one site in a browser session: its cookies and each origin's local storage. */
+export const browserSiteStateSchema = z.object({
+  cookies: z.array(browserCookieSchema).max(1000),
+  origins: z
+    .array(
+      z.object({
+        origin: z.string().max(2048),
+        localStorage: z.array(z.object({ name: z.string().max(4096), value: z.string() })).max(2000),
+      }),
+    )
+    .max(100),
+});
+export type BrowserSiteState = z.infer<typeof browserSiteStateSchema>;
+
+/** A browser login loaded into a session. `signedOut` is set when the agent asked a person to sign in to its site again. */
+export const browserLoadedLoginSchema = z.strictObject({
+  id: z.uuid(),
+  site: z.string(),
+  signedOut: z.boolean(),
+});
+export type BrowserLoadedLogin = z.infer<typeof browserLoadedLoginSchema>;
+
+export const browserLoadLoginSchema = z.strictObject({
+  id: z.uuid(),
+  site: browserSiteSchema,
+  state: browserSiteStateSchema,
+});
+export type BrowserLoadLogin = z.infer<typeof browserLoadLoginSchema>;
+
+export const browserSiteStateRequestSchema = z.strictObject({ site: browserSiteSchema });
+
 export const browserSessionStateSchema = z.strictObject({
   sessionId: browserSessionIdSchema,
   url: z.string(),
@@ -48,6 +119,10 @@ export const browserSessionStateSchema = z.strictObject({
   needsPerson: z.string().nullable(),
   /** The member who took over, while one has control. */
   controlledBy: z.string().nullable(),
+  /** The site the agent asked a person to sign in to, while it waits for one. */
+  signIn: z.string().nullable(),
+  /** The browser logins loaded into the session. */
+  logins: z.array(browserLoadedLoginSchema),
 });
 export type BrowserSessionState = z.infer<typeof browserSessionStateSchema>;
 
@@ -69,7 +144,11 @@ export const browserControlSchema = z.discriminatedUnion('controller', [
 ]);
 export type BrowserControl = z.infer<typeof browserControlSchema>;
 
-export const browserNeedsPersonSchema = z.strictObject({ reason: z.string().trim().min(1).max(500) });
+export const browserNeedsPersonSchema = z.strictObject({
+  reason: z.string().trim().min(1).max(500),
+  signIn: browserSiteSchema.optional(),
+});
+export type BrowserNeedsPerson = z.infer<typeof browserNeedsPersonSchema>;
 
 const coordinate = z.number().min(0).max(4096);
 const modifiers = z.int().min(0).max(15).default(0);

@@ -9,7 +9,13 @@ import {
   type BrowserFrame,
   type BrowserHostErrorCode,
   type BrowserInput,
+  type BrowserLoadedLogin,
+  type BrowserLoadLogin,
+  type BrowserNeedsPerson,
   type BrowserSessionState,
+  type BrowserSiteState,
+  browserSiteOf,
+  siteIncludes,
 } from '@tulipfarm/browser/contracts';
 import { publicAddress } from '@tulipfarm/workspace-mcp-transport';
 import { startEgressProxy } from './egress.ts';
@@ -51,6 +57,8 @@ class Session {
   controller: 'agent' | 'person' = 'agent';
   controlledBy: string | null = null;
   needsPerson: string | null = null;
+  signIn: string | null = null;
+  readonly logins = new Map<string, BrowserLoadedLogin>();
   lastUsed: number;
   notice: string | undefined;
   title = '';
@@ -82,6 +90,8 @@ class Session {
       controller: this.controller,
       needsPerson: this.needsPerson,
       controlledBy: this.controlledBy,
+      signIn: this.signIn,
+      logins: [...this.logins.values()],
     };
   }
 
@@ -165,6 +175,9 @@ class Session {
     await this.context.close().catch(() => undefined);
   }
 }
+
+const markerPrefix = '__tulipfarm_login_';
+const loginMarker = (id: string) => `${markerPrefix}${id}`;
 
 export type BrowserHost = Awaited<ReturnType<typeof createBrowserHost>>;
 
@@ -330,6 +343,7 @@ export async function createBrowserHost(options: HostOptions) {
         409,
       );
     session.needsPerson = null;
+    session.signIn = null;
     const page = session.page;
     const element = (ref: string) => page.locator(`aria-ref=${ref}`);
     if (
@@ -390,20 +404,88 @@ export async function createBrowserHost(options: HostOptions) {
         session.controller = 'person';
         session.controlledBy = input.memberId;
       } else {
+        // A person who hands back after a sign-in request has signed in again, so the site's logins are current.
+        if (session.signIn)
+          for (const login of session.logins.values()) if (login.site === session.signIn) login.signedOut = false;
         session.controller = 'agent';
         session.controlledBy = null;
         session.needsPerson = null;
+        session.signIn = null;
       }
       await session.emitState();
       return session.state();
     });
   }
 
-  async function needsPerson(sessionId: string, reason: string): Promise<BrowserSessionState> {
+  async function needsPerson(sessionId: string, request: BrowserNeedsPerson): Promise<BrowserSessionState> {
     const session = get(sessionId);
-    session.needsPerson = reason;
+    session.needsPerson = request.reason;
+    session.signIn = request.signIn ?? null;
+    // Asked to sign in to a site whose login is loaded, the login has signed out.
+    for (const login of session.logins.values()) if (login.site === session.signIn) login.signedOut = true;
     await session.emitState();
     return session.state();
+  }
+
+  async function loadLogin(sessionId: string, login: BrowserLoadLogin): Promise<BrowserSessionState> {
+    const session = get(sessionId);
+    return session.run(async () => {
+      const cookies = login.state.cookies.filter(cookie => siteIncludes(login.site, cookie.domain));
+      if (cookies.length) await session.context.addCookies(cookies);
+      const marker = loginMarker(login.id);
+      for (const { origin, localStorage } of login.state.origins) {
+        if (!siteIncludes(login.site, new URL(origin).hostname) || !localStorage.length) continue;
+        // Storage is set once per origin, on its first page, so the site's later changes are kept.
+        await session.context.addInitScript(
+          ({ origin, items, marker }) => {
+            // This runs in the page, where the DOM's globals exist.
+            const page = globalThis as unknown as {
+              location: { origin: string };
+              localStorage: { getItem(name: string): string | null; setItem(name: string, value: string): void };
+            };
+            if (page.location.origin !== origin || page.localStorage.getItem(marker)) return;
+            for (const { name, value } of items) page.localStorage.setItem(name, value);
+            page.localStorage.setItem(marker, '1');
+          },
+          { origin: new URL(origin).origin, items: localStorage, marker },
+        );
+      }
+      session.logins.set(login.id, { id: login.id, site: login.site, signedOut: false });
+      session.needsPerson = null;
+      session.signIn = null;
+      const site = browserSiteOf(session.page.url());
+      if (site && siteIncludes(login.site, site))
+        await session.page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+      await session.emitState();
+      return session.state();
+    });
+  }
+
+  async function siteState(sessionId: string, site: string): Promise<BrowserSiteState> {
+    const session = get(sessionId);
+    return session.run(async () => {
+      const state = await session.context.storageState();
+      return {
+        cookies: state.cookies
+          .filter(cookie => siteIncludes(site, cookie.domain))
+          .map(({ name, value, domain, path, expires, httpOnly, secure, sameSite }) => ({
+            name,
+            value,
+            domain,
+            path,
+            expires,
+            httpOnly,
+            secure,
+            sameSite,
+          })),
+        origins: state.origins
+          .filter(({ origin }) => siteIncludes(site, new URL(origin).hostname))
+          .map(({ origin, localStorage }) => ({
+            origin,
+            localStorage: localStorage.filter(({ name }) => !name.startsWith(markerPrefix)),
+          })),
+      };
+    });
   }
 
   async function input(sessionId: string, event: BrowserInput): Promise<void> {
@@ -492,6 +574,8 @@ export async function createBrowserHost(options: HostOptions) {
     act,
     control,
     needsPerson,
+    loadLogin,
+    siteState,
     input,
     subscribe,
     close,

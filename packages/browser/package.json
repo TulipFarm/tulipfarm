@@ -10,14 +10,27 @@
     "./contracts": {
       "types": "./dist/contracts.d.ts",
       "default": "./dist/contracts.js"
+    },
+    "./logins": {
+      "types": "./dist/logins.d.ts",
+      "default": "./dist/logins.js"
+    },
+    "./login-contracts": {
+      "types": "./dist/login-contracts.d.ts",
+      "default": "./dist/login-contracts.js"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test --test-concurrency=1 test/*.test.mjs"
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test:integration": "node --test --test-concurrency=1 test/*.integration.mjs"
   },
   "dependencies": {
+    "@tulipfarm/access": "workspace:*",
+    "@tulipfarm/keyring": "workspace:*",
+    "@tulipfarm/secrets": "workspace:*",
+    "@tulipfarm/workspace-storage": "workspace:*",
     "zod": "4.6.6"
   },
   "devDependencies": {

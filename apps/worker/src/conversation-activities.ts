@@ -78,7 +78,9 @@ import { chatSkills } from '@tulipfarm/agents/chat-skills';
 import { createReplyTextPublisher } from '@tulipfarm/conversations/event-publisher';
 import { isFeatureEnabled } from '@tulipfarm/observability';
 import { createBrowserHostClient } from '@tulipfarm/browser';
+import { createBrowserLogins } from '@tulipfarm/browser/logins';
 import { browserHostConfiguration } from '@tulipfarm/config/browser-host';
+import { saveBackBrowserLogins } from './browser-logins.ts';
 import { beginReplySession } from './reply-session.ts';
 import { heartbeating } from './app-activities.ts';
 import {
@@ -193,6 +195,7 @@ export function meteredReply(
   }: MeteredReplyOptions = {},
 ): ConversationReply {
   const secretServices = secretsServices(runtime);
+  const browserLogins = createBrowserLogins({ runtime, keyring: () => integrationCredentialKeyring() });
   // Built on the first plan reply, so deployments without a credential keyring still construct replies.
   const credentials: Partial<Record<PlanProvider, PlanCredentials | null>> = { ...planCredentials };
   const credentialsFor = (provider: PlanProvider) =>
@@ -637,6 +640,14 @@ export function meteredReply(
     } finally {
       session.close();
       await observeChatDetail('publisher-close', () => publisher.close());
+      if (browser && requester)
+        await saveBackBrowserLogins({
+          client: browser.client,
+          logins: browserLogins,
+          workspaceId: fence.workspaceId,
+          conversationId: fence.conversationId,
+          actor: requester,
+        });
     }
   };
 }

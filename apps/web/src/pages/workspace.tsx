@@ -24,6 +24,7 @@ import {
   DatabaseIcon,
   FilesIcon,
   FolderIcon,
+  GlobeIcon,
   HelpCircleIcon,
   InboxIcon,
   LockIcon,
@@ -123,6 +124,7 @@ export type WorkspacePath =
   | '/$workspaceSlug/settings'
   | '/$workspaceSlug/settings/account'
   | '/$workspaceSlug/settings/secrets'
+  | '/$workspaceSlug/settings/browser-logins'
   | '/$workspaceSlug/settings/models'
   | '/$workspaceSlug/settings/usage'
   | '/$workspaceSlug/teams'
@@ -160,6 +162,7 @@ const tasks: Page = { label: 'Tasks', to: '/$workspaceSlug/tasks', icon: TasksIc
 const settings: Page = { label: 'Settings', to: '/$workspaceSlug/settings', icon: SettingsIcon };
 const account: Page = { label: 'Account', to: '/$workspaceSlug/settings/account', icon: UserCircleIcon };
 const secrets: Page = { label: 'Secrets', to: '/$workspaceSlug/settings/secrets', icon: LockIcon };
+const browserLogins: Page = { label: 'Browser logins', to: '/$workspaceSlug/settings/browser-logins', icon: GlobeIcon };
 const members: Page = { label: 'Members', to: '/$workspaceSlug/members', icon: UserIcon };
 const membersAndTeams: Page = { label: 'Members & teams', to: members.to, icon: UsersIcon };
 const teams: Page = { label: 'Teams', to: '/$workspaceSlug/teams', icon: UsersIcon };
@@ -242,6 +245,7 @@ const pages = [
   tasks,
   account,
   secrets,
+  browserLogins,
   models,
   usage,
   soul,
@@ -563,6 +567,7 @@ function useSettingsMode() {
   return (
     current === account ||
     current === secrets ||
+    current === browserLogins ||
     current === teams ||
     settingsPages.some(page => page.to === current.to)
   );
@@ -580,6 +585,7 @@ function SettingsNavigation() {
     settings.state.data.membership.role === 'admin';
   const capabilities = useSecretsCapabilities(workspace.id);
   const secretsVisible = capabilities.state.kind === 'ready' && capabilities.state.data.enabled;
+  const browserLoginsVisible = useFlag('browser-use');
   const { setOpenMobile } = useSidebar();
   return (
     <>
@@ -605,6 +611,7 @@ function SettingsNavigation() {
             <SidebarMenu>
               <NavItem page={account} />
               {secretsVisible && <NavItem page={secrets} />}
+              {browserLoginsVisible && <NavItem page={browserLogins} />}
             </SidebarMenu>
           </SidebarGroup>
           <SidebarGroup>

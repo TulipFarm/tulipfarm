@@ -71,8 +71,24 @@ test('A handoff flags the session and tells the model to stop', async () => {
     calls.map(call => call[0]),
     ['state', 'open', 'needsPerson'],
   );
-  assert.equal(calls[2][2], 'Tick the terms box');
+  assert.deepEqual(calls[2][2], { reason: 'Tick the terms box' });
   assert.equal(output.result.status, 'waiting-for-person');
+});
+
+test('A sign-in handoff names the site, and a URL in its place is refused', async () => {
+  const { client, calls } = fakeClient();
+  await invokeBrowser({ client, imageInput: true }, origin, {
+    tool: 'browser.handoff',
+    reason: 'Sign in to Amazon',
+    signIn: 'WWW.Amazon.com',
+  });
+  assert.deepEqual(calls.at(-1)[2], { reason: 'Sign in to Amazon', signIn: 'amazon.com' });
+  const refused = await invokeBrowser({ client, imageInput: true }, origin, {
+    tool: 'browser.handoff',
+    reason: 'Sign in',
+    signIn: 'https://amazon.com/login',
+  });
+  assert.equal(refused.result.error, 'invalid-site');
 });
 
 test('A host refusal becomes an instruction, not a failed turn', async () => {

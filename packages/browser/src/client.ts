@@ -7,7 +7,11 @@ import {
   type BrowserControl,
   type BrowserHostErrorCode,
   type BrowserInput,
+  type BrowserLoadLogin,
+  type BrowserNeedsPerson,
   type BrowserSessionState,
+  type BrowserSiteState,
+  browserSiteStateSchema,
 } from './contracts.ts';
 
 export class BrowserHostError extends Error {
@@ -82,8 +86,16 @@ export function createBrowserHostClient(connection: BrowserHostConnection, fetch
     async control(sessionId: string, control: BrowserControl): Promise<BrowserSessionState> {
       return browserSessionStateSchema.parse(await call('POST', `${session(sessionId)}/control`, control));
     },
-    async needsPerson(sessionId: string, reason: string): Promise<BrowserSessionState> {
-      return browserSessionStateSchema.parse(await call('POST', `${session(sessionId)}/needs-person`, { reason }));
+    async needsPerson(sessionId: string, request: BrowserNeedsPerson): Promise<BrowserSessionState> {
+      return browserSessionStateSchema.parse(await call('POST', `${session(sessionId)}/needs-person`, request));
+    },
+    /** Loads a browser login's cookies and storage into the session. */
+    async loadLogin(sessionId: string, login: BrowserLoadLogin): Promise<BrowserSessionState> {
+      return browserSessionStateSchema.parse(await call('POST', `${session(sessionId)}/logins`, login));
+    },
+    /** The session's cookies and storage for one site, to save as a browser login. */
+    async siteState(sessionId: string, site: string): Promise<BrowserSiteState> {
+      return browserSiteStateSchema.parse(await call('POST', `${session(sessionId)}/site-state`, { site }));
     },
     async input(sessionId: string, input: BrowserInput): Promise<void> {
       await call('POST', `${session(sessionId)}/input`, input, 10_000);
