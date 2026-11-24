@@ -132,7 +132,9 @@ every patch), the document notes the gap and falls back to
 never changes, so a known SHA is never read again. Every issue comment and every discussion comment
 and reply is paged through; only a single part whose Markdown would exceed 1 MiB is
 recorded as `too-large`, and a later part of a file found to be binary as
-`unsupported`. Neither is published.
+`unsupported`. Neither is published. An item whose read Markdown exceeds 1 MiB, or
+whose title exceeds 512 characters, is also recorded as `too-large`. Later passes
+skip a `too-large` item without downloading it until its revision changes.
 
 When such a version replaces an imported item, the earlier revision stays stored
 but loses its publication, so search and evidence stop returning it. Import details

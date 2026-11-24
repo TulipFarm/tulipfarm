@@ -1105,6 +1105,47 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         assert.equal((await query(ownerActor, 'peony')).hits.length, 1);
       });
 
+      await t.test('an oversized document is read once per revision, not on every pass', async () => {
+        const nativeId = 'doc:7002:huge.md';
+        const items = state.repos.get('7002').items;
+        items.set(nativeId, {
+          kind: 'doc',
+          title: 'acme/leadership: huge.md',
+          text: `marigold ${'x'.repeat(1024 * 1024)}`,
+          revision: 'blob:30',
+        });
+        const downloads = () => [...reads, ...fileReads].filter(read => read.nativeId === nativeId).length;
+        try {
+          reads.length = 0;
+          fileReads.length = 0;
+          await sync();
+          assert.equal(downloads(), 1);
+          assert.equal(await itemFailure(nativeId), 'too-large');
+          await sync();
+          assert.equal(downloads(), 1, 'a full pass does not download an unchanged oversized revision again');
+          state.lister = () => ({ observations: [], nextCursor: null });
+          try {
+            await db.platform.query(
+              `UPDATE ${table('github_sources')} SET next_attempt_at=clock_timestamp() WHERE source_id=$1`,
+              [sourceId],
+            );
+            const work = (await github.due(ws.id)).find(w => w.sourceId === sourceId);
+            assert.equal((await github.process(work)).disposition, 'ready');
+          } finally {
+            state.lister = null;
+          }
+          assert.equal(downloads(), 1, 'an incremental pass does not retry it');
+          items.set(nativeId, { ...items.get(nativeId), text: 'marigold trimmed', revision: 'blob:31' });
+          await sync();
+          assert.equal(downloads(), 2, 'a new revision is read');
+          assert.equal(await itemFailure(nativeId), null);
+          assert.equal((await query(ownerActor, 'marigold')).hits.length, 1);
+        } finally {
+          items.delete(nativeId);
+          await sync();
+        }
+      });
+
       await t.test('a repository GitHub keeps failing is set aside for the pass without tombstones', async () => {
         const before = await live();
         state.listError = id => (id === '7002' ? new GitHubCorpusError('transient') : null);

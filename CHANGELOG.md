@@ -129,6 +129,10 @@ One version identifies all apps and images of a release.
 
 ### Fixed
 
+- GitHub Knowledge no longer downloads an oversized file on every sync. A file
+  whose Markdown is over 1 MiB, or whose title is over 512 characters, is
+  recorded as `too-large` and skipped until it changes. Before, each pass
+  downloaded and rejected it again.
 - Long Knowledge documents reach Keep again. Each call now sends at most 32
   chunks (128 KiB) instead of 256, so Keep finishes embedding them within the
   delivery timeout even while it indexes a large backfill. Before, such
