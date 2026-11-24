@@ -4,7 +4,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import { NativeConnection } from '@temporalio/worker';
 import { Client, Connection } from '@temporalio/client';
-import { createGitHubKnowledgeWorker } from '../dist/knowledge-github-composition.js';
+import { createGitHubKnowledgeParts } from '../dist/knowledge-github-composition.js';
+import { createKnowledgeWorker } from '../dist/knowledge-worker.js';
 import { startGitHubKnowledgeWorkflow } from '../../api/dist/knowledge-github-dispatch.js';
 import { knowledgeFixture } from '../../api/test/knowledge-fixture.mjs';
 import { githubProviderFixture } from '../../api/test/knowledge-github-provider-fixture.mjs';
@@ -52,13 +53,17 @@ test(
         },
       });
       assert.equal(configured.status, 200, configured.bytes.toString());
-      githubWorker = await createGitHubKnowledgeWorker({
-        runtime: f.runtime,
+      githubWorker = await createKnowledgeWorker({
         connection,
         env,
-        githubCorpus: gh.provider(f.runtime),
+        parts: {
+          github: createGitHubKnowledgeParts({
+            runtime: f.runtime,
+            githubCorpus: gh.provider(f.runtime),
+          }).activities,
+        },
       });
-      githubRunning = githubWorker.worker.run();
+      githubRunning = githubWorker.run();
       const source = async () =>
         (
           await f.db.platform.query(
@@ -148,7 +153,7 @@ test(
     } finally {
       await f?.app.close();
       if (githubWorker) {
-        githubWorker.worker.shutdown();
+        githubWorker.shutdown();
         await githubRunning;
       }
       await f?.close();

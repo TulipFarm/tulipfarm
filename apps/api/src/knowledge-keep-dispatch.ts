@@ -15,7 +15,7 @@ export async function startKnowledgeKeepWorkflow(
     await temporal.connection.withDeadline(Date.now() + 10000, () =>
       temporal.client.workflow.start('knowledgeKeepSync', {
         workflowId: `knowledge-keep-${workspaceId}`,
-        taskQueue: `${process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm'}-knowledge-keep`,
+        taskQueue: `${process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm'}-knowledge`,
         args: [{ workspaceId }],
         workflowIdConflictPolicy: 'USE_EXISTING',
         workflowIdReusePolicy: 'ALLOW_DUPLICATE',

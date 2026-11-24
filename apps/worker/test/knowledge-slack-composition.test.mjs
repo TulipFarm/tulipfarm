@@ -1,17 +1,13 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
-import { createSlackKnowledgeWorker } from '../dist/knowledge-slack-composition.js';
+import { createSlackKnowledgeParts } from '../dist/knowledge-slack-composition.js';
 import { createSlackKnowledgeActivities } from '../dist/knowledge-slack-activities.js';
 
-test('Slack corpus composition isolates and bounds provider activities', async () => {
-  let options;
+test('Slack corpus composition isolates provider activities', async () => {
   const forbidden = async () => assert.fail('composition performs no external work');
-  const worker = {};
-  const composed = await createSlackKnowledgeWorker({
+  const composed = createSlackKnowledgeParts({
     runtime: { transaction: forbidden },
-    connection: {},
-    env: { TEMPORAL_TASK_QUEUE: 'fixture', TEMPORAL_NAMESPACE: 'fixture-space' },
     slackCorpus: {
       discover: forbidden,
       inspectSelection: forbidden,
@@ -19,31 +15,17 @@ test('Slack corpus composition isolates and bounds provider activities', async (
       list: forbidden,
       read: forbidden,
     },
-    createWorker: async value => {
-      options = value;
-      return worker;
-    },
   });
-  assert.equal(composed.worker, worker);
-  assert.equal(options.taskQueue, 'fixture-knowledge-slack');
-  assert.equal(options.namespace, 'fixture-space');
-  assert.equal(options.maxConcurrentActivityTaskExecutions, 2);
-  assert.match(options.workflowsPath, /knowledge-slack-workflows\.js$/);
-  assert.deepEqual(Object.keys(options.activities), ['processSlackKnowledge']);
+  assert.ok(composed.service);
+  assert.deepEqual(Object.keys(composed.activities), ['processSlackKnowledge']);
 });
 
 test('Slack composition without linked-member configuration stays not-configured', async () => {
-  let options;
-  await createSlackKnowledgeWorker({
+  const composed = createSlackKnowledgeParts({
     runtime: { transaction: async () => assert.fail('no storage work') },
-    connection: {},
     env: { SLACK_CONFIGURATION: '{"invalid":true}', SLACK_CREDENTIAL_KEYS: '{}' },
-    createWorker: async value => {
-      options = value;
-      return {};
-    },
   });
-  assert.equal(options.taskQueue, 'tulipfarm-knowledge-slack');
+  assert.ok(composed.service);
 });
 
 test('Slack activity validates ID-only work, discards results, and sanitizes failures', async () => {

@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "node --env-file-if-exists=.env.local src/worker.ts",
     "dev:storage": "node --env-file-if-exists=.env.storage.local src/storage-worker.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/bundle-workflows.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --test-concurrency=1 test/*.test.mjs",
     "test:integration": "node --test test/workspace.integration.mjs",

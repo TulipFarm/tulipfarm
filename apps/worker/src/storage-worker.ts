@@ -1,11 +1,10 @@
 import '@tulipfarm/config/load-secret-files';
 import { temporalConnectionOptions } from '@tulipfarm/config/temporal';
-import { extname } from 'node:path';
 import { readBuildInfo } from '@tulipfarm/build-info/node';
 import { captureException, createBackgroundJob, retryError, startTelemetry } from '@tulipfarm/observability';
 import { shutdownExtensions, startExtensions } from '@tulipfarm/extensions';
 import { workerTelemetry } from './telemetry.ts';
-import { fileURLToPath } from 'node:url';
+import { workflowSource } from './workflow-source.ts';
 import { NativeConnection, Runtime, Worker } from '@temporalio/worker';
 import { createWorkspaceMaintenance } from '@tulipfarm/workspaces/lifecycle';
 import { createMigrationCredentialResolver } from '@tulipfarm/workspaces/capabilities';
@@ -61,11 +60,10 @@ async function run() {
   try {
     connection = await NativeConnection.connect(temporalConnectionOptions());
     const worker = await Worker.create({
-      ...workerTelemetry(telemetry),
+      ...workflowSource('storage-workflows', workerTelemetry(telemetry)),
       connection,
       namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
       taskQueue: process.env.TEMPORAL_STORAGE_TASK_QUEUE ?? 'tulipfarm-storage-v1',
-      workflowsPath: fileURLToPath(new URL(`./storage-workflows${extname(import.meta.filename)}`, import.meta.url)),
       activities: {
         initializeWorkspaceStorage: maintenance.initializeWorkspaceStorage,
         cleanupTableHistory: cleanupTables.cleanupTableHistory,

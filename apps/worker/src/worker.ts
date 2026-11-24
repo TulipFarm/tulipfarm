@@ -1,6 +1,4 @@
 import '@tulipfarm/config/load-secret-files';
-import { extname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { NativeConnection, Runtime, Worker } from '@temporalio/worker';
 import { temporalConnectionOptions } from '@tulipfarm/config/temporal';
 import { publicWebConfiguration } from '@tulipfarm/config/public-web';
@@ -53,12 +51,14 @@ import { integrationCredentialKeyring } from '@tulipfarm/integrations';
 import { createKnowledgeActivities } from './knowledge-activities.ts';
 import { knowledgeMediaRecognition } from './media-recognition.ts';
 import { createFiles } from '@tulipfarm/files';
-import { createKnowledgeKeepWorker } from './knowledge-keep-composition.ts';
-import { createGoogleKnowledgeWorker } from './knowledge-google-composition.ts';
-import { createSlackKnowledgeWorker } from './knowledge-slack-composition.ts';
-import { createGitHubKnowledgeWorker } from './knowledge-github-composition.ts';
-import { createAtlassianKnowledgeWorker } from './knowledge-atlassian-composition.ts';
-import { createDefaultKnowledgeWorker } from './knowledge-defaults-composition.ts';
+import { createKnowledgeKeepParts } from './knowledge-keep-composition.ts';
+import { createGoogleKnowledgeParts } from './knowledge-google-composition.ts';
+import { createSlackKnowledgeParts } from './knowledge-slack-composition.ts';
+import { createGitHubKnowledgeParts } from './knowledge-github-composition.ts';
+import { createAtlassianKnowledgeParts } from './knowledge-atlassian-composition.ts';
+import { createDefaultKnowledgeParts } from './knowledge-defaults-composition.ts';
+import { createKnowledgeWorker } from './knowledge-worker.ts';
+import { workflowSource } from './workflow-source.ts';
 import { createDefaultKnowledgeGate, withKnowledgeSourceAuthorization } from '@tulipfarm/knowledge';
 import { createWorkflowAgentTasks } from './workflow-agent-tasks.ts';
 import { createSkillActivities } from './skill-activities.ts';
@@ -486,7 +486,6 @@ async function run() {
             connection,
             namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
             taskQueue: process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm',
-            workflowsPath: fileURLToPath(new URL(`./workflows${extname(import.meta.filename)}`, import.meta.url)),
             activities: {
               ...activities,
               ...coreResources?.activities,
@@ -517,101 +516,56 @@ async function run() {
                 ? createWorkflowCodingActivities(coreResources.runtime, coding.backend, coding.configuration)
                 : {}),
             },
-            ...workerTelemetry(telemetry),
+            ...workflowSource('workflows', workerTelemetry(telemetry)),
             shutdownGraceTime: '5 seconds',
           });
-    const knowledgeWorker = knowledgeResources
-      ? await Worker.create({
-          ...workerTelemetry(telemetry),
-          connection,
-          namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
-          taskQueue: `${process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm'}-knowledge`,
-          workflowsPath: fileURLToPath(
-            new URL(`./knowledge-workflows${extname(import.meta.filename)}`, import.meta.url),
-          ),
-          activities: createKnowledgeActivities(
-            knowledgeResources.runtime,
-            chatObjects ?? undefined,
-            knowledgeMediaRecognition(knowledgeResources.runtime),
-          ),
-          maxConcurrentActivityTaskExecutions: 2,
-          shutdownGraceTime: '40 seconds',
-        })
-      : undefined;
     const recommendationWorker = recommendations
       ? await Worker.create({
-          ...workerTelemetry(telemetry),
+          ...workflowSource('recommendation-workflows', workerTelemetry(telemetry)),
           connection,
           namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
           taskQueue: `${process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm'}-recommendations`,
-          workflowsPath: fileURLToPath(
-            new URL(`./recommendation-workflows${extname(import.meta.filename)}`, import.meta.url),
-          ),
           activities: recommendations.activities,
           maxConcurrentActivityTaskExecutions: recommendations.concurrency,
           shutdownGraceTime: '55 seconds',
         })
       : undefined;
-    const googleKnowledge = knowledgeResources
-      ? await createGoogleKnowledgeWorker({
-          runtime: knowledgeResources.runtime,
-          connection,
-          telemetry,
-          gate: createDefaultKnowledgeGate({ runtime: knowledgeResources.runtime }),
-          ...knowledgeMediaRecognition(knowledgeResources.runtime),
-        })
-      : undefined;
-    const slackKnowledge = knowledgeResources
-      ? await createSlackKnowledgeWorker({
-          runtime: knowledgeResources.runtime,
-          connection,
-          telemetry,
-          gate: createDefaultKnowledgeGate({ runtime: knowledgeResources.runtime }),
-        })
-      : undefined;
-    const githubKnowledge = knowledgeResources
-      ? await createGitHubKnowledgeWorker({
-          runtime: knowledgeResources.runtime,
-          connection,
-          telemetry,
-          gate: createDefaultKnowledgeGate({ runtime: knowledgeResources.runtime }),
-        })
-      : undefined;
-    const atlassianKnowledge = knowledgeResources
-      ? await createAtlassianKnowledgeWorker({
-          runtime: knowledgeResources.runtime,
-          connection,
-          telemetry,
-          gate: createDefaultKnowledgeGate({ runtime: knowledgeResources.runtime }),
-        })
-      : undefined;
-    const defaultKnowledge =
-      knowledgeResources && googleKnowledge && slackKnowledge && githubKnowledge && atlassianKnowledge
-        ? await createDefaultKnowledgeWorker({
-            runtime: knowledgeResources.runtime,
-            connection,
-            telemetry,
-            engines: {
-              google: googleKnowledge.service,
-              slack: slackKnowledge.service,
-              github: githubKnowledge.service,
-              atlassian: atlassianKnowledge.service,
-            },
-          })
-        : undefined;
-    const knowledgeKeep = knowledgeResources
-      ? await createKnowledgeKeepWorker({ runtime: knowledgeResources.runtime, connection, telemetry })
+    const knowledgeParts = (runtime: NonNullable<typeof knowledgeResources>['runtime']) => {
+      const google = createGoogleKnowledgeParts({
+        runtime,
+        gate: createDefaultKnowledgeGate({ runtime }),
+        ...knowledgeMediaRecognition(runtime),
+      });
+      const slack = createSlackKnowledgeParts({ runtime, gate: createDefaultKnowledgeGate({ runtime }) });
+      const github = createGitHubKnowledgeParts({ runtime, gate: createDefaultKnowledgeGate({ runtime }) });
+      const atlassian = createAtlassianKnowledgeParts({ runtime, gate: createDefaultKnowledgeGate({ runtime }) });
+      const defaults = createDefaultKnowledgeParts({
+        runtime,
+        engines: {
+          google: google.service,
+          slack: slack.service,
+          github: github.service,
+          atlassian: atlassian.service,
+        },
+      });
+      const keep = createKnowledgeKeepParts({ runtime });
+      return {
+        ingest: createKnowledgeActivities(runtime, chatObjects ?? undefined, knowledgeMediaRecognition(runtime)),
+        google: google.activities,
+        slack: slack.activities,
+        github: github.activities,
+        atlassian: atlassian.activities,
+        defaults: defaults.activities,
+        ...(keep ? { keep: keep.activities } : {}),
+      };
+    };
+    const knowledgeWorker = knowledgeResources
+      ? await createKnowledgeWorker({ connection, telemetry, parts: knowledgeParts(knowledgeResources.runtime) })
       : undefined;
     const workers = [
       ...(worker ? [worker] : []),
       ...(knowledgeWorker ? [knowledgeWorker] : []),
       ...(recommendationWorker ? [recommendationWorker] : []),
-      ...(googleKnowledge ? [googleKnowledge.worker] : []),
-      ...(slackKnowledge ? [slackKnowledge.worker] : []),
-      ...(githubKnowledge ? [githubKnowledge.worker] : []),
-      ...(atlassianKnowledge ? [atlassianKnowledge.worker] : []),
-      ...(defaultKnowledge ? [defaultKnowledge.worker] : []),
-      ...(knowledgeKeep ? [knowledgeKeep.worker] : []),
     ];
     await taskDispatch?.startRecovery();
     await planDispatch?.startRecovery();

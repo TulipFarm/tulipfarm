@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { NativeConnection, Worker } from '@temporalio/worker';
+import { NativeConnection } from '@temporalio/worker';
 import { Client, Connection } from '@temporalio/client';
 import { KnowledgeKeepUnavailable } from '@tulipfarm/knowledge';
 import { startKnowledgeKeepWorkflow } from '../../api/dist/knowledge-keep-dispatch.js';
 import { createKnowledgeKeepActivities } from '../dist/knowledge-keep-activities.js';
+import { createKnowledgeWorker } from '../dist/knowledge-worker.js';
 
 async function withWorker(feed, run) {
   const address = process.env.TEST_TEMPORAL_ADDRESS ?? '127.0.0.1:7233';
@@ -18,15 +18,13 @@ async function withWorker(feed, run) {
     connection = await NativeConnection.connect({ address });
     clientConnection = await Connection.connect({ address });
     const client = new Client({ connection: clientConnection });
-    worker = await Worker.create({
+    worker = await createKnowledgeWorker({
       connection,
-      taskQueue: `${queue}-knowledge-keep`,
-      workflowsPath: fileURLToPath(new URL('../dist/knowledge-keep-workflows.js', import.meta.url)),
-      activities: createKnowledgeKeepActivities(feed),
-      maxConcurrentActivityTaskExecutions: 2,
+      env: { TEMPORAL_TASK_QUEUE: queue },
+      parts: { keep: createKnowledgeKeepActivities(feed) },
     });
     running = worker.run();
-    await run({ client, clientConnection, taskQueue: `${queue}-knowledge-keep` });
+    await run({ client, clientConnection, taskQueue: `${queue}-knowledge` });
   } finally {
     if (worker) {
       worker.shutdown();

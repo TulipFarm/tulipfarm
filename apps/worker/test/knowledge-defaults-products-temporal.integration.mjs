@@ -11,11 +11,12 @@ import {
   defaultKnowledgeFlagEnabled,
   recordDefaultKnowledgeIntent,
 } from '@tulipfarm/knowledge';
-import { createGoogleKnowledgeWorker } from '../dist/knowledge-google-composition.js';
-import { createSlackKnowledgeWorker } from '../dist/knowledge-slack-composition.js';
-import { createAtlassianKnowledgeWorker } from '../dist/knowledge-atlassian-composition.js';
-import { createGitHubKnowledgeWorker } from '../dist/knowledge-github-composition.js';
-import { createDefaultKnowledgeWorker } from '../dist/knowledge-defaults-composition.js';
+import { createGoogleKnowledgeParts } from '../dist/knowledge-google-composition.js';
+import { createSlackKnowledgeParts } from '../dist/knowledge-slack-composition.js';
+import { createAtlassianKnowledgeParts } from '../dist/knowledge-atlassian-composition.js';
+import { createGitHubKnowledgeParts } from '../dist/knowledge-github-composition.js';
+import { createDefaultKnowledgeParts } from '../dist/knowledge-defaults-composition.js';
+import { createKnowledgeWorker } from '../dist/knowledge-worker.js';
 import { knowledgeFixture } from '../../api/test/knowledge-fixture.mjs';
 import { googleProviderFixture, connectGoogle } from '../../api/test/knowledge-google-provider-fixture.mjs';
 import { slackProviderFixture } from '../../api/test/knowledge-slack-provider-fixture.mjs';
@@ -34,8 +35,8 @@ async function eventually(operation, message) {
 const automatic = { enabled: defaultKnowledgeFlagEnabled, record: recordDefaultKnowledgeIntent };
 
 /**
- * Runs one product family through real Temporal: the API sweep dispatches the intent, the defaults worker
- * configures sources and provider workers publish. No HTTP read opens Knowledge.
+ * Runs one product family through real Temporal: the API sweep dispatches the intent, the knowledge worker's
+ * defaults activities configure sources and its provider activities publish. No HTTP read opens Knowledge.
  */
 async function journey(name, setup, body) {
   const priorQueue = process.env.TEMPORAL_TASK_QUEUE;
@@ -59,18 +60,26 @@ async function journey(name, setup, body) {
     );
     const gate = createDefaultKnowledgeGate({ runtime: f.runtime });
     const start = async worker => {
-      workers.push({ worker, running: worker.worker.run() });
+      workers.push({ worker, running: worker.run() });
       return worker;
     };
     const stop = async worker => {
       const index = workers.findIndex(item => item.worker === worker);
       const [item] = workers.splice(index, 1);
-      item.worker.worker.shutdown();
+      item.worker.shutdown();
       await item.running;
     };
-    const engine = await start(await setup.engine({ f, connection, env, gate }));
+    const engine = setup.engine({ f, gate });
+    // One knowledge worker serves the provider and defaults activities together, as in production.
     const defaults = (engines = { [setup.kind]: engine.service }) =>
-      createDefaultKnowledgeWorker({ runtime: f.runtime, connection, env, engines });
+      createKnowledgeWorker({
+        connection,
+        env,
+        parts: {
+          [setup.kind]: engine.activities,
+          defaults: createDefaultKnowledgeParts({ runtime: f.runtime, engines }).activities,
+        },
+      });
     const q = async (sql, values = []) =>
       (
         await f.db.platform.query(
@@ -82,7 +91,7 @@ async function journey(name, setup, body) {
   } finally {
     await f?.app.close();
     for (const item of workers.reverse()) {
-      item.worker.worker.shutdown();
+      item.worker.shutdown();
       await item.running;
     }
     await f?.close();
@@ -198,11 +207,9 @@ test(
       {
         kind: 'google',
         fixture: async extra => ({ googleOptions: { ...google.options, defaultKnowledge: automatic }, ...extra }),
-        engine: ({ f, integration, env, gate }) =>
-          createGoogleKnowledgeWorker({
+        engine: ({ f, gate }) =>
+          createGoogleKnowledgeParts({
             runtime: f.runtime,
-            integration,
-            env,
             gate,
             googleService: createGoogleWorkspaceService({ runtime: f.runtime, ...google.options }),
             providerFetch: google.providerFetch,
@@ -254,11 +261,9 @@ test(
       {
         kind: 'slack',
         fixture: async extra => ({ slackCorpus: slack.provider, ...extra }),
-        engine: ({ f, integration, env, gate }) =>
-          createSlackKnowledgeWorker({
+        engine: ({ f, gate }) =>
+          createSlackKnowledgeParts({
             runtime: f.runtime,
-            integration,
-            env,
             gate,
             slackCorpus: slack.provider(f.runtime),
           }),
@@ -303,11 +308,9 @@ test(
       {
         kind: 'atlassian',
         fixture: async extra => ({ atlassianCorpus: atlassian.provider, ...extra }),
-        engine: ({ f, integration, env, gate }) =>
-          createAtlassianKnowledgeWorker({
+        engine: ({ f, gate }) =>
+          createAtlassianKnowledgeParts({
             runtime: f.runtime,
-            integration,
-            env,
             gate,
             atlassianCorpus: atlassian.provider(f.runtime),
           }),
@@ -360,11 +363,9 @@ test(
       {
         kind: 'atlassian',
         fixture: async extra => ({ atlassianCorpus: atlassian.provider, ...extra }),
-        engine: ({ f, integration, env, gate }) =>
-          createAtlassianKnowledgeWorker({
+        engine: ({ f, gate }) =>
+          createAtlassianKnowledgeParts({
             runtime: f.runtime,
-            integration,
-            env,
             gate,
             atlassianCorpus: atlassian.provider(f.runtime),
           }),
@@ -428,11 +429,9 @@ test(
       {
         kind: 'slack',
         fixture: async extra => ({ slackCorpus: slack.provider, ...extra }),
-        engine: ({ f, integration, env, gate }) =>
-          createSlackKnowledgeWorker({
+        engine: ({ f, gate }) =>
+          createSlackKnowledgeParts({
             runtime: f.runtime,
-            integration,
-            env,
             gate,
             slackCorpus: slack.provider(f.runtime),
           }),
@@ -526,11 +525,9 @@ test(
       {
         kind: 'github',
         fixture: async extra => ({ githubCorpus: gh.provider, ...extra }),
-        engine: ({ f, integration, env, gate }) =>
-          createGitHubKnowledgeWorker({
+        engine: ({ f, gate }) =>
+          createGitHubKnowledgeParts({
             runtime: f.runtime,
-            integration,
-            env,
             gate,
             githubCorpus: gh.provider(f.runtime),
           }),
@@ -566,11 +563,9 @@ test(
       {
         kind: 'google',
         fixture: async extra => ({ googleOptions: { ...google.options, defaultKnowledge: automatic }, ...extra }),
-        engine: ({ f, integration, env, gate }) =>
-          createGoogleKnowledgeWorker({
+        engine: ({ f, gate }) =>
+          createGoogleKnowledgeParts({
             runtime: f.runtime,
-            integration,
-            env,
             gate,
             googleService: createGoogleWorkspaceService({ runtime: f.runtime, ...google.options }),
             providerFetch: google.providerFetch,
@@ -625,11 +620,9 @@ test(
       {
         kind: 'slack',
         fixture: async extra => ({ slackCorpus: slack.provider, ...extra }),
-        engine: ({ f, integration, env, gate }) =>
-          createSlackKnowledgeWorker({
+        engine: ({ f, gate }) =>
+          createSlackKnowledgeParts({
             runtime: f.runtime,
-            integration,
-            env,
             gate,
             slackCorpus: slack.provider(f.runtime),
           }),
@@ -673,11 +666,9 @@ test(
       {
         kind: 'atlassian',
         fixture: async extra => ({ atlassianCorpus: atlassian.provider, ...extra }),
-        engine: ({ f, integration, env, gate }) =>
-          createAtlassianKnowledgeWorker({
+        engine: ({ f, gate }) =>
+          createAtlassianKnowledgeParts({
             runtime: f.runtime,
-            integration,
-            env,
             gate,
             atlassianCorpus: atlassian.provider(f.runtime),
           }),

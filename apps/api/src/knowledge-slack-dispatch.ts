@@ -17,7 +17,7 @@ export async function startSlackKnowledgeWorkflow(
     await temporal.connection.withDeadline(Date.now() + 10000, () =>
       temporal.client.workflow.start('slackKnowledgeSync', {
         workflowId: `knowledge-slack-${work.workspaceId}-${work.sourceId}-${work.generation}`,
-        taskQueue: `${process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm'}-knowledge-slack`,
+        taskQueue: `${process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm'}-knowledge`,
         args: [work],
         workflowIdConflictPolicy: 'USE_EXISTING',
         workflowIdReusePolicy: 'ALLOW_DUPLICATE',

@@ -4,7 +4,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import { NativeConnection } from '@temporalio/worker';
 import { Client, Connection } from '@temporalio/client';
-import { createAtlassianKnowledgeWorker } from '../dist/knowledge-atlassian-composition.js';
+import { createAtlassianKnowledgeParts } from '../dist/knowledge-atlassian-composition.js';
+import { createKnowledgeWorker } from '../dist/knowledge-worker.js';
 import { startAtlassianKnowledgeWorkflow } from '../../api/dist/knowledge-atlassian-dispatch.js';
 import { knowledgeFixture } from '../../api/test/knowledge-fixture.mjs';
 import { atlassianProviderFixture } from '../../api/test/knowledge-atlassian-provider-fixture.mjs';
@@ -58,13 +59,17 @@ test(
         },
       });
       assert.equal(configured.status, 200, configured.bytes.toString());
-      atlassianWorker = await createAtlassianKnowledgeWorker({
-        runtime: f.runtime,
+      atlassianWorker = await createKnowledgeWorker({
         connection,
         env,
-        atlassianCorpus: atlassian.provider(f.runtime),
+        parts: {
+          atlassian: createAtlassianKnowledgeParts({
+            runtime: f.runtime,
+            atlassianCorpus: atlassian.provider(f.runtime),
+          }).activities,
+        },
       });
-      atlassianRunning = atlassianWorker.worker.run();
+      atlassianRunning = atlassianWorker.run();
       const source = async () =>
         (
           await f.db.platform.query(
@@ -150,7 +155,7 @@ test(
     } finally {
       await f?.app.close();
       if (atlassianWorker) {
-        atlassianWorker.worker.shutdown();
+        atlassianWorker.shutdown();
         await atlassianRunning;
       }
       await f?.close();

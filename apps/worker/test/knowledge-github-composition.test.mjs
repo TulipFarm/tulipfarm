@@ -2,18 +2,14 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { asyncLocalStorage } from '@temporalio/activity';
-import { createGitHubKnowledgeWorker } from '../dist/knowledge-github-composition.js';
+import { createGitHubKnowledgeParts } from '../dist/knowledge-github-composition.js';
 import { createGitHubKnowledgeActivities } from '../dist/knowledge-github-activities.js';
 import { githubCorpusFromEnvironment } from '@tulipfarm/github/corpus';
 
-test('GitHub corpus composition isolates and bounds provider activities', async () => {
-  let options;
+test('GitHub corpus composition isolates provider activities', async () => {
   const forbidden = async () => assert.fail('composition performs no external work');
-  const worker = {};
-  const composed = await createGitHubKnowledgeWorker({
+  const composed = createGitHubKnowledgeParts({
     runtime: { transaction: forbidden },
-    connection: {},
-    env: { TEMPORAL_TASK_QUEUE: 'fixture', TEMPORAL_NAMESPACE: 'fixture-space' },
     githubCorpus: {
       discover: forbidden,
       inspectSelection: forbidden,
@@ -21,17 +17,9 @@ test('GitHub corpus composition isolates and bounds provider activities', async 
       list: forbidden,
       read: forbidden,
     },
-    createWorker: async value => {
-      options = value;
-      return worker;
-    },
   });
-  assert.equal(composed.worker, worker);
-  assert.equal(options.taskQueue, 'fixture-knowledge-github');
-  assert.equal(options.namespace, 'fixture-space');
-  assert.equal(options.maxConcurrentActivityTaskExecutions, 2);
-  assert.match(options.workflowsPath, /knowledge-github-workflows\.js$/);
-  assert.deepEqual(Object.keys(options.activities), ['processGitHubKnowledge']);
+  assert.ok(composed.service);
+  assert.deepEqual(Object.keys(composed.activities), ['processGitHubKnowledge']);
 });
 
 test('GitHub composition without OAuth configuration or keys stays not-configured', async () => {
@@ -44,17 +32,10 @@ test('GitHub composition without OAuth configuration or keys stays not-configure
       GITHUB_OAUTH_REDIRECT_URI: 'https://app.example/github/callback',
     },
   ]) {
-    let options;
-    const composed = await createGitHubKnowledgeWorker({
+    const composed = createGitHubKnowledgeParts({
       runtime: { transaction: async () => assert.fail('no storage work') },
-      connection: {},
       env,
-      createWorker: async value => {
-        options = value;
-        return {};
-      },
     });
-    assert.equal(options.taskQueue, 'tulipfarm-knowledge-github');
     assert.ok(composed.service);
     await assert.rejects(
       githubCorpusFromEnvironment({ runtime: { transaction: async () => assert.fail('no storage work') }, env }).access(
