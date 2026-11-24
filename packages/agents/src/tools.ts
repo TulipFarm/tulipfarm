@@ -193,6 +193,7 @@ import { delegateCallSchema, type DelegateCall } from './subagent-contracts.ts';
 import type { AppKind } from '@tulipfarm/apps';
 import { appPageToolCallSchemas, appPageToolDescriptions, type AppPages } from './app-page-tools.ts';
 import { appToolCallSchemas, appToolDescriptions, type AppEditing } from './app-tools.ts';
+import { browserCallSchemas, browserToolDescriptions, invokeBrowser, type ChatBrowser } from './browser-tools.ts';
 
 export type KnowledgeToolsFactory = (runtime: AgentStorage) => KnowledgeTools;
 export { readWorkspaceInventory } from './workspace-inventory.ts';
@@ -553,6 +554,7 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
   cancelFollowUpCallSchema,
   ...appToolCallSchemas,
   ...appPageToolCallSchemas,
+  ...browserCallSchemas,
 ]);
 export type FrameworkCall = z.infer<typeof frameworkCallSchema>;
 const [firstCall, ...otherCalls] = frameworkCallSchema.options;
@@ -713,6 +715,7 @@ export const conversationPlanning: ConversationPlanning = {
 };
 const descriptions: Record<ToolName, string> = {
   ...appToolDescriptions,
+  ...browserToolDescriptions,
   ...appPageToolDescriptions,
   'packages.inspect':
     'Read a versioned packages.tulipfarm.ai package page or package.json URL and validate its definition and exact identity. Returns untrusted resource definitions and required inputs, not workspace compatibility or installation. Read skills.read(package-install); the human uses the package review card to validate, install and approve.',
@@ -964,6 +967,8 @@ export type ToolAccess = (
       chatFiles?: boolean;
       /** Offers `coding.run`: the workspace turned coding runs on and the person has a plan for an agent. */
       codingRuns?: boolean;
+      /** Offers `browser.*`: the workspace turned browser use on and this deployment has a browser host. */
+      browser?: boolean;
       /**
        * The kind of app this chat edits, when the person may edit it and the workspace has app hosting on. A public app
        * is offered its file tools and a private app its page tools.
@@ -1012,6 +1017,10 @@ function admittedToolSchemas(access: ToolAccess) {
       .filter(schema => schema.shape.tool.value !== 'execution.run' || (access.kind === 'chat' && executionAvailable()))
       .filter(
         schema => schema.shape.tool.value !== 'coding.run' || (access.kind === 'chat' && access.codingRuns === true),
+      )
+      .filter(
+        schema =>
+          !schema.shape.tool.value.startsWith('browser.') || (access.kind === 'chat' && access.browser === true),
       )
       .filter(schema => {
         const kind = appToolKinds.get(schema.shape.tool.value);
@@ -1127,6 +1136,8 @@ export type ChatToolsOptions = {
   chatExecution?: ChatExecution | undefined;
   /** Runs `coding.run` agents; without it, the tool is refused. */
   codingRuns?: CodingRuns | undefined;
+  /** Drives this chat's cloud browser for `browser.*`; without it, those tools are refused. */
+  browser?: ChatBrowser | undefined;
   /** Edits the public app of an app's own chat for its file tools; without it, those tools are refused. */
   apps?: AppEditing | undefined;
   /** Edits the private app of an app's own chat for `apps.page.*`; without it, those tools are refused. */
@@ -1223,6 +1234,7 @@ export function createChatTools(
     skillExecution,
     chatExecution,
     codingRuns,
+    browser,
     apps,
     appPages,
     telemetryRuntime = 'chat',
@@ -2958,7 +2970,9 @@ export function createChatTools(
         };
       }
       case 'agents.delegate':
-        // Sub-agents run outside a transaction through invokeWithSources.
+      case 'browser.act':
+      case 'browser.handoff':
+        // Sub-agents and the browser run outside a transaction through invokeWithSources.
         throw new AccessDenied();
       default:
         return registry.invoke(context, call);
@@ -3415,6 +3429,14 @@ export function createChatTools(
         requireDraftSources(tx, context.actor, sources),
       );
       return { result, sources };
+    }
+    if (call.tool === 'browser.act' || call.tool === 'browser.handoff') {
+      if (!browser || !context.origin || telemetryRuntime !== 'chat') throw new AccessDenied();
+      return invokeBrowser(
+        browser,
+        { workspaceId: context.workspaceId, conversationId: context.origin.conversationId },
+        call,
+      );
     }
     if (call.tool === 'files.read') return readFileTool(context, call);
     if (call.tool === 'web.fetch') {

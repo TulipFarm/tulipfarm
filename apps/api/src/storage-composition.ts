@@ -21,6 +21,9 @@ import type { createTemporalClient } from './temporal.ts';
 import { emailDeliveryKeys } from '@tulipfarm/workspaces/email-delivery';
 import { authConfig } from './auth.ts';
 import { registerConversations } from './conversations.ts';
+import { registerBrowserLive } from './browser-live.ts';
+import { createBrowserHostClient } from '@tulipfarm/browser';
+import { browserHostConfiguration } from '@tulipfarm/config/browser-host';
 import { registerFollowUps } from './follow-ups.ts';
 import { registerLayoutInteractions } from './layout-interactions.ts';
 import { humanReadableTableFiles } from '@tulipfarm/agents/table-sources';
@@ -272,6 +275,12 @@ export function registerStorageComposition(
     identity: dependencies.pool,
     events,
     replies,
+  });
+  const browserHost = browserHostConfiguration();
+  registerBrowserLive(app, {
+    auth: dependencies.auth,
+    chats: conversations,
+    client: browserHost ? createBrowserHostClient(browserHost) : undefined,
   });
   registerLayoutInteractions(app, {
     auth: dependencies.auth,

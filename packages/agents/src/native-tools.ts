@@ -210,6 +210,9 @@ const coreChatTools = new Set(
     'web.search',
     'web.fetch',
     'api.request',
+    // Offered only when this chat has a cloud browser; the model must not mistake a site task for a web.fetch.
+    'browser.act',
+    'browser.handoff',
     'execution.run',
     'files.read',
     'images.generate',
@@ -283,8 +286,12 @@ export function nativeChatTools(
   chatFiles = false,
   codingRuns = false,
   apps?: AppKind,
+  browser = false,
 ): ChatCatalog {
-  const full = nativeTools({ kind: 'chat', mcp, earlierMessages, chatFiles, codingRuns, apps }, chatCallSchema);
+  const full = nativeTools(
+    { kind: 'chat', mcp, earlierMessages, chatFiles, codingRuns, apps, browser },
+    chatCallSchema,
+  );
   if (!full.tools.length) throw new Error('tool-catalog-empty');
   if (!loaded) return { ...full, discovery: '', load: () => [], search: () => [] };
   const deferred = full.tools.filter(tool => !coreChatTools.has(tool.name) && !tool.name.startsWith('mcp_'));

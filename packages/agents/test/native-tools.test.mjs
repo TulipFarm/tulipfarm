@@ -85,7 +85,7 @@ test('native tool names and descriptions follow the registered chat tools', t =>
       else process.env[name] = previous;
     });
   }
-  const { tools } = nativeChatTools(undefined, true, undefined, true, true, 'public');
+  const { tools } = nativeChatTools(undefined, true, undefined, true, true, 'public', true);
   const registered = chatCallSchema.options
     .map(option => option.shape.tool.value)
     .filter(tool => !tool.startsWith('mcp.'));
@@ -94,7 +94,7 @@ test('native tool names and descriptions follow the registered chat tools', t =>
     tools.map(tool => tool.name),
     registered.filter(tool => !pageTools.includes(tool)).map(nativeToolName),
   );
-  const privateTools = nativeChatTools(undefined, true, undefined, true, true, 'private').tools;
+  const privateTools = nativeChatTools(undefined, true, undefined, true, true, 'private', true).tools;
   const privateNames = privateTools.map(tool => tool.name);
   assert.deepEqual(
     pageTools.map(nativeToolName).filter(name => privateNames.includes(name)),

@@ -77,6 +77,8 @@ import { pinnedImageChoice } from '@tulipfarm/agents/image-generation';
 import { chatSkills } from '@tulipfarm/agents/chat-skills';
 import { createReplyTextPublisher } from '@tulipfarm/conversations/event-publisher';
 import { isFeatureEnabled } from '@tulipfarm/observability';
+import { createBrowserHostClient } from '@tulipfarm/browser';
+import { browserHostConfiguration } from '@tulipfarm/config/browser-host';
 import { beginReplySession } from './reply-session.ts';
 import { heartbeating } from './app-activities.ts';
 import {
@@ -363,6 +365,16 @@ export function meteredReply(
     let delegations = 0;
     // A coding run uses the member's own plan and GitHub account, so only in their own chat in the app.
     const codingRunTools = requester && !externalContext && !project ? codingRuns : undefined;
+    // The cloud browser belongs to the member's own chat in the app, never to Slack or a project chat.
+    const browserHost = browserHostConfiguration();
+    const browser =
+      requester && !externalContext && !project && browserHost
+        ? (await observeChatDetail('feature-flag', () =>
+            isFeatureEnabled('browser-use', null, { id: fence.workspaceId }),
+          ))
+          ? { client: createBrowserHostClient(browserHost), imageInput: routeCapabilities(validatedRoute).imageInput }
+          : undefined
+        : undefined;
     const appChat =
       requester && !externalContext && !project
         ? { workspaceId: fence.workspaceId, actor: requester, conversationId: fence.conversationId }
@@ -393,6 +405,7 @@ export function meteredReply(
       skillExecution,
       chatExecution,
       codingRuns: codingRunTools,
+      browser,
       apps: appTools,
       appPages: pageTools,
       telemetryRuntime: externalContext ? 'slack' : 'chat',
@@ -546,6 +559,7 @@ export function meteredReply(
               waitingRowCards,
               chatFiles: chatFilesOffered && Boolean(chatFiles),
               codingRuns: codingRunsOffered && Boolean(codingRunTools),
+              browser: Boolean(browser),
               apps: appKind,
               ...(answerText ? { answerText } : {}),
               ...(layoutPreview ? { layoutPreview } : {}),
@@ -584,6 +598,7 @@ export function meteredReply(
               waitingRowCards,
               chatFiles: chatFilesOffered && Boolean(chatFiles),
               codingRuns: codingRunsOffered && Boolean(codingRunTools),
+              browser: Boolean(browser),
               apps: appKind,
               ...(externalContext ? { preloadedTools: ['slack.thread.react'] } : {}),
               ...(answerText ? { answerText } : {}),

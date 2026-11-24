@@ -91,6 +91,10 @@
     "./keep": {
       "types": "./dist/keep.d.ts",
       "default": "./dist/keep.js"
+    },
+    "./browser-host": {
+      "types": "./dist/browser-host.d.ts",
+      "default": "./dist/browser-host.js"
     }
   },
   "scripts": {

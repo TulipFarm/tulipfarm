@@ -12,6 +12,7 @@ export const settingServices = [
   'worker',
   'storage-worker',
   'render-worker',
+  'browser-host',
   'snippet-broker',
   'gateway',
   'database',
@@ -544,6 +545,72 @@ export const settings: readonly Setting[] = [
     selfHost: { section: 'public-web', commented: true },
   },
   {
+    name: 'BROWSER_HOST_ENDPOINT',
+    group: 'Public origins',
+    services: ['api', 'worker', 'database'],
+    requirement: 'optional',
+    secret: false,
+    description:
+      'Origin (no path or credentials) of the browser host (`apps/browser-host`), which runs the browsers agents drive for the `browser` tool. Unset turns browser use off. Health probes `GET /health`. The browser host must not be able to reach your internal network.',
+  },
+  {
+    name: 'BROWSER_HOST_TOKEN',
+    group: 'Public origins',
+    services: ['api', 'worker', 'database', 'browser-host'],
+    requirement: 'conditional',
+    secret: true,
+    description:
+      'Bearer token, at least 32 random characters, that the browser host requires on every request. Required with BROWSER_HOST_ENDPOINT. Accepts BROWSER_HOST_TOKEN_FILE.',
+  },
+  {
+    name: 'BROWSER_HOST_PORT',
+    group: 'Public origins',
+    services: ['browser-host'],
+    requirement: 'optional',
+    secret: false,
+    default: '3010',
+    description: 'Port the browser host listens on.',
+  },
+  {
+    name: 'BROWSER_HOST_MAX_SESSIONS',
+    group: 'Public origins',
+    services: ['browser-host'],
+    requirement: 'optional',
+    secret: false,
+    default: '8',
+    description:
+      'Browser sessions the host runs at once. Each holds a Chromium context, so allow about 400 MB per session.',
+  },
+  {
+    name: 'BROWSER_HOST_IDLE_MINUTES',
+    group: 'Public origins',
+    services: ['browser-host'],
+    requirement: 'optional',
+    secret: false,
+    default: '10',
+    description: 'Minutes before the host closes a browser session that nobody used.',
+  },
+  {
+    name: 'BROWSER_HOST_HOLD_MINUTES',
+    group: 'Public origins',
+    services: ['browser-host'],
+    requirement: 'optional',
+    secret: false,
+    default: '1440',
+    description:
+      'Minutes the host keeps a browser session open while it waits for a person or a person has taken over.',
+  },
+  {
+    name: 'BROWSER_HOST_ALLOW_PRIVATE_NETWORKS',
+    group: 'Public origins',
+    services: ['browser-host'],
+    requirement: 'optional',
+    secret: false,
+    default: 'false',
+    description:
+      '`true` lets browser sessions open private and loopback addresses. For local development and tests only.',
+  },
+  {
     name: 'SEARXNG_ENDPOINT',
     group: 'Public origins',
     services: ['api', 'worker', 'database'],
@@ -1034,21 +1101,21 @@ export const settings: readonly Setting[] = [
   {
     name: 'CHROMIUM_EXECUTABLE_PATH',
     group: 'Temporal',
-    services: ['render-worker'],
+    services: ['render-worker', 'browser-host'],
     requirement: 'optional',
     secret: false,
     description:
-      'The Chromium the render worker drives. The render worker image sets it to Debian’s Chromium; unset uses the Chromium Playwright downloaded.',
+      'The Chromium the render worker and browser host drive. Their images set it to Debian’s Chromium; unset uses the Chromium Playwright downloaded.',
   },
   {
     name: 'CHROMIUM_SANDBOX',
     group: 'Temporal',
-    services: ['render-worker'],
+    services: ['render-worker', 'browser-host'],
     requirement: 'optional',
     secret: false,
     default: 'false',
     description:
-      '`true` runs Chromium in its own sandbox, which needs user namespaces or a seccomp profile that allows it. Pages always run without network access and with scripts off when printing.',
+      '`true` runs Chromium in its own sandbox, which needs user namespaces or a seccomp profile that allows it. The render worker’s pages run without network access and with scripts off when printing. Run the browser host, which opens any public website, with the sandbox on or in its own isolated machine.',
   },
   {
     name: 'TEMPORAL_STORAGE_TASK_QUEUE',

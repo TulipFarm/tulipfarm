@@ -1,0 +1,24 @@
+{
+  "name": "@tulipfarm/browser-host",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env.local src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/main.js",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test:chromium": "node --test --test-concurrency=1 test/*.chromium.mjs"
+  },
+  "dependencies": {
+    "@tulipfarm/browser": "workspace:*",
+    "@tulipfarm/config": "workspace:*",
+    "@tulipfarm/workspace-mcp-transport": "workspace:*",
+    "playwright-core": "1.62.1",
+    "zod": "4.6.6"
+  },
+  "devDependencies": {
+    "@tulipfarm/typescript-config": "workspace:*",
+    "@types/node": "26.6.3"
+  }
+}

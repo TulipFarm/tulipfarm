@@ -17,6 +17,7 @@ const sourceRoots = [
   'apps/api/src',
   'apps/worker/src',
   'apps/render-worker/src',
+  'apps/browser-host/src',
   'apps/database/src',
   'apps/snippet-broker/src',
   'apps/gateway/src',
@@ -61,7 +62,7 @@ const computedReads = {
   },
   'apps/database/src/cli.ts': { sites: 1, names: ['DATABASE_MIGRATION_URL', 'DATABASE_ADMIN_URL', 'DATABASE_URL'] },
   'apps/database/src/dev-setup.ts': {
-    sites: 2,
+    sites: 4,
     names: [
       'TEMPORAL_ADDRESS',
       'TEMPORAL_NAMESPACE',
@@ -71,6 +72,10 @@ const computedReads = {
       'HUNTSMAN_TOKEN',
       'SEARXNG_ENDPOINT',
       'SEARXNG_TOKEN',
+      'BROWSER_HOST_ENDPOINT',
+      'BROWSER_HOST_TOKEN',
+      'CHROMIUM_EXECUTABLE_PATH',
+      'BROWSER_HOST_ALLOW_PRIVATE_NETWORKS',
     ],
   },
   // Environment secret store (#14): reads operator-provisioned release secrets by name, which are not app settings.
