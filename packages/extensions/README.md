@@ -231,6 +231,7 @@ interface ResourceMeter {
     databasePicoUsdPerGibMonth: bigint; // a workspace's Postgres schema
     objectPicoUsdPerGibMonth: bigint; // its files, soul and app source in object storage
     runPicoUsdPerHour: bigint; // one agent-task or workflow step on a shared worker
+    browserPicoUsdPerHour?: bigint; // one open browser session; 4 × runPicoUsdPerHour when absent
   };
   computeUsage?(
     window: { start: Date; end: Date },
@@ -253,12 +254,21 @@ already priced; an extension can convert its provider cost with
 - **Run steps**: the worker records when each agent-task and workflow step
   starts and ends and charges the elapsed time at `runPicoUsdPerHour`. A step
   whose end was never recorded is charged up to its timeout.
+- **Browser sessions**: the worker records when each chat's or agent task's
+  browser session opens, is used and closes, and charges each session's open
+  time, rounded up to whole minutes, at `browserPicoUsdPerHour`, in the chat's
+  or task's own flow, so it counts against a task's credit allowance. A session
+  waiting for a person is open time too. A session whose close was never
+  recorded is charged up to when the browser host closes it unused. A new
+  browser does not open while `available()` is zero or less, or once a task has
+  used its credit allowance.
 - **Sandboxes**: `computeUsage` reports each workspace's sandbox compute for a
   closed hour, already priced in credit units. The worker asks for each hour
   once it is two hours old, and retries missed hours for up to a day.
 
 Every charge has a fixed id, so a retry or a second worker charges it once.
-Charges are `storage` and `compute` activities with their own flows, and are
+Charges are `storage` and `compute` activities with their own flows (browser
+time uses its chat's or task's flow), and are
 never refused: the work already happened, so a gate's balance may go below
 zero (see [Credit balance and grace](#credit-balance-and-grace)). While
 `available()` is zero or less, new model calls, workflow steps and

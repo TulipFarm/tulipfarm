@@ -55,6 +55,7 @@ const resourceModels: Record<string, string> = {
   'storage-apps': 'Published app storage',
   'compute-sandbox': 'Sandboxes',
   'compute-runs': 'Agent and workflow runs',
+  'compute-browser': 'Browser sessions',
 };
 const activityName = (value: string) =>
   activities[value] ?? (value.startsWith('knowledge-') ? `Knowledge (${value.slice(10).replaceAll('-', ' ')})` : value);
