@@ -1388,12 +1388,12 @@ export function createGitHubKnowledge({
     // One transaction records the item and reads its published revision, since an unchanged item needs nothing more.
     const previous = await fenced(work, token, async tx => {
       const prior = z
-        .object({ source_revision: z.string() })
+        .object({ source_revision: z.string(), failure: z.string().nullable() })
         .optional()
         .parse(
           (
             await tx.client.query(
-              `SELECT source_revision FROM ${table(tx, 'github_items')} WHERE source_id=$1 AND native_id=$2`,
+              `SELECT source_revision,failure FROM ${table(tx, 'github_items')} WHERE source_id=$1 AND native_id=$2`,
               [s.source_id, item.nativeId],
             )
           ).rows[0],
@@ -1415,6 +1415,8 @@ export function createGitHubKnowledge({
         ],
       );
       if (item.coverage !== 'supported') return undefined;
+      // A revision whose document was too large stays too large; reading it again only downloads it again.
+      if (prior?.source_revision === item.sourceRevision && prior.failure === 'too-large') return 'too-large' as const;
       return z
         .object({ id: uuidSchema, source_revision: z.string(), lexical_publication_id: uuidSchema.nullable() })
         .optional()
@@ -1427,7 +1429,7 @@ export function createGitHubKnowledge({
           ).rows[0],
         );
     });
-    if (item.coverage !== 'supported') return false;
+    if (item.coverage !== 'supported' || previous === 'too-large') return false;
     if (previous?.source_revision === item.sourceRevision && previous.lexical_publication_id) return false;
     return !(
       previous?.source_revision === item.sourceRevision &&
@@ -1492,7 +1494,7 @@ export function createGitHubKnowledge({
       }
       const bytes = Buffer.from(read.markdown);
       if (read.title.length > 512 || bytes.byteLength > githubCorpusLimits.markdownBytes)
-        throw new KnowledgeError('quota');
+        throw new GitHubCorpusError('too-large');
       const revisionId = identity(`${documentId}:${read.sourceRevision}`);
       await fenced(work, token, async (tx, _s, human) => {
         const prior = z
