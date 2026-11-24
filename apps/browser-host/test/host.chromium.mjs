@@ -19,7 +19,12 @@ const pages = {
   // Adds and removes many iframes, and starts a slow download in one that is removed once the file starts.
   '/churn': `<!doctype html><title>Churn</title>
     <button onclick="churn()">Churn frames</button>
+    <button onclick="framedPopup()">Open framed popup</button>
     <script>
+      function framedPopup() {
+        const popup = window.open('/framed-popup');
+        popup.addEventListener('load', () => setTimeout(() => popup.close(), 200));
+      }
       function churn() {
         for (let i = 0; i < 30; i += 1) {
           const frame = document.createElement('iframe');
@@ -33,6 +38,8 @@ const pages = {
         fetch('/download-started').then(() => frame.remove());
       }
     </script>`,
+  '/framed-popup': `<!doctype html><title>Framed popup</title>
+    ${Array.from({ length: 10 }, (_, i) => `<iframe srcdoc="frame ${i}"></iframe>`).join('')}`,
   // Starts a download in an iframe and removes the iframe as soon as the server starts sending the file.
   '/frame-download': `<!doctype html><title>Frame download</title>
     <button onclick="start()">Download in a frame</button>
@@ -775,6 +782,17 @@ test('removed frames are forgotten after a minute while a download one started i
   const done = await clicked;
   assert.match(done.notice ?? '', /"trickle.bin" was not saved: files are limited to 0 MiB/);
   assert.ok(stopped.includes('/trickle.bin'), 'the browser stopped receiving it');
+
+  // A closed tab's own iframes get no removal events of their own, and are forgotten with it.
+  const opened = await host.act(sessionId, { action: 'navigate', url: `${origin}/churn` });
+  await host.act(sessionId, { action: 'click', ref: ref(opened.snapshot, /button "Open framed popup"/) });
+  while (host.trackedFrames() < before + 11) await new Promise(resolve => setTimeout(resolve, 10));
+  for (const deadline = Date.now() + 3000; host.trackedFrames() > before && Date.now() < deadline;) {
+    clock += 61_000;
+    await host.sweep();
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  assert.equal(host.trackedFrames(), before, 'a closed tab and its iframes are forgotten');
 });
 
 test('two sessions downloading the same file are each held to their own limits', async t => {

@@ -385,10 +385,12 @@ export async function createBrowserHost(options: HostOptions) {
     removedFrames.delete(frameId);
   }
 
-  function removeFrame(frameId: string) {
-    if (!frameContexts.has(frameId)) return;
-    removedFrames.delete(frameId);
-    removedFrames.set(frameId, now());
+  function removeFrames(frameIds: Iterable<string>) {
+    for (const frameId of frameIds) {
+      if (!frameContexts.has(frameId)) continue;
+      removedFrames.delete(frameId);
+      removedFrames.set(frameId, now());
+    }
     forgetFrames();
   }
 
@@ -424,7 +426,7 @@ export async function createBrowserHost(options: HostOptions) {
     cdp.on('Target.targetCreated', ({ targetInfo }) => {
       if (targetInfo.browserContextId) trackFrame(targetInfo.targetId, targetInfo.browserContextId);
     });
-    cdp.on('Target.targetDestroyed', ({ targetId }) => removeFrame(targetId));
+    cdp.on('Target.targetDestroyed', ({ targetId }) => removeFrames([targetId]));
     cdp.on('Browser.downloadWillBegin', event => {
       const transfer = { url: event.url, name: event.suggestedFilename, received: 0, frameId: event.frameId };
       const known = sessionIn(frameContexts.get(event.frameId));
@@ -489,23 +491,38 @@ export async function createBrowserHost(options: HostOptions) {
     return undefined;
   }
 
-  /** Records the context of a page's frames as they are attached, including ones already there. */
+  /**
+   * Records the context of a page's frames as they are attached, including ones already there. Closing a page sends
+   * no removal for its own iframes, so they are all removed with it.
+   */
   async function trackFrames(context: BrowserContext, contextId: string, page: Page) {
+    const frames = new Set<string>();
+    const track = (frameId: string) => {
+      frames.add(frameId);
+      trackFrame(frameId, contextId);
+    };
+    page.once('close', () => {
+      removeFrames(frames);
+      frames.clear();
+    });
     const cdp = await context.newCDPSession(page).catch(() => undefined);
     if (!cdp) return;
-    cdp.on('Page.frameAttached', event => trackFrame(event.frameId, contextId));
-    cdp.on('Page.frameNavigated', event => trackFrame(event.frame.id, contextId));
+    cdp.on('Page.frameAttached', event => track(event.frameId));
+    cdp.on('Page.frameNavigated', event => track(event.frame.id));
     // A frame swapped into its own process lives on as a browser target, so only a removal counts.
     cdp.on('Page.frameDetached', event => {
-      if (event.reason === 'remove') removeFrame(event.frameId);
+      if (event.reason !== 'remove') return;
+      frames.delete(event.frameId);
+      removeFrames([event.frameId]);
     });
     await cdp.send('Page.enable').catch(() => undefined);
     const { frameTree } = await cdp.send('Page.getFrameTree').catch(() => ({ frameTree: undefined }));
     const add = (tree: FrameTree) => {
-      trackFrame(tree.frame.id, contextId);
+      track(tree.frame.id);
       for (const child of tree.childFrames ?? []) add(child);
     };
     if (frameTree) add(frameTree);
+    if (page.isClosed()) removeFrames(frames);
   }
 
   const launch = () => {
