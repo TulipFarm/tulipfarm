@@ -51,12 +51,6 @@ export type HostOptions = {
 export type SessionEvent = { type: 'frame'; frame: BrowserFrame } | { type: 'state'; state: BrowserSessionState };
 type Listener = (event: SessionEvent) => void;
 
-/** The parts of the page's DOM the host reads inside a frame; the host is built without DOM types. */
-type PageDocument = {
-  body: { innerText: string } | null;
-  querySelectorAll(selectors: string): Iterable<{ value?: string }>;
-};
-
 /** Escapes text as Playwright quotes it in a snapshot's YAML, without the surrounding quotes. */
 function yamlEscape(text: string): string {
   const named: Record<string, string> = {
@@ -113,17 +107,31 @@ class Session {
     return next;
   }
 
-  /** The secrets typed in this session, as typed. */
-  readonly secrets = new Set<string>();
+  /** Whether a secret was typed in this session; from then on the agent gets no screenshots. */
+  get hasTypedSecret() {
+    return this.typed.length > 0;
+  }
 
   /**
-   * Remembers a typed secret so `redact` removes it: as typed, with its white space collapsed as a snapshot shows
-   * text, as a page may put it in an address, and as the snapshot's JSON and YAML quoting escapes it.
+   * Remembers a typed secret so `redact` removes it. A page or snapshot may show it changed: an input drops line
+   * breaks (and an email box trims), Playwright drops zero-width spaces and soft hyphens, trims and collapses white
+   * space. Each such form is also remembered as a snapshot's JSON and YAML quoting escapes it and as an address
+   * encodes it.
    */
   remember(value: string) {
-    this.secrets.add(value);
+    const changes = [
+      (text: string) => text.replace(/[\r\n]/g, ''),
+      (text: string) => text.replace(/[\u200b-\u200d\u2060\ufeff\u00ad]/g, ''),
+      (text: string) => text.trim(),
+      (text: string) => text.replace(/\s+/g, ' '),
+    ];
+    const shown = new Set([value]);
+    // A set's loop also visits what is added during it, so this applies every combination of changes.
+    for (const text of shown) for (const change of changes) shown.add(change(text));
     const forms = new Set<string>();
-    for (const text of new Set([value, value.replace(/\s+/g, ' ')])) {
+    for (const text of shown) {
+      // A changed form too short to mean anything would blank out ordinary text.
+      if (text !== value && text.length < 4) continue;
       const json = JSON.stringify(text).slice(1, -1);
       forms.add(text);
       forms.add(json);
@@ -134,25 +142,8 @@ class Session {
     }
     this.typed = [...new Set([...forms, ...this.typed])]
       .filter(form => form.length)
-      .slice(0, 200)
+      .slice(0, 400)
       .sort((a, b) => b.length - a.length);
-  }
-
-  /** Whether any frame's text or form fields hold a typed secret. A page that can't be checked counts as showing one. */
-  async showsSecret(): Promise<boolean> {
-    if (!this.secrets.size) return false;
-    const values = [...this.secrets];
-    const checks = this.page.frames().map(frame =>
-      frame
-        .evaluate(values => {
-          const document = (globalThis as unknown as { document: PageDocument }).document;
-          const texts = [document.body?.innerText ?? ''];
-          for (const field of document.querySelectorAll('input, textarea')) texts.push(field.value ?? '');
-          return texts.some(text => values.some(value => text.includes(value)));
-        }, values)
-        .catch(() => !frame.isDetached()),
-    );
-    return (await Promise.all(checks)).some(Boolean);
   }
 
   redact(text: string): string {
@@ -389,7 +380,7 @@ export async function createBrowserHost(options: HostOptions) {
     }
   }
 
-  async function result(session: Session, { screenshot: capture = true } = {}): Promise<BrowserActionResult> {
+  async function result(session: Session): Promise<BrowserActionResult> {
     const page = session.page;
     await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined);
     let snapshot = '';
@@ -399,15 +390,17 @@ export async function createBrowserHost(options: HostOptions) {
       snapshot = '(The page could not be read. Take a snapshot again after it loads.)';
     }
     const truncated = snapshot.length > snapshotChars;
-    // Redaction covers text, not pixels, so the agent gets no screenshot while a typed secret is on the page.
-    const withheld = !capture || (await session.showsSecret());
+    // Redaction covers text, not pixels, and a page can draw a typed secret anywhere, so after one is typed the
+    // agent gets no screenshots from this browser.
+    const withheld = session.hasTypedSecret;
     const screenshot = withheld
       ? undefined
       : (await page.screenshot({ type: 'jpeg', quality: 55, timeout: 10_000 })).toString('base64');
     await session.refreshTitle();
     const notices = [
       session.notice && session.redact(session.notice),
-      withheld && 'No screenshot: the page may show a secret TulipFarm typed. Read the snapshot instead.',
+      withheld &&
+        'Screenshots are off in this browser after a sign-in with a secret. The accessibility snapshot still works.',
     ].filter(Boolean);
     session.notice = undefined;
     snapshot = session.redact(snapshot);
@@ -606,7 +599,7 @@ export async function createBrowserHost(options: HostOptions) {
         throw new HostError('action-failed', 'The sign-in form could not be filled in or sent.', 422);
       }
       await page.waitForTimeout(300);
-      return result(session, { screenshot: false });
+      return result(session);
     });
   }
 

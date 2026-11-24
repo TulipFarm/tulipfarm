@@ -347,8 +347,8 @@ test('a secret is typed only into sign-in fields on its own site and never shown
   assert.match(filled.snapshot, /Inputs seen: 2/, 'the page’s own listeners saw both values');
   assert.match(filled.snapshot, /Nothing typed here/, 'the frame that took focus got nothing');
   const typing = await host.act(sessionId, { action: 'snapshot' });
-  assert.equal(typing.screenshot, undefined, 'no screenshot while a field holds the secret');
-  assert.match(typing.notice, /No screenshot/);
+  assert.equal(typing.screenshot, undefined, 'no screenshots once a secret was typed');
+  assert.match(typing.notice, /Screenshots are off in this browser/);
 
   const done = await host.typeSecret(sessionId, { hosts: ['127.0.0.1'], fields: fields(user, pass), submit });
   assert.equal(done.state.title, 'Welcome');
@@ -371,7 +371,35 @@ test('a secret is typed only into sign-in fields on its own site and never shown
   assert.match(done.state.url, /user=••••&pass=••••/);
   const later = await host.act(sessionId, { action: 'snapshot' });
   assert.equal(later.snapshot.includes('DUMMY'), false);
-  assert.equal(later.screenshot, undefined, 'no screenshot while the page shows the secret');
+  assert.equal(later.screenshot, undefined);
+  // A page can draw the secret anywhere, such as in CSS content, so screenshots stay off for the whole session.
   const away = await host.act(sessionId, { action: 'navigate', url: `${origin}/account` });
-  assert.ok(away.screenshot, 'a page without the secret is shown again');
+  assert.equal(away.screenshot, undefined);
+  assert.match(away.notice, /accessibility snapshot still works/);
+});
+
+test('a secret is redacted in the forms the browser and the snapshot change it to', async t => {
+  const host = await createBrowserHost({ ...options, allowPrivateNetworks: true });
+  t.after(() => host.shutdown());
+  await host.open(sessionId);
+  for (const [username, password] of [
+    [' ada@example.com ', ' DUMMY-Padded-123 '],
+    ['ada@example.com', 'DUMMY-New\nLine-123'],
+    ['ada@example.com', 'DUMMY-Zero\u200bWidth-123'],
+    ['ada@example.com', 'DUMMY-Soft\u00adHyphen-123'],
+  ]) {
+    const page = await host.act(sessionId, { action: 'navigate', url: `${origin}/login` });
+    const done = await host.typeSecret(sessionId, {
+      hosts: ['127.0.0.1'],
+      fields: [
+        { ref: ref(page.snapshot, /textbox "Email"/), kind: 'username', value: username },
+        { ref: ref(page.snapshot, /textbox "Password"/), kind: 'password', value: password },
+      ],
+      submit: ref(page.snapshot, /button "Sign in"/),
+    });
+    assert.equal(done.state.title, 'Welcome', JSON.stringify(password));
+    const shown = JSON.stringify(done);
+    assert.equal(shown.includes('DUMMY'), false, `${JSON.stringify(password)} in ${shown}`);
+    assert.equal(shown.includes('ada@example.com'), false, JSON.stringify(username));
+  }
 });
