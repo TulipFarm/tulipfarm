@@ -45,153 +45,189 @@ function chatHistory() {
   ];
 }
 
+const chat = {
+  id: chatId,
+  title: 'Join the Orchid Club',
+  titleRevision: 1,
+  titleManual: false,
+  archived: false,
+  activityAt: '2026-11-24T10:00:00.000000Z',
+  createdAt: '2026-11-24T10:00:00.000000Z',
+  projectId: null,
+};
+
+/**
+ * Opens the chat with a mocked API. `browser` is the browser's state, `started` whether it is running yet, and
+ * `handle(path, method, request)` answers extra requests; return `undefined` to fall through.
+ */
+async function openChat(
+  { browser: initial, started: startedAtOpen = true, handle = () => undefined, page: pagePath },
+  run,
+) {
+  const { workspace, session } = createWorkspaceFixture();
+  const server = await createServer({
+    root: fileURLToPath(new URL('..', import.meta.url)),
+    server: { host: '127.0.0.1', port: 0 },
+    logLevel: 'error',
+  });
+  await server.listen();
+  const chromiumBrowser = await chromium.launch();
+  const context = await chromiumBrowser.newContext({
+    viewport: { width: 1440, height: 1000 },
+    reducedMotion: 'reduce',
+  });
+  const page = await context.newPage();
+  page.setDefaultTimeout(15000);
+  // A blank 1280x800 page stands in for a screencast frame.
+  const pixel = await page.evaluate(() => {
+    const canvas = Object.assign(document.createElement('canvas'), { width: 1280, height: 800 });
+    return canvas.toDataURL('image/jpeg').split(',')[1];
+  });
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const history = chatHistory();
+  const live = {
+    state: { sessionId, ...initial },
+    started: startedAtOpen,
+    refusedStreams: [],
+    controls: [],
+    inputs: [],
+  };
+  const base = `/v1/workspaces/${workspace.id}/conversations/${chatId}/browser`;
+  const shell = new Map([
+    ...workspaceShellReads(workspace.id),
+    ['/v1/feature-flags', { 'browser-use': true }],
+    ['/v1/auth/get-session', session],
+    ['/v1/user/visit', { firstSession: false }],
+    ['/v1/workspaces', [workspace]],
+    [`/v1/workspaces/${workspace.slug}`, workspace],
+  ]);
+  const suffixes = [
+    ['/governance/me', membership],
+    ['/governance', governance],
+    ['/credits', credits],
+    ['/model-catalog', chatCatalog],
+    ['/google-workspace/availability', { configured: false }],
+    ['/google-workspace', { status: 'disconnected' }],
+    ['/projects', []],
+    ['/google-workspace/operations/proposals', { proposals: [], nextCursor: null }],
+    ['/candidates', []],
+    ['/integrations', { integrations: [] }],
+    ['/selection', { accountId: null, generation: null, version: 0 }],
+    ['/system-package-installations', { installations: [], nextCursor: null }],
+  ];
+  try {
+    await page.route('**/v1/**', async route => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      const method = request.method();
+      const extra = await handle(path.replace(`/v1/workspaces/${workspace.id}`, ''), method, request, live);
+      if (extra !== undefined) return route.fulfill(extra);
+      if (path === `${base}/live`) {
+        if (!live.started) {
+          live.refusedStreams.push(Date.now());
+          return route.fulfill({ status: 404, json: { error: 'browser-not-found' } });
+        }
+        const events = [
+          `event: state\ndata: ${JSON.stringify(live.state)}\n\n`,
+          `event: frame\ndata: ${JSON.stringify({ data: pixel, width: 1280, height: 800 })}\n\n`,
+        ];
+        return route.fulfill({
+          status: 200,
+          contentType: 'text/event-stream',
+          body: `retry: 60000\n${events.join('')}`,
+        });
+      }
+      if (path === base && method === 'GET') {
+        // The browser starts while the panel is waiting for it.
+        if (live.refusedStreams.length > 0) live.started = true;
+        return route.fulfill({ json: { browser: live.started ? live.state : null } });
+      }
+      if (path === `${base}/control` && method === 'POST') {
+        const { controller } = request.postDataJSON();
+        live.controls.push(controller);
+        const person = controller === 'person';
+        live.state = {
+          ...live.state,
+          controller,
+          needsPerson: person ? live.state.needsPerson : null,
+          signIn: person ? live.state.signIn : null,
+          controlledBy: person ? session.user.id : null,
+        };
+        return route.fulfill({ json: { browser: live.state } });
+      }
+      if (path === `${base}/input` && method === 'POST') {
+        live.inputs.push(request.postDataJSON());
+        return route.fulfill({ status: 204 });
+      }
+      if (await serveWorkspaceShellEvent(route, workspace)) return;
+      const body = shell.has(path) ? shell.get(path) : suffixes.find(([suffix]) => path.endsWith(suffix))?.[1];
+      if (body !== undefined) return route.fulfill({ json: body });
+      if (path.endsWith('/conversations/pinned')) return route.fulfill({ json: { chats: [] } });
+      if (path.endsWith('/conversations') && method === 'GET')
+        return route.fulfill({ json: { chats: [chat], nextCursor: null } });
+      const conversation = /\/conversations\/([\w-]+)(\/.*)?$/.exec(path);
+      if (conversation && method === 'GET') {
+        const rest = conversation[2] ?? '';
+        if (rest === '/messages')
+          return route.fulfill({ json: { messages: history, nextBefore: null, hasGitHubProposals: false } });
+        if (!rest) return route.fulfill({ json: chat });
+        if (rest === '/events') return route.fulfill({ status: 204 });
+        return route.fulfill({ json: [] });
+      }
+      if (method === 'GET') return route.fulfill({ status: 404, json: { error: 'not-found' } });
+      throw new Error(`Unexpected API request ${method} ${path}`);
+    });
+    await page.goto(`${server.resolvedUrls.local[0]}${workspace.slug}/${pagePath ?? `chat/${chatId}`}`);
+    if (!pagePath)
+      await page
+        .getByRole('application', { name: /Browser screen/ })
+        .locator('img')
+        .waitFor();
+    await run({ page, live, session });
+    assert.deepEqual(errors, []);
+  } finally {
+    await context.close();
+    await chromiumBrowser.close();
+    await server.close();
+  }
+}
+
+const composerHas = (page, text) =>
+  page.waitForFunction(
+    expected => document.querySelector('[aria-label="Message"]')?.textContent?.includes(expected),
+    text,
+  );
+
 test(
   'the live browser opens when the agent asks for a person, waits for the browser to start, and lets the member take over and hand back',
   { timeout: 120000 },
   async () => {
-    const { workspace, session } = createWorkspaceFixture();
-    const server = await createServer({
-      root: fileURLToPath(new URL('..', import.meta.url)),
-      server: { host: '127.0.0.1', port: 0 },
-      logLevel: 'error',
-    });
-    await server.listen();
-    const browser = await chromium.launch();
-    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
-    const page = await context.newPage();
-    page.setDefaultTimeout(15000);
-    // A blank 1280x800 page stands in for a screencast frame.
-    const pixel = await page.evaluate(() => {
-      const canvas = Object.assign(document.createElement('canvas'), { width: 1280, height: 800 });
-      return canvas.toDataURL('image/jpeg').split(',')[1];
-    });
-    const errors = [];
-    page.on('pageerror', error => errors.push(error.message));
-
-    const chat = {
-      id: chatId,
-      title: 'Join the Orchid Club',
-      titleRevision: 1,
-      titleManual: false,
-      archived: false,
-      activityAt: '2026-11-24T10:00:00.000000Z',
-      createdAt: '2026-11-24T10:00:00.000000Z',
-      projectId: null,
-    };
-    const history = chatHistory();
-    // The browser has not started when the panel first opens.
-    let started = false;
-    let state = {
-      sessionId,
+    const browser = {
       url: 'https://orchid.example/join',
       title: 'Orchid Club sign up',
       controller: 'agent',
       needsPerson: 'Tick the terms box to accept the Orchid Club terms.',
       controlledBy: null,
+      signIn: null,
+      logins: [],
     };
-    const refusedStreams = [];
-    const controls = [];
-    const inputs = [];
-    const base = `/v1/workspaces/${workspace.id}/conversations/${chatId}/browser`;
-    const shell = new Map([
-      ...workspaceShellReads(workspace.id),
-      ['/v1/feature-flags', { 'browser-use': true }],
-      ['/v1/auth/get-session', session],
-      ['/v1/user/visit', { firstSession: false }],
-      ['/v1/workspaces', [workspace]],
-      [`/v1/workspaces/${workspace.slug}`, workspace],
-    ]);
-    const suffixes = [
-      ['/governance/me', membership],
-      ['/governance', governance],
-      ['/credits', credits],
-      ['/model-catalog', chatCatalog],
-      ['/google-workspace/availability', { configured: false }],
-      ['/google-workspace', { status: 'disconnected' }],
-      ['/projects', []],
-      ['/google-workspace/operations/proposals', { proposals: [], nextCursor: null }],
-      ['/candidates', []],
-      ['/integrations', { integrations: [] }],
-      ['/selection', { accountId: null, generation: null, version: 0 }],
-      ['/system-package-installations', { installations: [], nextCursor: null }],
-    ];
-
-    try {
-      await page.route('**/v1/**', async route => {
-        const request = route.request();
-        const path = new URL(request.url()).pathname;
-        const method = request.method();
-        if (path === `${base}/live`) {
-          if (!started) {
-            refusedStreams.push(Date.now());
-            return route.fulfill({ status: 404, json: { error: 'browser-not-found' } });
-          }
-          const events = [
-            `event: state\ndata: ${JSON.stringify(state)}\n\n`,
-            `event: frame\ndata: ${JSON.stringify({ data: pixel, width: 1280, height: 800 })}\n\n`,
-          ];
-          return route.fulfill({
-            status: 200,
-            contentType: 'text/event-stream',
-            body: `retry: 60000\n${events.join('')}`,
-          });
-        }
-        if (path === base && method === 'GET') {
-          // The browser starts while the panel is waiting for it.
-          if (refusedStreams.length > 0) started = true;
-          return route.fulfill({ json: { browser: started ? state : null } });
-        }
-        if (path === `${base}/control` && method === 'POST') {
-          const { controller } = request.postDataJSON();
-          controls.push(controller);
-          state = {
-            ...state,
-            controller,
-            needsPerson: controller === 'person' ? state.needsPerson : null,
-            controlledBy: controller === 'person' ? session.user.id : null,
-          };
-          return route.fulfill({ json: { browser: state } });
-        }
-        if (path === `${base}/input` && method === 'POST') {
-          inputs.push(request.postDataJSON());
-          return route.fulfill({ status: 204 });
-        }
-        if (await serveWorkspaceShellEvent(route, workspace)) return;
-        const body = shell.has(path) ? shell.get(path) : suffixes.find(([suffix]) => path.endsWith(suffix))?.[1];
-        if (body !== undefined) return route.fulfill({ json: body });
-        if (path.endsWith('/conversations/pinned')) return route.fulfill({ json: { chats: [] } });
-        if (path.endsWith('/conversations') && method === 'GET')
-          return route.fulfill({ json: { chats: [chat], nextCursor: null } });
-        const conversation = /\/conversations\/([\w-]+)(\/.*)?$/.exec(path);
-        if (conversation && method === 'GET') {
-          const rest = conversation[2] ?? '';
-          if (rest === '/messages')
-            return route.fulfill({ json: { messages: history, nextBefore: null, hasGitHubProposals: false } });
-          if (!rest) return route.fulfill({ json: chat });
-          if (rest === '/events') return route.fulfill({ status: 204 });
-          return route.fulfill({ json: [] });
-        }
-        if (method === 'GET') return route.fulfill({ status: 404, json: { error: 'not-found' } });
-        throw new Error(`Unexpected API request ${method} ${path}`);
-      });
-
-      await page.goto(`${server.resolvedUrls.local[0]}${workspace.slug}/chat/${chatId}`);
-      const screen = page.getByRole('application', { name: /Browser screen/ });
-      await screen.locator('img').waitFor();
-      assert.ok(refusedStreams.length >= 1, 'the panel opened before the browser had started');
+    await openChat({ browser, started: false }, async ({ page, live }) => {
+      assert.ok(live.refusedStreams.length >= 1, 'the panel opened before the browser had started');
       await page.getByText('The agent needs you').waitFor();
       await page.getByText('Tick the terms box to accept the Orchid Club terms.').waitFor();
 
       await page.getByRole('button', { name: 'Take over' }).click();
       await page.getByText('You’re in control. The agent waits until you hand back.').waitFor();
       assert.equal(await page.getByText('The agent needs you').count(), 0, 'the alert hides while the member acts');
-      await page.getByRole('application', { name: 'Browser screen. Click and type to use the page.' }).waitFor();
+      const screen = page.getByRole('application', { name: 'Browser screen. Click and type to use the page.' });
+      await screen.waitFor();
 
       // A click at the centre of the screen lands at the centre of the page.
       const box = await screen.boundingBox();
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-      await expectInputs(inputs, 2);
-      const [press, release] = inputs;
+      await expectInputs(live.inputs, 2);
+      const [press, release] = live.inputs;
       assert.equal(press.type, 'mouse');
       assert.equal(press.event, 'mousePressed');
       assert.equal(release.event, 'mouseReleased');
@@ -199,20 +235,167 @@ test(
 
       await page.getByRole('button', { name: 'Hand back to the agent' }).click();
       await page.getByRole('button', { name: 'Take over' }).waitFor();
-      await page.waitForFunction(() =>
-        document
-          .querySelector('[aria-label="Message"]')
-          ?.textContent?.includes('I’ve finished in the browser. Continue.'),
-      );
-      assert.deepEqual(controls, ['person', 'agent']);
-      assert.deepEqual(errors, []);
-    } finally {
-      await context.close();
-      await browser.close();
-      await server.close();
-    }
+      await composerHas(page, 'I’ve finished in the browser. Continue.');
+      assert.deepEqual(live.controls, ['person', 'agent']);
+      assert.equal(await page.getByRole('dialog').count(), 0, 'no save prompt without a sign-in');
+    });
   },
 );
+
+const signInBrowser = {
+  url: 'https://shop.example/sign-in',
+  title: 'Sign in to Orchid Shop',
+  controller: 'agent',
+  needsPerson: 'Sign in to Orchid Shop, then hand the browser back.',
+  signIn: 'shop.example',
+  controlledBy: null,
+  logins: [],
+};
+const savedLogin = {
+  id: '3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f',
+  name: 'Orchid Shop team',
+  site: 'shop.example',
+  ownerMembershipId: membership.membershipId,
+  status: 'active',
+  grants: [],
+  canManage: true,
+  canUse: true,
+  createdAt: '2026-11-24T09:00:00.000Z',
+  savedAt: '2026-11-24T09:00:00.000Z',
+  lastUsedAt: null,
+};
+
+test(
+  'a sign-in request offers the saved logins for the site and loads the chosen one',
+  { timeout: 120000 },
+  async () => {
+    const listed = [];
+    const loaded = [];
+    await openChat(
+      {
+        browser: signInBrowser,
+        handle: (path, method, request, live) => {
+          if (path === '/browser-logins' && method === 'GET') {
+            listed.push(new URL(request.url()).searchParams.get('site'));
+            return {
+              json: {
+                enabled: true,
+                logins: [savedLogin, { ...savedLogin, id: crypto.randomUUID(), name: 'Gone', status: 'suspended' }],
+              },
+            };
+          }
+          if (path === `/conversations/${chatId}/browser/logins/${savedLogin.id}/load` && method === 'POST') {
+            loaded.push(savedLogin.id);
+            live.state = {
+              ...live.state,
+              url: 'https://shop.example/account',
+              needsPerson: null,
+              signIn: null,
+              logins: [{ id: savedLogin.id, site: 'shop.example', signedOut: false }],
+            };
+            return { json: { browser: live.state } };
+          }
+        },
+      },
+      async ({ page, live }) => {
+        await page.getByText('Sign in to shop.example').waitFor();
+        const logins = page.getByRole('list', { name: 'Saved logins for shop.example' });
+        await logins.getByText('Orchid Shop team').waitFor();
+        assert.equal(await logins.getByText('Gone').count(), 0, 'a suspended login is not offered');
+        assert.equal(await page.getByText('The agent needs you').count(), 0, 'the picker replaces the generic alert');
+        assert.deepEqual([...new Set(listed)], ['shop.example']);
+
+        await page.getByRole('button', { name: 'Use this login' }).click();
+        await composerHas(page, 'shop.example');
+        assert.deepEqual(loaded, [savedLogin.id]);
+        assert.deepEqual(live.controls, [], 'loading a login needs no take over');
+        await page.getByRole('button', { name: 'Take over' }).waitFor();
+        assert.equal(await page.getByRole('button', { name: 'Use this login' }).count(), 0);
+      },
+    );
+  },
+);
+
+test('a member who signs in themselves is offered to save the login on hand back', { timeout: 120000 }, async () => {
+  const saved = [];
+  await openChat(
+    {
+      browser: signInBrowser,
+      handle: (path, method, request) => {
+        if (path === '/browser-logins' && method === 'GET') return { json: { enabled: true, logins: [] } };
+        if (path === `/conversations/${chatId}/browser/logins` && method === 'POST') {
+          saved.push(request.postDataJSON());
+          return { json: { ...savedLogin, name: request.postDataJSON().name } };
+        }
+      },
+    },
+    async ({ page, live }) => {
+      await page.getByText('Sign in to shop.example').waitFor();
+      await page.getByRole('button', { name: 'Sign in yourself' }).click();
+      await page.getByText('You’re in control. The agent waits until you hand back.').waitFor();
+      live.state = { ...live.state, url: 'https://shop.example/account', title: 'Your account' };
+
+      await page.getByRole('button', { name: 'Hand back to the agent' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Save login' });
+      await dialog.waitFor();
+      assert.equal(await dialog.getByRole('textbox', { name: 'Site' }).inputValue(), 'shop.example');
+      await dialog.getByRole('textbox', { name: 'Name' }).fill('Orchid Shop team');
+      await dialog.getByRole('button', { name: 'Save login' }).click();
+      await dialog.waitFor({ state: 'detached' });
+      assert.deepEqual(saved, [{ name: 'Orchid Shop team', site: 'shop.example' }]);
+      assert.deepEqual(live.controls, ['person', 'agent']);
+      await composerHas(page, 'I’ve finished in the browser. Continue.');
+    },
+  );
+});
+
+test('the browser logins settings page lists, renames and deletes logins', { timeout: 120000 }, async () => {
+  const changes = [];
+  let logins = [
+    { ...savedLogin, lastUsedAt: '2026-11-24T09:30:00.000Z' },
+    { ...savedLogin, id: '4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a', name: 'Old shop', status: 'needs-sign-in' },
+  ];
+  await openChat(
+    {
+      page: 'settings/browser-logins',
+      browser: signInBrowser,
+      handle: (path, method, request) => {
+        if (path === '/browser-logins' && method === 'GET') return { json: { enabled: true, logins } };
+        const one = /^\/browser-logins\/([\w-]+)$/.exec(path);
+        if (one && method === 'PATCH') {
+          const { name } = request.postDataJSON();
+          changes.push(['rename', one[1], name]);
+          logins = logins.map(login => (login.id === one[1] ? { ...login, name } : login));
+          return { json: logins.find(login => login.id === one[1]) };
+        }
+        if (one && method === 'DELETE') {
+          changes.push(['delete', one[1]]);
+          logins = logins.filter(login => login.id !== one[1]);
+          return { status: 204 };
+        }
+      },
+    },
+    async ({ page }) => {
+      await page.getByText('Orchid Shop team').waitFor();
+      await page.getByText('Signed out').waitFor();
+
+      await page.getByRole('button', { name: 'Actions for Orchid Shop team' }).click();
+      await page.getByRole('menuitem', { name: 'Rename' }).click();
+      await page.getByRole('dialog').getByRole('textbox', { name: 'Name' }).fill('Shop for the team');
+      await page.getByRole('dialog').getByRole('button', { name: 'Save' }).click();
+      await page.getByText('Shop for the team').waitFor();
+
+      await page.getByRole('button', { name: 'Actions for Old shop' }).click();
+      await page.getByRole('menuitem', { name: 'Delete' }).click();
+      await page.getByRole('button', { name: 'Delete login' }).click();
+      await page.getByRole('button', { name: 'Actions for Old shop' }).waitFor({ state: 'detached' });
+      assert.deepEqual(changes, [
+        ['rename', savedLogin.id, 'Shop for the team'],
+        ['delete', '4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a'],
+      ]);
+    },
+  );
+});
 
 async function expectInputs(inputs, count) {
   const deadline = Date.now() + 5000;
