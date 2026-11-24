@@ -74,6 +74,12 @@ export function createTaskProgress(runtime: AgentStorage) {
           ).rows[0],
         );
       if (secret.runnable) return { kind: 'runnable' };
+      // A hand-off past its deadline runs again, so the task fails with "needs a person"; a hand back wakes it sooner.
+      const handoff = await tx.client.query(
+        `SELECT 1 FROM ${relation(tx, 'tf_agent_task_runs')} b JOIN ${relation(tx, 'tf_agent_tool_calls')} c ON c.run_id=b.run_id WHERE b.task_id=$1 AND b.generation=$2 AND c.status='waiting' AND c.call->>'tool'='browser.handoff' AND (c.result->>'waitingUntil')::timestamptz<=clock_timestamp()`,
+        [taskId, task.generation],
+      );
+      if (handoff.rowCount) return { kind: 'runnable' };
       const step = z
         .object({ proposal_id: z.uuid().nullable() })
         .optional()

@@ -77,7 +77,7 @@ import { pinnedImageChoice } from '@tulipfarm/agents/image-generation';
 import { chatSkills } from '@tulipfarm/agents/chat-skills';
 import { createReplyTextPublisher } from '@tulipfarm/conversations/event-publisher';
 import { isFeatureEnabled } from '@tulipfarm/observability';
-import { createBrowserHostClient } from '@tulipfarm/browser';
+import { browserSessionId, createBrowserHostClient } from '@tulipfarm/browser';
 import { createBrowserLogins } from '@tulipfarm/browser/logins';
 import { browserHostConfiguration } from '@tulipfarm/config/browser-host';
 import { saveBackBrowserLogins } from './browser-logins.ts';
@@ -649,7 +649,7 @@ export function meteredReply(
           client: browser.client,
           logins: browserLogins,
           workspaceId: fence.workspaceId,
-          conversationId: fence.conversationId,
+          sessionId: browserSessionId(fence.workspaceId, { conversationId: fence.conversationId }),
           actor: requester,
         });
     }

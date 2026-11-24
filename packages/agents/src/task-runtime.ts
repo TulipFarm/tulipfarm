@@ -17,9 +17,10 @@ import { agentDefinitionSchema, recordConflict, scopeSchema, toolCallSchema, too
 import { effectiveAgentScope, unavailableTableMessage } from './data-scope.ts';
 import { agentModelInputSchema, modelDecisionSchema, parseModelDecision, taskReadTools } from './model.ts';
 import { withKnowledgeRetrieveGrant } from './knowledge-tool-contracts.ts';
+import { withBrowserGrant } from './tool-capabilities.ts';
 import type { InferenceResult } from './inference.ts';
-import { createAgentExecutor, type RunImages, type TaskSecretsAccess } from './executor.ts';
-export type { TaskSecretsAccess } from './executor.ts';
+import { createAgentExecutor, type RunImages, type TaskBrowser, type TaskSecretsAccess } from './executor.ts';
+export type { TaskBrowser, TaskSecretsAccess } from './executor.ts';
 import type { SkillExecutionFactory } from './skill-execution.ts';
 import { createAgentTasks } from './tasks.ts';
 import { createTaskApprovals } from './task-approvals.ts';
@@ -98,10 +99,10 @@ const taskReadAdmitted = (definition: z.infer<typeof agentDefinitionSchema>, cal
   call.tool === 'files.read' ||
   call.tool === 'secrets.request' ||
   call.tool === 'secrets.list' ||
-  (taskReadTools.has(call.tool) &&
+  ((taskReadTools.has(call.tool) || call.tool === 'browser.handoff' || call.tool === 'browser.signIn') &&
     (isMcpCall(call)
       ? Boolean(definition.mcp?.length)
-      : withKnowledgeRetrieveGrant(definition.tools).includes(call.tool) ||
+      : withBrowserGrant(withKnowledgeRetrieveGrant(definition.tools)).includes(call.tool) ||
         (call.tool === 'skills.read' && (definition.skills?.length ?? 0) > 0)));
 const callsSchema = z.array(z.object({ call: toolCallSchema, status: z.string(), result: toolResultSchema }));
 const instructions =
@@ -276,6 +277,7 @@ export function createTaskRuntime(
   reading?: TaskFileReading,
   images?: RunImages,
   secrets?: TaskSecretsAccess,
+  browser?: TaskBrowser,
 ) {
   runtime = withTaskTelemetry(runtime);
   async function locked<T>(workspaceId: string, taskId: string, operation: (tx: Transaction) => Promise<T>) {
@@ -593,7 +595,7 @@ export function createTaskRuntime(
           .parse(
             (
               await tx.client.query(
-                `SELECT id, call->>'tool' IN ('api.request','secrets.request') AS api FROM ${relation(tx, 'tf_agent_tool_calls')} WHERE run_id=$1 AND id=ANY($2::uuid[]) AND status NOT IN ('completed','failed','blocked') ORDER BY sequence`,
+                `SELECT id, call->>'tool' IN ('api.request','secrets.request','browser.handoff') AS api FROM ${relation(tx, 'tf_agent_tool_calls')} WHERE run_id=$1 AND id=ANY($2::uuid[]) AND status NOT IN ('completed','failed','blocked') ORDER BY sequence`,
                 [runId, callIds],
               )
             ).rows,
@@ -927,6 +929,9 @@ export function createTaskRuntime(
         ...((await imageGenerationOffered(workspaceId, c.definition.tools)) ? { images: true as const } : {}),
         ...(reading?.links && (await reading.enabled(workspaceId)) ? { taskFiles: true as const } : {}),
         ...(secrets?.tools.enabled() ? { taskSecrets: true as const } : {}),
+        ...(browser && c.definition.tools.includes('browser.act') && (await browser.enabled(workspaceId))
+          ? { browser: true as const }
+          : {}),
       });
       const timeoutMs = Math.min(
         modelCallTimeoutMs + 2000,
@@ -977,6 +982,7 @@ export function createTaskRuntime(
           images,
           reading,
           taskSecrets: secrets,
+          browser,
           telemetryRuntime: 'task',
         }).execute({ workspaceId, runId: tool.runId, callId: tool.callId });
         if (tool.step !== null)
@@ -987,7 +993,7 @@ export function createTaskRuntime(
                 [tool.runId, tool.step],
               );
             await tx.client.query(
-              `UPDATE ${relation(tx, 'tf_agent_tasks')} t SET status=$3 WHERE t.id=$1 AND t.status IN ('pending','waiting-approval') AND EXISTS (SELECT 1 FROM ${relation(tx, 'tf_agent_task_runs')} b JOIN ${relation(tx, 'tf_agent_tool_calls')} c ON c.run_id=b.run_id WHERE b.task_id=t.id AND b.generation=t.generation AND b.run_id=$2 AND c.id=$4 AND (c.call->>'tool' LIKE 'slack.%' OR c.call->>'tool' LIKE 'mcp.%' OR c.call->>'tool' LIKE 'github.personal.%' OR c.call->>'tool' IN ('api.request','secrets.request')))`,
+              `UPDATE ${relation(tx, 'tf_agent_tasks')} t SET status=$3 WHERE t.id=$1 AND t.status IN ('pending','waiting-approval') AND EXISTS (SELECT 1 FROM ${relation(tx, 'tf_agent_task_runs')} b JOIN ${relation(tx, 'tf_agent_tool_calls')} c ON c.run_id=b.run_id WHERE b.task_id=t.id AND b.generation=t.generation AND b.run_id=$2 AND c.id=$4 AND (c.call->>'tool' LIKE 'slack.%' OR c.call->>'tool' LIKE 'mcp.%' OR c.call->>'tool' LIKE 'github.personal.%' OR c.call->>'tool' IN ('api.request','secrets.request','browser.handoff')))`,
               [taskId, tool.runId, result === 'waiting' ? 'waiting-approval' : 'pending', tool.callId],
             );
           });
@@ -1004,6 +1010,7 @@ export function createTaskRuntime(
           images,
           reading,
           taskSecrets: secrets,
+          browser,
         });
         const executions = tools.callIds.map(callId => ({ workspaceId, runId: tools.runId, callId }));
         const statuses =

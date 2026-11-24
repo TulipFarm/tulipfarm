@@ -91,6 +91,10 @@ import {
 } from './knowledge-tool-contracts.ts';
 import { readOnlyCall, toolObservation, type KnowledgeToolsFactory } from './tools.ts';
 import { invokeBoundedKnowledge, withKnowledgeRetrieveGrant } from './knowledge-retrieval.ts';
+import { withBrowserGrant } from './tool-capabilities.ts';
+import { browserSessionId, type BrowserHostClient } from '@tulipfarm/browser';
+import { runBrowserCall, type BrowserSecrets } from './browser-tools.ts';
+import { browserToolResultSchema, type AgentBrowserSettings } from './contracts.ts';
 import { knowledgeTaskSpend } from '@tulipfarm/workspace-storage/knowledge-credits';
 import { createAgentTasks } from './tasks.ts';
 import { withTaskTelemetry } from './task-telemetry.ts';
@@ -129,7 +133,25 @@ type Options = {
   reading?: TaskFileReading | undefined;
   /** Task `secrets.*` tools and what task `api.request` may reach; without it, both are refused or public only. */
   taskSecrets?: TaskSecretsAccess | undefined;
+  /** The browser task `browser.*` tools use; without it, they are refused. */
+  browser?: TaskBrowser | undefined;
 };
+/** The cloud browser of agents' runs. */
+export type TaskBrowser = {
+  client: BrowserHostClient;
+  /** Whether browser use is on in the workspace now. */
+  enabled(workspaceId: string): Promise<boolean>;
+  /** The secrets `browser.signIn` types, held by the run; absent while secrets are turned off. */
+  secrets?:
+    | ((holder: { workspaceId: string; actor: HumanActor; origin: TaskSecretOrigin }) => BrowserSecrets)
+    | undefined;
+  /** Loads a browser login into a session; throws when the run's owner may not use it. */
+  loadLogin?:
+    | ((input: { workspaceId: string; actor: HumanActor; sessionId: string; loginId: string }) => Promise<void>)
+    | undefined;
+};
+/** How long a run's browser waits for a person after the agent hands off. */
+export const browserHandoffWaitMs = 24 * 60 * 60 * 1000;
 /** A task run's secret forms, the secrets it holds and the operator's private hosts. */
 export type TaskSecretsAccess = {
   tools: TaskSecretTools;
@@ -223,6 +245,115 @@ export function createAgentExecutor(options: Options) {
       if (publish) await options.internalActivity?.(tx, ids);
       return result;
     });
+  }
+
+  /**
+   * Runs a task's `browser.*` call in the task's own session. A hand-off leaves the call waiting until a person hands the
+   * browser back, or fails the task once its deadline passes; each later execution checks the session again.
+   */
+  async function runTaskBrowser(
+    ids: ExecutionIds,
+    call: Extract<ToolCall, { tool: `browser.${string}` }>,
+    actor: HumanActor,
+    task: { taskId: string; settings: AgentBrowserSettings | undefined; waitingUntil: string | undefined },
+  ): Promise<ExecutionStatus> {
+    const browser = options.browser;
+    const sessionId = browserSessionId(ids.workspaceId, { runId: task.taskId });
+    const settle = (status: 'completed' | 'waiting', result: unknown, waitingUntil?: string, failure?: string) =>
+      executionTransaction(ids, async tx => {
+        await taskOutputAllowed(tx, ids.workspaceId, ids.runId, true);
+        const changed = await tx.client.query(
+          `UPDATE ${relation(tx, 'tf_agent_tool_calls')} SET status=$2,result=$3 WHERE id=$1 AND status='waiting'`,
+          [
+            ids.callId,
+            failure ? 'failed' : status,
+            JSON.stringify(toolResultSchema.parse({ browser: result, ...(waitingUntil ? { waitingUntil } : {}) })),
+          ],
+        );
+        await tx.client.query(`UPDATE ${relation(tx, 'tf_agent_runs')} SET status=$2 WHERE id=$1`, [
+          ids.runId,
+          status === 'waiting' ? 'waiting' : 'running',
+        ]);
+        if (failure && changed.rowCount) {
+          const failed = await tx.client.query(
+            `UPDATE ${relation(tx, 'tf_agent_tasks')} SET status='failed',pause_reason=NULL WHERE id=$1 AND status IN ('pending','waiting-approval')`,
+            [task.taskId],
+          );
+          if (failed.rowCount)
+            await tx.client.query(
+              `INSERT INTO ${relation(tx, 'tf_agent_task_messages')} (task_id,sequence,generation,role,text,sources) SELECT t.id,COALESCE((SELECT max(sequence)+1 FROM ${relation(tx, 'tf_agent_task_messages')} WHERE task_id=t.id),0),t.generation,'agent',$2,'[]'::jsonb FROM ${relation(tx, 'tf_agent_tasks')} t WHERE t.id=$1`,
+              [task.taskId, failure],
+            );
+          if (failed.rowCount)
+            await options.taskSecrets?.tools.endRun(tx, { kind: 'task', taskId: task.taskId, runId: ids.runId });
+        }
+        return failure ? ('failed' as const) : status;
+      });
+    if (!browser || !(await browser.enabled(ids.workspaceId)))
+      return settle('completed', {
+        error: 'browser-unavailable',
+        instruction: 'Browser use is turned off in this workspace. Finish without the browser and say why.',
+      });
+    if (call.tool === 'browser.handoff' && task.waitingUntil) {
+      let state;
+      try {
+        state = await browser.client.state(sessionId);
+      } catch {
+        // The host is unreachable: keep waiting, and check again on the next wake.
+        return 'waiting';
+      }
+      if (state && state.controller === 'agent' && !state.needsPerson)
+        return settle('completed', {
+          status: 'handed-back',
+          url: state.url,
+          title: state.title,
+          instruction: 'A person handed the browser back. Take a snapshot and continue from this page.',
+        });
+      const expired = Date.parse(task.waitingUntil) <= Date.now();
+      if (expired || !state) {
+        await browser.client.close(sessionId).catch(() => undefined);
+        return settle(
+          'completed',
+          { error: 'needs-a-person', instruction: 'No person handed the browser back in time.' },
+          undefined,
+          expired
+            ? 'This run needs a person. No one handed the browser back within 24 hours, so the run stopped and its browser closed.'
+            : 'This run needs a person. Its browser closed before anyone handed it back, so the run stopped.',
+        );
+      }
+      return 'waiting';
+    }
+    const holder = browser.secrets;
+    const step = await runBrowserCall(
+      {
+        client: browser.client,
+        sessionId,
+        mode: 'task',
+        imageInput: false,
+        allowedSites: task.settings?.sites,
+        secrets: holder
+          ? () =>
+              holder({
+                workspaceId: ids.workspaceId,
+                actor,
+                origin: { kind: 'task', taskId: task.taskId, runId: ids.runId },
+              })
+          : undefined,
+        // Preselected logins load only when the run's owner may use them now; any other is skipped.
+        opened: async () => {
+          for (const loginId of task.settings?.logins ?? [])
+            await browser
+              .loadLogin?.({ workspaceId: ids.workspaceId, actor, sessionId, loginId })
+              .catch(() => undefined);
+        },
+      },
+      call,
+    );
+    const handedOff =
+      call.tool === 'browser.handoff' && (step.result as { status?: unknown } | null)?.status === 'waiting-for-person';
+    return handedOff
+      ? settle('waiting', step.result, new Date(Date.now() + browserHandoffWaitMs).toISOString())
+      : settle('completed', step.result);
   }
 
   async function execute(input: ExecutionIds, batch?: { work: TaskWork }): Promise<ExecutionStatus> {
@@ -443,8 +574,10 @@ export function createAgentExecutor(options: Options) {
                 } else if (isMcpCall(row.call)) {
                   if (!definition.mcp?.length || delegationTools !== null) throw new AccessDenied();
                 } else if (
-                  !withKnowledgeRetrieveGrant(
-                    definition.tools.filter(tool => delegationTools === null || delegationTools.includes(tool)),
+                  !withBrowserGrant(
+                    withKnowledgeRetrieveGrant(
+                      definition.tools.filter(tool => delegationTools === null || delegationTools.includes(tool)),
+                    ),
                   ).includes(row.call.tool) &&
                   !automaticSkillRead
                 )
@@ -830,6 +963,41 @@ export function createAgentExecutor(options: Options) {
                     call: row.call,
                     actor: { kind: 'human' as const, userId: run.user_id, membershipId: run.membership_id },
                     secretTask: { taskId: binding.task_id },
+                  };
+                }
+                if (
+                  row.call.tool === 'browser.act' ||
+                  row.call.tool === 'browser.handoff' ||
+                  row.call.tool === 'browser.signIn'
+                ) {
+                  if (!binding || !run.user_id || !run.membership_id) throw new AccessDenied();
+                  if (row.status === 'completed' || row.status === 'blocked' || row.status === 'failed')
+                    return row.status;
+                  if (
+                    !batch &&
+                    !taskAssociated &&
+                    (
+                      await transaction.client.query(
+                        `SELECT 1 FROM ${relation(transaction, 'tf_agent_tool_calls')} WHERE run_id = $1 AND sequence < $2 AND status <> 'completed'`,
+                        [ids.runId, row.sequence],
+                      )
+                    ).rowCount
+                  )
+                    return 'waiting';
+                  // A hand-off already waiting keeps its deadline; it is checked again, never asked again.
+                  const waiting = row.status === 'waiting' ? browserToolResultSchema.safeParse(row.result) : null;
+                  await transaction.client.query(
+                    `UPDATE ${relation(transaction, 'tf_agent_tool_calls')} SET status='waiting' WHERE id=$1`,
+                    [ids.callId],
+                  );
+                  return {
+                    call: row.call,
+                    actor: { kind: 'human' as const, userId: run.user_id, membershipId: run.membership_id },
+                    browserTask: {
+                      taskId: binding.task_id,
+                      settings: definition.browser,
+                      waitingUntil: waiting?.success ? waiting.data.waitingUntil : undefined,
+                    },
                   };
                 }
                 if (
@@ -1287,6 +1455,14 @@ export function createAgentExecutor(options: Options) {
               ]);
               return status;
             });
+          }
+          if (
+            outcome.call.tool === 'browser.act' ||
+            outcome.call.tool === 'browser.handoff' ||
+            outcome.call.tool === 'browser.signIn'
+          ) {
+            if (!('browserTask' in outcome) || outcome.actor.kind !== 'human') throw new AccessDenied();
+            return runTaskBrowser(ids, outcome.call, outcome.actor, outcome.browserTask);
           }
           if (outcome.call.tool === 'images.generate') {
             const call = outcome.call,
@@ -1908,7 +2084,13 @@ export function createAgentExecutor(options: Options) {
         return { status: row.status, result: row.result };
       }
       if (row.call.tool === 'images.generate') return { status: row.status, result: row.result };
-      if (row.call.tool === 'secrets.request' || row.call.tool === 'secrets.list') {
+      if (
+        row.call.tool === 'secrets.request' ||
+        row.call.tool === 'secrets.list' ||
+        row.call.tool === 'browser.act' ||
+        row.call.tool === 'browser.handoff' ||
+        row.call.tool === 'browser.signIn'
+      ) {
         const owner = z
           .object({ membership_id: z.uuid().nullable() })
           .safeParse(

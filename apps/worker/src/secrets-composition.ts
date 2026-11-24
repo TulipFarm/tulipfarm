@@ -1,7 +1,7 @@
 import { apiCallPrivateHosts } from '@tulipfarm/api-calls';
 import { createConversationRequests, secretRequestSettlement } from '@tulipfarm/conversations/requests';
 import { integrationCredentialKeyring } from '@tulipfarm/integrations';
-import type { TaskSecretsAccess } from '@tulipfarm/agents/task-runtime';
+import type { TaskBrowser, TaskSecretsAccess } from '@tulipfarm/agents/task-runtime';
 import type { ChatToolsOptions } from '@tulipfarm/agents/tools';
 import { heldSecrets } from '@tulipfarm/secrets/send';
 import {
@@ -38,6 +38,15 @@ export function taskSecretsAccess(services: ReturnType<typeof secretsServices>):
           },
         }
       : {}),
+  };
+}
+
+/** The secrets `browser.signIn` types in an agent's run, which the run holds for its owner. */
+export function taskBrowserSecrets(services: ReturnType<typeof secretsServices>): TaskBrowser['secrets'] {
+  if (!services.secrets.capabilities().enabled) return undefined;
+  return holder => {
+    const held = heldSecrets(services.secrets, services.requests, holder);
+    return { resolve: held.resolve, recordUse: (id, url) => held.recordUse(id, url, 'browser.signIn') };
   };
 }
 

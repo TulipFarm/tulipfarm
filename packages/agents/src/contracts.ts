@@ -34,6 +34,8 @@ import { mcpCallSchema, mcpExecutionResultSchema } from './mcp-contracts.ts';
 import { githubTaskCallSchema, githubTaskResultSchema } from './github-task-contracts.ts';
 import { knowledgeToolCallSchema, knowledgeToolResultSchema } from './knowledge-tool-contracts.ts';
 import { toolNameSchema } from './tool-capabilities.ts';
+import { browserCallSchemas } from './browser-call-contracts.ts';
+import { browserAllowedSitesSchema } from '@tulipfarm/browser/contracts';
 import {
   skillExecutionCallSchema,
   skillExecutionResultSchema,
@@ -70,6 +72,13 @@ export {
   supportedAgentToolRuntimes,
   toolNameSchema,
 } from './tool-capabilities.ts';
+export const agentBrowserSettingsSchema = z.strictObject({
+  /** Limits the browser to these sites and their subdomains. Absent, the agent may visit any public website. */
+  sites: browserAllowedSitesSchema.optional(),
+  /** Browser logins loaded into each run's browser, when the run's owner may use them. */
+  logins: z.array(uuidSchema).max(10).optional(),
+});
+export type AgentBrowserSettings = z.infer<typeof agentBrowserSettingsSchema>;
 export const agentDefinitionSchema = z.strictObject({
   name: z.string().trim().min(1).max(120),
   instructions: z.string().min(1).max(32000),
@@ -78,6 +87,8 @@ export const agentDefinitionSchema = z.strictObject({
   skills: procedureSelectionsSchema.optional(),
   responseRule: z.enum(['tag', 'every-message']).optional(),
   mcp: mcpPermissionSlotsSchema.optional(),
+  /** How the agent uses a browser when its tools list `browser.act`. */
+  browser: agentBrowserSettingsSchema.optional(),
 });
 export const definitionRevisionSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const resource = { tableId: uuidSchema };
@@ -195,6 +206,7 @@ export const toolCallSchema = z.discriminatedUnion('tool', [
     range: z.strictObject({ start: z.number().int().min(0), end: z.number().int().min(1).optional() }).optional(),
   }),
   generateImagesCallSchema,
+  ...browserCallSchemas,
   skillExecutionCallSchema,
   skillFileCallSchema,
   ...githubTaskCallSchema.options,
@@ -300,8 +312,14 @@ const taskSecretResultSchema = z.union([
     instruction: z.string(),
   }),
 ]);
+/** A run's `browser.*` result. `waitingUntil` marks a hand-off that waits for a person until then. */
+export const browserToolResultSchema = z.strictObject({
+  browser: z.record(z.string(), z.json()),
+  waitingUntil: z.iso.datetime().optional(),
+});
 export const toolResultSchema = z.union([
   taskSecretResultSchema,
+  browserToolResultSchema,
   imageOutputResultSchema,
   taskFileReadResultSchema,
   z.strictObject({

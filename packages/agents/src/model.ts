@@ -7,7 +7,7 @@ import { resolvedProceduresSchema } from './workspace-skill-contracts.ts';
 import { resolveSelectedSkills, skillSelectionsSchema } from './skills.ts';
 import { mcpModelCatalogSchema, isMcpCall } from './mcp-contracts.ts';
 import { validateMcpCall } from './mcp-catalog.ts';
-import { agentRuntimeToolNames, taskDirectToolNames } from './tool-capabilities.ts';
+import { agentRuntimeToolNames, taskDirectToolNames, withBrowserGrant } from './tool-capabilities.ts';
 import { skillDefinitionRevision } from './skill-packages.ts';
 import { nativeAgentTools, type NativeCall } from './native-tools.ts';
 import { readOnlyCall, type ToolName } from './tools.ts';
@@ -83,9 +83,11 @@ export const agentModelInputSchema = z
     taskFiles: z.literal(true).optional(),
     /** Offers `secrets.request` and `secrets.list` to a task; set only while secrets are on. */
     taskSecrets: z.literal(true).optional(),
+    /** Offers the browser tools to a task whose agent lists `browser.act`; set only while browser use is on. */
+    browser: z.literal(true).optional(),
   })
   .superRefine((input, ctx) => {
-    if ((input.files || input.taskFiles || input.taskSecrets) && !input.task)
+    if ((input.files || input.taskFiles || input.taskSecrets || input.browser) && !input.task)
       ctx.addIssue({ code: 'custom', message: 'File content requires a member-owned private task' });
     if (input.task && input.runtime)
       ctx.addIssue({ code: 'custom', message: 'Task inputs cannot select a Slack channel runtime' });
@@ -145,6 +147,10 @@ export function modelNativeTools(input: ModelInput) {
       ? input.definition.tools.filter(tool => runtimeTools.has(tool))
       : [...input.definition.tools];
   if (!input.images) allowed.splice(0, allowed.length, ...allowed.filter(tool => tool !== 'images.generate'));
+  if (!input.task || !input.browser)
+    allowed.splice(0, allowed.length, ...allowed.filter(tool => tool !== 'browser.act'));
+  else if (allowed.includes('browser.act'))
+    allowed.push('browser.handoff', ...(input.taskSecrets ? (['browser.signIn'] as const) : []));
   if (
     (input.definition.skills?.length ?? 0) > 0 &&
     !allowed.includes('skills.read') &&
@@ -207,8 +213,10 @@ export function parseModelDecision(value: unknown, input: Parameters<AgentModel>
       if (automaticSkillRead && call.revision === undefined)
         call.revision = input.definition.skills?.find(selection => selection.id === call.skillId)?.revision;
       if (
-        (!withKnowledgeRetrieveGrant(input.definition.tools).includes(call.tool) && !automaticSkillRead) ||
-        (runtimeTools && !runtimeTools.has(call.tool))
+        (!withBrowserGrant(withKnowledgeRetrieveGrant(input.definition.tools)).includes(call.tool) &&
+          !automaticSkillRead) ||
+        (call.tool.startsWith('browser.') && !(input.task && input.browser)) ||
+        (runtimeTools && !withBrowserGrant([...runtimeTools]).includes(call.tool))
       )
         throw new Error('tool-not-admitted');
       if (call.tool === 'skills.read') {

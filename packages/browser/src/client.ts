@@ -71,7 +71,10 @@ export function createBrowserHostClient(connection: BrowserHostConnection, fetch
 
   return {
     /** Opens the session, or returns it when open. `allowedSites` limits a new session's pages to those sites. */
-    async open(sessionId: string, options: { allowedSites?: readonly string[] } = {}): Promise<BrowserSessionState> {
+    async open(
+      sessionId: string,
+      options: { allowedSites?: readonly string[] | undefined } = {},
+    ): Promise<BrowserSessionState> {
       return browserSessionStateSchema.parse(
         await call('POST', '/v1/sessions', {
           sessionId,

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { withKnowledgeRetrieveGrant } from './knowledge-tool-contracts.ts';
+import { withBrowserGrant } from './tool-capabilities.ts';
 import { z } from 'zod';
 import {
   AccessDenied,
@@ -650,7 +651,8 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
               value.call.tool === 'secrets.request' ||
               value.call.tool === 'secrets.list'
             ? !run.task_id || run.kind !== 'delegated'
-            : !withKnowledgeRetrieveGrant(definition.tools).includes(value.call.tool) && !automaticSkillRead
+            : !withBrowserGrant(withKnowledgeRetrieveGrant(definition.tools)).includes(value.call.tool) &&
+              !automaticSkillRead
       )
         throw new AccessDenied();
       if (value.call.tool === 'skills.read') {

@@ -137,6 +137,8 @@ async function harness(t) {
     woken,
     paused,
     engine,
+    activationId,
+    definitionRevision,
     transaction,
     refuse: on => (refuse = on),
   };
@@ -444,3 +446,40 @@ test('the Tasks page reads live activity and marks tasks done or reopens them', 
     ['marked-done', 'reopened'],
   );
 });
+
+test(
+  'a run that hands its browser to a person puts a browser item in the owner’s Inbox',
+  { timeout: 60000 },
+  async t => {
+    const { workspace, runtime, s, query, agentId, activationId, definitionRevision, create, assignment, engine } =
+      await harness(t);
+    const row = await create('Download the latest invoice');
+    await engine.step(workspace.id, true);
+    const taskId = (await assignment(row.id)).current_task_id;
+    const runId = randomUUID();
+    await query(
+      `INSERT INTO ${s}.tf_agent_runs(id,agent_id,activation_id,definition_revision,kind,user_id,membership_id,scope,task_id,task_generation)
+      VALUES($1,$2,$3,$4,'delegated',$5,$6,'[]',$7,0)`,
+      [runId, agentId, activationId, definitionRevision, workspace.userId, workspace.membershipId, taskId],
+    );
+    await query(
+      `INSERT INTO ${s}.tf_agent_tool_calls(id,run_id,sequence,call,status,result) VALUES($1,$2,0,$3,'waiting',$4)`,
+      [
+        randomUUID(),
+        runId,
+        JSON.stringify({ tool: 'browser.handoff', reason: 'Solve the captcha' }),
+        JSON.stringify({ browser: { status: 'waiting-for-person' }, waitingUntil: new Date(Date.now() + 3600000) }),
+      ],
+    );
+    await query(`UPDATE ${s}.tf_agent_tasks SET status='waiting-approval' WHERE id=$1`, [taskId]);
+    await engine.step(workspace.id, true);
+    assert.deepEqual(
+      await query(`SELECT kind,source_id,summary FROM ${s}.tf_inbox_items WHERE row_id=$1 AND resolved_at IS NULL`, [
+        row.id,
+      ]),
+      [{ kind: 'waiting', source_id: taskId, summary: 'An agent needs you in its browser' }],
+    );
+    const { items } = await createRowWork(runtime, commonCompatibility).inbox(workspace.id, workspace.userId);
+    assert.equal(items.find(item => item.rowId === row.id)?.taskId, taskId, 'the item opens the run and its browser');
+  },
+);
