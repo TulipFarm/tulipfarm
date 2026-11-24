@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BrowserHostError } from '@tulipfarm/browser';
 import { SecretError } from '@tulipfarm/secrets';
-import { invokeBrowser } from '../src/browser-tools.ts';
+import { invokeBrowser, runBrowserCall } from '../src/browser-tools.ts';
+import { withBrowserGrant } from '../src/tool-capabilities.ts';
 import { outboundRefusal } from '../src/mcp-catalog-egress.ts';
 import { discoverToolNames, isExternalTool } from '../src/tools.ts';
 
@@ -377,5 +378,25 @@ test('A step saves what the page downloaded to Files and says so', async () => {
   assert.deepEqual(
     noFiles.result.downloadsNotSaved,
     downloads.map(download => download.name),
+  );
+});
+
+test('A run is not offered uploads, and its downloads are reported as not saved', async () => {
+  const runTools = discoverToolNames({ kind: 'agent', task: true, tools: withBrowserGrant(['browser.act']) });
+  assert.ok(runTools.includes('browser.act') && runTools.includes('browser.signIn'));
+  assert.equal(runTools.includes('browser.upload'), false);
+
+  const downloads = [{ id: '1d2c3b4a-5e6f-4a7b-8c9d-0e1f2a3b4c5d', name: 'report.csv', size: 4 }];
+  const { client, calls } = fakeClient({ act: async () => ({ state, snapshot: '', truncated: false, downloads }) });
+  const run = { client, sessionId: 'run-session', mode: 'task', imageInput: false };
+  const step = await runBrowserCall(run, { tool: 'browser.act', action: { action: 'snapshot' } });
+  assert.deepEqual(step.result.downloadsNotSaved, ['report.csv']);
+  assert.match(step.result.downloadInstruction, /not saved in runs/);
+  const refused = await runBrowserCall(run, { tool: 'browser.upload', file: 'f', ref: 'e2' });
+  assert.equal(refused.result.error, 'files-unavailable');
+  assert.match(refused.result.instruction, /Runs cannot upload files/);
+  assert.equal(
+    calls.some(call => call[0] === 'upload' || call[0] === 'download'),
+    false,
   );
 });

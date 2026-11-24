@@ -670,6 +670,32 @@ test('a download is held for the agent once, and one over the size limit is refu
   assert.equal(result.downloads?.[0]?.name, 'report.csv');
 });
 
+test('a session limited to listed sites downloads through its proxy, held to the same limits', async t => {
+  const host = await createBrowserHost({
+    ...options,
+    allowPrivateNetworks: true,
+    maxDownloadBytes: 256 * 1024,
+    downloadWaitMs: 3000,
+  });
+  t.after(() => host.shutdown());
+  await host.open(sessionId, ['127.0.0.1']);
+  let result = await host.act(sessionId, { action: 'navigate', url: `${origin}/files` });
+  result = await host.act(sessionId, { action: 'click', ref: ref(result.snapshot, /link "Download report"/) });
+  assert.equal(result.downloads?.[0]?.name, 'report.csv', JSON.stringify(result));
+  const held = host.takeDownload(sessionId, result.downloads[0].id);
+  const chunks = [];
+  for await (const chunk of await held.read()) chunks.push(chunk);
+  await held.done();
+  assert.equal(Buffer.concat(chunks).toString(), 'month,total\nMay,42\n');
+
+  stopped.length = 0;
+  result = await host.act(sessionId, { action: 'snapshot' });
+  result = await host.act(sessionId, { action: 'click', ref: ref(result.snapshot, /link "Download in a new tab"/) });
+  assert.equal(result.downloads, undefined);
+  assert.match(result.notice ?? '', /"stream.bin" was not saved: files are limited to 0 MiB/);
+  assert.ok(stopped.includes('/stream.bin?tab'), 'the browser stopped receiving it');
+});
+
 test('the agent uploads a file only into a file input', async t => {
   const host = await createBrowserHost({ ...options, allowPrivateNetworks: true });
   t.after(() => host.shutdown());
