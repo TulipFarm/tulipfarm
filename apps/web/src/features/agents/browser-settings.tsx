@@ -107,3 +107,30 @@ export function AgentBrowserSettingsSection({
     </FormSection>
   );
 }
+
+/** What an agent's browser may do in its runs, for the activation review: its sites and its logins by name. */
+export function BrowserSettingsReview({
+  workspaceId,
+  settings,
+}: {
+  workspaceId: string;
+  settings: AgentBrowserSettings | undefined;
+}) {
+  const chosen = settings?.logins ?? [];
+  const read = useBrowserLogins(workspaceId, undefined, chosen.length > 0);
+  const known = read.state.kind === 'ready' ? read.state.data.logins : [];
+  const names = chosen.map(id => {
+    const login = known.find(candidate => candidate.id === id);
+    if (login) return `${login.name} (${login.site})`;
+    return read.state.kind === 'ready' ? 'A login you can’t use' : 'A saved login';
+  });
+  return (
+    <div>
+      <p>Browser</p>
+      <ul>
+        <li>Sites it can open: {settings?.sites?.join(', ') || 'Any website'}</li>
+        <li>Logins it loads: {names.join(', ') || 'None'}</li>
+      </ul>
+    </div>
+  );
+}

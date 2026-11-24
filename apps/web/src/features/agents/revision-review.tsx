@@ -14,6 +14,7 @@ import { ScopeSummary } from './reference-names';
 import { toolLabels } from './labels';
 import type { AgentDetail } from './api';
 import { DraftSkill } from './setup-review';
+import { BrowserSettingsReview } from './browser-settings';
 
 export function RevisionReview({
   workspaceId,
@@ -51,6 +52,9 @@ export function RevisionReview({
           <div className="grid gap-3 text-sm">
             <p className="font-medium">{definition.name}</p>
             <p>Permitted actions: {definition.tools.map(tool => toolLabels[tool]).join(', ') || 'None'}</p>
+            {definition.tools.includes('browser.act') && (
+              <BrowserSettingsReview workspaceId={workspaceId} settings={definition.browser} />
+            )}
             {!!definition.skills?.length && (
               <div>
                 <p>Skills</p>
