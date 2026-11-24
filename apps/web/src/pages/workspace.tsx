@@ -891,7 +891,8 @@ function WorkspaceNavigation({ onSearch, backHref }: { onSearch: () => void; bac
                   <SidebarMenuButton
                     icon={<SearchIcon size="lg" aria-hidden="true" />}
                     tooltip={`Search ${searchShortcutLabel}`}
-                    badge={searchShortcutLabel}
+                    // Leading space keeps "Search" and "Ctrl K" separate words for WCAG label-in-name checks.
+                    badge={` ${searchShortcutLabel}`}
                     aria-keyshortcuts="Meta+K Control+K"
                     onClick={() => {
                       setOpenMobile(false);
