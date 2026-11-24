@@ -54,7 +54,7 @@ before(async () => {
       );
     }
     if (url.pathname === '/login') {
-      response.writeHead(200, { 'content-type': 'text/html' });
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       const other = `http://localhost:${site.address().port}/frame`;
       return response.end(
         `<!doctype html><title>Sign in</title>
@@ -64,17 +64,35 @@ before(async () => {
           <label>Notes <input name="notes"></label>
           <button type="submit">Sign in</button>
         </form>
-        <iframe title="Other site" src="${other}"></iframe>`,
+        <p id="inputs">No input yet</p>
+        <iframe title="Other site" src="${other}"></iframe>
+        <script>
+          let inputs = 0;
+          document.querySelector('form').addEventListener('input', () => {
+            document.getElementById('inputs').textContent = 'Inputs seen: ' + ++inputs;
+          });
+          // A page that hands focus to another site's frame must not hand it the secret.
+          for (const input of document.querySelectorAll('form input'))
+            input.addEventListener('focus', () => setInterval(() => document.querySelector('iframe').focus(), 1));
+        </script>`,
       );
     }
     if (url.pathname === '/frame') {
       response.writeHead(200, { 'content-type': 'text/html' });
-      return response.end(`<!doctype html><label>Frame password <input type="password"></label>`);
+      return response.end(
+        `<!doctype html><label>Frame password <input type="password"></label><p id="leak">Nothing typed here</p>
+        <script>
+          document.querySelector('input').focus();
+          document.addEventListener('keydown', () => (document.getElementById('leak').textContent = 'Frame got keys'));
+          document.querySelector('input').addEventListener('input', () => (document.getElementById('leak').textContent = 'Frame got input'));
+        </script>`,
+      );
     }
     if (url.pathname === '/done') {
-      response.writeHead(200, { 'content-type': 'text/html' });
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       return response.end(
-        `<!doctype html><title>Welcome</title><p>${[...url.searchParams].map(([k, v]) => `${k}=${v}`).join(' ')}</p>`,
+        `<!doctype html><title>Welcome</title><h1>Hi ${url.searchParams.get('pass')}</h1>
+        <p>${[...url.searchParams].map(([k, v]) => `${k}=${v}`).join(' ')}</p>`,
       );
     }
     response.writeHead(pages[url.pathname] ? 200 : 404, { 'content-type': 'text/html' });
@@ -308,7 +326,8 @@ test('a secret is typed only into sign-in fields on its own site and never shown
   const notes = ref(page.snapshot, /textbox "Notes"/);
   const framed = ref(page.snapshot, /textbox "Frame password"/);
   const submit = ref(page.snapshot, /button "Sign in"/);
-  const secret = { username: 'ada@example.com', password: 'p@ss w0rd!' };
+  // Quotes, a backslash, an apostrophe, non-ASCII letters, a run of spaces and " #" make the snapshot escape it.
+  const secret = { username: 'ada@example.com', password: `"DUMMY\\Secret" it's é ü  #x` };
   const fields = (username, password) => [
     { ref: username, kind: 'username', value: secret.username },
     { ref: password, kind: 'password', value: secret.password },
@@ -321,14 +340,38 @@ test('a secret is typed only into sign-in fields on its own site and never shown
   await refused({ hosts: ['127.0.0.1'], fields: fields(user, framed) }, 'destination-denied');
   const unchanged = await host.act(sessionId, { action: 'snapshot' });
   assert.equal(unchanged.snapshot.includes(secret.username), false);
+  assert.ok(unchanged.screenshot, 'nothing typed yet, so the agent still sees the page');
+
+  const filled = await host.typeSecret(sessionId, { hosts: ['127.0.0.1'], fields: fields(user, pass) });
+  assert.equal(filled.screenshot, undefined, 'a sign-in result never carries a screenshot');
+  assert.match(filled.snapshot, /Inputs seen: 2/, 'the page’s own listeners saw both values');
+  assert.match(filled.snapshot, /Nothing typed here/, 'the frame that took focus got nothing');
+  const typing = await host.act(sessionId, { action: 'snapshot' });
+  assert.equal(typing.screenshot, undefined, 'no screenshot while a field holds the secret');
+  assert.match(typing.notice, /No screenshot/);
 
   const done = await host.typeSecret(sessionId, { hosts: ['127.0.0.1'], fields: fields(user, pass), submit });
   assert.equal(done.state.title, 'Welcome');
-  const shown = JSON.stringify({ ...done, screenshot: '' });
-  for (const value of [secret.username, secret.password, encodeURIComponent(secret.password), 'p%40ss+w0rd%21'])
+  const escaped = JSON.stringify(secret.password).slice(1, -1);
+  const shown = JSON.stringify(done);
+  for (const value of [
+    secret.username,
+    secret.password,
+    secret.password.replace(/\s+/g, ' '),
+    escaped,
+    escaped.replace(/\s+/g, ' '),
+    escaped.replace(/\s+/g, ' ').replace(/'/g, "''"),
+    encodeURIComponent(secret.password),
+    new URLSearchParams({ v: secret.password }).toString().slice(2),
+    'DUMMY',
+  ])
     assert.equal(shown.includes(value), false, value);
+  assert.match(done.snapshot, /heading .*Hi ••••/);
   assert.match(done.snapshot, /user=•••• pass=••••/);
   assert.match(done.state.url, /user=••••&pass=••••/);
   const later = await host.act(sessionId, { action: 'snapshot' });
-  assert.equal(later.snapshot.includes(secret.password), false);
+  assert.equal(later.snapshot.includes('DUMMY'), false);
+  assert.equal(later.screenshot, undefined, 'no screenshot while the page shows the secret');
+  const away = await host.act(sessionId, { action: 'navigate', url: `${origin}/account` });
+  assert.ok(away.screenshot, 'a page without the secret is shown again');
 });

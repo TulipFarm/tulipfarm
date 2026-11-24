@@ -156,8 +156,8 @@ export const browserActionResultSchema = z.strictObject({
   /** The page's accessibility snapshot, with refs for elements the agent can act on. Truncated when long. */
   snapshot: z.string(),
   truncated: z.boolean(),
-  /** A JPEG screenshot of the viewport, base64-encoded. */
-  screenshot: z.string(),
+  /** A JPEG screenshot of the viewport, base64-encoded. Left out when the page could show a typed secret. */
+  screenshot: z.string().optional(),
   /** What happened that the agent should know, such as a blocked address. */
   notice: z.string().optional(),
 });

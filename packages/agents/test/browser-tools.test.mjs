@@ -4,7 +4,7 @@ import { BrowserHostError } from '@tulipfarm/browser';
 import { SecretError } from '@tulipfarm/secrets';
 import { invokeBrowser } from '../src/browser-tools.ts';
 import { outboundRefusal } from '../src/mcp-catalog-egress.ts';
-import { discoverToolNames } from '../src/tools.ts';
+import { discoverToolNames, isExternalTool } from '../src/tools.ts';
 
 const origin = {
   workspaceId: '6f1c2b8e-1a2b-4c3d-8e9f-0a1b2c3d4e5f',
@@ -34,6 +34,9 @@ test('Chat lists the browser tools only when the reply offers a browser', () => 
   const offered = discoverToolNames({ kind: 'chat', browser: true });
   assert.ok(offered.includes('browser.act') && offered.includes('browser.handoff'));
   assert.equal(discoverToolNames({ kind: 'agent', tools: ['browser.act'] }).includes('browser.act'), false);
+  // A browser step can take a minute and signing in opens its own secrets transaction, so none holds the reply's.
+  for (const tool of ['browser.act', 'browser.handoff', 'browser.signIn'])
+    assert.equal(isExternalTool(tool), true, tool);
 });
 
 test('A step opens the chat session, returns the page as untrusted data and shows the screenshot', async () => {
@@ -61,6 +64,15 @@ test('A step opens the chat session, returns the page as untrusted data and show
   });
   assert.equal(text.images, undefined);
   assert.equal(JSON.stringify(text.result).includes('AAAA'), false);
+  const withheld = fakeClient({
+    act: async () => ({ state, snapshot: '', truncated: false, notice: 'No screenshot' }),
+  });
+  const shown = await invokeBrowser({ client: withheld.client, imageInput: true }, origin, {
+    tool: 'browser.act',
+    action: { action: 'snapshot' },
+  });
+  assert.equal(shown.images, undefined);
+  assert.equal(shown.result.notice, 'No screenshot');
 });
 
 test('A handoff flags the session and tells the model to stop', async () => {
@@ -189,6 +201,8 @@ test('Sign-in types the secret through the host and never returns it', async () 
   const text = JSON.stringify(output);
   assert.equal(text.includes(login.username) || text.includes(login.password), false);
   assert.equal(output.result.snapshot, signedIn.snapshot);
+  // The page may show what was just typed, so sign-in never passes a screenshot on.
+  assert.equal(output.images, undefined);
 });
 
 test('Sign-in refuses unusable secrets and mismatched fields without typing', async () => {
