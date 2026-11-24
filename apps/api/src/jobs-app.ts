@@ -1,3 +1,4 @@
+import type { ConversationRuntime } from '@tulipfarm/conversations/runtime';
 import Fastify from 'fastify';
 import type { ModelContinuity } from '@tulipfarm/agents/chat';
 import { registerFlagSubjectResolver } from '@tulipfarm/observability';
@@ -35,7 +36,8 @@ export function buildJobsApp(options: { agentModel?: ModelContinuity | null } = 
       registerHealth(v1, temporal);
       const pool = createIdentityPool(v1);
       registerFlagSubjectResolver(apiFlagSubjects(pool));
-      const models = createModelConfiguration({ pool });
+      let workspaces: ConversationRuntime | undefined;
+      const models = createModelConfiguration({ pool, workspaces: () => workspaces });
       if (options.agentModel === undefined) v1.addHook('onReady', models.registerModelBundle);
       v1.register(async jobs => {
         const storage = isolatedStorageEnabled() ? workspaceRuntime(pool) : undefined;
@@ -45,6 +47,7 @@ export function buildJobsApp(options: { agentModel?: ModelContinuity | null } = 
         const runtime = storage ? withKnowledgeSourceAuthorization(withGitHubSourceAuthorization(storage)) : undefined;
         const defaultKnowledge = defaultKnowledgeStarter(jobs, temporal);
         if (!runtime) return;
+        workspaces = runtime;
         const slack = slackDependencies(pool, runtime, defaultKnowledge.hook);
         const dependencies = {
           pool,

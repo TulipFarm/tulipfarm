@@ -508,7 +508,11 @@ export function createAgentChat(
             return null;
           }
           inFlight.dispatch = dispatchInference(
-            signal => model.infer(selected.attempt.resolution, selected.input, timeoutMs, signal),
+            signal =>
+              model.infer(selected.attempt.resolution, selected.input, timeoutMs, signal, {
+                workspaceId,
+                membershipId: selected.row.membership_id,
+              }),
             timeoutMs,
           );
           return inFlight.dispatch;

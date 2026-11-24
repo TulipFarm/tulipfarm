@@ -1,7 +1,16 @@
 import { useCallback, useMemo } from 'react';
 import { Field } from '@tulipfarm/sprout/field';
 import { FormSection } from '@tulipfarm/sprout/form';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from '@tulipfarm/sprout/select';
+import type { ModelCatalogFamily } from '@tulipfarm/config/model-catalog';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { useModelRule } from './queries';
 import { modelApi } from './api';
@@ -11,6 +20,8 @@ import { useModelCatalog } from './use-model-catalog';
 import { ModelOption } from './model-option';
 import { ModelSetupLink, noModelsConfigured } from './model-setup';
 import { familyPlan } from './chatgpt-plan-api';
+import { modelName } from './model-name';
+import { planModelOfFamily } from '@tulipfarm/config/plan-models';
 
 export function AgentModelPicker({
   workspaceId,
@@ -30,10 +41,16 @@ export function AgentModelPicker({
       description="The model this agent asks for first."
     >
       <ModelRead state={catalog.state} refresh={catalog.refresh} label="model catalog">
-        {({ families: listed, imageModels }) => {
-          // Agents never run on a member's own plan.
-          const families = listed.filter(family => !familyPlan(family));
+        {({ families, imageModels }) => {
           const selected = families.find(family => family.id === value);
+          const plans = families.filter(family => familyPlan(family));
+          const credits = families.filter(family => !familyPlan(family));
+          const options = (group: readonly ModelCatalogFamily[]) =>
+            group.map(family => (
+              <SelectItem key={family.id} value={family.id} disabled={!family.available}>
+                <ModelOption family={family} details />
+              </SelectItem>
+            ));
           return (
             <div className="grid gap-3">
               {!families.length && (
@@ -53,9 +70,11 @@ export function AgentModelPicker({
                 helper={
                   selected?.unavailableReason === 'model-family-paused'
                     ? `${selected.displayName} is temporarily unavailable for new choices. This agent keeps it and runs on its fallback rule's model when one is set.`
-                    : value && (!selected || !selected.available)
-                      ? 'Your saved preference is unavailable and has not been replaced. Choose an available family or clear it.'
-                      : 'Leave empty to let the workspace choose.'
+                    : (selected ? familyPlan(selected) : value && planModelOfFamily(value))
+                      ? "Runs on the plan of the person it works for. If that plan can't answer, the run stops."
+                      : value && (!selected || !selected.available)
+                        ? 'Your saved preference is unavailable and has not been replaced. Choose an available family or clear it.'
+                        : 'Leave empty to let the workspace choose.'
                 }
               >
                 <Select
@@ -70,7 +89,7 @@ export function AgentModelPicker({
                       {selected ? (
                         <ModelOption family={selected} />
                       ) : value ? (
-                        `${value} (unavailable)`
+                        `${modelName(families, value)}${planModelOfFamily(value) ? '' : ' (unavailable)'}`
                       ) : (
                         'Workspace default'
                       )}
@@ -80,14 +99,24 @@ export function AgentModelPicker({
                     <SelectItem value="">Workspace default</SelectItem>
                     {value && !selected && (
                       <SelectItem value={value} disabled>
-                        {value} (unavailable)
+                        {modelName(families, value)}
+                        {planModelOfFamily(value) ? '' : ' (unavailable)'}
                       </SelectItem>
                     )}
-                    {families.map(family => (
-                      <SelectItem key={family.id} value={family.id} disabled={!family.available}>
-                        <ModelOption family={family} details />
-                      </SelectItem>
-                    ))}
+                    {plans.length > 0 ? (
+                      <>
+                        <SelectGroup>
+                          <SelectLabel>Your plans</SelectLabel>
+                          {options(plans)}
+                        </SelectGroup>
+                        <SelectGroup>
+                          <SelectLabel>Workspace credits</SelectLabel>
+                          {options(credits)}
+                        </SelectGroup>
+                      </>
+                    ) : (
+                      options(credits)
+                    )}
                   </SelectContent>
                 </Select>
               </Field>
@@ -96,9 +125,11 @@ export function AgentModelPicker({
           );
         }}
       </ModelRead>
-      {value && catalog.state.kind === 'ready' && catalog.state.data.families.some(family => family.id === value) && (
-        <InheritedFallback key={`${workspaceId}/${value}`} api={api} source={value} />
-      )}
+      {value &&
+        catalog.state.kind === 'ready' &&
+        catalog.state.data.families.some(family => family.id === value && !familyPlan(family)) && (
+          <InheritedFallback key={`${workspaceId}/${value}`} api={api} source={value} />
+        )}
     </FormSection>
   );
 }

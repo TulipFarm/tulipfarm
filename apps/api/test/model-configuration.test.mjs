@@ -88,3 +88,21 @@ test('the catalog and worker model calls enable the same families with the same 
   assert.equal(snapshot.modelFamilyEligibility(request('claude-opus')), false);
   assert.equal(conversationModel('claude-opus', served), null);
 });
+
+test("a plan model is eligible only as an agent's model, never for memberless work or as a fallback", async () => {
+  const { modelFamilyEligibility } = createModelConfiguration({
+    pool,
+    env: { ...env, MODEL_CATALOG: catalogOf(['claude-opus', 'claude-sonnet', 'chatgpt-luna']) },
+  });
+  assert.equal(await modelFamilyEligibility(request('chatgpt-luna', { purpose: 'agent-model' })), true);
+  assert.equal(await modelFamilyEligibility(request('chatgpt-luna')), false);
+  assert.equal(
+    await modelFamilyEligibility(request('chatgpt-luna', { purpose: 'agent-model', fallbackFor: 'claude-opus' })),
+    false,
+  );
+  assert.equal(
+    await modelFamilyEligibility(request('claude-opus', { purpose: 'agent-model', fallbackFor: 'chatgpt-luna' })),
+    false,
+  );
+  assert.equal(await modelFamilyEligibility(request('claude-sonnet', { purpose: 'agent-model' })), true);
+});

@@ -9,8 +9,18 @@ import {
   type ResolvedModel,
   type ServedModelCatalog,
 } from '@tulipfarm/config';
-import { inferDecision, inferenceRouteSchema, routeCapabilities, type InferenceRoute } from './inference.ts';
-import type { ModelContinuity } from './continuity.ts';
+import {
+  inferDecision,
+  inferenceRouteSchema,
+  isPlanRoute,
+  planRouteFailure,
+  routeCapabilities,
+  type InferenceResult,
+  type InferenceRoute,
+  type PlanRouteProvider,
+} from './inference.ts';
+import type { ModelContinuity, RunMember } from './continuity.ts';
+import type { MemberPlanAccess } from './member-plans.ts';
 import type { ModelRouteHealth } from './model-health.ts';
 import type { ModelBundleStore } from './model-bundles.ts';
 
@@ -83,11 +93,21 @@ function buildModelEnvironment(catalog: ServedModelCatalog, credentials: readonl
   });
   const defaultFamily = catalog.defaultModel.id;
   const paused = (familyId: string) => catalog.model(familyId)?.paused ?? false;
-  const binding = (resolution: ResolvedModel) =>
-    [...configured, ...planItems()].find(
-      item => item.route.id === resolution.route.id && JSON.stringify(item.route) === JSON.stringify(resolution.route),
-    ) ?? null;
+  const binding = (resolution: ResolvedModel) => {
+    // A run admitted elsewhere may name a plan model this process has not built yet.
+    planBundle(resolution.familyId);
+    return (
+      [...configured, ...planItems()].find(
+        item =>
+          item.route.id === resolution.route.id && JSON.stringify(item.route) === JSON.stringify(resolution.route),
+      ) ?? null
+    );
+  };
   const inference = (resolution: ResolvedModel): InferenceRoute | null => binding(resolution)?.inference ?? null;
+  const isPlanFamily = (familyId: string) => {
+    const type = catalog.model(familyId)?.route.type;
+    return type !== undefined && isPlanProvider(type);
+  };
   const deploymentKey = (resolution: ResolvedModel) => {
     const route = inference(resolution);
     if (!route) throw new Error('Model route unavailable');
@@ -119,13 +139,63 @@ function buildModelEnvironment(catalog: ServedModelCatalog, credentials: readonl
         throw error;
       }
     },
-    /** `bundles` supplies the bundles of earlier configurations, so runs bound to them can finish and settle. */
+    /**
+     * `bundles` supplies the bundles of earlier configurations, so runs bound to them can finish and settle, and keeps
+     * the bundles of plan models runs are admitted on. `plans` gives a run's member their plans; without it, or without
+     * a member, a run on a plan model stops for lack of one.
+     */
     continuity(
       health: (deploymentKey: (resolution: ResolvedModel) => string) => ModelRouteHealth,
-      bundles?: Pick<ModelBundleStore, 'read'>,
+      bundles?: Pick<ModelBundleStore, 'read'> & Partial<Pick<ModelBundleStore, 'register'>>,
+      plans?: MemberPlanAccess,
     ): ModelContinuity {
+      const registered = new Set<string>();
+      /** Runs a plan model's decision on the member's plans in turn, stopping when none can answer. */
+      const planDecision = async (
+        route: Extract<InferenceRoute, { provider: PlanRouteProvider }>,
+        input: Parameters<ModelContinuity['infer']>[1],
+        timeoutMs: number,
+        signal: AbortSignal,
+        member: RunMember,
+      ): Promise<InferenceResult> => {
+        // Without a member's token the decision fails with the plan's member-required reason.
+        if (!member.membershipId || !plans) return inferDecision({ ...route, timeoutMs }, input, signal);
+        const deadline = Date.now() + timeoutMs;
+        const access = await plans({
+          provider: route.provider,
+          workspaceId: member.workspaceId,
+          membershipId: member.membershipId,
+          model: route.model,
+        });
+        let token = access.token;
+        let result: InferenceResult | undefined;
+        while (token) {
+          result = await inferDecision(
+            { ...route, accessToken: token, timeoutMs: Math.max(1, deadline - Date.now()) },
+            input,
+            signal,
+          );
+          if (result.kind !== 'failure' || signal.aborted || deadline - Date.now() < 2000) break;
+          const failure = planRouteFailure(result.reason);
+          if (!failure) break;
+          token = await access.next(failure, result.retryAfterMs ?? undefined);
+        }
+        if (!result) return inferDecision({ ...route, timeoutMs }, input, signal);
+        if (result.kind === 'success') await access.answered();
+        return { ...result, planConnectionId: access.source().connectionId };
+      };
       return {
-        activeBundle: () => ({ bundle, activationRevision: 0 }),
+        activeBundle: (_workspaceId, familyId) => {
+          const plan = familyId === undefined ? null : planBundle(familyId);
+          if (!plan) return { bundle, activationRevision: 0 };
+          const active = { bundle: plan.bundle, activationRevision: 0 };
+          if (!bundles?.register || registered.has(plan.bundle.id)) return active;
+          // Another process may settle the run, so it must be able to read the plan model's bundle back.
+          return bundles.register(plan.bundle).then(() => {
+            registered.add(plan.bundle.id);
+            return active;
+          });
+        },
         trustedBundle: bundleId => {
           if (bundleId === bundle.id) return bundle;
           const plan = [...planBundles.values()].find(built => built.bundle.id === bundleId);
@@ -142,16 +212,24 @@ function buildModelEnvironment(catalog: ServedModelCatalog, credentials: readonl
         budgetPicoUsd: () => runBudgetPicoUsd,
         defaultFamily: () => defaultFamily,
         paused,
-        fallbacks: familyId => catalog.fallbacks(familyId).map(model => model.id),
+        // A plan model never falls back, and is never a fallback.
+        fallbacks: familyId =>
+          isPlanFamily(familyId)
+            ? []
+            : catalog
+                .fallbacks(familyId)
+                .filter(model => !isPlanProvider(model.route.type))
+                .map(model => model.id),
         imageInput: resolution => {
           const route = inference(resolution);
           return route && routeCapabilities(route).imageInput ? modelImageLimits(route.provider, route.model) : null;
         },
         imageCatalog: catalog,
         health: health(deploymentKey),
-        infer: (resolution, input, timeoutMs, signal) => {
+        infer: (resolution, input, timeoutMs, signal, member) => {
           const route = inference(resolution);
           if (!route) throw new Error('Model route unavailable');
+          if (isPlanRoute(route)) return planDecision(route, input, timeoutMs, signal, member);
           return inferDecision({ ...route, timeoutMs }, input, signal);
         },
       };

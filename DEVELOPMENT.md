@@ -78,6 +78,20 @@ in Models settings. Local development completes the sign-in on
 `http://127.0.0.1:1455/auth/callback`; see
 [`self-host/README.md`](self-host/README.md#chatgpt-plan).
 
+To use your own Claude or GitHub Copilot plan locally without signing in on
+every fresh database or workspace, put a token, or a command that prints one,
+in `~/.tulipfarm/dev.env` (or the file `TULIPFARM_DEV_ENV_FILE` names). Every
+worktree reads it, and it never enters the repository:
+
+```sh
+TULIPFARM_DEV_PLAN_COPILOT_TOKEN_COMMAND=gh auth token
+TULIPFARM_DEV_PLAN_CLAUDE_TOKEN=sk-ant-oat01-...
+```
+
+The first time a member's model list loads in a workspace, the API connects
+that member's plan with the token, as if they had pasted it in Models settings.
+It only runs where local sign-in does, and leaves a working connection alone.
+
 ## Commands
 
 | Command             | What it does                                                                         |

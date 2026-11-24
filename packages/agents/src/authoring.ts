@@ -127,7 +127,7 @@ export function createAgentAuthoring(runtime: AgentStorage, eligible: ModelFamil
         if (await changesFamily(transaction, agentId, input.definition.modelFamilyId)) {
           if (!(await modelFamilyEnabled(transaction, input.definition.modelFamilyId)))
             throw new AgentError('workspace-disabled', 400);
-          if (!(await eligible({ workspaceId, modelFamilyId: input.definition.modelFamilyId })))
+          if (!(await eligible({ workspaceId, modelFamilyId: input.definition.modelFamilyId, purpose: 'agent-model' })))
             throw new AgentError('model-family-unavailable', 400);
         }
       }

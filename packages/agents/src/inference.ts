@@ -308,13 +308,18 @@ export function planFailure(error: unknown): PlanFailure | undefined {
   return error instanceof Error ? (planFailurePattern.exec(error.message)?.[1] as PlanFailure | undefined) : undefined;
 }
 
+/** The plan failure an inference failure reason names, such as `claude-usage-limit`, for trying the next plan. */
+export const planRouteFailure = (reason: string) => planFailure(new Error(`model-${reason}`));
+
 /** Failures of a member's plan route; the conversation shows each with its own recovery action. */
 export type PlanRouteFailure = `${PlanRouteProvider}-${PlanFailure | 'member-required'}`;
 export type ChatGptFailure = Extract<PlanRouteFailure, `chatgpt-${string}`>;
 const memberRequired = (provider: PlanRouteProvider): PlanRouteFailure => `${provider}-member-required`;
 type Attribution = { actualModel: string | null; requestId: string | null; usage: InferenceUsage };
-export type InferenceResult = Attribution &
-  (
+export type InferenceResult = Attribution & {
+  /** The member's plan connection that took the call, for usage records; absent off a plan. */
+  planConnectionId?: string | null;
+} & (
     | { kind: 'success'; decision: z.infer<typeof modelDecisionSchema> }
     | {
         kind: 'failure';
@@ -1043,11 +1048,9 @@ export async function inferDecision(
   if (callerSignal?.aborted) return { ...failure('cancelled', null), dispatch: 'not-started' };
   const config = inferenceRouteSchema.safeParse(route);
   if (!config.success) return { ...failure('configuration', null), dispatch: 'not-started' };
-  // Agent decisions never run for a member, so they cannot use a member's plan.
-  if (isPlanRoute(config.data))
-    return { ...failure(memberRequired(config.data.provider), null), dispatch: 'not-started' };
   const parsedInput = agentModelInputSchema.safeParse(input);
   if (!parsedInput.success) return { ...failure('invalid-request', null), dispatch: 'not-started' };
+  if (isPlanRoute(config.data)) return inferPlanDecision(config.data, parsedInput.data, callerSignal);
   return withChatModelRequest('reply', async () => {
     const { wire, catalog } = observeChatDetailSync('round-prepare', () => request(config.data, parsedInput.data));
     return observeInference(
@@ -1214,6 +1217,60 @@ export async function inferDecision(
         return result;
       },
     );
+  });
+}
+
+/**
+ * A decision on a member's plan, sent as plan chats send their rounds. Without the member's token it fails with the
+ * plan's member-required reason; plan failures keep their own reasons so the caller can try the member's next plan.
+ */
+async function inferPlanDecision(
+  config: Extract<z.output<typeof inferenceRouteSchema>, { provider: PlanRouteProvider }>,
+  input: z.output<typeof agentModelInputSchema>,
+  callerSignal?: AbortSignal,
+): Promise<InferenceResult> {
+  if (!config.accessToken) return { ...failure(memberRequired(config.provider), null), dispatch: 'not-started' };
+  return withChatModelRequest('reply', async () => {
+    const { wire, catalog } = observeChatDetailSync('round-prepare', () => request(config, input));
+    let attribution: Attribution = { actualModel: null, requestId: null, usage: { kind: 'unknown' } };
+    try {
+      const decision = await sendChatRequest(
+        config,
+        0,
+        undefined,
+        wire,
+        body => {
+          const meta = metadataSchema.safeParse(body);
+          // Plan sessions answer on the requested model without naming it.
+          attribution = {
+            ...attribution,
+            actualModel: (meta.success && meta.data.model) || config.model,
+            requestId: (meta.success && meta.data.request_id) || null,
+          };
+          const selected = nativeStep(config, body);
+          if (selected.kind === 'failure') return { value: undefined, failed: true, rejection: selected.rejection };
+          if (unusableStep(selected)) return { value: undefined, failed: true };
+          try {
+            return { value: parseNativeAgentDecision(selected, input, catalog), failed: false };
+          } catch {
+            return { value: undefined, failed: true };
+          }
+        },
+        undefined,
+        undefined,
+        (_measure, value) => {
+          attribution = { ...attribution, usage: value };
+        },
+        callerSignal,
+      );
+      if (!decision) return failure('invalid-decision', 200, attribution);
+      return { kind: 'success', decision, ...attribution };
+    } catch (error) {
+      if (callerSignal?.aborted) return failure('cancelled', null, attribution);
+      if (!(error instanceof ModelCallError)) return failure('transport', null, attribution);
+      const { status, retryAfterMs } = error.modelDiagnostics;
+      return failure(error.reason as InferenceFailure, status ?? null, attribution, retryAfterMs ?? null);
+    }
   });
 }
 

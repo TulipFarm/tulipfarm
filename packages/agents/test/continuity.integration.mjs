@@ -13,7 +13,13 @@ import { Client } from 'pg';
 import { provisionWorkspace } from '@tulipfarm/workspace-storage/provisioning';
 import { createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
-import { initialBundleModels, initialModelMapping, modelBundleSchema } from '@tulipfarm/config';
+import {
+  initialBundleModels,
+  initialModelMapping,
+  loadModelCatalog,
+  modelBundleSchema,
+  servedModelBundle,
+} from '@tulipfarm/config';
 import { AccessDenied } from '@tulipfarm/access';
 import { createAgentChat, createModelRouteHealth } from '../dist/chat.js';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
@@ -1308,6 +1314,93 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
             `INSERT INTO ${table('tf_grants')} (team_id,asset_id,permission) VALUES ($1,$2,'table.row.read')`,
             [teamId, tableId],
           );
+        },
+      );
+      await t.test(
+        "a plan model runs on the member's plan with no fallback or paused replacement and records plan-paid usage",
+        async () => {
+          const shipped = JSON.parse(
+            await readFile(new URL('../../config/catalog/models.json', import.meta.url), 'utf8'),
+          ).models;
+          const pick = id => shipped.find(model => model.id === id);
+          const served = loadModelCatalog({
+            ANTHROPIC_API_KEY: 'synthetic-key',
+            MODEL_CATALOG: JSON.stringify({
+              version: 1,
+              models: [{ ...pick('claude-opus'), default: true, fallback: null }, pick('chatgpt-luna')],
+            }),
+          });
+          const plan = servedModelBundle({ models: [served.model('chatgpt-luna')] }).bundle;
+          const previousFlag = process.env.FEATURE_FLAG_CHATGPT_PLAN;
+          process.env.FEATURE_FLAG_CHATGPT_PLAN = 'true';
+          await owner.query(
+            `UPDATE ${table('tf_agent_definitions')} SET definition=jsonb_set(definition,'{modelFamilyId}','"chatgpt-luna"') WHERE agent_id=$1`,
+            [agentId],
+          );
+          await rule('gpt-astra');
+          const connectionId = randomUUID();
+          const called = [],
+            members = [];
+          let reply = { ...unavailable, reason: 'chatgpt-usage-limit', status: 429 };
+          const base = config(
+            async (resolution, _input, _timeoutMs, _signal, member) => {
+              called.push(resolution.familyId);
+              members.push(member);
+              return { ...reply, planConnectionId: connectionId };
+            },
+            () => true,
+          );
+          const chat = createAgentChat(runtime, {
+            ...base,
+            activeBundle: (_workspaceId, familyId) =>
+              familyId === 'chatgpt-luna' ? { bundle: plan, activationRevision: 1 } : base.activeBundle(),
+            trustedBundle: id => (id === plan.id ? plan : base.trustedBundle(id)),
+            restrictions: () => ({
+              allowedProviders: ['anthropic', 'azure', 'chatgpt'],
+              allowedLocations: ['test', 'server'],
+            }),
+            fallbacks: () => ['gpt-astra'],
+          });
+          try {
+            const stopped = await submit(chat);
+            await exhaust(chat, stopped);
+            assert.ok(called.length > 0);
+            assert.ok(called.every(familyId => familyId === 'chatgpt-luna'));
+            assert.deepEqual(members[0], { workspaceId, membershipId });
+            const failed = await chat.read(workspaceId, ownerUserId, agentId, stopped);
+            assert.equal(failed.status, 'failed');
+            assert.equal(failed.model.failure, 'chatgpt-usage-limit');
+
+            reply = answer;
+            const answered = await submit(chat);
+            await clearWait();
+            await chat.processTurn(workspaceId, answered);
+            assert.equal((await chat.read(workspaceId, ownerUserId, agentId, answered)).status, 'answered');
+            const receipt = (await attempts(answered))[0];
+            const usage = (
+              await owner.query(
+                `SELECT m.paid_by,m.connection_id,m.model_provider,m.activity,u.charged FROM ${table('tf_model_usage')} m JOIN ${table('tf_credit_usage')} u ON u.id=m.id WHERE m.id=$1`,
+                [receipt.id],
+              )
+            ).rows[0];
+            assert.deepEqual(
+              { ...usage, charged: String(usage.charged) },
+              {
+                paid_by: 'plan',
+                connection_id: connectionId,
+                model_provider: 'chatgpt',
+                activity: 'agent',
+                charged: '0',
+              },
+            );
+          } finally {
+            if (previousFlag === undefined) delete process.env.FEATURE_FLAG_CHATGPT_PLAN;
+            else process.env.FEATURE_FLAG_CHATGPT_PLAN = previousFlag;
+            await owner.query(
+              `UPDATE ${table('tf_agent_definitions')} SET definition=jsonb_set(definition,'{modelFamilyId}','"claude-opus"') WHERE agent_id=$1`,
+              [agentId],
+            );
+          }
         },
       );
       await t.test('legacy definitions require an explicit trusted binding', async () => {

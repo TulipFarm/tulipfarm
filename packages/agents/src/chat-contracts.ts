@@ -8,7 +8,17 @@ const modelIdentitySchema = z.object({
   modelId: z.string(),
   route: z.object({
     id: z.string(),
-    provider: z.enum(['anthropic', 'openai', 'xai', 'google', 'azure', 'openai-compatible']),
+    provider: z.enum([
+      'anthropic',
+      'openai',
+      'xai',
+      'google',
+      'azure',
+      'openai-compatible',
+      'chatgpt',
+      'claude',
+      'copilot',
+    ]),
   }),
 });
 export const retryModelSchema = z.strictObject({

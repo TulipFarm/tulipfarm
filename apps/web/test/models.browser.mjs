@@ -1920,6 +1920,56 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
     );
 
     await scenario(
+      "agent model choices group the member's plans apart from workspace credits; a plan model inherits no fallback",
+      async (page, fixture) => {
+        fixture.catalog.families.push({
+          id: 'chatgpt-luna',
+          displayName: 'GPT-6 Luna',
+          vendor: 'openai',
+          currentVersion: 'gpt-6-luna',
+          provider: 'chatgpt',
+          inputCreditsPerMillionTokens: null,
+          outputCreditsPerMillionTokens: null,
+          available: true,
+          unavailableReason: null,
+          mappingRevision: 'fixture-mapping-1',
+          pricingRevision: 'fixture-pricing-1',
+          fallbackFor: [],
+        });
+        fixture.agent.definition.modelFamilyId = 'primary';
+        await page.goto(`${origin}/acme/agents/${agentId}`);
+        await page.getByRole('tab', { name: 'Instructions', exact: true }).click();
+        const inherited = page.getByRole('region', { name: 'Inherited workspace fallback', exact: true });
+        await inherited.waitFor();
+        await modelPreference(page).click();
+        const plans = page.getByRole('group', { name: 'Your plans', exact: true });
+        const credits = page.getByRole('group', { name: 'Workspace credits', exact: true });
+        assert.deepEqual(await plans.getByRole('option').allInnerTexts(), [
+          'GPT-6 Luna\nChatGPT plan, no workspace credits',
+        ]);
+        assert.equal(await credits.getByRole('option', { name: /^Primary family / }).count(), 1);
+        assert.equal(await credits.getByRole('option', { name: /^GPT-6 Luna/ }).count(), 0);
+        await plans.getByRole('option', { name: /^GPT-6 Luna/ }).click();
+        await page
+          .getByText("Runs on the plan of the person it works for. If that plan can't answer, the run stops.", {
+            exact: true,
+          })
+          .waitFor();
+        await inherited.waitFor({ state: 'detached' });
+        await page.getByRole('button', { name: 'Save agent', exact: true }).click();
+        await page
+          .getByText('Saved. Research assistant does not run until you activate a version.', { exact: true })
+          .waitFor();
+        assert.equal(writes(fixture)[0].body.definition.modelFamilyId, 'chatgpt-luna');
+        assert.equal(
+          fixture.requests.some(request => request.path.endsWith('/chatgpt-luna')),
+          false,
+          'A plan model must not load an inherited fallback',
+        );
+      },
+    );
+
+    await scenario(
       'agent conflict exposes newer definition and deliberately adopts its model preference',
       async (page, fixture) => {
         await page.goto(`${origin}/acme/agents/${agentId}`);

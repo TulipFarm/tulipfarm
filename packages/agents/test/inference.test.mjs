@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
+import { chatGptEndpoint, claudePlanEndpoint, copilotPlanEndpoint } from '@tulipfarm/config';
 import { fitFileImportSelection, parseImportFile } from '@tulipfarm/tables/imports';
 import { importWorkbook } from '../../tables/test/import-object-fixture.mjs';
 import { createServer } from 'node:http';
@@ -3510,4 +3511,16 @@ test('native-tool reminders omit duplicated tool descriptions', () => {
   assert.deepEqual(data({ kind: 'text' }).tools, {});
   assert.equal('tools' in data({ kind: 'agent', input }), false);
   assert.equal('generateTitle' in data({ kind: 'tools' }), false);
+});
+
+const planEndpoints = { chatgpt: chatGptEndpoint, claude: claudePlanEndpoint, copilot: copilotPlanEndpoint };
+test("an agent decision on a plan route without the member's token stops as member-required before dispatch", async t => {
+  const fetch = t.mock.method(globalThis, 'fetch', () => assert.fail('No plan call expected'));
+  for (const [provider, endpoint] of Object.entries(planEndpoints)) {
+    const result = await inferSourceDecision({ provider, endpoint, model: 'plan-model' }, input);
+    assert.equal(result.kind, 'failure');
+    assert.equal(result.reason, `${provider}-member-required`);
+    assert.equal(result.dispatch, 'not-started');
+  }
+  assert.equal(fetch.mock.callCount(), 0);
 });

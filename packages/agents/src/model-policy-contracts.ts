@@ -40,4 +40,6 @@ export type ModelFamilyEligibility = (input: {
   fallbackFor?: string;
   /** Use already bound to the family, such as a fallback rule from it; a paused family stays eligible. */
   existing?: boolean;
+  /** An agent's model, which may be a member's plan model since the agent runs for a member. */
+  purpose?: 'agent-model';
 }) => boolean | Promise<boolean>;
