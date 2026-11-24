@@ -22,7 +22,7 @@ export async function startGitHubKnowledgeWorkflow(
     await temporal.connection.withDeadline(Date.now() + 10000, () =>
       temporal.client.workflow.start('githubKnowledgeSync', {
         workflowId: `knowledge-github-${work.workspaceId}-${work.sourceId}-${work.generation}`,
-        taskQueue: `${process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm'}-knowledge-github`,
+        taskQueue: `${process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm'}-knowledge`,
         args: [work],
         workflowIdConflictPolicy: 'USE_EXISTING',
         workflowIdReusePolicy: 'ALLOW_DUPLICATE',

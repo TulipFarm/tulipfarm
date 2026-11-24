@@ -14,6 +14,8 @@ const packages = [
   ['@tulipfarm/api', 'apps/api'],
   ['@tulipfarm/worker', 'apps/worker'],
 ];
+// The worker also prebuilds its Temporal workflow bundles from the compiled output.
+const buildSteps = { '@tulipfarm/worker': ['scripts/bundle-workflows.mjs'] };
 
 function sourceFiles(directory, prefix = 'src') {
   return readdirSync(join(directory, prefix), { withFileTypes: true }).flatMap(entry => {
@@ -55,13 +57,14 @@ test('memory extraction builds retain every compiler input while test tasks reta
     const path = join(root, directory);
     const manifest = JSON.parse(readFileSync(join(path, 'package.json'), 'utf8'));
     const config = JSON.parse(readFileSync(join(path, 'tsconfig.json'), 'utf8'));
-    assert.equal(manifest.scripts.build, 'tsc -p tsconfig.json');
+    const steps = buildSteps[name] ?? [];
+    assert.equal(manifest.scripts.build, ['tsc -p tsconfig.json', ...steps.map(step => `node ${step}`)].join(' && '));
     assert.deepEqual(config.include, ['src']);
     const build = tasks.find(task => task.taskId === `${name}#build`);
     const tests = tasks.find(task => task.taskId === `${name}#test`);
     assert.ok(build, name);
     assert.ok(tests, name);
-    for (const input of ['package.json', 'tsconfig.json', ...sourceFiles(path)]) {
+    for (const input of ['package.json', 'tsconfig.json', ...steps, ...sourceFiles(path)]) {
       assert.ok(Object.hasOwn(build.inputs, input), `${name}: missing build input ${input}`);
     }
     const compilerFiles = await commandOutput(['exec', 'tsc', '-p', `${directory}/tsconfig.json`, '--listFilesOnly']);

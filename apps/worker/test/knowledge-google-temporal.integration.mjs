@@ -5,7 +5,8 @@ import { test } from 'node:test';
 import { NativeConnection } from '@temporalio/worker';
 import { Client, Connection } from '@temporalio/client';
 import { createGoogleWorkspaceService } from '@tulipfarm/google-workspace';
-import { createGoogleKnowledgeWorker } from '../dist/knowledge-google-composition.js';
+import { createGoogleKnowledgeParts } from '../dist/knowledge-google-composition.js';
+import { createKnowledgeWorker } from '../dist/knowledge-worker.js';
 import { startGoogleKnowledgeWorkflow } from '../../api/dist/knowledge-google-dispatch.js';
 import { knowledgeFixture } from '../../api/test/knowledge-fixture.mjs';
 import { googleProviderFixture, connectGoogle } from '../../api/test/knowledge-google-provider-fixture.mjs';
@@ -49,14 +50,18 @@ test(
       });
       assert.equal(configured.status, 200, configured.bytes.toString());
       const workerService = createGoogleWorkspaceService({ runtime: f.runtime, ...provider.options });
-      googleWorker = await createGoogleKnowledgeWorker({
-        runtime: f.runtime,
+      googleWorker = await createKnowledgeWorker({
         connection,
         env,
-        googleService: workerService,
-        providerFetch: provider.providerFetch,
+        parts: {
+          google: createGoogleKnowledgeParts({
+            runtime: f.runtime,
+            googleService: workerService,
+            providerFetch: provider.providerFetch,
+          }).activities,
+        },
       });
-      googleRunning = googleWorker.worker.run();
+      googleRunning = googleWorker.run();
       const source = async () =>
         (
           await f.db.platform.query(
@@ -141,7 +146,7 @@ test(
     } finally {
       await f?.app.close();
       if (googleWorker) {
-        googleWorker.worker.shutdown();
+        googleWorker.shutdown();
         await googleRunning;
       }
       await f?.close();

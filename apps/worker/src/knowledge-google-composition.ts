@@ -1,7 +1,3 @@
-import { extname } from 'node:path';
-import { workerTelemetry, type WorkerTelemetry } from './telemetry.ts';
-import { fileURLToPath } from 'node:url';
-import { Worker, type NativeConnection } from '@temporalio/worker';
 import { createGoogleWorkspaceService } from '@tulipfarm/google-workspace';
 import { createGoogleCorpusProvider } from '@tulipfarm/google-workspace/corpus';
 import { createGoogleKnowledge } from '@tulipfarm/knowledge';
@@ -33,28 +29,8 @@ export function createWorkerGoogleKnowledge(dependencies: {
   });
 }
 
-export async function createGoogleKnowledgeWorker(
-  dependencies: Parameters<typeof createWorkerGoogleKnowledge>[0] & {
-    connection: NativeConnection;
-    env?: NodeJS.ProcessEnv;
-    createWorker?: typeof Worker.create;
-    telemetry?: WorkerTelemetry;
-  },
-) {
-  const env = dependencies.env ?? process.env;
+/** The Google sync service and the activities the knowledge worker runs for it. */
+export function createGoogleKnowledgeParts(dependencies: Parameters<typeof createWorkerGoogleKnowledge>[0]) {
   const service = createWorkerGoogleKnowledge(dependencies);
-  const createWorker = dependencies.createWorker ?? Worker.create.bind(Worker);
-  const worker = await createWorker({
-    ...workerTelemetry(dependencies.telemetry),
-    connection: dependencies.connection,
-    namespace: env.TEMPORAL_NAMESPACE ?? 'default',
-    taskQueue: `${env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm'}-knowledge-google`,
-    workflowsPath: fileURLToPath(
-      new URL(`./knowledge-google-workflows${extname(import.meta.filename)}`, import.meta.url),
-    ),
-    activities: createGoogleKnowledgeActivities(service),
-    maxConcurrentActivityTaskExecutions: 2,
-    shutdownGraceTime: '40 seconds',
-  });
-  return { worker, service };
+  return { service, activities: createGoogleKnowledgeActivities(service) };
 }

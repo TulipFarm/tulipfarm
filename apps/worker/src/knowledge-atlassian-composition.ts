@@ -1,7 +1,3 @@
-import { extname } from 'node:path';
-import { workerTelemetry, type WorkerTelemetry } from './telemetry.ts';
-import { fileURLToPath } from 'node:url';
-import { Worker, type NativeConnection } from '@temporalio/worker';
 import { createAtlassianKnowledge, type AtlassianCorpusProvider } from '@tulipfarm/knowledge';
 import type { KnowledgeSourceGate } from '@tulipfarm/knowledge';
 import { atlassianCorpusFromEnvironment } from '@tulipfarm/atlassian/corpus';
@@ -25,27 +21,8 @@ export function createWorkerAtlassianKnowledge(dependencies: {
   });
 }
 
-export async function createAtlassianKnowledgeWorker(
-  dependencies: Parameters<typeof createWorkerAtlassianKnowledge>[0] & {
-    connection: NativeConnection;
-    createWorker?: typeof Worker.create;
-    telemetry?: WorkerTelemetry;
-  },
-) {
-  const env = dependencies.env ?? process.env;
+/** The Atlassian sync service and the activities the knowledge worker runs for it. */
+export function createAtlassianKnowledgeParts(dependencies: Parameters<typeof createWorkerAtlassianKnowledge>[0]) {
   const service = createWorkerAtlassianKnowledge(dependencies);
-  const createWorker = dependencies.createWorker ?? Worker.create.bind(Worker);
-  const worker = await createWorker({
-    ...workerTelemetry(dependencies.telemetry),
-    connection: dependencies.connection,
-    namespace: env.TEMPORAL_NAMESPACE ?? 'default',
-    taskQueue: `${env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm'}-knowledge-atlassian`,
-    workflowsPath: fileURLToPath(
-      new URL(`./knowledge-atlassian-workflows${extname(import.meta.filename)}`, import.meta.url),
-    ),
-    activities: createAtlassianKnowledgeActivities(service),
-    maxConcurrentActivityTaskExecutions: 2,
-    shutdownGraceTime: '40 seconds',
-  });
-  return { worker, service };
+  return { service, activities: createAtlassianKnowledgeActivities(service) };
 }

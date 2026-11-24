@@ -19,6 +19,15 @@ One version identifies all apps and images of a release.
 
 ### Changed
 
+- The worker serves every Knowledge workflow (Google, Slack, GitHub,
+  Atlassian, automatic integration Knowledge and Keep delivery) from the one
+  `<TEMPORAL_TASK_QUEUE>-knowledge` task queue with a single Temporal worker,
+  instead of one worker and queue per provider. The knowledge worker uses
+  less memory and starts faster, and `pnpm build` now prebuilds the workflow
+  bundles into `apps/worker/dist`, so workers no longer bundle workflow code
+  at startup. When upgrading, terminate any Knowledge workflows still open on
+  the old `-knowledge-<provider>` queues; the API's background sweeps start
+  them again on the new queue.
 - Keep now always holds personal memory, answers Knowledge search and recalls
   compacted chats, in every workspace; the `keep-memory` feature flag is
   removed. Nothing moves from the earlier memory: members start with empty

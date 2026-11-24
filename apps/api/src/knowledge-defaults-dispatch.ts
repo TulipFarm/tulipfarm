@@ -18,7 +18,7 @@ export async function startDefaultKnowledgeWorkflow(
     await temporal.connection.withDeadline(Date.now() + 10000, () =>
       temporal.client.workflow.start('knowledgeDefaultsSync', {
         workflowId: `knowledge-defaults-${work.workspaceId}-${work.intentId}-${work.generation}`,
-        taskQueue: `${process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm'}-knowledge-defaults`,
+        taskQueue: `${process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm'}-knowledge`,
         args: [work],
         workflowIdConflictPolicy: 'USE_EXISTING',
         workflowIdReusePolicy: 'ALLOW_DUPLICATE',

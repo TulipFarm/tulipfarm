@@ -4,7 +4,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import { NativeConnection } from '@temporalio/worker';
 import { Client, Connection } from '@temporalio/client';
-import { createSlackKnowledgeWorker } from '../dist/knowledge-slack-composition.js';
+import { createSlackKnowledgeParts } from '../dist/knowledge-slack-composition.js';
+import { createKnowledgeWorker } from '../dist/knowledge-worker.js';
 import { startSlackKnowledgeWorkflow } from '../../api/dist/knowledge-slack-dispatch.js';
 import { knowledgeFixture } from '../../api/test/knowledge-fixture.mjs';
 import { slackProviderFixture } from '../../api/test/knowledge-slack-provider-fixture.mjs';
@@ -51,13 +52,17 @@ test(
         },
       });
       assert.equal(configured.status, 200, configured.bytes.toString());
-      slackWorker = await createSlackKnowledgeWorker({
-        runtime: f.runtime,
+      slackWorker = await createKnowledgeWorker({
         connection,
         env,
-        slackCorpus: slack.provider(f.runtime),
+        parts: {
+          slack: createSlackKnowledgeParts({
+            runtime: f.runtime,
+            slackCorpus: slack.provider(f.runtime),
+          }).activities,
+        },
       });
-      slackRunning = slackWorker.worker.run();
+      slackRunning = slackWorker.run();
       const source = async () =>
         (
           await f.db.platform.query(
@@ -138,7 +143,7 @@ test(
     } finally {
       await f?.app.close();
       if (slackWorker) {
-        slackWorker.worker.shutdown();
+        slackWorker.shutdown();
         await slackRunning;
       }
       await f?.close();

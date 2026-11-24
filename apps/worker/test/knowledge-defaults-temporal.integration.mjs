@@ -9,8 +9,9 @@ import {
   defaultKnowledgeFlagEnabled,
   recordDefaultKnowledgeIntent,
 } from '@tulipfarm/knowledge';
-import { createGitHubKnowledgeWorker } from '../dist/knowledge-github-composition.js';
-import { createDefaultKnowledgeWorker } from '../dist/knowledge-defaults-composition.js';
+import { createGitHubKnowledgeParts } from '../dist/knowledge-github-composition.js';
+import { createDefaultKnowledgeParts } from '../dist/knowledge-defaults-composition.js';
+import { createKnowledgeWorker } from '../dist/knowledge-worker.js';
 import { startDefaultKnowledgeWorkflow } from '../../api/dist/knowledge-defaults-dispatch.js';
 import { knowledgeFixture } from '../../api/test/knowledge-fixture.mjs';
 import { githubProviderFixture } from '../../api/test/knowledge-github-provider-fixture.mjs';
@@ -33,7 +34,7 @@ test(
     const queue = `default-knowledge-${randomUUID()}`;
     process.env.TEMPORAL_TASK_QUEUE = queue;
     const gh = githubProviderFixture();
-    let f, connection, clientConnection, githubWorker, defaultsWorker, githubRunning, defaultsRunning;
+    let f, connection, clientConnection, knowledgeWorker, knowledgeRunning;
     try {
       const address = process.env.TEST_TEMPORAL_ADDRESS ?? '127.0.0.1:7233';
       connection = await NativeConnection.connect({ address });
@@ -48,21 +49,18 @@ test(
         `UPDATE ${f.table('tf_credit_account')} SET available=10000000000000,granted=10000000000000`,
       );
       const gate = createDefaultKnowledgeGate({ runtime: f.runtime });
-      githubWorker = await createGitHubKnowledgeWorker({
+      const github = createGitHubKnowledgeParts({
         runtime: f.runtime,
-        connection,
-        env,
         githubCorpus: gh.provider(f.runtime),
         gate,
       });
-      defaultsWorker = await createDefaultKnowledgeWorker({
-        runtime: f.runtime,
+      const defaults = createDefaultKnowledgeParts({ runtime: f.runtime, engines: { github: github.service } });
+      knowledgeWorker = await createKnowledgeWorker({
         connection,
         env,
-        engines: { github: githubWorker.service },
+        parts: { github: github.activities, defaults: defaults.activities },
       });
-      githubRunning = githubWorker.worker.run();
-      defaultsRunning = defaultsWorker.worker.run();
+      knowledgeRunning = knowledgeWorker.run();
       const owner = await gh.connect(f, f.signed.owner, 101, 'owner', undefined, {
         enabled: defaultKnowledgeFlagEnabled,
         record: recordDefaultKnowledgeIntent,
@@ -165,13 +163,9 @@ test(
       if (priorFlags === undefined) delete process.env.FEATURE_FLAGS_OFF;
       else process.env.FEATURE_FLAGS_OFF = priorFlags;
       await f?.app.close();
-      if (githubWorker) {
-        githubWorker.worker.shutdown();
-        await githubRunning;
-      }
-      if (defaultsWorker) {
-        defaultsWorker.worker.shutdown();
-        await defaultsRunning;
+      if (knowledgeWorker) {
+        knowledgeWorker.shutdown();
+        await knowledgeRunning;
       }
       await f?.close();
       await connection?.close();

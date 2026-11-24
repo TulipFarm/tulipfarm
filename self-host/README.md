@@ -127,6 +127,8 @@ image twice: one with `TULIPFARM_WORKER_ROLE=core` and one with
 `TULIPFARM_WORKER_ROLE=knowledge`. Both need the worker's environment. The
 knowledge role needs isolated workspace storage, and its telemetry uses the
 service name `tulipfarm-knowledge-worker`. Unset or `all` keeps one process.
+The knowledge role serves every Knowledge workflow from one task queue,
+`<TEMPORAL_TASK_QUEUE>-knowledge`.
 Document parsers always run at the lowest CPU priority.
 
 ## Separate API jobs
