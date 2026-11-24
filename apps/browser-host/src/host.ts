@@ -370,10 +370,46 @@ export async function createBrowserHost(options: HostOptions) {
   const resolved = new Map<string, { publicOnly: boolean; at: number }>();
 
   // Downloads in progress the browser reported whose session is still being found, by the browser's id.
-  const unclaimed = new Map<string, { url: string; name: string; received: number }>();
-  // The browser context of every page and frame the host has seen, kept after the frame is gone, so a download is
-  // traced to its session even when the frame that started it was removed straight away.
+  const unclaimed = new Map<string, { url: string; name: string; received: number; frameId: string }>();
+  // The browser context of every page and frame the host has seen, kept for a while after the frame is gone, so a
+  // download is traced to its session even when the frame that started it was removed straight away.
   const frameContexts = new Map<string, string>();
+  // When each frame that is gone was removed, oldest first. A download no session can be found for is stopped, so
+  // forgetting a frame only stops a download it starts after this long.
+  const removedFrames = new Map<string, number>();
+  const removedFrameMs = 60_000;
+  const maxRemovedFrames = 2000;
+
+  function trackFrame(frameId: string, contextId: string) {
+    frameContexts.set(frameId, contextId);
+    removedFrames.delete(frameId);
+  }
+
+  function removeFrame(frameId: string) {
+    if (!frameContexts.has(frameId)) return;
+    removedFrames.delete(frameId);
+    removedFrames.set(frameId, now());
+    forgetFrames();
+  }
+
+  /** Forgets frames removed over a minute ago, and the oldest beyond the cap for a context. */
+  function forgetFrames() {
+    const needed = new Set([...unclaimed.values()].map(transfer => transfer.frameId));
+    const counts = new Map<string, number>();
+    for (const frameId of removedFrames.keys()) {
+      const contextId = frameContexts.get(frameId) ?? '';
+      counts.set(contextId, (counts.get(contextId) ?? 0) + 1);
+    }
+    for (const [frameId, at] of removedFrames) {
+      if (needed.has(frameId)) continue;
+      const contextId = frameContexts.get(frameId) ?? '';
+      const count = counts.get(contextId) ?? 0;
+      if (now() - at < removedFrameMs && count <= maxRemovedFrames) continue;
+      removedFrames.delete(frameId);
+      frameContexts.delete(frameId);
+      counts.set(contextId, count - 1);
+    }
+  }
   // Downloads stopped because no session could be found for them, by address and file name, so the session
   // Playwright reports them to gets the reason.
   const untraced = new Set<string>();
@@ -386,10 +422,11 @@ export async function createBrowserHost(options: HostOptions) {
 
   async function watchDownloads(cdp: CDPSession, downloadsPath: string) {
     cdp.on('Target.targetCreated', ({ targetInfo }) => {
-      if (targetInfo.browserContextId) frameContexts.set(targetInfo.targetId, targetInfo.browserContextId);
+      if (targetInfo.browserContextId) trackFrame(targetInfo.targetId, targetInfo.browserContextId);
     });
+    cdp.on('Target.targetDestroyed', ({ targetId }) => removeFrame(targetId));
     cdp.on('Browser.downloadWillBegin', event => {
-      const transfer = { url: event.url, name: event.suggestedFilename, received: 0 };
+      const transfer = { url: event.url, name: event.suggestedFilename, received: 0, frameId: event.frameId };
       const known = sessionIn(frameContexts.get(event.frameId));
       if (known) {
         known.transfers.set(event.guid, transfer);
@@ -456,12 +493,16 @@ export async function createBrowserHost(options: HostOptions) {
   async function trackFrames(context: BrowserContext, contextId: string, page: Page) {
     const cdp = await context.newCDPSession(page).catch(() => undefined);
     if (!cdp) return;
-    cdp.on('Page.frameAttached', event => frameContexts.set(event.frameId, contextId));
-    cdp.on('Page.frameNavigated', event => frameContexts.set(event.frame.id, contextId));
+    cdp.on('Page.frameAttached', event => trackFrame(event.frameId, contextId));
+    cdp.on('Page.frameNavigated', event => trackFrame(event.frame.id, contextId));
+    // A frame swapped into its own process lives on as a browser target, so only a removal counts.
+    cdp.on('Page.frameDetached', event => {
+      if (event.reason === 'remove') removeFrame(event.frameId);
+    });
     await cdp.send('Page.enable').catch(() => undefined);
     const { frameTree } = await cdp.send('Page.getFrameTree').catch(() => ({ frameTree: undefined }));
     const add = (tree: FrameTree) => {
-      frameContexts.set(tree.frame.id, contextId);
+      trackFrame(tree.frame.id, contextId);
       for (const child of tree.childFrames ?? []) add(child);
     };
     if (frameTree) add(frameTree);
@@ -490,6 +531,7 @@ export async function createBrowserHost(options: HostOptions) {
         monitor = undefined;
         unclaimed.clear();
         frameContexts.clear();
+        removedFrames.clear();
         void rm(downloadsPath, { recursive: true, force: true });
         for (const session of sessions.values()) void session.close();
         sessions.clear();
@@ -590,7 +632,11 @@ export async function createBrowserHost(options: HostOptions) {
     session.contextId = contextId;
     await trackFrames(context, contextId, page);
     context.on('close', () => {
-      for (const [frameId, owner] of frameContexts) if (owner === contextId) frameContexts.delete(frameId);
+      for (const [frameId, owner] of frameContexts)
+        if (owner === contextId) {
+          frameContexts.delete(frameId);
+          removedFrames.delete(frameId);
+        }
     });
     const opened = session;
     const watch = (watched: Page) => watched.on('download', download => keep(opened, download));
@@ -1255,6 +1301,7 @@ export async function createBrowserHost(options: HostOptions) {
 
   async function sweep(): Promise<number> {
     let closed = 0;
+    forgetFrames();
     for (const [id, session] of sessions) {
       expireDownloads(session);
       const limit = session.needsPerson || session.controller === 'person' ? options.holdMs : options.idleMs;
@@ -1287,6 +1334,8 @@ export async function createBrowserHost(options: HostOptions) {
     close,
     sweep,
     size: () => sessions.size,
+    /** How many pages and frames the host is tracking, so tests can see removed ones are forgotten. */
+    trackedFrames: () => frameContexts.size,
     async shutdown() {
       for (const session of sessions.values()) await session.close();
       sessions.clear();

@@ -16,6 +16,23 @@ const pages = {
     </form>
     <a href="/popup" target="_blank">Open help</a>`,
   '/popup': `<!doctype html><title>Help</title><p>Help centre</p>`,
+  // Adds and removes many iframes, and starts a slow download in one that is removed once the file starts.
+  '/churn': `<!doctype html><title>Churn</title>
+    <button onclick="churn()">Churn frames</button>
+    <script>
+      function churn() {
+        for (let i = 0; i < 30; i += 1) {
+          const frame = document.createElement('iframe');
+          frame.srcdoc = 'frame ' + i;
+          document.body.append(frame);
+          frame.remove();
+        }
+        const frame = document.createElement('iframe');
+        frame.src = '/trickle.bin';
+        document.body.append(frame);
+        fetch('/download-started').then(() => frame.remove());
+      }
+    </script>`,
   // Starts a download in an iframe and removes the iframe as soon as the server starts sending the file.
   '/frame-download': `<!doctype html><title>Frame download</title>
     <button onclick="start()">Download in a frame</button>
@@ -177,6 +194,25 @@ before(async () => {
       response.on('close', () => {
         clearInterval(timer);
         stopped.push(url.pathname + url.search);
+      });
+      return;
+    }
+    // A download that sends a kilobyte at once and then one every 200 ms, so it passes 8 KiB after about 1.5 s.
+    if (url.pathname === '/trickle.bin') {
+      response.writeHead(200, {
+        'content-type': 'application/octet-stream',
+        'content-disposition': 'attachment; filename="trickle.bin"',
+      });
+      response.write(Buffer.alloc(1024, 1));
+      let sent = 1;
+      const timer = setInterval(() => {
+        response.write(Buffer.alloc(1024, 1));
+        // The page removes the iframe once the browser has had time to turn the response into a download.
+        if (++sent === 2) for (const waiting of downloadStarted.splice(0)) waiting.end();
+      }, 200);
+      response.on('close', () => {
+        clearInterval(timer);
+        stopped.push(url.pathname);
       });
       return;
     }
@@ -711,6 +747,34 @@ test('a download is held to its limits after the iframe that started it is remov
   assert.match(result.notice ?? '', /"stream.bin" was not saved: files are limited to 0 MiB/);
   assert.ok(stopped.includes('/stream.bin?frame'), 'the browser stopped receiving it');
   assert.ok(Date.now() - started < 3000, 'without waiting for it to finish');
+});
+
+test('removed frames are forgotten after a minute while a download one started is still held to its limits', async t => {
+  let clock = 1_000_000;
+  const host = await createBrowserHost({
+    ...options,
+    allowPrivateNetworks: true,
+    idleMs: 60 * 60_000,
+    maxDownloadBytes: 8 * 1024,
+    downloadWaitMs: 5000,
+    now: () => clock,
+  });
+  t.after(() => host.shutdown());
+  await host.open(sessionId);
+  const result = await host.act(sessionId, { action: 'navigate', url: `${origin}/churn` });
+  const before = host.trackedFrames();
+  const clicked = host.act(sessionId, { action: 'click', ref: ref(result.snapshot, /button "Churn frames"/) });
+  while (host.trackedFrames() < before + 31) await new Promise(resolve => setTimeout(resolve, 10));
+  while (!stopped.includes('/trickle.bin') && host.trackedFrames() > before) {
+    clock += 61_000;
+    await host.sweep();
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(host.trackedFrames(), before, 'removed frames are forgotten');
+  assert.ok(!stopped.includes('/trickle.bin'), 'while the download is still in progress');
+  const done = await clicked;
+  assert.match(done.notice ?? '', /"trickle.bin" was not saved: files are limited to 0 MiB/);
+  assert.ok(stopped.includes('/trickle.bin'), 'the browser stopped receiving it');
 });
 
 test('two sessions downloading the same file are each held to their own limits', async t => {
