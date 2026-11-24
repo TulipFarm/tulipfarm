@@ -36,7 +36,13 @@ function fakes({ logins = [], enabled = true, state } = {}) {
 }
 
 const run = ({ client, service }) =>
-  saveBackBrowserLogins({ client, logins: service, workspaceId, conversationId, actor });
+  saveBackBrowserLogins({
+    client,
+    logins: service,
+    workspaceId,
+    sessionId: browserSessionId(workspaceId, { conversationId }),
+    actor,
+  });
 
 test('saves each loaded login back as the requester and marks signed-out ones', async () => {
   const f = fakes({
