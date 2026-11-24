@@ -21,6 +21,7 @@ import { withBrowserGrant } from './tool-capabilities.ts';
 import type { InferenceResult } from './inference.ts';
 import { createAgentExecutor, type RunImages, type TaskBrowser, type TaskSecretsAccess } from './executor.ts';
 export type { TaskBrowser, TaskSecretsAccess } from './executor.ts';
+export type { BrowserMeter } from './browser-tools.ts';
 import type { SkillExecutionFactory } from './skill-execution.ts';
 import { createAgentTasks } from './tasks.ts';
 import { createTaskApprovals } from './task-approvals.ts';

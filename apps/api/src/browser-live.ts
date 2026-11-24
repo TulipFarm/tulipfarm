@@ -8,9 +8,13 @@ import {
   browserSessionId,
   browserSessionStateSchema,
   type BrowserHostClient,
+  type BrowserSessionState,
 } from '@tulipfarm/browser';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { errorAttributes, isFeatureEnabled } from '@tulipfarm/observability';
+import { resourceMeter } from '@tulipfarm/extensions';
+import { browserUsageCompatibility, recordBrowserUsage } from '@tulipfarm/workspace-storage/resource-credits';
+import type { SqlClient } from '@tulipfarm/workspace-storage/runtime';
 import type { registerAuth } from './auth.ts';
 import { authConfig } from './auth.ts';
 import { authenticateRoutes } from './authenticated-routes.ts';
@@ -53,6 +57,42 @@ type Owner = {
   handedBack?(workspaceId: string, id: string, log: (error: unknown) => void): Promise<void>;
 };
 
+/** Records that a person used or watched a browser session, so its open time is charged. Never throws. */
+type BrowserUsage = (workspaceId: string, sessionId: string, state: BrowserSessionState) => Promise<void>;
+
+/**
+ * Records a person's use of a session the agent opened, extending its charged time; it never starts a charge itself.
+ * Absent without a resource meter, as nothing is charged then.
+ */
+export function browserUsage(
+  runtime: {
+    transaction<T>(
+      workspaceId: string,
+      compatibility: { readonly minimum: number; readonly maximum: number },
+      action: (tx: { client: SqlClient; schema: string; commonVersion?: number }) => Promise<T>,
+    ): Promise<T>;
+  },
+  log: (error: unknown, workspaceId: string) => void,
+): BrowserUsage | undefined {
+  if (!resourceMeter()) return undefined;
+  return async (workspaceId, sessionId, state) => {
+    const { openedAt, closesAt } = state;
+    if (!openedAt || !closesAt) return;
+    try {
+      await runtime.transaction(workspaceId, browserUsageCompatibility, tx =>
+        recordBrowserUsage(tx, {
+          sessionId,
+          openedAt: new Date(openedAt),
+          closesAt: new Date(closesAt),
+          at: new Date(),
+        }),
+      );
+    } catch (error) {
+      log(error, workspaceId);
+    }
+  };
+}
+
 function registerLiveRoutes(
   app: FastifyInstance,
   auth: Pick<ReturnType<typeof registerAuth>['auth'], 'api'>,
@@ -60,6 +100,7 @@ function registerLiveRoutes(
   enabled: (workspaceId: string) => Promise<boolean>,
   streams: Set<() => void>,
   owner: Owner,
+  usage: BrowserUsage | undefined,
 ) {
   const schema = (operationId: string, summary: string, response: z.ZodType, body?: z.ZodType) => ({
     operationId,
@@ -122,7 +163,10 @@ function registerLiveRoutes(
         const { workspaceId, id } = owner.params.parse(request.params);
         // Without a browser host, or with browser use off, there is simply no browser.
         if (!(await visible(workspaceId, user(request), id)) || !client) return { browser: null };
-        return { browser: await client.state(owner.sessionId(workspaceId, id)) };
+        const sessionId = owner.sessionId(workspaceId, id);
+        const browser = await client.state(sessionId);
+        if (browser) await usage?.(workspaceId, sessionId, browser);
+        return { browser };
       },
     );
 
@@ -144,6 +188,7 @@ function registerLiveRoutes(
           sessionId,
           controller === 'person' ? { controller, memberId: userId } : { controller },
         );
+        await usage?.(workspaceId, sessionId, browser);
         if (controller === 'agent')
           await owner.handedBack?.(workspaceId, id, error =>
             request.log.warn(errorAttributes(error), 'browser_hand_back_wake_failed'),
@@ -211,6 +256,7 @@ function registerLiveRoutes(
         body.once('error', end);
         timers.push(setTimeout(end, liveLifetimeMs));
         // A member who loses access, or whose workspace turns browser use off, stops seeing it within half a minute.
+        // Watching keeps the browser open, so each check records that open time too.
         const recheck = () =>
           timers.push(
             setTimeout(async () => {
@@ -218,6 +264,10 @@ function registerLiveRoutes(
                 if (!(await visible(workspaceId, userId, id))) return end();
               } catch {
                 return end();
+              }
+              if (usage) {
+                const state = await client.state(sessionId).catch(() => null);
+                if (state) await usage(workspaceId, sessionId, state);
               }
               if (!ended) recheck();
             }, 30_000),
@@ -253,49 +303,67 @@ export function registerBrowserLive(
     client: BrowserHostClient | undefined;
     /** Whether browser use is on in a workspace; the `browser-use` flag unless a test replaces it. */
     enabled?: (workspaceId: string) => Promise<boolean>;
+    /** Records a person's use of a browser for its charge; absent when resources are not metered. */
+    usage?: BrowserUsage | undefined;
   },
 ) {
-  const { chats, tasks, client, auth } = dependencies;
+  const { chats, tasks, client, auth, usage } = dependencies;
   const enabled = dependencies.enabled ?? (workspaceId => isFeatureEnabled('browser-use', null, { id: workspaceId }));
   const streams = new Set<() => void>();
   app.addHook('preClose', async () => {
     for (const end of streams) end();
   });
-  registerLiveRoutes(app, auth, client, enabled, streams, {
-    base: '/workspaces/:workspaceId/conversations/:chatId/browser',
-    params: chatParams.transform(({ workspaceId, chatId }) => ({ workspaceId, id: chatId })),
-    paramsSchema: chatParams,
-    tag: 'Conversations',
-    operation: 'Conversation',
-    noun: 'chat',
-    notFound: 'conversation-not-found',
-    unavailable: 'conversations-unavailable',
-    read: chats.read,
-    sessionId: (workspaceId, chatId) => browserSessionId(workspaceId, { conversationId: chatId }),
-  });
+  registerLiveRoutes(
+    app,
+    auth,
+    client,
+    enabled,
+    streams,
+    {
+      base: '/workspaces/:workspaceId/conversations/:chatId/browser',
+      params: chatParams.transform(({ workspaceId, chatId }) => ({ workspaceId, id: chatId })),
+      paramsSchema: chatParams,
+      tag: 'Conversations',
+      operation: 'Conversation',
+      noun: 'chat',
+      notFound: 'conversation-not-found',
+      unavailable: 'conversations-unavailable',
+      read: chats.read,
+      sessionId: (workspaceId, chatId) => browserSessionId(workspaceId, { conversationId: chatId }),
+    },
+    usage,
+  );
   if (tasks)
-    registerLiveRoutes(app, auth, client, enabled, streams, {
-      base: '/workspaces/:workspaceId/agent-tasks/:taskId/browser',
-      params: taskParams.transform(({ workspaceId, taskId }) => ({ workspaceId, id: taskId })),
-      paramsSchema: taskParams,
-      tag: 'Agent tasks',
-      operation: 'AgentTask',
-      noun: 'run',
-      notFound: 'task-not-found',
-      unavailable: 'task-operation-unavailable',
-      read: tasks.read,
-      sessionId: (workspaceId, taskId) => browserSessionId(workspaceId, { runId: taskId }),
-      // Either a recorded hand back or a delivered wake resumes the run; with neither, the member must try again.
-      handedBack: async (workspaceId, taskId, log) => {
-        const recorded = await tasks.handBack(workspaceId, taskId).then(
-          () => true,
-          error => (log(error), false),
-        );
-        const woken = await tasks.wake(workspaceId, taskId).then(
-          () => true,
-          error => (log(error), false),
-        );
-        if (!recorded && !woken) throw new Error('run-not-resumed');
+    registerLiveRoutes(
+      app,
+      auth,
+      client,
+      enabled,
+      streams,
+      {
+        base: '/workspaces/:workspaceId/agent-tasks/:taskId/browser',
+        params: taskParams.transform(({ workspaceId, taskId }) => ({ workspaceId, id: taskId })),
+        paramsSchema: taskParams,
+        tag: 'Agent tasks',
+        operation: 'AgentTask',
+        noun: 'run',
+        notFound: 'task-not-found',
+        unavailable: 'task-operation-unavailable',
+        read: tasks.read,
+        sessionId: (workspaceId, taskId) => browserSessionId(workspaceId, { runId: taskId }),
+        // Either a recorded hand back or a delivered wake resumes the run; with neither, the member must try again.
+        handedBack: async (workspaceId, taskId, log) => {
+          const recorded = await tasks.handBack(workspaceId, taskId).then(
+            () => true,
+            error => (log(error), false),
+          );
+          const woken = await tasks.wake(workspaceId, taskId).then(
+            () => true,
+            error => (log(error), false),
+          );
+          if (!recorded && !woken) throw new Error('run-not-resumed');
+        },
       },
-    });
+      usage,
+    );
 }

@@ -317,6 +317,11 @@ jobs:
         run: |
           pnpm --filter @tulipfarm/workspace-storage exec node --test --test-concurrency=1 test/integration/model-usage.test.mjs test/integration/credit-alerts.test.mjs
           pnpm --filter @tulipfarm/worker exec node --test --test-concurrency=1 test/plan-chat.integration.mjs
+      - name: Check browser time is charged once, by the minute, to its chat or run
+        if: matrix.group == 'apps'
+        run: |
+          pnpm --filter @tulipfarm/workspace-storage exec node --test --test-concurrency=1 test/integration/resource-credits.test.mjs
+          pnpm --filter @tulipfarm/worker exec node --test --test-concurrency=1 test/browser-usage.integration.mjs
       - name: Check that one chat at a time edits an app and only a finished turn saves
         if: matrix.group == 'apps'
         run: pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/app-tools.integration.mjs

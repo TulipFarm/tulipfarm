@@ -1,3 +1,4 @@
+import { errorAttributes } from '@tulipfarm/observability';
 import type { FastifyInstance } from 'fastify';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import { registerAgents } from './agents.ts';
@@ -21,7 +22,7 @@ import type { createTemporalClient } from './temporal.ts';
 import { emailDeliveryKeys } from '@tulipfarm/workspaces/email-delivery';
 import { authConfig } from './auth.ts';
 import { registerConversations } from './conversations.ts';
-import { registerBrowserLive } from './browser-live.ts';
+import { browserUsage, registerBrowserLive } from './browser-live.ts';
 import { registerBrowserLogins } from './browser-logins.ts';
 import { createBrowserLogins } from '@tulipfarm/browser/logins';
 import { createBrowserHostClient } from '@tulipfarm/browser';
@@ -292,6 +293,9 @@ export function registerStorageComposition(
       wake: deliverTaskWake(temporal),
     },
     client: browserClient,
+    usage: browserUsage(runtime, (error, workspaceId) =>
+      app.log.warn({ ...errorAttributes(error), workspaceId }, 'browser_usage_not_recorded'),
+    ),
   });
   registerBrowserLogins(app, {
     auth: dependencies.auth,

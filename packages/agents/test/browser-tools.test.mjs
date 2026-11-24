@@ -17,7 +17,7 @@ const state = { sessionId: 's', url: 'https://example.com/', title: 'Example', c
 function fakeClient(overrides = {}) {
   const calls = [];
   const client = {
-    open: async id => (calls.push(['open', id]), state),
+    open: async (id, options) => (calls.push(['open', id, options]), state),
     state: async id => (calls.push(['state', id]), null),
     act: async (id, action) => (
       calls.push(['act', id, action]),
@@ -399,4 +399,93 @@ test('A run is not offered uploads, and its downloads are reported as not saved'
     calls.some(call => call[0] === 'upload' || call[0] === 'download'),
     false,
   );
+});
+
+function testMeter(refusal) {
+  const events = [];
+  return {
+    events,
+    meter: {
+      admit: async () => (events.push('admit'), refusal),
+      record: async recorded => void events.push(['record', recorded.url]),
+      end: async () => void events.push('end'),
+    },
+  };
+}
+
+test('A metered chat records its browser time and refuses a new browser without credits', async () => {
+  const { client, calls } = fakeClient();
+  const metered = testMeter(undefined);
+  const origins = [];
+  const chat = {
+    client,
+    imageInput: false,
+    meter: meterOrigin => (origins.push(meterOrigin), metered.meter),
+  };
+  await invokeBrowser(chat, origin, { tool: 'browser.act', action: { action: 'snapshot' } });
+  assert.deepEqual(metered.events, ['admit', ['record', state.url], ['record', state.url]]);
+  assert.equal(origins[0].conversationId, origin.conversationId);
+  assert.deepEqual(calls[1], ['open', calls[0][1], { allowedSites: undefined, workspaceId: origin.workspaceId }]);
+
+  const refused = testMeter('out-of-credits');
+  const broke = fakeClient();
+  const output = await invokeBrowser({ ...chat, client: broke.client, meter: () => refused.meter }, origin, {
+    tool: 'browser.act',
+    action: { action: 'snapshot' },
+  });
+  assert.deepEqual(output.result, {
+    error: 'out-of-credits',
+    instruction:
+      "This workspace is out of credits, so a new browser can't open. Tell the member and finish without the browser.",
+  });
+  assert.deepEqual(
+    broke.calls.map(call => call[0]),
+    ['state'],
+    'no browser opens',
+  );
+
+  // A browser already open keeps working: only a new one is refused.
+  const open = fakeClient({ state: async () => state });
+  const kept = await invokeBrowser({ ...chat, client: open.client, meter: () => refused.meter }, origin, {
+    tool: 'browser.act',
+    action: { action: 'snapshot' },
+  });
+  assert.equal(kept.result.url, state.url);
+});
+
+test('A run refuses a new browser once its allowance or the workspace credits are used up', async () => {
+  const run = refusal => ({
+    client: fakeClient().client,
+    sessionId: 's',
+    mode: 'task',
+    imageInput: false,
+    meter: testMeter(refusal).meter,
+  });
+  const call = { tool: 'browser.act', action: { action: 'snapshot' } };
+  assert.deepEqual((await runBrowserCall(run('allowance-used'), call)).result, {
+    error: 'credit-allowance-used',
+    instruction:
+      "This run has used its credit allowance, so a new browser can't open. Finish without the browser and say why.",
+  });
+  assert.deepEqual((await runBrowserCall(run('out-of-credits'), call)).result, {
+    error: 'out-of-credits',
+    instruction:
+      "This workspace is out of credits, so a new browser can't open. Finish without the browser and say why.",
+  });
+  const handoff = await runBrowserCall(run('out-of-credits'), { tool: 'browser.handoff', reason: 'Sign in' });
+  assert.equal(handoff.result.error, 'out-of-credits');
+});
+
+test('A step queued behind busy browsers tells the agent its place and to wait', async () => {
+  const message = 'All 3 browsers for this workspace are in use. This step is number 2 in line.';
+  const { client } = fakeClient({
+    open: async () => {
+      throw new BrowserHostError('browser-busy', message, 429, 2);
+    },
+  });
+  const output = await invokeBrowser({ client, imageInput: false }, origin, {
+    tool: 'browser.act',
+    action: { action: 'snapshot' },
+  });
+  assert.deepEqual(output.result, { error: 'browser-busy', message, instruction: 'Wait a minute, then try again.' });
 });

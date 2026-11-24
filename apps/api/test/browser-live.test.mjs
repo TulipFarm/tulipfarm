@@ -15,7 +15,7 @@ const auth = {
   },
 };
 
-function setup(t, client, readable = () => true, enabled = () => true) {
+function setup(t, client, readable = () => true, enabled = () => true, usage = undefined) {
   const app = Fastify();
   t.after(() => app.close());
   const workspaceId = randomUUID();
@@ -31,12 +31,13 @@ function setup(t, client, readable = () => true, enabled = () => true) {
     },
     client,
     enabled: async () => enabled(),
+    usage,
   });
   const base = `/workspaces/${workspaceId}/conversations/${chatId}/browser`;
   const sessionId = browserSessionId(workspaceId, { conversationId: chatId });
   const as = (method, url, payload, cookie = 'session=reader') =>
     app.inject({ method, url: `${base}${url}`, payload, headers: { cookie, origin } });
-  return { app, as, sessionId };
+  return { app, as, sessionId, workspaceId };
 }
 
 const state = sessionId => ({
@@ -295,4 +296,24 @@ test('with browser use off no browser is reachable, and a live view ends once it
   const ended = await live;
   assert.equal(ended.statusCode, 200);
   assert.match(ended.body, /event: state/);
+});
+
+test("a person's use of the browser is recorded for its charge", async t => {
+  const recorded = [];
+  const client = {
+    state: async id => state(id),
+    control: async (id, control) => ({ ...state(id), controller: control.controller }),
+  };
+  const { as, sessionId, workspaceId } = setup(t, client, undefined, undefined, async (...use) => {
+    recorded.push(use);
+  });
+  await as('GET', '');
+  await as('POST', '/control', { controller: 'person' });
+  assert.deepEqual(
+    recorded.map(([workspace, session, browser]) => [workspace, session, browser.controller]),
+    [
+      [workspaceId, sessionId, 'agent'],
+      [workspaceId, sessionId, 'person'],
+    ],
+  );
 });

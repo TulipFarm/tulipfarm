@@ -5,6 +5,7 @@ import {
   browserSessionId,
   type BrowserActionResult,
   type BrowserHostClient,
+  type BrowserSessionState,
 } from '@tulipfarm/browser';
 import { SecretError, type Placement, type SecretKind, type SecretValue } from '@tulipfarm/secrets';
 import type { HumanActor, SourceDependency } from '@tulipfarm/access';
@@ -65,8 +66,22 @@ export type BrowserFiles = {
   save(download: { id: string; name: string; bytes: Uint8Array }, folderId?: string): Promise<BrowserFileSave>;
 };
 
+/** Charges a session's browser time to the chat or run it belongs to. Present only while resources are metered. */
+export type BrowserMeter = {
+  /** Why a new browser may not open now, or undefined when it may. */
+  admit(): Promise<'out-of-credits' | 'allowance-used' | undefined>;
+  /** Records that the session was used, from the state its host returned. Never throws. */
+  record(state: BrowserSessionState): Promise<void>;
+  /** Records that the session closed. Never throws. */
+  end(): Promise<void>;
+};
+
 export type ChatBrowser = {
   client: BrowserHostClient;
+  /** Meters the chat's browser time; absent when resources are not metered. */
+  meter?:
+    | ((origin: { workspaceId: string; conversationId: string; sessionId: string }) => BrowserMeter | undefined)
+    | undefined;
   /** The model reads images, so each step's screenshot follows its result. */
   imageInput: boolean;
   /** Finds the secrets `browser.signIn` types; without it, that tool is refused. */
@@ -87,6 +102,10 @@ type Step = Omit<Output, 'sources'> & { sources?: SourceDependency[] };
 export type BrowserSessionContext = {
   client: BrowserHostClient;
   sessionId: string;
+  /** The workspace whose browsers the session counts against. */
+  workspaceId?: string | undefined;
+  /** Meters the session's browser time and may refuse to open a new one. */
+  meter?: BrowserMeter | undefined;
   mode: 'chat' | 'task';
   /** The model reads images, so each step's screenshot follows its result. */
   imageInput: boolean;
@@ -104,6 +123,7 @@ const taskRecovery: Partial<Record<BrowserHostError['code'], string>> = {
   'person-in-control':
     'A person has taken over this browser. Do not act. Call browser.handoff saying you are waiting for them to hand it back; the run waits for them.',
   capacity: 'No browser is free right now. Try again later in this run, or finish without the browser and say why.',
+  'browser-busy': 'Wait a minute, then try again.',
   unavailable: 'The browser is not reachable right now. Try again later in this run, or finish without it and say why.',
 };
 const recovery: Partial<Record<BrowserHostError['code'], string>> = {
@@ -117,6 +137,7 @@ const recovery: Partial<Record<BrowserHostError['code'], string>> = {
     'Take a snapshot and point username at the username or email box and password at the password box. Hand off if the page has no such boxes.',
   'action-failed': 'The step failed. Take a snapshot to see the page, then try another way or hand off to the member.',
   capacity: 'No browser is free right now. Tell the member and try again in a few minutes.',
+  'browser-busy': 'Wait a minute, then try again.',
   unavailable: 'The browser is not reachable right now. Tell the member and try again later.',
 };
 
@@ -232,6 +253,7 @@ async function upload(
     { ref: call.ref, name: downloadName(read.name), mediaType },
     read.bytes,
   );
+  await browser.meter?.record(result.state);
   return {
     result: {
       ...view(result),
@@ -241,6 +263,20 @@ async function upload(
     },
     sources: read.sources,
   };
+}
+
+function admissionRefusal(reason: 'out-of-credits' | 'allowance-used', mode: 'chat' | 'task'): Step {
+  if (reason === 'allowance-used')
+    return refusal(
+      'credit-allowance-used',
+      "This run has used its credit allowance, so a new browser can't open. Finish without the browser and say why.",
+    );
+  return refusal(
+    'out-of-credits',
+    mode === 'task'
+      ? "This workspace is out of credits, so a new browser can't open. Finish without the browser and say why."
+      : "This workspace is out of credits, so a new browser can't open. Tell the member and finish without the browser.",
+  );
 }
 
 async function signIn(
@@ -302,6 +338,7 @@ async function signIn(
     throw error;
   }
   await secrets.recordUse(secret.secretId, state.url);
+  await browser.meter?.record(result.state);
   // No screenshot: the page may show what was just typed.
   return {
     result: {
@@ -324,10 +361,13 @@ export async function invokeBrowser(
   files?: BrowserFiles,
 ): Promise<Output> {
   const holder = browser.secrets;
+  const sessionId = browserSessionId(origin.workspaceId, { conversationId: origin.conversationId });
   const step = await runBrowserCall(
     {
       client: browser.client,
-      sessionId: browserSessionId(origin.workspaceId, { conversationId: origin.conversationId }),
+      sessionId,
+      workspaceId: origin.workspaceId,
+      meter: browser.meter?.({ workspaceId: origin.workspaceId, conversationId: origin.conversationId, sessionId }),
       mode: 'chat',
       imageInput: browser.imageInput,
       secrets: holder ? () => holder(origin) : undefined,
@@ -346,20 +386,41 @@ export async function invokeBrowser(
 
 /** Runs one `browser.*` call in a session, opening it on first use. */
 export async function runBrowserCall(browser: BrowserSessionContext, call: BrowserCall): Promise<Step> {
-  const { client, sessionId } = browser;
-  // Opening is idempotent; a handoff, or a run that loads logins on its first open, checks for the session first.
-  const open = async (check = browser.opened !== undefined) => {
-    if (check && (await client.state(sessionId))) return;
-    await client.open(sessionId, { allowedSites: browser.allowedSites });
+  const { client, sessionId, meter } = browser;
+  /**
+   * Opens the session unless it is open, or returns why a new one may not open. Opening is idempotent; a handoff, a run
+   * that loads logins on its first open, or a metered session checks for the session first.
+   */
+  const open = async (check = browser.opened !== undefined || meter !== undefined): Promise<Step | undefined> => {
+    if (check) {
+      const state = await client.state(sessionId);
+      if (state) {
+        await meter?.record(state);
+        return undefined;
+      }
+    }
+    const refused = await meter?.admit();
+    if (refused) return admissionRefusal(refused, browser.mode);
+    const state = await client.open(sessionId, {
+      allowedSites: browser.allowedSites,
+      workspaceId: browser.workspaceId,
+    });
+    await meter?.record(state);
     await browser.opened?.();
+    return undefined;
   };
   try {
     if (call.tool === 'browser.handoff') {
       const signIn = call.signIn === undefined ? undefined : browserSiteSchema.safeParse(call.signIn);
       if (signIn && !signIn.success)
         return { result: { error: 'invalid-site', instruction: 'Set signIn to the site only, such as amazon.com.' } };
-      await open(true);
-      await client.needsPerson(sessionId, { reason: call.reason, ...(signIn ? { signIn: signIn.data } : {}) });
+      const refused = await open(true);
+      if (refused) return refused;
+      const waiting = await client.needsPerson(sessionId, {
+        reason: call.reason,
+        ...(signIn ? { signIn: signIn.data } : {}),
+      });
+      await meter?.record(waiting);
       return {
         result: {
           status: 'waiting-for-person',
@@ -372,8 +433,10 @@ export async function runBrowserCall(browser: BrowserSessionContext, call: Brows
     }
     if (call.tool === 'browser.signIn') return await signIn(browser, call);
     if (call.tool === 'browser.upload') return await upload(browser, call);
-    await open();
+    const refused = await open();
+    if (refused) return refused;
     const result = await client.act(sessionId, call.action);
+    await meter?.record(result.state);
     return {
       result: { ...view(result), ...(await saveDownloads(browser, result, call.folderId)) },
       ...(browser.imageInput && result.screenshot

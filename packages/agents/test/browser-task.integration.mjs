@@ -202,7 +202,7 @@ test('an agent run uses one browser, waits for a person, and resumes or fails', 
     const task = await start();
     const sessionId = browserSessionId(w.id, { runId: task.id });
     assert.equal(await settle(task.id), 'waiting-approval');
-    assert.deepEqual(host.calls[0], ['open', sessionId, { allowedSites: ['billing.example'] }]);
+    assert.deepEqual(host.calls[0], ['open', sessionId, { allowedSites: ['billing.example'], workspaceId: w.id }]);
     assert.deepEqual(
       loaded.map(l => [l.sessionId, l.loginId, l.actor.userId]),
       [[sessionId, login, owner.userId]],
