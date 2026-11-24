@@ -70,8 +70,14 @@ export function createBrowserHostClient(connection: BrowserHostConnection, fetch
   const session = (sessionId: string) => `/v1/sessions/${encodeURIComponent(sessionId)}`;
 
   return {
-    async open(sessionId: string): Promise<BrowserSessionState> {
-      return browserSessionStateSchema.parse(await call('POST', '/v1/sessions', { sessionId }));
+    /** Opens the session, or returns it when open. `allowedSites` limits a new session's pages to those sites. */
+    async open(sessionId: string, options: { allowedSites?: readonly string[] } = {}): Promise<BrowserSessionState> {
+      return browserSessionStateSchema.parse(
+        await call('POST', '/v1/sessions', {
+          sessionId,
+          ...(options.allowedSites?.length ? { allowedSites: options.allowedSites } : {}),
+        }),
+      );
     },
     async state(sessionId: string): Promise<BrowserSessionState | null> {
       try {

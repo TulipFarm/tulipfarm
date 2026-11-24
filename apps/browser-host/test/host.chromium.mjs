@@ -192,6 +192,24 @@ test('private addresses are blocked unless allowed', async t => {
   assert.notEqual(result.state.title, 'Sign up');
 });
 
+test('a session limited to listed sites opens only their pages, while their pages load what they need', async t => {
+  const host = await createBrowserHost({ ...options, allowPrivateNetworks: true });
+  t.after(() => host.shutdown());
+  await host.open(sessionId, ['127.0.0.1']);
+  const allowed = await host.act(sessionId, { action: 'navigate', url: `${origin}/login` });
+  assert.equal(allowed.state.title, 'Sign in');
+  assert.equal(allowed.notice, undefined);
+  // The page's frame on another site still loads; only pages the agent or a link opens are limited.
+  assert.match(allowed.snapshot, /iframe/);
+  const blocked = await host.act(sessionId, { action: 'navigate', url: `http://localhost:${site.address().port}/` });
+  assert.match(blocked.notice ?? '', /may only open 127\.0\.0\.1/);
+  assert.notEqual(blocked.state.title, 'Sign up');
+  // Opening the session again does not lift the limit.
+  await host.open(sessionId);
+  const again = await host.act(sessionId, { action: 'navigate', url: `http://localhost:${site.address().port}/` });
+  assert.match(again.notice ?? '', /may only open/);
+});
+
 test('a redirect to a blocked address is refused at every hop', async t => {
   const host = await createBrowserHost({ ...options, allowAddress: address => address === '127.0.0.1' });
   t.after(() => host.shutdown());

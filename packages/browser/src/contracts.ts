@@ -86,6 +86,22 @@ export function browserSiteOf(url: string): string | null {
   }
 }
 
+/** The sites an agent's browser may open, when its manager limits it. Each one includes its subdomains. */
+export const browserAllowedSitesSchema = z.array(browserSiteSchema).min(1).max(50);
+
+/** Whether a page's host is one of the allowed sites or a subdomain of one. */
+export function siteAllows(sites: readonly string[], hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.$/, '');
+  return sites.some(site => host === site || host.endsWith(`.${site}`));
+}
+
+export const browserOpenSchema = z.strictObject({
+  sessionId: z.uuid(),
+  /** Limits the session's pages to these sites. Applies when the session opens; absent, any public site. */
+  allowedSites: browserAllowedSitesSchema.optional(),
+});
+export type BrowserOpen = z.infer<typeof browserOpenSchema>;
+
 /** Whether a cookie or storage domain belongs to a site: the site itself, a subdomain, or a parent it shares cookies with. */
 export function siteIncludes(site: string, domain: string): boolean {
   const host = domain.toLowerCase().replace(/^\./, '');

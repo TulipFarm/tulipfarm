@@ -16,6 +16,7 @@ import {
   type BrowserSiteState,
   type BrowserTypeSecret,
   browserSiteOf,
+  siteAllows,
   siteIncludes,
 } from '@tulipfarm/browser/contracts';
 import { publicAddress } from '@tulipfarm/workspace-mcp-transport';
@@ -321,7 +322,7 @@ export async function createBrowserHost(options: HostOptions) {
     return session;
   }
 
-  async function create(sessionId: string): Promise<Session> {
+  async function create(sessionId: string, allowedSites: readonly string[] | undefined): Promise<Session> {
     if (sessions.size + opening.size >= options.maxSessions)
       throw new HostError('capacity', 'The browser host is running as many sessions as it can. Try again soon.', 503);
     const context = await (
@@ -337,9 +338,16 @@ export async function createBrowserHost(options: HostOptions) {
     await context.route('**/*', async route => {
       const url = new URL(route.request().url());
       if (url.protocol === 'data:' || url.protocol === 'blob:' || url.protocol === 'about:') return route.continue();
+      const request = route.request();
+      // Limited to listed sites, no tab opens another site; a listed site's pages may still load their own resources.
+      const topLevel = request.isNavigationRequest() && !request.frame().parentFrame();
+      if (allowedSites && topLevel && !siteAllows(allowedSites, url.hostname)) {
+        if (session) session.notice = `Blocked ${url.origin}: this browser may only open ${allowedSites.join(', ')}.`;
+        return route.abort('blockedbyclient');
+      }
       if ((url.protocol === 'http:' || url.protocol === 'https:') && (await publicHost(url.hostname)))
         return route.continue();
-      if (session && route.request().isNavigationRequest() && route.request().frame() === session.page.mainFrame())
+      if (session && request.isNavigationRequest() && request.frame() === session.page.mainFrame())
         session.notice = `Blocked ${url.origin}: the browser only opens public websites.`;
       return route.abort('blockedbyclient');
     });
@@ -361,7 +369,8 @@ export async function createBrowserHost(options: HostOptions) {
     return session;
   }
 
-  async function open(sessionId: string): Promise<BrowserSessionState> {
+  /** Opens a session, or returns the open one. Allowed sites apply only when the session is created. */
+  async function open(sessionId: string, allowedSites?: readonly string[]): Promise<BrowserSessionState> {
     const existing = sessions.get(sessionId);
     if (existing) {
       existing.lastUsed = now();
@@ -369,7 +378,7 @@ export async function createBrowserHost(options: HostOptions) {
     }
     let pending = opening.get(sessionId);
     if (!pending) {
-      pending = create(sessionId);
+      pending = create(sessionId, allowedSites);
       opening.set(sessionId, pending);
     }
     try {
