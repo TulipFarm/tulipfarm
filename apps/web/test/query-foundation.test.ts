@@ -219,11 +219,12 @@ test('observers share one in-flight read; focus is inert; transient errors retai
   runtime.client.mount();
   let calls = 0;
   let failure: number | null = null;
+  let accessLost: boolean | undefined;
   const input = {
     key: ['records', 'one'],
     load: async () => {
       calls++;
-      if (failure) throw Object.assign(new Error('failed'), { status: failure });
+      if (failure) throw Object.assign(new Error('failed'), { status: failure, accessLost });
       return ['private'];
     },
   };
@@ -242,8 +243,14 @@ test('observers share one in-flight read; focus is inert; transient errors retai
     await first.refetch();
     assert.equal(readState(first.getCurrentResult()).kind, 'ready');
     assert.deepEqual(runtime.client.getQueryData(options.queryKey), ['private']);
-    runtime.client.setQueryData(featureKey(scope, ['unrelated']), 'keep');
+    // A 404 that is not the resource's own not-found answer says nothing about access.
     failure = 404;
+    accessLost = false;
+    await first.refetch();
+    assert.equal(readState(first.getCurrentResult()).kind, 'ready');
+    assert.deepEqual(runtime.client.getQueryData(options.queryKey), ['private']);
+    accessLost = undefined;
+    runtime.client.setQueryData(featureKey(scope, ['unrelated']), 'keep');
     await first.refetch();
     assert.deepEqual(readState(first.getCurrentResult()), { kind: 'unavailable', status: 404 });
     assert.equal(runtime.client.getQueryData(options.queryKey), undefined);

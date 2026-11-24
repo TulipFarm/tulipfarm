@@ -55,6 +55,7 @@ try {
   let userId = 'ada';
   let listStatus = 503;
   let historyStatus = 200;
+  let notFoundCode = 'conversation-not-found';
   let writeStatus = 200;
   let delay = 0;
   let dropWrite = false;
@@ -214,7 +215,10 @@ try {
     }
     await route.fulfill({
       status,
-      json: status === 200 ? json : { error: 'unavailable' },
+      json:
+        status === 200
+          ? json
+          : { error: status === 404 && path.includes('/conversations') ? notFoundCode : 'unavailable' },
       headers: { 'access-control-allow-origin': origin, 'access-control-allow-credentials': 'true' },
     });
   };
@@ -807,7 +811,17 @@ try {
   history[1].turn.status = 'queued';
   await notifyChange(page, workspace.id, userId, 'detail', chatId);
   await page.getByRole('button', { name: 'Stop reply' }).waitFor();
+  // Only the API's own not-found answer means access changed. A 404 with another code, such as a route this
+  // deploy has not reached yet, keeps the loaded chat.
   historyStatus = 404;
+  notFoundCode = 'not-found';
+  const beforeOtherNotFound = historyRequests;
+  await notifyChange(page, workspace.id, userId, 'detail', chatId);
+  while (historyRequests === beforeOtherNotFound) await setTimeout(50);
+  await setTimeout(500);
+  assert.equal(await page.getByRole('heading', { name: 'Personal chats unavailable' }).count(), 0);
+  await page.getByText('🌱 olleH', { exact: true }).waitFor();
+  notFoundCode = 'conversation-not-found';
   // Pending replies are no longer polled indefinitely, so a change notice prompts the denied read.
   await notifyChange(page, workspace.id, userId, 'detail', chatId);
   await page.getByRole('heading', { name: 'Personal chats unavailable' }).waitFor();

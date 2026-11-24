@@ -11,8 +11,11 @@ export function errorStatus(error: unknown): number | undefined {
     : undefined;
 }
 
+/** The status of a failed read that means its resource or access is gone, which clears its cached data. */
 export function deniedStatus(error: unknown) {
   const status = errorStatus(error);
+  if (typeof error === 'object' && error !== null && 'accessLost' in error && error.accessLost === false)
+    return undefined;
   return status === 401 || status === 403 || status === 404 ? status : undefined;
 }
 
