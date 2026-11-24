@@ -37,3 +37,22 @@ export async function saveBackBrowserLogins(input: {
     log('warn', 'activity', 'call_failed', { operation: 'browser.login-save-back', ...errorAttributes(error) });
   }
 }
+
+/**
+ * Ends a finished run's browser: saves its logins back as the run's owner, then closes it. An unreachable host or a
+ * failed close throws, so the task step retries until the session is closed; only a session the host no longer has
+ * needs nothing.
+ */
+export async function endRunBrowser(input: {
+  client: BrowserHostClient;
+  logins: BrowserLogins;
+  workspaceId: string;
+  sessionId: string;
+  owner: () => Promise<BrowserLoginsPrincipal | undefined>;
+}) {
+  const { client, sessionId } = input;
+  if (!(await client.state(sessionId))) return;
+  const actor = await input.owner();
+  if (actor) await saveBackBrowserLogins({ ...input, actor });
+  await client.close(sessionId);
+}

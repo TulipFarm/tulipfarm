@@ -33,7 +33,7 @@ import { browserHostConfiguration } from '@tulipfarm/config/browser-host';
 import { integrationCredentialKeyring } from '@tulipfarm/integrations';
 import type { TaskBrowser } from '@tulipfarm/agents/task-runtime';
 import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
-import { saveBackBrowserLogins } from './browser-logins.ts';
+import { endRunBrowser } from './browser-logins.ts';
 
 export function createTaskComposition(
   storage: Parameters<typeof createTaskRuntime>[0],
@@ -109,26 +109,22 @@ export function createTaskComposition(
     browser,
   );
   /** When a run ends, its browser saves its logins back as the run's owner and closes. */
-  async function endRunBrowser(workspaceId: string, taskId: string) {
+  async function endTaskBrowser(workspaceId: string, taskId: string) {
     if (!browser) return;
-    const sessionId = browserSessionId(workspaceId, { runId: taskId });
-    if (!(await browser.client.state(sessionId).catch(() => null))) return;
-    const owner = await runtime.transaction(workspaceId, commonCompatibility, async tx => {
-      const row = await tx.client.query<{ owner_user_id: string }>(
-        `SELECT owner_user_id FROM ${qualified(tx.schema, 'tf_agent_tasks')} WHERE id=$1`,
-        [taskId],
-      );
-      return row.rows[0]?.owner_user_id;
+    await endRunBrowser({
+      client: browser.client,
+      logins: browserLogins,
+      workspaceId,
+      sessionId: browserSessionId(workspaceId, { runId: taskId }),
+      owner: () =>
+        runtime.transaction(workspaceId, commonCompatibility, async tx => {
+          const row = await tx.client.query<{ owner_user_id: string }>(
+            `SELECT owner_user_id FROM ${qualified(tx.schema, 'tf_agent_tasks')} WHERE id=$1`,
+            [taskId],
+          );
+          return row.rows[0]?.owner_user_id;
+        }),
     });
-    if (owner)
-      await saveBackBrowserLogins({
-        client: browser.client,
-        logins: browserLogins,
-        workspaceId,
-        sessionId,
-        actor: owner,
-      });
-    await browser.client.close(sessionId).catch(() => undefined);
   }
   const progress = createTaskProgress(runtime);
   async function processAgentTaskStep(workspaceId: string, taskId: string): Promise<TaskProgress> {
@@ -136,7 +132,8 @@ export function createTaskComposition(
       await mcp?.(runtime).recover(workspaceId);
       await tasks.process(workspaceId, taskId);
       const next = await progress(workspaceId, taskId);
-      if (next.kind === 'terminal') await endRunBrowser(workspaceId, taskId).catch(() => undefined);
+      // A failed close fails the step, which retries until the run's browser has closed.
+      if (next.kind === 'terminal') await endTaskBrowser(workspaceId, taskId);
       return next;
     } catch {
       // Database and provider failures can contain private inputs. Temporal stores errors.

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { browserSessionId } from '@tulipfarm/browser';
-import { saveBackBrowserLogins } from '../dist/browser-logins.js';
+import { endRunBrowser, saveBackBrowserLogins } from '../dist/browser-logins.js';
 
 const workspaceId = '6f1e2d3c-4b5a-4968-8776-655443322110';
 const conversationId = '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d';
@@ -85,4 +85,26 @@ test('does nothing when logins are off, and never throws when the browser is unr
   const gone = fakes({ state: new Error('browser host unreachable') });
   await run(gone);
   assert.deepEqual(gone.saves, []);
+});
+
+test('a finished run’s browser closes only after the host confirms; an unreachable host is retried, not skipped', async () => {
+  const sessionId = browserSessionId(workspaceId, { runId: conversationId });
+  const end = client =>
+    endRunBrowser({ client, logins: fakes().service, workspaceId, sessionId, owner: async () => 'owner-1' });
+  const closed = [];
+  const host = (state, close = async id => closed.push(id)) => ({ state, siteState: async () => ({}), close });
+  await assert.rejects(end(host(async () => Promise.reject(new Error('host unreachable')))));
+  await assert.rejects(
+    end(
+      host(
+        async () => ({ logins: [] }),
+        async () => Promise.reject(new Error('close failed')),
+      ),
+    ),
+  );
+  assert.deepEqual(closed, []);
+  await end(host(async () => null));
+  assert.deepEqual(closed, []);
+  await end(host(async () => ({ logins: [] })));
+  assert.deepEqual(closed, [sessionId]);
 });
