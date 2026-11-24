@@ -6,6 +6,7 @@ import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import type { createTemporalClient } from './temporal.ts';
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { executionCompatibility } from '@tulipfarm/tables/execution';
+import { tablePolicyReceipt } from '@tulipfarm/conversations/tool-activity-history';
 import type { AgentWorkflowOptions } from '@tulipfarm/agents/agent-trigger-workflows';
 import { createAgentWorkflowCombine } from '@tulipfarm/agents/agent-workflow-combine';
 import { errorAttributes } from '@tulipfarm/observability';
@@ -31,13 +32,13 @@ export function registerTableDispatch(
           z.array(z.object({ id: z.uuid() })).parse(
             (
               await tx.client.query(`SELECT p.id FROM ${qualified(tx.schema, 'tf_table_proposals')} p
-          JOIN ${qualified(tx.schema, 'tf_table_proposal_decisions')} d
+          LEFT JOIN ${qualified(tx.schema, 'tf_table_proposal_decisions')} d
             ON d.proposal_id=p.id AND d.digest=p.digest AND d.membership_id=p.membership_id
           LEFT JOIN LATERAL (
             SELECT sequence,operation,digest,membership_id FROM ${qualified(tx.schema, 'tf_table_proposal_controls')}
             WHERE proposal_id=p.id ORDER BY sequence DESC LIMIT 1
           ) c ON true
-          WHERE d.decision='approve' AND p.expires_at>clock_timestamp()
+          WHERE (d.decision='approve' OR (d.decision IS NULL AND ${tablePolicyReceipt(name => qualified(tx.schema, name), tx.commonVersion, true)})) AND p.expires_at>clock_timestamp()
             AND (c.sequence IS NULL OR (c.operation='resume' AND c.digest=p.digest AND c.membership_id=p.membership_id))
             AND NOT EXISTS (
               SELECT 1 FROM ${qualified(tx.schema, 'tf_table_executions')} e

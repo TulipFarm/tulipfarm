@@ -23,6 +23,8 @@ import {
   type TableEffect,
 } from './proposal-contracts.ts';
 import { tableProposalDigest } from './proposals.ts';
+import { tablePolicyReceipt } from '@tulipfarm/conversations/tool-activity-history';
+import { readReviewPolicy, shouldAsk } from '@tulipfarm/workspace-storage/action-review';
 import {
   addedFileIds,
   archiveBlockers,
@@ -142,14 +144,14 @@ async function admit(held: TableTransaction, manifest: ProposalManifest, plan: R
     ).rowCount
   )
     throw new TableProposalError('proposal-expired');
-  if (
-    !(
-      await tx.client.query(
-        `SELECT 1 FROM ${table(tx, 'tf_table_proposals')} p JOIN ${table(tx, 'tf_table_proposal_decisions')} d ON d.proposal_id=p.id AND d.digest=p.digest AND d.membership_id=p.membership_id WHERE p.id=$1 AND p.expires_at>clock_timestamp() AND d.decision='approve'`,
-        [manifest.id],
-      )
-    ).rowCount
-  )
+  const admission = (
+    await tx.client.query(
+      `SELECT d.decision IS NULL AS policy FROM ${table(tx, 'tf_table_proposals')} p LEFT JOIN ${table(tx, 'tf_table_proposal_decisions')} d ON d.proposal_id=p.id AND d.digest=p.digest AND d.membership_id=p.membership_id WHERE p.id=$1 AND p.expires_at>clock_timestamp()
+        AND (d.decision='approve' OR (d.decision IS NULL AND ${tablePolicyReceipt(name => table(tx, name), tx.commonVersion, true)}))`,
+      [manifest.id],
+    )
+  ).rows[0];
+  if (!admission || (admission.policy && shouldAsk(await readReviewPolicy(tx), 'create-table')))
     throw new TableProposalError('proposal-not-approved');
   const control = (
     await tx.client.query(

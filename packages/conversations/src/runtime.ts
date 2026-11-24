@@ -7,7 +7,7 @@ import { createConversationRequests } from './requests.ts';
 import { presentChoiceSchema } from './request-contracts.ts';
 import { z } from 'zod';
 import { defaultCallTimeoutMs } from '@tulipfarm/config/timeouts';
-import { storedToolPresentation } from './tool-activity-history.ts';
+import { storedToolPresentation, tablePolicyReceipt } from './tool-activity-history.ts';
 import { toolPresentation } from './tool-activity.ts';
 import { marketplacePackagesInPrompt } from '@tulipfarm/config/package-links';
 import {
@@ -1971,7 +1971,9 @@ export function createConversationExecutor(
                       AND lower(btrim(np->'after'->>'label'))=lower(btrim(op->'after'->>'label'))))))) THEN 'superseded'
             ELSE 'pending' END AS status
         FROM ${table(tx, 'tf_table_proposals')} p LEFT JOIN ${table(tx, 'tf_table_proposal_decisions')} d ON d.proposal_id=p.id
-        WHERE p.conversation_id=$1 AND p.turn_id<>$2 AND p.membership_id=$3 AND p.user_id=$4 ORDER BY p.created_at DESC,p.id DESC LIMIT 10`,
+        WHERE p.conversation_id=$1 AND p.turn_id<>$2 AND p.membership_id=$3 AND p.user_id=$4
+          AND NOT ${tablePolicyReceipt(name => table(tx, name), tx.commonVersion)}
+          ORDER BY p.created_at DESC,p.id DESC LIMIT 10`,
                         [fence.conversationId, fence.turnId, chat.requester.membershipId, chat.requester.userId],
                       )
                     ).rows,
@@ -3321,6 +3323,32 @@ export function createConversationExecutor(
             `INSERT INTO ${table(tx, 'tf_conversation_parts')} (conversation_id, message_id, ordinal, kind, text, layout) VALUES ($1,$2,$3,'layout',$4,$5)`,
             [fence.conversationId, messageId, ordinal++, layoutText(layout), JSON.stringify(layout)],
           );
+        // The policy saved it, not the model. Keep its link even if the model omitted it from its reply.
+        if (tx.commonVersion >= 113 && !chat.project_id && !chat.slack && !chat.context && !chat.standalone) {
+          const links = (
+            await tx.client.query<{ action: string; url: string }>(
+              `SELECT action,result->>'url' AS url
+            FROM ${table(tx, 'tf_action_review_receipts')} a WHERE conversation_id=$1 AND turn_id=$2 AND result ? 'url'
+            AND (action<>'create-table' OR EXISTS (
+              SELECT 1 FROM ${table(tx, 'tf_table_proposal_receipts')} published WHERE published.proposal_id=a.call_id
+              AND published.table_id::text=a.result->>'tableId' AND published.receipt->>'status'='completed'))
+            AND action IN ('create-table','create-agent','create-skill','create-workflow') ORDER BY created_at`,
+              [fence.conversationId, fence.turnId],
+            )
+          ).rows;
+          for (const { action, url } of links) {
+            if (
+              !/^\/[a-zA-Z0-9_%.-]+\/(?:tables|agents|skills|workflows)\/[a-f0-9-]{36}$/.test(url) ||
+              [...result, ...(layout ? [layoutText(layout)] : [])].some(part => part.includes(url))
+            )
+              continue;
+            await tx.client.query(
+              `INSERT INTO ${table(tx, 'tf_conversation_parts')}(conversation_id,message_id,ordinal,kind,text)
+              VALUES ($1,$2,$3,'text',$4)`,
+              [fence.conversationId, messageId, ordinal++, `[Open ${action.slice(7)}](${url})`],
+            );
+          }
+        }
         await tx.client.query(
           `INSERT INTO ${table(tx, 'tf_conversation_results')} (conversation_id, turn_id, message_id, sources) VALUES ($1,$2,$3,$4)`,
           [

@@ -3,6 +3,14 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./action-review-contracts": {
+      "types": "./dist/action-review-contracts.d.ts",
+      "default": "./dist/action-review-contracts.js"
+    },
+    "./action-review": {
+      "types": "./dist/action-review.d.ts",
+      "default": "./dist/action-review.js"
+    },
     "./knowledge-retrieval": {
       "types": "./dist/knowledge-retrieval.d.ts",
       "default": "./dist/knowledge-retrieval.js"

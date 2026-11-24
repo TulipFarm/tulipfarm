@@ -1,0 +1,3 @@
+[data-permission-menu] {
+  width: min(21rem, calc(100vw - 1rem));
+}

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { NodeSDK } from '@opentelemetry/sdk-node';
+import { commonCompatibility as compatibility } from '@tulipfarm/workspace-storage/runtime';
 import {
   InMemoryMetricExporter,
   PeriodicExportingMetricReader,
@@ -18,7 +19,6 @@ const workspaceId = randomUUID(),
   agentId = randomUUID(),
   activationId = randomUUID(),
   membershipId = randomUUID();
-const compatibility = { minimum: 1, maximum: 112 };
 const result = (rows = []) => ({ rows, rowCount: rows.length });
 const transaction = query => ({ schema: 'telemetry_fixture', commonVersion: 1, client: { query } });
 

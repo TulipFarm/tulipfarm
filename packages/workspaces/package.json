@@ -3,6 +3,14 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./action-review": {
+      "types": "./dist/action-review.d.ts",
+      "default": "./dist/action-review.js"
+    },
+    "./action-review-contracts": {
+      "types": "./dist/action-review-contracts.d.ts",
+      "default": "./dist/action-review-contracts.js"
+    },
     "./soul-explorer": {
       "types": "./dist/soul-explorer.d.ts",
       "default": "./dist/soul-explorer.js"

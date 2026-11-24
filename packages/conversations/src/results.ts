@@ -41,7 +41,7 @@ export function reviewCardReference(tool: string, value: unknown): ReviewCardRef
   const receipt = parsed.data;
   if (tool === 'tables.propose' && receipt.status === 'pending' && receipt.id) return { kind: 'table', id: receipt.id };
   if (
-    /^rows\.(?:create(?:\.batch)?|update|delete)$/.test(tool) &&
+    /^rows\.(?:(?:create|update)(?:\.batch)?|delete)$/.test(tool) &&
     receipt.status === 'review-required' &&
     receipt.draftId
   )

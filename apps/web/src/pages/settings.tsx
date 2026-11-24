@@ -29,6 +29,7 @@ import { useFlag } from '@/lib/feature-flags';
 import { KnowledgeSettings } from '@/features/files/knowledge-settings';
 import { AssignmentLimitsSettings } from '@/features/tables/assignment-limits';
 import { InboxSlackSettings } from '@/features/inbox/inbox-slack';
+import { ActionReviewSettings } from '@/features/settings/action-review';
 
 export function SettingsPage() {
   const { workspace, user, membershipId } = workspaceRoute.useRouteContext();
@@ -139,6 +140,7 @@ function GeneralSettings({ workspaceId, slug, userId }: { workspaceId: string; s
       <ModelRead state={read.state} refresh={read.refresh} label="workspace settings">
         {({ settings, membership }) => (
           <>
+            <ActionReviewSettings workspaceId={workspaceId} admin={admin && !stale} />
             <SettingsGroup title="Workspace identity" titleId="identity-heading">
               {!admin && (
                 <p className="px-4 py-3 text-sm text-muted-foreground">

@@ -3,6 +3,13 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { createWorkspaceSettingsService, WorkspaceSettingsError } from '@tulipfarm/workspaces/settings';
+import { ActionReviewError, createActionReviewService } from '@tulipfarm/workspaces/action-review';
+import {
+  actionReviewSettingsSchema,
+  previewReviewSchema,
+  reviewPreviewSchema,
+  saveReviewSchema,
+} from '@tulipfarm/workspaces/action-review-contracts';
 import {
   deleteWorkspaceReceiptSchema,
   deleteWorkspaceSchema,
@@ -21,6 +28,14 @@ const params = z.object({ workspaceId: z.uuid() });
 const recoveryParams = params.extend({ requestId: z.uuid() });
 const json = (schema: z.ZodType) => z.toJSONSchema(schema, { target: 'openapi-3.0', io: 'input' });
 const errorSchema = json(z.object({ error: z.string() }));
+// Fastify's default validator removes fields while trying union branches. Parse the chosen mode without mutation.
+const reviewValidator =
+  (body: z.ZodType) =>
+  ({ httpPart }: { httpPart?: string }) =>
+  (value: unknown) => {
+    const parsed = (httpPart === 'body' ? body : params).safeParse(value);
+    return parsed.success ? { value: parsed.data } : { error: parsed.error };
+  };
 
 export function registerWorkspaceSettings(
   app: FastifyInstance,
@@ -29,6 +44,7 @@ export function registerWorkspaceSettings(
   },
 ) {
   const service = createWorkspaceSettingsService(dependencies);
+  const review = createActionReviewService(dependencies);
   app.register(async routes => {
     const user = authenticateRoutes(routes, dependencies.auth, {
       origin: () => authConfig().webOrigin,
@@ -36,6 +52,8 @@ export function registerWorkspaceSettings(
     });
     routes.setErrorHandler((error, _request, reply) => {
       if (requestBoundaryError(error, reply)) return;
+      if (error instanceof ActionReviewError)
+        return reply.code(error.code === 'action-review-admin-required' ? 403 : 400).send({ error: error.code });
       if (error instanceof WorkspaceSettingsError)
         return reply.code(error.code === 'workspace-settings-not-found' ? 404 : 409).send({ error: error.code });
       if (error instanceof StorageUnavailableError) return reply.code(503).send({ error: 'workspace-unavailable' });
@@ -62,6 +80,27 @@ export function registerWorkspaceSettings(
       },
     });
     const base = '/workspaces/:workspaceId/settings';
+    const reviewPath = `${base}/action-review`;
+    routes.get(reviewPath, { schema: schema('getActionReviewV1', actionReviewSettingsSchema) }, request =>
+      review.snapshot(params.parse(request.params).workspaceId, user(request)),
+    );
+    routes.post(
+      // oxlint-disable-next-line tulipfarm/product-copy -- A stable route, not user-facing copy.
+      `${reviewPath}/preview`,
+      {
+        schema: schema('previewActionReviewV1', reviewPreviewSchema, previewReviewSchema),
+        validatorCompiler: reviewValidator(previewReviewSchema),
+      },
+      request => review.preview(params.parse(request.params).workspaceId, user(request), request.body),
+    );
+    routes.put(
+      reviewPath,
+      {
+        schema: schema('saveActionReviewV1', actionReviewSettingsSchema, saveReviewSchema),
+        validatorCompiler: reviewValidator(saveReviewSchema),
+      },
+      request => review.save(params.parse(request.params).workspaceId, user(request), request.body),
+    );
     routes.get(base, { schema: schema('getWorkspaceSettingsV1', workspaceSettingsSchema) }, request =>
       service.snapshot(params.parse(request.params).workspaceId, user(request)),
     );

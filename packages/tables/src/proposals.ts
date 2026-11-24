@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { tableProposalSupersededCondition } from '@tulipfarm/conversations/tool-activity-history';
+import { tablePolicyState, tableProposalSupersededCondition } from '@tulipfarm/conversations/tool-activity-history';
 import { z } from 'zod';
 import {
   AccessDenied,
@@ -278,6 +278,16 @@ function operations(options: TableProposalOptions) {
   }
   async function state(tx: TableTransaction, row: z.infer<typeof storedSchema>) {
     const id = row.manifest.id;
+    const policy =
+      tx.commonVersion < 113
+        ? 'none'
+        : (
+            await tx.client.query(
+              `SELECT ${tablePolicyState(name => table(tx, name), tx.commonVersion)} AS policy
+             FROM ${table(tx, 'tf_table_proposals')} p WHERE p.id=$1`,
+              [id],
+            )
+          ).rows[0]?.policy;
     const decision = z
       .enum(['approve', 'reject'])
       .nullable()
@@ -333,24 +343,28 @@ function operations(options: TableProposalOptions) {
                 ? 'partial'
                 : saved.some(item => item.receipt.status === 'failed')
                   ? 'failed'
-                  : decision !== 'approve'
-                    ? (
-                        await tx.client.query(
-                          `SELECT 1 FROM ${table(tx, 'tf_table_proposals')} p WHERE p.id=$1 AND ${tableProposalSupersededSql(tx)}`,
-                          [id],
-                        )
-                      ).rowCount
-                      ? 'superseded'
-                      : 'pending'
-                    : executions.some(active)
+                  : policy === 'stopped'
+                    ? 'cancelled'
+                    : policy === 'current'
                       ? 'running'
-                      : 'approved';
+                      : decision !== 'approve'
+                        ? (
+                            await tx.client.query(
+                              `SELECT 1 FROM ${table(tx, 'tf_table_proposals')} p WHERE p.id=$1 AND ${tableProposalSupersededSql(tx)}`,
+                              [id],
+                            )
+                          ).rowCount
+                          ? 'superseded'
+                          : 'pending'
+                        : executions.some(active)
+                          ? 'running'
+                          : 'approved';
     return {
       id,
       digest: row.digest,
       status,
       decision,
-      cancelled: control?.operation === 'cancel',
+      cancelled: control?.operation === 'cancel' || status === 'cancelled',
       expired: row.expired,
       plans: row.manifest.plans.map(plan => {
         const applied = imported.get(plan.input.tableId) ?? 0;
@@ -1075,7 +1089,18 @@ function operations(options: TableProposalOptions) {
           return state(tx, row);
         }
         const status = await state(tx, row);
-        if (kind === 'decision' && status.decision) throw new TableProposalError('proposal-conflict');
+        if (
+          kind === 'decision' &&
+          (status.decision ||
+            (tx.commonVersion >= 113 &&
+              (
+                await tx.client.query(
+                  `SELECT 1 FROM ${table(tx, 'tf_action_review_receipts')} WHERE call_id=$1 AND action='create-table'`,
+                  [id],
+                )
+              ).rowCount))
+        )
+          throw new TableProposalError('proposal-conflict');
         if (action === 'approve' || action === 'resume') {
           if (row.expired) throw new TableProposalError('proposal-expired');
           if (action === 'approve' && status.cancelled) throw new TableProposalError('proposal-cancelled');

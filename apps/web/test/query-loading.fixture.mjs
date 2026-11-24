@@ -100,6 +100,8 @@ export async function startFixture() {
           resources: [],
           grants: [],
         });
+      else if (path === `${base}/settings/action-review`)
+        json = { mode: 'auto', revision: 0, rule: null, interpretation: null, actions: [], canManage: true };
       else if (path === `${base}/settings`)
         json = { workspaceId: id, name: workspace.name, slug: workspace.slug, revision: 1, canManage: true };
       else if (path === `${base}/personal-memory/files`)
