@@ -74,7 +74,12 @@ export function createBrowserHostServer(host: BrowserHost, token: string): Serve
         response.destroy();
         return;
       }
-      if (error instanceof HostError) send(response, error.status, { error: error.code, message: error.message });
+      if (error instanceof HostError)
+        send(response, error.status, {
+          error: error.code,
+          message: error.message,
+          ...(error.position ? { position: error.position } : {}),
+        });
       else {
         console.error('browser host request failed', error);
         send(response, 500, { error: 'action-failed', message: 'The browser host failed.' });
@@ -89,8 +94,11 @@ export function createBrowserHostServer(host: BrowserHost, token: string): Serve
     if (!authorized(request, token)) return send(response, 401, { error: 'invalid-request', message: 'Unauthorized' });
 
     if (url.pathname === '/v1/sessions' && method === 'POST') {
-      const { sessionId, allowedSites } = parse(browserOpenSchema, await readJson(request));
-      return send(response, 200, await host.open(sessionId, allowedSites));
+      const { sessionId, allowedSites, workspaceId } = parse(browserOpenSchema, await readJson(request));
+      // A request that ends while it waits for a browser gives up its place in line.
+      const ended = new AbortController();
+      response.once('close', () => ended.abort());
+      return send(response, 200, await host.open(sessionId, allowedSites, workspaceId, ended.signal));
     }
     const match = /^\/v1\/sessions\/([^/]+)(?:\/([a-z-]+))?$/.exec(url.pathname);
     const download = /^\/v1\/sessions\/([^/]+)\/downloads\/([^/]+)$/.exec(url.pathname);

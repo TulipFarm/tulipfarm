@@ -472,6 +472,66 @@ test('the host refuses sessions beyond its capacity', async t => {
   await assert.rejects(host.open('00000000-0000-4000-8000-000000000002'), { code: 'capacity' });
 });
 
+const workspace = '00000000-0000-4000-8000-0000000000aa';
+const other = '00000000-0000-4000-8000-0000000000bb';
+const session = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+
+test('a workspace’s extra sessions wait in line, first come first served, while open ones resume at once', async t => {
+  const host = await createBrowserHost({ ...options, maxSessions: 6, maxSessionsPerWorkspace: 2 });
+  t.after(() => host.shutdown());
+  await host.open(session(1), undefined, workspace);
+  await host.open(session(2), undefined, workspace);
+  const order = [];
+  const third = host.open(session(3), undefined, workspace).then(state => order.push(state.sessionId));
+  const fourth = host.open(session(4), undefined, workspace).then(state => order.push(state.sessionId));
+  // Another workspace and an open session never wait.
+  await host.open(session(5), undefined, other);
+  assert.equal((await host.open(session(1), undefined, workspace)).sessionId, session(1));
+  assert.deepEqual(order, []);
+  await host.close(session(1));
+  await third;
+  assert.deepEqual(order, [session(3)]);
+  await host.close(session(2));
+  await fourth;
+  assert.deepEqual(order, [session(3), session(4)]);
+});
+
+test('a session that waits too long is told its place in line, and leaving the line frees it', async t => {
+  const host = await createBrowserHost({ ...options, maxSessions: 6, maxSessionsPerWorkspace: 2, queueWaitMs: 300 });
+  t.after(() => host.shutdown());
+  await host.open(session(1), undefined, workspace);
+  await host.open(session(2), undefined, workspace);
+  const ended = new AbortController();
+  const gaveUp = host.open(session(3), undefined, workspace, ended.signal);
+  const waiting = host.open(session(4), undefined, workspace);
+  ended.abort();
+  await assert.rejects(gaveUp, { code: 'invalid-request' });
+  await assert.rejects(waiting, error => {
+    assert.equal(error.code, 'browser-busy');
+    assert.equal(error.position, 1);
+    assert.equal(error.message, 'All 2 browsers for this workspace are in use. This step is number 1 in line.');
+    return true;
+  });
+  // Nobody is left in line, so the next session opens as soon as a browser closes.
+  await host.close(session(1));
+  assert.equal((await host.open(session(5), undefined, workspace)).sessionId, session(5));
+  assert.equal(host.size(), 2);
+});
+
+test('a session’s state says when it opened and when it closes unless used', async t => {
+  let clock = Date.parse('2026-01-01T00:00:00Z');
+  const host = await createBrowserHost({ ...options, idleMs: 60_000, holdMs: 600_000, now: () => clock });
+  t.after(() => host.shutdown());
+  const opened = await host.open(sessionId, undefined, workspace);
+  assert.equal(opened.openedAt, '2026-01-01T00:00:00.000Z');
+  assert.equal(opened.closesAt, '2026-01-01T00:01:00.000Z');
+  clock += 5000;
+  await host.needsPerson(sessionId, { reason: 'Solve the captcha' });
+  const waiting = await host.state(sessionId);
+  assert.equal(waiting.openedAt, '2026-01-01T00:00:00.000Z');
+  assert.equal(waiting.closesAt, '2026-01-01T00:10:05.000Z');
+});
+
 test('a saved login carries a site’s cookies and storage into a new session', async t => {
   const host = await createBrowserHost({ ...options, allowPrivateNetworks: true });
   t.after(() => host.shutdown());

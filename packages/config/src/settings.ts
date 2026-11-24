@@ -582,6 +582,16 @@ export const settings: readonly Setting[] = [
       'Browser sessions the host runs at once. Each holds a Chromium context, so allow about 400 MB per session.',
   },
   {
+    name: 'BROWSER_MAX_SESSIONS_PER_WORKSPACE',
+    group: 'Public origins',
+    services: ['browser-host'],
+    requirement: 'optional',
+    secret: false,
+    default: '3',
+    description:
+      'Browser sessions one workspace runs at once. A new session beyond this waits up to a minute for one to close, then the agent is told to try again.',
+  },
+  {
     name: 'BROWSER_HOST_IDLE_MINUTES',
     group: 'Public origins',
     services: ['browser-host'],

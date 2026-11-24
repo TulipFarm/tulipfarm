@@ -13,6 +13,7 @@ const host = await createBrowserHost({
   executablePath: env.CHROMIUM_EXECUTABLE_PATH || undefined,
   sandbox: env.CHROMIUM_SANDBOX === 'true',
   maxSessions: Number(env.BROWSER_HOST_MAX_SESSIONS ?? 8),
+  maxSessionsPerWorkspace: Number(env.BROWSER_MAX_SESSIONS_PER_WORKSPACE ?? 3),
   idleMs: minutes(env.BROWSER_HOST_IDLE_MINUTES, 10),
   holdMs: minutes(env.BROWSER_HOST_HOLD_MINUTES, 24 * 60),
   allowPrivateNetworks: env.BROWSER_HOST_ALLOW_PRIVATE_NETWORKS === 'true',
