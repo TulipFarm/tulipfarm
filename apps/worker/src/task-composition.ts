@@ -26,7 +26,14 @@ import type { KnowledgeToolsFactory } from '@tulipfarm/agents/tools';
 import { createKnowledgeTools } from './knowledge-tools-composition.ts';
 import { createSkillExecutionFactory } from '@tulipfarm/agents/skill-execution';
 import { configuredSkillClient } from '@tulipfarm/workflow-snippets/client';
-import { secretsServices, taskSecretsAccess } from './secrets-composition.ts';
+import { secretsServices, taskBrowserSecrets, taskSecretsAccess } from './secrets-composition.ts';
+import { browserSessionId, createBrowserHostClient } from '@tulipfarm/browser';
+import { createBrowserLogins } from '@tulipfarm/browser/logins';
+import { browserHostConfiguration } from '@tulipfarm/config/browser-host';
+import { integrationCredentialKeyring } from '@tulipfarm/integrations';
+import type { TaskBrowser } from '@tulipfarm/agents/task-runtime';
+import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
+import { endRunBrowser } from './browser-logins.ts';
 
 export function createTaskComposition(
   storage: Parameters<typeof createTaskRuntime>[0],
@@ -45,6 +52,20 @@ export function createTaskComposition(
     fileText: (...args) => (google ??= googleOperations(runtime)).fileText(...args),
     fileDocument: (...args) => (google ??= googleOperations(runtime)).fileDocument(...args),
   };
+  const secrets = secretsServices(runtime);
+  const browserHost = browserHostConfiguration();
+  const browserLogins = createBrowserLogins({ runtime, keyring: () => integrationCredentialKeyring() });
+  const browser: TaskBrowser | undefined = browserHost
+    ? {
+        client: createBrowserHostClient(browserHost),
+        enabled: workspaceId => isFeatureEnabled('browser-use', null, { id: workspaceId }),
+        secrets: taskBrowserSecrets(secrets),
+        loadLogin: async ({ workspaceId, actor, sessionId, loginId }) => {
+          const login = await browserLogins.use(workspaceId, actor, loginId);
+          await browser!.client.loadLogin(sessionId, { id: login.id, site: login.site, state: login.state });
+        },
+      }
+    : undefined;
   const tasks = createTaskRuntime(
     runtime,
     model,
@@ -84,14 +105,36 @@ export function createTaskComposition(
       links: objects && attachments ? { fetch: fetchPublicFile, objects, hasRoom: attachments.hasRoom } : undefined,
     },
     files ? { files, choose: runImageChoice } : undefined,
-    taskSecretsAccess(secretsServices(runtime)),
+    taskSecretsAccess(secrets),
+    browser,
   );
+  /** When a run ends, its browser saves its logins back as the run's owner and closes. */
+  async function endTaskBrowser(workspaceId: string, taskId: string) {
+    if (!browser) return;
+    await endRunBrowser({
+      client: browser.client,
+      logins: browserLogins,
+      workspaceId,
+      sessionId: browserSessionId(workspaceId, { runId: taskId }),
+      owner: () =>
+        runtime.transaction(workspaceId, commonCompatibility, async tx => {
+          const row = await tx.client.query<{ owner_user_id: string }>(
+            `SELECT owner_user_id FROM ${qualified(tx.schema, 'tf_agent_tasks')} WHERE id=$1`,
+            [taskId],
+          );
+          return row.rows[0]?.owner_user_id;
+        }),
+    });
+  }
   const progress = createTaskProgress(runtime);
   async function processAgentTaskStep(workspaceId: string, taskId: string): Promise<TaskProgress> {
     try {
       await mcp?.(runtime).recover(workspaceId);
       await tasks.process(workspaceId, taskId);
-      return await progress(workspaceId, taskId);
+      const next = await progress(workspaceId, taskId);
+      // A failed close fails the step, which retries until the run's browser has closed.
+      if (next.kind === 'terminal') await endTaskBrowser(workspaceId, taskId);
+      return next;
     } catch {
       // Database and provider failures can contain private inputs. Temporal stores errors.
       throw new Error('task-step-unavailable');

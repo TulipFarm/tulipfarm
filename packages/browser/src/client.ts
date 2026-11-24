@@ -6,7 +6,7 @@ import {
   type BrowserActionResult,
   type BrowserControl,
   type BrowserHostErrorCode,
-  type BrowserInput,
+  type BrowserInputs,
   type BrowserLoadLogin,
   type BrowserNeedsPerson,
   type BrowserSessionState,
@@ -70,8 +70,17 @@ export function createBrowserHostClient(connection: BrowserHostConnection, fetch
   const session = (sessionId: string) => `/v1/sessions/${encodeURIComponent(sessionId)}`;
 
   return {
-    async open(sessionId: string): Promise<BrowserSessionState> {
-      return browserSessionStateSchema.parse(await call('POST', '/v1/sessions', { sessionId }));
+    /** Opens the session, or returns it when open. `allowedSites` limits a new session's pages to those sites. */
+    async open(
+      sessionId: string,
+      options: { allowedSites?: readonly string[] | undefined } = {},
+    ): Promise<BrowserSessionState> {
+      return browserSessionStateSchema.parse(
+        await call('POST', '/v1/sessions', {
+          sessionId,
+          ...(options.allowedSites?.length ? { allowedSites: options.allowedSites } : {}),
+        }),
+      );
     },
     async state(sessionId: string): Promise<BrowserSessionState | null> {
       try {
@@ -102,7 +111,7 @@ export function createBrowserHostClient(connection: BrowserHostConnection, fetch
     async siteState(sessionId: string, site: string): Promise<BrowserSiteState> {
       return browserSiteStateSchema.parse(await call('POST', `${session(sessionId)}/site-state`, { site }));
     },
-    async input(sessionId: string, input: BrowserInput): Promise<void> {
+    async input(sessionId: string, input: BrowserInputs): Promise<void> {
       await call('POST', `${session(sessionId)}/input`, input, 10_000);
     },
     async close(sessionId: string): Promise<void> {

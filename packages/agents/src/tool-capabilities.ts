@@ -37,6 +37,8 @@ const taskOnlyTools = [
   'knowledge.read',
   'knowledge.retrieve',
   'images.generate',
+  // Grants browser.handoff and browser.signIn with it.
+  'browser.act',
 ] as const;
 
 const taskProposalTools = ['rows.create', 'rows.update', 'rows.delete'] as const;
@@ -79,4 +81,9 @@ export function supportedAgentToolRuntimes(tool: string) {
 export function agentToolRuntimeDescription(tool: string) {
   const labels = supportedAgentToolRuntimes(tool).map(runtime => runtimeLabels[runtime]);
   return labels.length ? `Available to ${labels.join(', ')}.` : 'Unavailable to saved-agent runtimes.';
+}
+
+/** Granting `browser.act` grants the other browser tools with it. */
+export function withBrowserGrant<T extends string>(tools: readonly T[]): (T | 'browser.handoff' | 'browser.signIn')[] {
+  return tools.includes('browser.act' as T) ? [...tools, 'browser.handoff', 'browser.signIn'] : [...tools];
 }

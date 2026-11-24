@@ -4,13 +4,13 @@ import { z } from 'zod';
 import { AccessDenied } from '@tulipfarm/access';
 import {
   BrowserHostError,
-  browserInputSchema,
+  browserInputsSchema,
   browserSessionId,
   browserSessionStateSchema,
   type BrowserHostClient,
 } from '@tulipfarm/browser';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
-import { errorAttributes } from '@tulipfarm/observability';
+import { errorAttributes, isFeatureEnabled } from '@tulipfarm/observability';
 import type { registerAuth } from './auth.ts';
 import { authConfig } from './auth.ts';
 import { authenticateRoutes } from './authenticated-routes.ts';
@@ -18,6 +18,7 @@ import { routeValidation } from './route-validation.ts';
 import { requestBoundaryError } from './security.ts';
 
 const chatParams = z.strictObject({ workspaceId: z.uuid(), chatId: z.uuid() });
+const taskParams = z.strictObject({ workspaceId: z.uuid(), taskId: z.uuid() });
 const stateResponse = z.strictObject({ browser: browserSessionStateSchema.nullable() });
 const controlBody = z.strictObject({ controller: z.enum(['agent', 'person']) });
 const okResponse = z.strictObject({ ok: z.literal(true) });
@@ -32,12 +33,39 @@ const validation = routeValidation({
   invalid: () => new Error('invalid-request'),
 });
 const { json } = validation;
-function schema(operationId: string, summary: string, response: z.ZodType, body?: z.ZodType) {
-  return {
+// The ingress ends a request after 240 s, so the live view ends first and the panel reconnects.
+const liveLifetimeMs = 180_000;
+
+/** What owns a browser session: a chat, or an agent's run. */
+type Owner = {
+  base: string;
+  params: z.ZodType<{ workspaceId: string; id: string }>;
+  paramsSchema: z.ZodType;
+  tag: string;
+  operation: string;
+  noun: string;
+  notFound: string;
+  unavailable: string;
+  /** Throws `AccessDenied` unless the member may see the chat or run. */
+  read(workspaceId: string, userId: string, id: string): Promise<unknown>;
+  sessionId(workspaceId: string, id: string): string;
+  /** Runs after a member hands the browser back; throws when nothing will resume the owner. */
+  handedBack?(workspaceId: string, id: string, log: (error: unknown) => void): Promise<void>;
+};
+
+function registerLiveRoutes(
+  app: FastifyInstance,
+  auth: Pick<ReturnType<typeof registerAuth>['auth'], 'api'>,
+  client: BrowserHostClient | undefined,
+  enabled: (workspaceId: string) => Promise<boolean>,
+  streams: Set<() => void>,
+  owner: Owner,
+) {
+  const schema = (operationId: string, summary: string, response: z.ZodType, body?: z.ZodType) => ({
     operationId,
     summary,
-    tags: ['Conversations'],
-    params: json(chatParams),
+    tags: [owner.tag],
+    params: json(owner.paramsSchema),
     ...(body ? { body: json(body) } : {}),
     response: {
       200: json(response),
@@ -48,35 +76,14 @@ function schema(operationId: string, summary: string, response: z.ZodType, body?
       409: errorSchema,
       503: errorSchema,
     },
-  };
-}
-// The ingress ends a request after 240 s, so the live view ends first and the panel reconnects.
-const liveLifetimeMs = 180_000;
-
-/**
- * The live view of a chat's cloud browser. Whoever can read the chat can watch it, take it over, use it while in
- * control and hand it back. The browser session is derived from the chat, so no other chat's browser is reachable.
- */
-export function registerBrowserLive(
-  app: FastifyInstance,
-  dependencies: {
-    auth: Pick<ReturnType<typeof registerAuth>['auth'], 'api'>;
-    chats: { read(workspaceId: string, userId: string, chatId: string): Promise<unknown> };
-    client: BrowserHostClient | undefined;
-  },
-) {
-  const { chats, client } = dependencies;
-  const streams = new Set<() => void>();
-  app.addHook('preClose', async () => {
-    for (const end of streams) end();
   });
   app.register(async routes => {
     validation.install(routes, true);
-    const user = authenticateRoutes(routes, dependencies.auth, { origin: () => authConfig().webOrigin });
+    const user = authenticateRoutes(routes, auth, { origin: () => authConfig().webOrigin });
     routes.setErrorHandler((error, request, reply) => {
       if (requestBoundaryError(error, reply)) return;
-      if (error instanceof AccessDenied) return reply.code(404).send({ error: 'conversation-not-found' });
-      if (error instanceof StorageUnavailableError) return reply.code(503).send({ error: 'conversations-unavailable' });
+      if (error instanceof AccessDenied) return reply.code(404).send({ error: owner.notFound });
+      if (error instanceof StorageUnavailableError) return reply.code(503).send({ error: owner.unavailable });
       if (error instanceof BrowserHostError) {
         if (error.code === 'session-not-found') return reply.code(404).send({ error: 'browser-not-found' });
         if (error.code === 'person-in-control' || error.code === 'agent-in-control')
@@ -90,80 +97,88 @@ export function registerBrowserLive(
       request.log.error(errorAttributes(error), 'browser_live_failed');
       return reply.code(503).send({ error: 'browser-unavailable' });
     });
-    const base = '/workspaces/:workspaceId/conversations/:chatId/browser';
-    /** Authorizes the reader and returns the host and this chat's browser session. */
+    /** Whether the member may see the owner and browser use is on in its workspace. */
+    async function visible(workspaceId: string, userId: string, id: string) {
+      await owner.read(workspaceId, userId, id);
+      return enabled(workspaceId);
+    }
+    /** Authorizes the reader and returns the host and this owner's browser session. */
     async function session(params: unknown, userId: string) {
-      const { workspaceId, chatId } = chatParams.parse(params);
-      await chats.read(workspaceId, userId, chatId);
+      const { workspaceId, id } = owner.params.parse(params);
+      // With browser use off, no browser is reachable, as if it had closed.
+      if (!(await visible(workspaceId, userId, id)))
+        throw new BrowserHostError('session-not-found', 'Browser use is turned off', 404);
       if (!client) throw new BrowserHostError('unavailable', 'Browser use is not configured');
-      return { client, sessionId: browserSessionId(workspaceId, { conversationId: chatId }), workspaceId, chatId };
+      return { client, sessionId: owner.sessionId(workspaceId, id), workspaceId, id };
     }
 
     routes.get(
-      base,
+      owner.base,
       {
         logLevel: 'silent',
-        schema: schema('getConversationBrowserV1', "Read the state of a chat's browser", stateResponse),
+        schema: schema(`get${owner.operation}BrowserV1`, `Read the state of a ${owner.noun}'s browser`, stateResponse),
       },
       async request => {
-        const { workspaceId, chatId } = chatParams.parse(request.params);
-        await chats.read(workspaceId, user(request), chatId);
-        // Without a browser host the chat simply has no browser.
-        if (!client) return { browser: null };
-        return { browser: await client.state(browserSessionId(workspaceId, { conversationId: chatId })) };
+        const { workspaceId, id } = owner.params.parse(request.params);
+        // Without a browser host, or with browser use off, there is simply no browser.
+        if (!(await visible(workspaceId, user(request), id)) || !client) return { browser: null };
+        return { browser: await client.state(owner.sessionId(workspaceId, id)) };
       },
     );
 
     routes.post(
-      `${base}/control`,
+      `${owner.base}/control`,
       {
         schema: schema(
-          'controlConversationBrowserV1',
-          "Take over a chat's browser or hand it back",
+          `control${owner.operation}BrowserV1`,
+          `Take over a ${owner.noun}'s browser or hand it back`,
           stateResponse,
           controlBody,
         ),
       },
       async request => {
         const userId = user(request);
-        const { client, sessionId } = await session(request.params, userId);
+        const { client, sessionId, workspaceId, id } = await session(request.params, userId);
         const { controller } = controlBody.parse(request.body);
-        return {
-          browser: await client.control(
-            sessionId,
-            controller === 'person' ? { controller, memberId: userId } : { controller },
-          ),
-        };
+        const browser = await client.control(
+          sessionId,
+          controller === 'person' ? { controller, memberId: userId } : { controller },
+        );
+        if (controller === 'agent')
+          await owner.handedBack?.(workspaceId, id, error =>
+            request.log.warn(errorAttributes(error), 'browser_hand_back_wake_failed'),
+          );
+        return { browser };
       },
     );
 
     routes.post(
-      `${base}/input`,
+      `${owner.base}/input`,
       {
         logLevel: 'silent',
         schema: schema(
-          'sendConversationBrowserInputV1',
-          "Send a pointer or key event to a chat's browser",
+          `send${owner.operation}BrowserInputV1`,
+          `Send pointer and key events to a ${owner.noun}'s browser`,
           okResponse,
-          browserInputSchema,
+          browserInputsSchema,
         ),
       },
       async request => {
         const { client, sessionId } = await session(request.params, user(request));
-        await client.input(sessionId, browserInputSchema.parse(request.body));
+        await client.input(sessionId, browserInputsSchema.parse(request.body));
         return { ok: true as const };
       },
     );
 
     routes.get(
-      `${base}/live`,
+      `${owner.base}/live`,
       {
         logLevel: 'silent',
         schema: {
-          operationId: 'streamConversationBrowserV1',
-          summary: "Stream a chat's browser screen and state as server-sent events",
-          tags: ['Conversations'],
-          params: json(chatParams),
+          operationId: `stream${owner.operation}BrowserV1`,
+          summary: `Stream a ${owner.noun}'s browser screen and state as server-sent events`,
+          tags: [owner.tag],
+          params: json(owner.paramsSchema),
           response: {
             200: {
               description: 'Live browser frames',
@@ -177,7 +192,7 @@ export function registerBrowserLive(
       },
       async (request, reply) => {
         const userId = user(request);
-        const { client, sessionId, workspaceId, chatId } = await session(request.params, userId);
+        const { client, sessionId, workspaceId, id } = await session(request.params, userId);
         const abort = new AbortController();
         const upstream = await client.frames(sessionId, abort.signal);
         const body = Readable.fromWeb(upstream.body as import('node:stream/web').ReadableStream<Uint8Array>);
@@ -195,12 +210,12 @@ export function registerBrowserLive(
         reply.raw.once('close', end);
         body.once('error', end);
         timers.push(setTimeout(end, liveLifetimeMs));
-        // A member who loses the chat stops seeing its browser within half a minute.
+        // A member who loses access, or whose workspace turns browser use off, stops seeing it within half a minute.
         const recheck = () =>
           timers.push(
             setTimeout(async () => {
               try {
-                await chats.read(workspaceId, userId, chatId);
+                if (!(await visible(workspaceId, userId, id))) return end();
               } catch {
                 return end();
               }
@@ -217,4 +232,70 @@ export function registerBrowserLive(
       },
     );
   });
+}
+
+/**
+ * The live view of a chat's or an agent run's cloud browser. Whoever can read the chat or see the run can watch it,
+ * take it over, use it while in control and hand it back. The session is derived from the chat or run, so no other
+ * browser is reachable. Handing a run's browser back wakes the run.
+ */
+export function registerBrowserLive(
+  app: FastifyInstance,
+  dependencies: {
+    auth: Pick<ReturnType<typeof registerAuth>['auth'], 'api'>;
+    chats: { read(workspaceId: string, userId: string, chatId: string): Promise<unknown> };
+    tasks?: {
+      read(workspaceId: string, userId: string, taskId: string): Promise<unknown>;
+      /** Records the hand back on the run, so the minutely recovery resumes it even if the wake is lost. */
+      handBack(workspaceId: string, taskId: string): Promise<unknown>;
+      wake(workspaceId: string, taskId: string): Promise<void>;
+    };
+    client: BrowserHostClient | undefined;
+    /** Whether browser use is on in a workspace; the `browser-use` flag unless a test replaces it. */
+    enabled?: (workspaceId: string) => Promise<boolean>;
+  },
+) {
+  const { chats, tasks, client, auth } = dependencies;
+  const enabled = dependencies.enabled ?? (workspaceId => isFeatureEnabled('browser-use', null, { id: workspaceId }));
+  const streams = new Set<() => void>();
+  app.addHook('preClose', async () => {
+    for (const end of streams) end();
+  });
+  registerLiveRoutes(app, auth, client, enabled, streams, {
+    base: '/workspaces/:workspaceId/conversations/:chatId/browser',
+    params: chatParams.transform(({ workspaceId, chatId }) => ({ workspaceId, id: chatId })),
+    paramsSchema: chatParams,
+    tag: 'Conversations',
+    operation: 'Conversation',
+    noun: 'chat',
+    notFound: 'conversation-not-found',
+    unavailable: 'conversations-unavailable',
+    read: chats.read,
+    sessionId: (workspaceId, chatId) => browserSessionId(workspaceId, { conversationId: chatId }),
+  });
+  if (tasks)
+    registerLiveRoutes(app, auth, client, enabled, streams, {
+      base: '/workspaces/:workspaceId/agent-tasks/:taskId/browser',
+      params: taskParams.transform(({ workspaceId, taskId }) => ({ workspaceId, id: taskId })),
+      paramsSchema: taskParams,
+      tag: 'Agent tasks',
+      operation: 'AgentTask',
+      noun: 'run',
+      notFound: 'task-not-found',
+      unavailable: 'task-operation-unavailable',
+      read: tasks.read,
+      sessionId: (workspaceId, taskId) => browserSessionId(workspaceId, { runId: taskId }),
+      // Either a recorded hand back or a delivered wake resumes the run; with neither, the member must try again.
+      handedBack: async (workspaceId, taskId, log) => {
+        const recorded = await tasks.handBack(workspaceId, taskId).then(
+          () => true,
+          error => (log(error), false),
+        );
+        const woken = await tasks.wake(workspaceId, taskId).then(
+          () => true,
+          error => (log(error), false),
+        );
+        if (!recorded && !woken) throw new Error('run-not-resumed');
+      },
+    });
 }

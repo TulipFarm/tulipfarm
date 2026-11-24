@@ -387,7 +387,19 @@ export function createRowAssignments(options: {
             );
             await syncRunState(tx, row.table_id, row.row_id, 'waiting');
             await postNote(tx, row, taskId, 'event', { type: 'approval-requested' });
-            await notifySponsor(tx, row, 'waiting', taskId, 'An agent run is waiting for your approval');
+            const handoff = await tx.client.query(
+              `SELECT 1 FROM ${relation(tx, 'tf_agent_task_runs')} b JOIN ${relation(tx, 'tf_agent_tool_calls')} c ON c.run_id=b.run_id JOIN ${relation(tx, 'tf_agent_tasks')} t ON t.id=b.task_id AND t.generation=b.generation WHERE b.task_id=$1 AND c.status='waiting' AND c.call->>'tool'='browser.handoff'`,
+              [taskId],
+            );
+            await notifySponsor(
+              tx,
+              row,
+              'waiting',
+              taskId,
+              handoff.rowCount
+                ? 'An agent needs you to take over its browser'
+                : 'An agent run is waiting for your approval',
+            );
           }
           continue;
         }

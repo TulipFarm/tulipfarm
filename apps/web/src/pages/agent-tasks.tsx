@@ -55,6 +55,8 @@ import { TaskSecretRequests } from '@/features/secrets/task-requests';
 import { useTaskSecretRequests } from '@/features/secrets/queries';
 import { useTaskApiCalls } from '@/features/api-calls/queries';
 import { apiOrigin } from '@/lib/auth';
+import { useFlag } from '@/lib/feature-flags';
+import { isBrowserTool, LiveBrowserCanvas } from '@/features/browser/live-browser';
 import { writesAllowed } from '@/lib/http';
 import { GitHubChatResponse } from '@/features/chat/github-download';
 import { ActivityResultCard } from '@/features/chat/activity-result-card';
@@ -253,6 +255,7 @@ function TaskDetail({ workspace, taskId }: { workspace: { id: string; slug: stri
   const read = useTaskDetail(api, taskId);
   const [pausing, setPausing] = useState(false);
   const [pauseError, setPauseError] = useState(false);
+  const browserUse = useFlag('browser-use');
   return (
     <PageContent>
       <nav className="flex flex-wrap items-center justify-between gap-4">
@@ -290,6 +293,12 @@ function TaskDetail({ workspace, taskId }: { workspace: { id: string; slug: stri
         {task => (
           <>
             <TaskHeading workspaceId={workspace.id} task={task} />
+            {browserUse &&
+              task.status !== 'completed' &&
+              task.status !== 'failed' &&
+              task.activity.some(activity => isBrowserTool(activity.tool)) && (
+                <LiveBrowserCanvas workspaceId={workspace.id} target={{ kind: 'run', taskId }} />
+              )}
             <TaskHistory
               key={`history/${taskId}`}
               api={api}
@@ -460,7 +469,8 @@ function useTaskWait(workspaceId: string, task: TaskSummary) {
   const revision = `${task.status}/${task.toolCalls}/${task.activeMilliseconds}`;
   const secrets = useTaskSecretRequests(workspaceId, task.id, revision);
   const calls = useTaskApiCalls(workspaceId, task.id, revision);
-  if (task.status !== 'waiting-approval') return { label: taskStatusLabel(task), next: taskNextStep(task) };
+  if (task.status !== 'waiting-approval' || task.waitingOn === 'browser')
+    return { label: taskStatusLabel(task), next: taskNextStep(task) };
   if (secrets.state.kind === 'ready' && secrets.state.data.some(request => request.status === 'waiting'))
     return { label: 'Needs a secret', next: 'Provide or decline the secret request below.' };
   if (calls.state.kind === 'ready' && calls.state.data.some(call => call.status === 'awaiting-approval'))

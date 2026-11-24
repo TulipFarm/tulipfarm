@@ -146,3 +146,29 @@ test('task runs are offered files.read only while their api.request response fil
   assert.throws(() => parseNativeAgentDecision({ text: '', calls: [read] }, input));
   assert.equal(parseNativeAgentDecision({ text: '', calls: [read] }, { ...input, taskFiles: true }).kind, 'tool');
 });
+
+test('a task is offered the browser only when its agent has it and browser use is on', () => {
+  const input = extra =>
+    agentModelInputSchema.parse({
+      prompt: 'Download the invoice.',
+      definition: { name: 'Agent', instructions: 'Do work.', tools: ['browser.act'] },
+      scope: [],
+      task: true,
+      ...extra,
+    });
+  const offered = extra =>
+    modelNativeTools(input(extra))
+      .tools.map(tool => tool.name)
+      .filter(name => name.startsWith('browser'));
+  assert.deepEqual(offered({}), []);
+  assert.deepEqual(offered({ browser: true }), ['browser_act', 'browser_handoff']);
+  assert.deepEqual(offered({ browser: true, taskSecrets: true }), ['browser_act', 'browser_handoff', 'browser_signIn']);
+  assert.throws(() =>
+    agentModelInputSchema.parse({
+      prompt: 'Chat.',
+      definition: { name: 'Agent', instructions: 'Do work.', tools: ['browser.act'] },
+      scope: [],
+      browser: true,
+    }),
+  );
+});

@@ -4,8 +4,9 @@ import { z } from 'zod';
 import {
   browserActionSchema,
   browserControlSchema,
-  browserInputSchema,
+  browserInputsSchema,
   browserNeedsPersonSchema,
+  browserOpenSchema,
   browserLoadLoginSchema,
   browserSiteStateRequestSchema,
   browserSessionIdSchema,
@@ -80,8 +81,8 @@ export function createBrowserHostServer(host: BrowserHost, token: string): Serve
     if (!authorized(request, token)) return send(response, 401, { error: 'invalid-request', message: 'Unauthorized' });
 
     if (url.pathname === '/v1/sessions' && method === 'POST') {
-      const { sessionId } = parse(z.strictObject({ sessionId: browserSessionIdSchema }), await readJson(request));
-      return send(response, 200, await host.open(sessionId));
+      const { sessionId, allowedSites } = parse(browserOpenSchema, await readJson(request));
+      return send(response, 200, await host.open(sessionId, allowedSites));
     }
     const match = /^\/v1\/sessions\/([^/]+)(?:\/([a-z-]+))?$/.exec(url.pathname);
     if (!match) return send(response, 404, { error: 'invalid-request', message: 'Not found' });
@@ -120,7 +121,7 @@ export function createBrowserHostServer(host: BrowserHost, token: string): Serve
         return send(response, 200, await host.siteState(sessionId, site));
       }
       case 'POST input':
-        await host.input(sessionId, parse(browserInputSchema, await readJson(request)));
+        await host.input(sessionId, parse(browserInputsSchema, await readJson(request)));
         return send(response, 204);
       case 'GET frames':
         return frames(sessionId, request, response);

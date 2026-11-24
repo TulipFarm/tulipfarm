@@ -1,6 +1,6 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
-import { chromium, type Browser, type BrowserContext, type CDPSession, type Page } from 'playwright-core';
+import { chromium, type Browser, type BrowserContext, type CDPSession, type Page, type Request } from 'playwright-core';
 import {
   browserViewport,
   type BrowserAction,
@@ -9,6 +9,7 @@ import {
   type BrowserFrame,
   type BrowserHostErrorCode,
   type BrowserInput,
+  type BrowserInputs,
   type BrowserLoadedLogin,
   type BrowserLoadLogin,
   type BrowserNeedsPerson,
@@ -16,6 +17,7 @@ import {
   type BrowserSiteState,
   type BrowserTypeSecret,
   browserSiteOf,
+  siteAllows,
   siteIncludes,
 } from '@tulipfarm/browser/contracts';
 import { publicAddress } from '@tulipfarm/workspace-mcp-transport';
@@ -255,6 +257,21 @@ const sitesOverlap = (a: string, b: string) => siteIncludes(a, b) || siteInclude
 
 export type BrowserHost = Awaited<ReturnType<typeof createBrowserHost>>;
 
+function frameOf(request: Request) {
+  try {
+    return request.frame();
+  } catch {
+    return undefined;
+  }
+}
+
+/** The notice for a page outside the allowed sites, naming up to five of them. */
+export function blockedNotice(origin: string, sites: readonly string[]) {
+  const named = sites.slice(0, 5).join(', ');
+  const more = sites.length > 5 ? ` and ${sites.length - 5} more` : '';
+  return `Blocked ${origin}: this browser can only open ${named}${more}.`;
+}
+
 export async function createBrowserHost(options: HostOptions) {
   const now = options.now ?? Date.now;
   const snapshotChars = options.snapshotChars ?? 24_000;
@@ -321,27 +338,56 @@ export async function createBrowserHost(options: HostOptions) {
     return session;
   }
 
-  async function create(sessionId: string): Promise<Session> {
+  async function create(sessionId: string, allowedSites: readonly string[] | undefined): Promise<Session> {
     if (sessions.size + opening.size >= options.maxSessions)
       throw new HostError('capacity', 'The browser host is running as many sessions as it can. Try again soon.', 503);
-    const context = await (
-      await launch()
-    ).newContext({
-      viewport: browserViewport,
-      acceptDownloads: false,
-      serviceWorkers: 'block',
-      locale: 'en-US',
-      timezoneId: 'UTC',
-    });
+    const started = await launch();
+    // Routes don't see redirect hops, so a limited session gets its own egress proxy that refuses other sites on every
+    // hop, as well as private addresses unless the host allows them.
+    const limit = allowedSites
+      ? await startEgressProxy({
+          allowed: options.allowPrivateNetworks ? () => true : allowAddress,
+          host: hostname => siteAllows(allowedSites, hostname),
+        })
+      : undefined;
+    const context = await started
+      .newContext({
+        ...(limit ? { proxy: { server: limit.server, bypass: '<-loopback>' } } : {}),
+        viewport: browserViewport,
+        acceptDownloads: false,
+        serviceWorkers: 'block',
+        locale: 'en-US',
+        timezoneId: 'UTC',
+      })
+      .catch(async error => {
+        await limit?.close();
+        throw error;
+      });
+    if (limit) context.on('close', () => void limit.close());
     let session: Session | undefined;
     await context.route('**/*', async route => {
       const url = new URL(route.request().url());
       if (url.protocol === 'data:' || url.protocol === 'blob:' || url.protocol === 'about:') return route.continue();
+      const request = route.request();
+      // A popup's first request comes before its frame exists, so it counts as no frame.
+      const frame = request.isNavigationRequest() ? frameOf(request) : undefined;
+      // Limited to listed sites, nothing reaches another site: no page, popup, frame, or resource.
+      if (allowedSites && !siteAllows(allowedSites, url.hostname)) {
+        if (session && frame === session.page.mainFrame()) session.notice = blockedNotice(url.origin, allowedSites);
+        return route.abort('blockedbyclient');
+      }
       if ((url.protocol === 'http:' || url.protocol === 'https:') && (await publicHost(url.hostname)))
         return route.continue();
-      if (session && route.request().isNavigationRequest() && route.request().frame() === session.page.mainFrame())
+      if (session && frame === session.page.mainFrame())
         session.notice = `Blocked ${url.origin}: the browser only opens public websites.`;
       return route.abort('blockedbyclient');
+    });
+    // Page routes don't see WebSockets, so they get the same checks here.
+    await context.routeWebSocket(/.*/, async socket => {
+      const url = new URL(socket.url());
+      if (allowedSites && !siteAllows(allowedSites, url.hostname)) return socket.close();
+      if (!(await publicHost(url.hostname))) return socket.close();
+      socket.connectToServer();
     });
     const page = await context.newPage();
     session = new Session(sessionId, context, page, now());
@@ -355,13 +401,21 @@ export async function createBrowserHost(options: HostOptions) {
         if (opened.page === added && last) void opened.switchTo(last);
       });
     });
+    // The proxy refuses a redirect to another site; the agent hears why, as for a link to it.
+    if (allowedSites)
+      context.on('request', request => {
+        if (!request.redirectedFrom() || frameOf(request) !== opened.page.mainFrame()) return;
+        const url = URL.parse(request.url());
+        if (url && !siteAllows(allowedSites, url.hostname)) opened.notice = blockedNotice(url.origin, allowedSites);
+      });
     page.on('framenavigated', frame => {
       if (frame === opened.page.mainFrame()) void opened.emitState();
     });
     return session;
   }
 
-  async function open(sessionId: string): Promise<BrowserSessionState> {
+  /** Opens a session, or returns the open one. Allowed sites apply only when the session is created. */
+  async function open(sessionId: string, allowedSites?: readonly string[]): Promise<BrowserSessionState> {
     const existing = sessions.get(sessionId);
     if (existing) {
       existing.lastUsed = now();
@@ -369,7 +423,7 @@ export async function createBrowserHost(options: HostOptions) {
     }
     let pending = opening.get(sessionId);
     if (!pending) {
-      pending = create(sessionId);
+      pending = create(sessionId, allowedSites);
       opening.set(sessionId, pending);
     }
     try {
@@ -709,9 +763,11 @@ export async function createBrowserHost(options: HostOptions) {
     });
   }
 
-  async function input(sessionId: string, event: BrowserInput): Promise<void> {
+  async function input(sessionId: string, events: BrowserInputs): Promise<void> {
     const session = get(sessionId);
-    return session.run(() => dispatch(session, event));
+    return session.run(async () => {
+      for (const event of Array.isArray(events) ? events : [events]) await dispatch(session, event);
+    });
   }
 
   async function dispatch(session: Session, event: BrowserInput): Promise<void> {

@@ -147,3 +147,135 @@ test('ordinary editor retains optional family through save and uncertain retry',
     server.kill('SIGTERM');
   }
 });
+
+test('a manager limits an agent’s browser to listed sites and preselects logins', { timeout: 60000 }, async () => {
+  const port = Number(process.env.AGENT_EDITOR_BROWSER_PORT ?? 5199) + 1;
+  const origin = `http://127.0.0.1:${port}`;
+  const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
+    cwd: new URL('..', import.meta.url),
+    stdio: 'ignore',
+  });
+  let browser;
+  try {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        if ((await fetch(origin)).ok) break;
+      } catch {}
+      assert.ok(attempt < 100 && server.exitCode === null, 'Editor browser server must start');
+      await setTimeout(100);
+    }
+    browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    page.setDefaultTimeout(10000);
+    await page.addInitScript(() => localStorage.setItem('tulipfarm:bud-corner', 'bottom-left'));
+    const errors = [];
+    page.on('pageerror', error => errors.push(String(error)));
+    const workspace = {
+      id: randomUUID(),
+      name: 'Editor proof',
+      slug: 'editor-proof',
+      createdAt: '2026-09-28T00:00:00.000Z',
+      status: 'ready',
+      soulCommit: 'a'.repeat(40),
+    };
+    const agentId = randomUUID();
+    const teamId = randomUUID();
+    const membershipId = randomUUID();
+    // Another manager chose this login; this manager can't see it, so it stays chosen.
+    const hiddenLogin = randomUUID();
+    const login = {
+      id: randomUUID(),
+      name: 'Orchid Club',
+      site: 'orchid.example',
+      ownerMembershipId: membershipId,
+      status: 'active',
+      grants: [],
+      canManage: true,
+      canUse: true,
+      createdAt: '2026-11-20T00:00:00.000Z',
+      savedAt: '2026-11-20T00:00:00.000Z',
+      lastUsedAt: null,
+    };
+    const detail = {
+      id: agentId,
+      name: 'Renewer',
+      owningTeamId: teamId,
+      savedRevision: 'a'.repeat(40),
+      definitionRevision: 'b'.repeat(64),
+      definition: {
+        name: 'Renewer',
+        instructions: 'Renew memberships.',
+        tools: ['browser.act'],
+        browser: { sites: ['orchid.example'], logins: [hiddenLogin] },
+      },
+      capabilities: ['read', 'edit', 'invoke'],
+      admin: false,
+      activations: [],
+    };
+    const writes = [];
+    await page.route('**/v1/**', async route => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      let json;
+      if (path === '/v1/auth/get-session')
+        json = {
+          session: { id: 'session', userId: 'editor' },
+          user: { id: 'editor', name: 'Editor', email: 'editor@example.com' },
+        };
+      else if (path === '/v1/feature-flags') json = { 'browser-use': true };
+      else if (path === '/v1/workspaces') json = [workspace];
+      else if (path === '/v1/workspaces/editor-proof') json = workspace;
+      else if (path.endsWith('/governance/me'))
+        json = {
+          membershipId,
+          role: 'member',
+          teams: [{ id: teamId, name: 'Editors' }],
+          capabilities: { manageGovernance: false, canLeave: true },
+        };
+      else if (path.endsWith('/chat/availability')) json = { configured: true };
+      else if (path.endsWith('/browser-logins')) json = { enabled: true, logins: [login] };
+      else if (path.endsWith('/agents/authoring-context'))
+        json = { currentSoulRevision: detail.savedRevision, teams: [{ id: teamId, name: 'Editors' }], admin: false };
+      else if (path.includes('/agents/commands/')) json = writes.at(-1)?.receipt;
+      else if (path.endsWith(`/agents/${agentId}`) && request.method() === 'PUT') {
+        const receipt = { commandId: randomUUID(), agentId, status: 'accepted', savedRevision: 'c'.repeat(40) };
+        writes.push({ body: request.postDataJSON(), receipt });
+        json = receipt;
+      } else if (path.endsWith(`/agents/${agentId}`)) json = detail;
+      else {
+        await route.fulfill({ status: 404, json: { error: 'unavailable' } });
+        return;
+      }
+      await route.fulfill({
+        json,
+        headers: { 'access-control-allow-origin': origin, 'access-control-allow-credentials': 'true' },
+      });
+    });
+    await page.goto(`${origin}/editor-proof/agents/${agentId}`);
+    await page.getByRole('tab', { name: 'Instructions', exact: true }).click();
+    const sites = page.getByRole('textbox', { name: /Allowed sites/ });
+    assert.equal(await sites.inputValue(), 'orchid.example');
+    assert.equal(
+      await page.getByRole('checkbox', { name: /A saved login you don’t have access to/ }).isChecked(),
+      true,
+    );
+    await sites.fill('orchid.example\nhttps://shop.orchid.example/cart');
+    await page.getByRole('button', { name: 'Save agent', exact: true }).click();
+    await page
+      .getByText('Enter one site per line, such as example.com, without https:// or a path.', { exact: true })
+      .waitFor();
+    assert.equal(writes.length, 0);
+    await sites.fill('orchid.example\nwww.Petals.example');
+    await page.getByRole('checkbox', { name: /Orchid Club/ }).check();
+    await page.getByRole('button', { name: 'Save agent', exact: true }).click();
+    await page.getByText('Saved. Renewer does not run until you activate a version.', { exact: true }).waitFor();
+    assert.deepEqual(writes[0].body.definition.browser, {
+      sites: ['orchid.example', 'petals.example'],
+      logins: [hiddenLogin, login.id],
+    });
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser?.close();
+    server.kill('SIGTERM');
+  }
+});

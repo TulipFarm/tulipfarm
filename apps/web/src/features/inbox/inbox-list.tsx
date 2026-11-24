@@ -116,6 +116,18 @@ export function InboxList({ workspaceId, workspaceSlug }: { workspaceId: string;
                 >
                   Open row
                 </Button>
+                {item.taskId && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    nativeButton={false}
+                    render={
+                      <Link to="/$workspaceSlug/agent-tasks/$taskId" params={{ workspaceSlug, taskId: item.taskId }} />
+                    }
+                  >
+                    Open run
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="ghost"

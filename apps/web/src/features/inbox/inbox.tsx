@@ -13,6 +13,7 @@ const inboxSchema = z.object({
       tableId: z.uuid(),
       tableName: z.string(),
       rowId: z.uuid(),
+      taskId: z.uuid().optional(),
       summary: z.string().nullable(),
       createdAt: z.string(),
     }),

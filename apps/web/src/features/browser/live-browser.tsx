@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BrowserInput } from '@tulipfarm/browser/contracts';
 import { browserViewport } from '@tulipfarm/browser/contracts';
-import { inputModifiers, typedText, viewportPoint } from './screen-input';
+import { inputBatch, inputModifiers, typedText, viewportPoint } from './screen-input';
 import { Alert, AlertDescription, AlertTitle } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { CanvasSection } from '@tulipfarm/sprout/canvas';
@@ -13,6 +13,7 @@ import {
   browserFrameSchema,
   browserSessionStateSchema,
   type BrowserSessionState,
+  type BrowserTarget,
 } from './api';
 import { loadedLoginPrompt, SaveLoginDialog, SignInPicker } from './login-picker';
 import { siteOfPage } from './logins';
@@ -30,17 +31,27 @@ type Live =
 
 const buttons = ['left', 'middle', 'right'] as const;
 
-/** The live screen of a chat's browser. The member can take over to act on the page, then hand back. */
+/**
+ * The live screen of a chat's or a run's browser. The member can take over to act on the page, then hand back.
+ * Handing back a chat's browser sends the agent a prompt; handing back a run's browser wakes the run on the server.
+ */
 export function LiveBrowserCanvas({
   workspaceId,
-  chatId,
+  target,
   onHandBack,
 }: {
   workspaceId: string;
-  chatId: string;
-  onHandBack: (prompt: string) => void;
+  target: BrowserTarget;
+  onHandBack?: (prompt: string) => void;
 }) {
-  const api = useMemo(() => browserApi(workspaceId, chatId), [workspaceId, chatId]);
+  const kind = target.kind;
+  const ownerId = target.kind === 'chat' ? target.chatId : target.taskId;
+  const api = useMemo(
+    () =>
+      browserApi(workspaceId, kind === 'chat' ? { kind: 'chat', chatId: ownerId } : { kind: 'run', taskId: ownerId }),
+    [workspaceId, kind, ownerId],
+  );
+  const chatId = target.kind === 'chat' ? target.chatId : null;
   const [live, setLive] = useState<Live>({ kind: 'connecting' });
   const [frame, setFrame] = useState<{ data: string; width: number; height: number } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -117,7 +128,8 @@ export function LiveBrowserCanvas({
       if (next) setLive({ kind: 'open', state: next });
       if (controller === 'person') signingIn.current = signIn;
       if (controller === 'agent') {
-        onHandBack(handBackPrompt);
+        onHandBack?.(handBackPrompt);
+        if (!chatId) return;
         const site = signingIn.current;
         signingIn.current = null;
         if (site && !state?.logins.some(login => login.site === site)) setSaving(site);
@@ -129,15 +141,33 @@ export function LiveBrowserCanvas({
     }
   };
 
-  // Inputs go one at a time so a click lands before the keys typed after it.
-  const queue = useRef(Promise.resolve());
+  // Inputs go in order, one request at a time, so a click lands before the keys typed after it. Inputs made while a
+  // request is out go together in the next one: a request per key would soon pass the API's rate limit.
+  const pending = useRef<{ api: typeof api; inputs: BrowserInput[]; sending: boolean }>({
+    api,
+    inputs: [],
+    sending: false,
+  });
   const send = useCallback(
     (input: BrowserInput) => {
-      queue.current = queue.current.then(
-        () => api.input(input),
-        () => api.input(input),
-      );
-      queue.current.catch(failure => setError(browserErrorMessage(failure)));
+      const queue = pending.current;
+      if (queue.api !== api) pending.current = { api, inputs: [], sending: false };
+      pending.current.inputs.push(input);
+      if (pending.current.sending) return;
+      const current = pending.current;
+      current.sending = true;
+      void (async () => {
+        while (current.inputs.length) {
+          const batch = current.inputs.splice(0, inputBatch(current.inputs));
+          try {
+            await current.api.input(batch);
+            setError('');
+          } catch (failure) {
+            setError(browserErrorMessage(failure));
+          }
+        }
+        current.sending = false;
+      })();
     },
     [api],
   );
@@ -210,8 +240,12 @@ export function LiveBrowserCanvas({
         <StatePanel
           kind="unavailable"
           heading="h3"
-          title="The browser has closed"
-          description="It closes after 10 minutes without use. Ask the agent to open it again."
+          title={chatId ? 'The browser has closed' : 'The browser isn’t open'}
+          description={
+            chatId
+              ? 'It closes after 10 minutes without use. Ask the agent to open it again.'
+              : 'It opens when the agent first uses it and closes when the run ends.'
+          }
         />
       </CanvasSection>
     );
@@ -239,7 +273,7 @@ export function LiveBrowserCanvas({
       meta={page.url}
       actions={
         <>
-          {siteOfPage(page.url) && (
+          {chatId && siteOfPage(page.url) && (
             <Button variant="ghost" size="sm" disabled={busy} onClick={() => setSaving(siteOfPage(page.url))}>
               Save login
             </Button>
@@ -257,10 +291,10 @@ export function LiveBrowserCanvas({
       }
     >
       <div className="flex flex-col gap-3">
-        {saving !== null && (
+        {chatId && saving !== null && (
           <SaveLoginDialog workspaceId={workspaceId} chatId={chatId} site={saving} close={() => setSaving(null)} />
         )}
-        {page.signIn && page.needsPerson && !inControl && (
+        {chatId && page.signIn && page.needsPerson && !inControl && (
           <SignInPicker
             workspaceId={workspaceId}
             chatId={chatId}
@@ -270,11 +304,11 @@ export function LiveBrowserCanvas({
             onTakeOver={() => void decide('person')}
             onLoaded={next => {
               setLive({ kind: 'open', state: next });
-              onHandBack(loadedLoginPrompt(page.signIn ?? ''));
+              onHandBack?.(loadedLoginPrompt(page.signIn ?? ''));
             }}
           />
         )}
-        {page.needsPerson && !page.signIn && !inControl && (
+        {page.needsPerson && !(chatId && page.signIn) && !inControl && (
           <Alert>
             <AlertTitle>The agent needs you</AlertTitle>
             <AlertDescription>{page.needsPerson} Take over, finish this step, then hand back.</AlertDescription>

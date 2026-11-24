@@ -195,7 +195,8 @@ test('existing-agent instructions save and activation in the real app', { timeou
           json = { membershipId: membership.membershipId, people: [], teams: [] };
         else if (path.endsWith('/workspace-mcp/capabilities')) json = { enabled: false };
         else if (path.endsWith('/credits')) json = credits;
-        else if (path.endsWith('/feature-flags')) json = {};
+        else if (path.endsWith('/feature-flags')) json = state.flags ?? {};
+        else if (path.endsWith('/browser-logins')) json = { enabled: true, logins: state.logins ?? [] };
         else if (path.endsWith('/bud'))
           json = {
             conversationId: null,
@@ -291,6 +292,42 @@ test('existing-agent instructions save and activation in the real app', { timeou
       assert.deepEqual(state.writes[0].input.definition.tools, ['web.fetch']);
       assert.deepEqual(state.writes[1].input.scope, scope);
       assert.match(page.url(), /tab=instructions/);
+    });
+
+    await t.test('the review lists where a browser agent can go and the logins it loads', async () => {
+      const state = fixture();
+      const login = {
+        id: randomUUID(),
+        name: 'Orchid Club',
+        site: 'orchid.example',
+        ownerMembershipId: membership.membershipId,
+        status: 'active',
+        grants: [],
+        canManage: true,
+        canUse: true,
+        createdAt: '2026-11-20T00:00:00.000Z',
+        savedAt: '2026-11-20T00:00:00.000Z',
+        lastUsedAt: null,
+      };
+      const hidden = randomUUID();
+      state.flags = { 'browser-use': true };
+      state.logins = [login];
+      state.detail.definition = {
+        ...state.detail.definition,
+        tools: ['browser.act'],
+        browser: { logins: [login.id, hidden] },
+      };
+      const { page } = await open(state);
+      await page.getByRole('textbox', { name: /Allowed sites/ }).fill('orchid.example\npetals.example');
+      await save(page).click();
+      const dialog = page.getByRole('alertdialog');
+      await dialog.getByText('Sites it can open: orchid.example, petals.example', { exact: true }).waitFor();
+      await dialog
+        .getByText('Saved logins it loads: Orchid Club (orchid.example), A saved login you don’t have access to', {
+          exact: true,
+        })
+        .waitFor();
+      assert.deepEqual(state.writes, []);
     });
 
     await t.test('queued saves are accepted before activation', async () => {

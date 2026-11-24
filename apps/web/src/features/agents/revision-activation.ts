@@ -18,6 +18,7 @@ export function needsActivationReview(previous: Definition, next: Definition) {
     definition.mcp ?? [],
     definition.modelFamilyId ?? null,
     definition.responseRule ?? 'tag',
+    definition.browser ?? null,
   ];
   return JSON.stringify(selections(previous)) !== JSON.stringify(selections(next));
 }

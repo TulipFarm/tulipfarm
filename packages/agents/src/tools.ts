@@ -213,7 +213,12 @@ import { delegateCallSchema, type DelegateCall } from './subagent-contracts.ts';
 import type { AppKind } from '@tulipfarm/apps';
 import { appPageToolCallSchemas, appPageToolDescriptions, type AppPages } from './app-page-tools.ts';
 import { appToolCallSchemas, appToolDescriptions, type AppEditing } from './app-tools.ts';
-import { browserCallSchemas, browserToolDescriptions, invokeBrowser, type ChatBrowser } from './browser-tools.ts';
+import {
+  browserTaskToolDescriptions,
+  browserToolDescriptions,
+  invokeBrowser,
+  type ChatBrowser,
+} from './browser-tools.ts';
 
 export type KnowledgeToolsFactory = (runtime: AgentStorage) => KnowledgeTools;
 export { readWorkspaceInventory } from './workspace-inventory.ts';
@@ -589,7 +594,6 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
   cancelFollowUpCallSchema,
   ...appToolCallSchemas,
   ...appPageToolCallSchemas,
-  ...browserCallSchemas,
 ]);
 export type FrameworkCall = z.infer<typeof frameworkCallSchema>;
 const [firstCall, ...otherCalls] = frameworkCallSchema.options;
@@ -1055,7 +1059,8 @@ function admittedToolSchemas(access: ToolAccess) {
       )
       .filter(
         schema =>
-          !schema.shape.tool.value.startsWith('browser.') || (access.kind === 'chat' && access.browser === true),
+          !schema.shape.tool.value.startsWith('browser.') ||
+          (access.kind === 'chat' ? access.browser === true : access.task === true),
       )
       .filter(schema => {
         const kind = appToolKinds.get(schema.shape.tool.value);
@@ -1113,10 +1118,16 @@ function toolInputSchema(schema: (typeof frameworkCallSchema.options)[number]) {
   }
   return json;
 }
+const browserTaskDescription = (tool: string) =>
+  tool in browserTaskToolDescriptions
+    ? browserTaskToolDescriptions[tool as keyof typeof browserTaskToolDescriptions]
+    : undefined;
 export function discoverTools(access: ToolAccess) {
   return admittedToolSchemas(access).map(schema => ({
     name: schema.shape.tool.value,
-    description: descriptions[schema.shape.tool.value],
+    description:
+      (access.kind === 'agent' ? browserTaskDescription(schema.shape.tool.value) : undefined) ??
+      descriptions[schema.shape.tool.value],
     inputSchema: toolInputSchema(schema),
     external: isExternalTool(schema.shape.tool.value),
   }));

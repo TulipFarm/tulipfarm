@@ -4,6 +4,7 @@ import {
   BotIcon,
   ChevronDownIcon,
   DatabaseIcon,
+  GlobeIcon,
   MoreIcon,
   PlugIcon,
   ScrollTextIcon,
@@ -35,6 +36,7 @@ export const changingTools = new Set<ToolName>([
   'skills.execute',
   'agents.task.start',
   'images.generate',
+  'browser.act',
 ]);
 export const suggestedTools: readonly ToolName[] = [
   'tables.list',
@@ -53,6 +55,7 @@ const apps = [
   { key: 'google', label: 'Google Workspace', prefixes: ['google'] },
   { key: 'github', label: 'GitHub', prefixes: ['github'] },
   { key: 'mcp', label: 'MCP tools', prefixes: ['mcp'] },
+  { key: 'browser', label: 'Browser', prefixes: ['browser'] },
 ] as const;
 
 const appOf = (tool: ToolName) =>
@@ -88,7 +91,9 @@ function ToolAppIcon({ app }: { app: string }) {
             ? BotIcon
             : app === 'mcp'
               ? PlugIcon
-              : WrenchIcon;
+              : app === 'browser'
+                ? GlobeIcon
+                : WrenchIcon;
   return (
     <span className="shrink-0">
       <Icon aria-hidden="true" size={16} />
@@ -139,8 +144,10 @@ export function AgentToolPicker({
     onChange(selection, preset ? next : next.filter(tool => !value.includes(tool)));
   };
   const images = useFlag('images');
+  const browser = useFlag('browser-use');
   const matches = (tool: ToolName, app: string) =>
     (images || tool !== 'images.generate' || value.includes(tool)) &&
+    (browser || tool !== 'browser.act' || value.includes(tool)) &&
     `${app} ${toolLabels[tool]} ${agentToolRuntimeDescription(tool)}`
       .toLowerCase()
       .includes(search.trim().toLowerCase());

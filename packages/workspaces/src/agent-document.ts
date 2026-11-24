@@ -64,6 +64,7 @@ export const agentDefinitionSchema = z.strictObject({
         'knowledge.read',
         'knowledge.retrieve',
         'images.generate',
+        'browser.act',
       ]),
     )
     .max(20)
@@ -78,6 +79,12 @@ export const agentDefinitionSchema = z.strictObject({
     .max(16)
     .optional(),
   mcp: mcpPermissionSlotsSchema.optional(),
+  browser: z
+    .strictObject({
+      sites: z.array(z.string().min(1).max(253)).min(1).max(50).optional(),
+      logins: z.array(z.uuid()).max(10).optional(),
+    })
+    .optional(),
 });
 
 export function serializeAgentDocument(input: z.input<typeof agentDefinitionSchema>): string {

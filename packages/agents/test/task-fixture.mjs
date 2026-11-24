@@ -20,6 +20,7 @@ export async function savedTaskAgent(
   skills = [],
   tools = ['rows.list', 'rows.update'],
   mcp = undefined,
+  extra = {},
 ) {
   const table = name => `"${workspace.names.schema}".${name}`;
   const teamId = randomUUID(),
@@ -53,6 +54,7 @@ export async function savedTaskAgent(
       tools,
       skills: selectedSkills,
       ...(mcp ? { mcp } : {}),
+      ...extra,
     };
     const revision = createHash('sha256').update(canonicalJson(definition)).digest('hex');
     const commandId = randomUUID(),

@@ -67,6 +67,7 @@ test('instruction and name changes activate without an extra review, including i
   );
   assert.equal(needsActivationReview(definition, { ...definition, modelFamilyId: 'grok-fast' }), true);
   assert.equal(needsActivationReview(definition, { ...definition, responseRule: 'every-message' }), true);
+  assert.equal(needsActivationReview(definition, { ...definition, browser: { sites: ['example.com'] } }), true);
   assert.equal(
     needsActivationReview(definition, {
       ...definition,

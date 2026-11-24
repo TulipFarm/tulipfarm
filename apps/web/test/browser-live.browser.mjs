@@ -92,6 +92,7 @@ async function openChat(
     refusedStreams: [],
     controls: [],
     inputs: [],
+    inputRequests: 0,
   };
   const base = `/v1/workspaces/${workspace.id}/conversations/${chatId}/browser`;
   const shell = new Map([
@@ -157,8 +158,11 @@ async function openChat(
         return route.fulfill({ json: { browser: live.state } });
       }
       if (path === `${base}/input` && method === 'POST') {
-        live.inputs.push(request.postDataJSON());
-        return route.fulfill({ status: 204 });
+        live.inputRequests++;
+        live.inputs.push(...[request.postDataJSON()].flat());
+        // A round trip to the host, during which later inputs wait to go together.
+        await new Promise(resolve => setTimeout(resolve, 100));
+        return route.fulfill({ json: { ok: true } });
       }
       if (await serveWorkspaceShellEvent(route, workspace)) return;
       const body = shell.has(path) ? shell.get(path) : suffixes.find(([suffix]) => path.endsWith(suffix))?.[1];
@@ -232,6 +236,14 @@ test(
       assert.equal(press.event, 'mousePressed');
       assert.equal(release.event, 'mouseReleased');
       assert.ok(Math.abs(press.x - 640) <= 2 && Math.abs(press.y - 400) <= 2, JSON.stringify(press));
+
+      // Fast typing goes in a few requests, in order, rather than two per key.
+      await page.keyboard.type('orchids are lovely', { delay: 5 });
+      await expectInputs(live.inputs, 2 + 2 * 'orchids are lovely'.length);
+      const typed = live.inputs.filter(input => input.type === 'key' && input.event === 'keyDown');
+      assert.equal(typed.map(input => input.text).join(''), 'orchids are lovely');
+      assert.ok(live.inputRequests < 12, `typing took ${live.inputRequests} requests`);
+      assert.equal(await page.getByText('Couldn’t reach the browser. Check your connection.').count(), 0);
 
       await page.getByRole('button', { name: 'Hand back to the agent' }).click();
       await page.getByRole('button', { name: 'Take over' }).waitFor();

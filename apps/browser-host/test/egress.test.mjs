@@ -48,6 +48,21 @@ test('the egress proxy opens only allowed addresses, for plain requests and tunn
   assert.equal(blocked.statusCode, 403);
 });
 
+test('a proxy limited to some hosts refuses others before resolving them', async t => {
+  const resolved = [];
+  const proxy = await startEgressProxy({
+    allowed,
+    resolve: async host => (resolved.push(host), resolve(host)),
+    host: name => name === 'site.test',
+  });
+  t.after(() => proxy.close());
+  const refused = await viaProxy(proxy, { path: 'http://other.test/' });
+  assert.equal(refused.statusCode, 403);
+  refused.resume();
+  assert.equal((await viaProxy(proxy, { method: 'CONNECT', path: 'other.test:443' })).statusCode, 403);
+  assert.deepEqual(resolved, []);
+});
+
 test('a cancelled request closes its upstream request too', async t => {
   let upstreamClosed;
   const closed = new Promise(done => (upstreamClosed = done));

@@ -74,6 +74,13 @@ export function createTaskProgress(runtime: AgentStorage) {
           ).rows[0],
         );
       if (secret.runnable) return { kind: 'runnable' };
+      // A hand-off runs again once a person has handed the browser back, so a lost wake still resumes the run, or once
+      // its deadline has passed, so the task fails with "needs a person".
+      const handoff = await tx.client.query(
+        `SELECT 1 FROM ${relation(tx, 'tf_agent_task_runs')} b JOIN ${relation(tx, 'tf_agent_tool_calls')} c ON c.run_id=b.run_id WHERE b.task_id=$1 AND b.generation=$2 AND c.status='waiting' AND c.call->>'tool'='browser.handoff' AND (c.result ? 'handedBackAt' OR (c.result->>'waitingUntil')::timestamptz<=clock_timestamp())`,
+        [taskId, task.generation],
+      );
+      if (handoff.rowCount) return { kind: 'runnable' };
       const step = z
         .object({ proposal_id: z.uuid().nullable() })
         .optional()
@@ -125,6 +132,24 @@ export function createTaskProgress(runtime: AgentStorage) {
         };
       }
       throw new Error('task-recovery-limit');
+    });
+  };
+}
+
+/**
+ * Records that a person handed a run's browser back, on the run's waiting hand-off. Only a hand back before the
+ * hand-off's deadline is recorded; a later one finds nothing waiting. Returns whether a hand back was recorded.
+ */
+export function createBrowserHandBack(runtime: AgentStorage) {
+  return async (workspaceId: string, taskId: string, at = new Date()): Promise<boolean> => {
+    taskId = z.uuid().parse(taskId);
+    return runtime.transaction(z.uuid().parse(workspaceId), commonCompatibility, async tx => {
+      await lockTask(tx, taskId);
+      const recorded = await tx.client.query(
+        `UPDATE ${relation(tx, 'tf_agent_tool_calls')} c SET result=c.result||jsonb_build_object('handedBackAt',$2::text) FROM ${relation(tx, 'tf_agent_task_runs')} b JOIN ${relation(tx, 'tf_agent_tasks')} t ON t.id=b.task_id AND t.generation=b.generation WHERE b.task_id=$1 AND c.run_id=b.run_id AND c.status='waiting' AND c.call->>'tool'='browser.handoff' AND NOT c.result ? 'handedBackAt' AND (c.result->>'waitingUntil')::timestamptz>$3::timestamptz`,
+        [taskId, at.toISOString(), at],
+      );
+      return Boolean(recorded.rowCount);
     });
   };
 }

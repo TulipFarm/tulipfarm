@@ -1,4 +1,4 @@
-import { browserViewport } from '@tulipfarm/browser/contracts';
+import { browserViewport, type BrowserInput } from '@tulipfarm/browser/contracts';
 
 type Size = { width: number; height: number };
 
@@ -24,4 +24,20 @@ export function viewportPoint(
 /** The text a key types, if any. Shortcuts and named keys such as Enter type nothing. */
 export function typedText(event: { key: string; metaKey: boolean; ctrlKey: boolean }) {
   return event.key.length === 1 && !event.metaKey && !event.ctrlKey ? event.key : undefined;
+}
+
+// Requests to the browser host stay well under its 64 KB body limit.
+const maxBatchBytes = 16 * 1024;
+const maxBatchInputs = 50;
+
+/** How many of the waiting inputs fit in the next request: at least one, and in order. */
+export function inputBatch(inputs: readonly BrowserInput[]) {
+  let bytes = 0;
+  let count = 0;
+  for (const input of inputs.slice(0, maxBatchInputs)) {
+    bytes += JSON.stringify(input).length;
+    if (count && bytes > maxBatchBytes) break;
+    count++;
+  }
+  return count;
 }

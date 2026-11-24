@@ -46,10 +46,11 @@ import type { ModelContinuity } from '@tulipfarm/agents/chat';
 import type { ModelFamilyEligibility } from '@tulipfarm/agents/model-policy';
 import { registerWorkflows } from './workflows.ts';
 import { createAgentTasks } from '@tulipfarm/agents/tasks';
+import { createBrowserHandBack } from '@tulipfarm/agents/task-progress';
 import { registerSkills } from './skills.ts';
 import { registerSkillImports } from './skill-imports.ts';
 import { registerAgentTasks } from './agent-tasks.ts';
-import { planDocumentStart, planWake, taskActionWake, taskWake } from './task-dispatch.ts';
+import { deliverTaskWake, planDocumentStart, planWake, taskActionWake, taskWake } from './task-dispatch.ts';
 import { registerAgentPlans } from './agent-plans.ts';
 import { createTaskApprovalDecision } from '@tulipfarm/agents/task-approvals';
 import { registerAuthoringDrafts } from './authoring-drafts.ts';
@@ -280,7 +281,18 @@ export function registerStorageComposition(
   });
   const browserHost = browserHostConfiguration();
   const browserClient = browserHost ? createBrowserHostClient(browserHost) : undefined;
-  registerBrowserLive(app, { auth: dependencies.auth, chats: conversations, client: browserClient });
+  const browserTasks = createAgentTasks(runtime);
+  registerBrowserLive(app, {
+    auth: dependencies.auth,
+    chats: conversations,
+    tasks: {
+      read: (workspaceId, userId, taskId) => browserTasks.read(workspaceId, userId, taskId),
+      handBack: createBrowserHandBack(runtime),
+      // The hand back must know whether the wake arrived, so this one reports failures.
+      wake: deliverTaskWake(temporal),
+    },
+    client: browserClient,
+  });
   registerBrowserLogins(app, {
     auth: dependencies.auth,
     chats: conversations,

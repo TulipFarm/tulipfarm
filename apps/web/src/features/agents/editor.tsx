@@ -23,6 +23,8 @@ import type { agentApi, AgentCommand, AgentContext, AgentDetail, AgentInput } fr
 import { activateRevision, needsActivationReview, type RevisionActivation } from './revision-activation';
 import { RevisionReview } from './revision-review';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
+import { useFlag } from '@/lib/feature-flags';
+import { AgentBrowserSettingsSection, browserSettings, parseBrowserSites } from './browser-settings';
 
 const responseRules = [
   {
@@ -51,6 +53,9 @@ type DefinitionDraft = {
   skills: SkillSelections;
   responseRule: 'tag' | 'every-message';
   modelFamilyId: string | undefined;
+  /** Allowed sites, one per line, while the browser is a permitted action. */
+  browserSites: string;
+  browserLogins: string[];
 };
 function savedDraft(detail: AgentDetail | null): DefinitionDraft {
   const definition = detail?.definition;
@@ -61,6 +66,8 @@ function savedDraft(detail: AgentDetail | null): DefinitionDraft {
     skills: definition?.skills ?? [],
     responseRule: definition?.responseRule ?? 'tag',
     modelFamilyId: definition?.modelFamilyId,
+    browserSites: definition?.browser?.sites?.join('\n') ?? '',
+    browserLogins: definition?.browser?.logins ?? [],
   };
 }
 
@@ -89,6 +96,7 @@ export function AgentEditor({
   suggestedModel?: { id: string; at: number } | null | undefined;
 }) {
   const [draft, setDraft] = useState(() => savedDraft(detail));
+  const browsing = useFlag('browser-use') && draft.tools.includes('browser.act');
   const appliedSuggestion = useRef<number | null>(null);
   useEffect(() => {
     if (!suggestedModel || appliedSuggestion.current === suggestedModel.at) return;
@@ -183,6 +191,7 @@ export function AgentEditor({
   const dirty =
     !finished && (JSON.stringify(draft) !== JSON.stringify(savedDraft(detail)) || (!detail && teamId !== 'personal'));
   const errors = showErrors ? agentDraftErrors(draft) : {};
+  const browserError = showErrors && browsing ? parseBrowserSites(draft.browserSites).error : undefined;
   if (concealed) return <UnsavedChanges dirty={dirty || write.state.kind === 'uncertain'} />;
   const team = context.teams.find(item => item.id === (detail?.owningTeamId ?? teamId));
   const changing = draft.tools.filter(tool => changingTools.has(tool)).length;
@@ -283,17 +292,19 @@ export function AgentEditor({
     submitIntent.current = null;
     if (locked) return;
     setParseFailed(false);
-    if (Object.keys(agentDraftErrors(draft)).length) {
+    if (Object.keys(agentDraftErrors(draft)).length || (browsing && parseBrowserSites(draft.browserSites).error)) {
       setShowErrors(true);
       return 'invalid';
     }
     setShowErrors(false);
-    const { modelFamilyId: _savedFamily, ...savedDefinition } = detail?.definition ?? {};
-    const { modelFamilyId, ...definition } = draft;
+    const { modelFamilyId: _savedFamily, browser: _savedBrowser, ...savedDefinition } = detail?.definition ?? {};
+    const { modelFamilyId, browserSites, browserLogins, ...definition } = draft;
+    const browser = draft.tools.includes('browser.act') ? browserSettings(browserSites, browserLogins) : undefined;
     const parsed = webAgentDefinitionSchema.safeParse({
       ...savedDefinition,
       ...definition,
       ...(modelFamilyId === undefined ? {} : { modelFamilyId }),
+      ...(browser ? { browser } : {}),
     });
     if (!parsed.success) {
       setParseFailed(true);
@@ -404,6 +415,16 @@ export function AgentEditor({
           onChange={tools => update({ tools })}
         />
       </FormSection>
+      {browsing && (
+        <AgentBrowserSettingsSection
+          workspaceId={workspaceId}
+          sites={draft.browserSites}
+          logins={draft.browserLogins}
+          error={browserError}
+          disabled={locked}
+          onChange={update}
+        />
+      )}
       <FormSection
         title="Slack trigger"
         description="Choose which messages in attached Slack channels start this agent."

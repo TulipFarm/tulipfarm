@@ -95,9 +95,17 @@ const failureGuidance: Record<TaskFailureReason, { label: string; recovery: stri
   },
 };
 
-type TaskState = Pick<TaskSummary, 'status' | 'pauseReason'> & Partial<Pick<TaskSummary, 'failureReason'>>;
+type TaskState = Pick<TaskSummary, 'status' | 'pauseReason'> &
+  Partial<Pick<TaskSummary, 'failureReason' | 'waitingOn'>>;
+
+const browserGuidance = {
+  label: 'Needs you in the browser',
+  recovery:
+    'The agent is waiting for someone to finish a step in its browser. Take over, finish it, then hand back. If no one does, the run stops after 24 hours.',
+};
 
 function guidance(task: TaskState) {
+  if (task.status === 'waiting-approval' && task.waitingOn === 'browser') return browserGuidance;
   if (task.status === 'paused' && task.pauseReason) return pauseGuidance[task.pauseReason];
   if (task.status === 'failed' && task.failureReason) return failureGuidance[task.failureReason];
   return undefined;

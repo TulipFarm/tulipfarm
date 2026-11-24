@@ -102,6 +102,8 @@ export const inboxSchema = z.object({
       tableId: z.uuid(),
       tableName: z.string(),
       rowId: z.uuid(),
+      /** The agent run a waiting item is about. */
+      taskId: z.uuid().optional(),
       summary: z.string().nullable(),
       createdAt: z.string(),
     }),
@@ -528,6 +530,7 @@ export function createRowWork(runtime: Runtime, compatibility: unknown) {
             tableId: row.table_id,
             tableName: row.table_name,
             rowId: row.row_id,
+            ...(row.kind === 'waiting' ? { taskId: row.source_id } : {}),
             summary: row.summary,
             createdAt: iso(row.created_at),
           });
