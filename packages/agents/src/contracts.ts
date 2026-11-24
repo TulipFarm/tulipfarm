@@ -316,6 +316,8 @@ const taskSecretResultSchema = z.union([
 export const browserToolResultSchema = z.strictObject({
   browser: z.record(z.string(), z.json()),
   waitingUntil: z.iso.datetime().optional(),
+  /** When a person handed the browser back, recorded only while the hand-off was still waiting. */
+  handedBackAt: z.iso.datetime().optional(),
 });
 export const toolResultSchema = z.union([
   taskSecretResultSchema,

@@ -255,7 +255,12 @@ export function createAgentExecutor(options: Options) {
     ids: ExecutionIds,
     call: Extract<ToolCall, { tool: `browser.${string}` }>,
     actor: HumanActor,
-    task: { taskId: string; settings: AgentBrowserSettings | undefined; waitingUntil: string | undefined },
+    task: {
+      taskId: string;
+      settings: AgentBrowserSettings | undefined;
+      waitingUntil: string | undefined;
+      handedBackAt: string | undefined;
+    },
   ): Promise<ExecutionStatus> {
     const browser = options.browser;
     const sessionId = browserSessionId(ids.workspaceId, { runId: task.taskId });
@@ -295,32 +300,36 @@ export function createAgentExecutor(options: Options) {
         instruction: 'Browser use is turned off in this workspace. Finish without the browser and say why.',
       });
     if (call.tool === 'browser.handoff' && task.waitingUntil) {
-      let state;
-      try {
-        state = await browser.client.state(sessionId);
-      } catch {
-        // The host is unreachable: keep waiting, and check again on the next wake.
-        return 'waiting';
-      }
-      if (state && state.controller === 'agent' && !state.needsPerson)
-        return settle('completed', {
-          status: 'handed-back',
-          url: state.url,
-          title: state.title,
-          instruction: 'A person handed the browser back. Take a snapshot and continue from this page.',
-        });
-      const expired = Date.parse(task.waitingUntil) <= Date.now();
-      if (expired || !state) {
+      const deadline = Date.parse(task.waitingUntil);
+      // A hand back the API recorded counts only if it came before the deadline; the deadline never waits for the host.
+      const handedBack = task.handedBackAt !== undefined && Date.parse(task.handedBackAt) <= deadline;
+      const stop = async (failure: string) => {
         await browser.client.close(sessionId).catch(() => undefined);
         return settle(
           'completed',
           { error: 'needs-a-person', instruction: 'No person handed the browser back in time.' },
           undefined,
-          expired
-            ? 'This run needs a person. No one handed the browser back within 24 hours, so the run stopped and its browser closed.'
-            : 'This run needs a person. Its browser closed before anyone handed it back, so the run stopped.',
+          failure,
         );
+      };
+      if (!handedBack && deadline <= Date.now())
+        return stop('No one handed the browser back within 24 hours, so the run stopped and its browser closed.');
+      let state;
+      try {
+        state = await browser.client.state(sessionId);
+      } catch {
+        // The host is unreachable: keep waiting, and check again on the next wake.
+        if (!handedBack) return 'waiting';
       }
+      if (handedBack || (state && state.controller === 'agent' && !state.needsPerson))
+        return settle('completed', {
+          status: 'handed-back',
+          ...(state ? { url: state.url, title: state.title } : {}),
+          instruction: state
+            ? 'A person handed the browser back. Take a snapshot and continue from this page.'
+            : 'A person handed the browser back. Take a snapshot to see where the browser is now.',
+        });
+      if (state === null) return stop('The browser closed before anyone handed it back, so the run stopped.');
       return 'waiting';
     }
     const holder = browser.secrets;
@@ -997,6 +1006,7 @@ export function createAgentExecutor(options: Options) {
                       taskId: binding.task_id,
                       settings: definition.browser,
                       waitingUntil: waiting?.success ? waiting.data.waitingUntil : undefined,
+                      handedBackAt: waiting?.success ? waiting.data.handedBackAt : undefined,
                     },
                   };
                 }
