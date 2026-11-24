@@ -123,6 +123,8 @@ class Session {
   readonly downloading = new Map<Download, { name: string; work: Promise<void> }>();
   /** The browser's own record of each download in progress, by its id, with the bytes received so far. */
   readonly transfers = new Map<string, { url: string; name: string; received: number; download?: Download }>();
+  /** The browser's id for this session's context, which its download events are traced back to. */
+  contextId = '';
   /** Why a download was stopped, for the notice the agent gets. */
   readonly stopped = new WeakMap<Download, string>();
   /** What happened to downloads since the agent's last step, such as one too large to keep. */
@@ -324,6 +326,10 @@ const secretTyped = 'downloads aren’t saved after a password is typed in this 
 const tooManyDownloads = 'too many downloads are waiting to be saved.';
 const notSaved = (name: string, reason: string) => `"${name}" was not saved: ${reason}`;
 
+type FrameTree = { frame: { id: string }; childFrames?: FrameTree[] };
+const hasFrame = (tree: FrameTree, frameId: string): boolean =>
+  tree.frame.id === frameId || (tree.childFrames ?? []).some(child => hasFrame(child, frameId));
+
 const markerPrefix = '__tulipfarm_login_';
 const loadMarker = `${markerPrefix}load`;
 /** Whether two sites can share sign-in cookies: one is the other or its parent. */
@@ -363,7 +369,7 @@ export async function createBrowserHost(options: HostOptions) {
   const egress = options.allowPrivateNetworks ? undefined : await startEgressProxy({ allowed: allowAddress });
   const resolved = new Map<string, { publicOnly: boolean; at: number }>();
 
-  // Downloads in progress the browser reported but Playwright has not yet handed to a session, by the browser's id.
+  // Downloads in progress the browser reported whose session is still being found, by the browser's id.
   const unclaimed = new Map<string, { url: string; name: string; received: number }>();
   // The browser's own download events cover every context and tab, so a download a new tab starts before the host
   // could watch that tab is still stopped mid-transfer.
@@ -371,11 +377,15 @@ export async function createBrowserHost(options: HostOptions) {
 
   function watchDownloads(cdp: CDPSession) {
     cdp.on('Browser.downloadWillBegin', event => {
-      unclaimed.set(event.guid, { url: event.url, name: event.suggestedFilename, received: 0 });
-      for (const session of sessions.values()) link(session);
+      const transfer = { url: event.url, name: event.suggestedFilename, received: 0 };
+      unclaimed.set(event.guid, transfer);
+      void ownerOf(cdp, event.frameId).then(owner => {
+        if (!unclaimed.delete(event.guid) || !owner) return;
+        owner.transfers.set(event.guid, transfer);
+        link(owner);
+      });
     });
     cdp.on('Browser.downloadProgress', event => {
-      if (unclaimed.has(event.guid)) for (const session of sessions.values()) link(session);
       const owner = [...sessions.values()].find(session => session.transfers.has(event.guid));
       const transfer = owner?.transfers.get(event.guid) ?? unclaimed.get(event.guid);
       if (!transfer) return;
@@ -387,6 +397,27 @@ export async function createBrowserHost(options: HostOptions) {
       transfer.received = Math.max(event.receivedBytes, event.totalBytes);
       if (owner) checkTransfer(owner, transfer);
     });
+  }
+
+  /**
+   * Finds the session whose browser context the frame that started a download belongs to. A page or an iframe in
+   * its own process is a browser target; any other iframe is looked up in its page's frame tree.
+   */
+  async function ownerOf(cdp: CDPSession, frameId: string) {
+    const bySession = (contextId: string | undefined) =>
+      [...sessions.values()].find(session => session.contextId === contextId);
+    const { targetInfos } = await cdp.send('Target.getTargets').catch(() => ({ targetInfos: [] }));
+    const target = targetInfos.find(info => info.targetId === frameId);
+    if (target) return bySession(target.browserContextId);
+    for (const session of sessions.values())
+      for (const page of session.context.pages()) {
+        const pageCdp = await session.context.newCDPSession(page).catch(() => undefined);
+        if (!pageCdp) continue;
+        const { frameTree } = await pageCdp.send('Page.getFrameTree').catch(() => ({ frameTree: undefined }));
+        await pageCdp.detach().catch(() => undefined);
+        if (frameTree && hasFrame(frameTree, frameId)) return session;
+      }
+    return undefined;
   }
 
   const launch = () => {
@@ -506,8 +537,9 @@ export async function createBrowserHost(options: HostOptions) {
       socket.connectToServer();
     });
     const page = await context.newPage();
-    await watchContextDownloads(context, page);
+    const contextId = await watchContextDownloads(context, page);
     session = new Session(sessionId, context, page, now());
+    session.contextId = contextId;
     const opened = session;
     const watch = (watched: Page) => watched.on('download', download => keep(opened, download));
     watch(page);
@@ -559,21 +591,25 @@ export async function createBrowserHost(options: HostOptions) {
       downloadPath: downloadsPath,
       eventsEnabled: true,
     });
+    return targetInfo.browserContextId;
   }
 
-  /** Pairs each download in progress with the browser's record of it, which Playwright reports separately. */
+  /**
+   * Pairs each download in progress with the browser's record of it, which Playwright reports separately. Both belong
+   * to this session already, so only identical downloads in the same session could swap records.
+   */
   function link(session: Session) {
-    for (const download of session.downloading.keys()) {
-      if ([...session.transfers.values()].some(transfer => transfer.download === download)) continue;
-      const found = [...unclaimed].find(
-        ([, candidate]) => candidate.url === download.url() && candidate.name === download.suggestedFilename(),
+    const paired = new Set([...session.transfers.values()].map(transfer => transfer.download));
+    for (const transfer of session.transfers.values()) {
+      if (transfer.download) continue;
+      const download = [...session.downloading.keys()].find(
+        candidate =>
+          !paired.has(candidate) && candidate.url() === transfer.url && candidate.suggestedFilename() === transfer.name,
       );
-      if (!found) continue;
-      const [guid, transfer] = found;
-      unclaimed.delete(guid);
-      const claimed = { ...transfer, download };
-      session.transfers.set(guid, claimed);
-      checkTransfer(session, claimed);
+      if (!download) continue;
+      paired.add(download);
+      transfer.download = download;
+      checkTransfer(session, transfer);
     }
   }
 

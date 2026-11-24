@@ -22,6 +22,7 @@ const pages = {
     <a href="/stream.bin">Download stream</a>
     <a href="/slow.bin">Download slowly</a>
     <a href="/stream.bin?tab" target="_blank">Download in a new tab</a>
+    <a href="/shared.bin">Download shared</a>
     <label>Invoice <input id="invoice" type="file"></label>
     <div role="button" aria-label="Upload photo" style="display:inline-block;padding:8px">Upload photo
       <input type="file" style="display:none" id="photo"></div>
@@ -163,6 +164,29 @@ before(async () => {
         stopped.push(url.pathname + url.search);
       });
       return;
+    }
+    // One address that streams endlessly to a browser with the "big" cookie and sends a small file to any other.
+    if (url.pathname === '/shared.bin') {
+      response.writeHead(200, {
+        'content-type': 'application/octet-stream',
+        'content-disposition': 'attachment; filename="shared.bin"',
+      });
+      const big = /\bbig=1\b/.test(request.headers.cookie ?? '');
+      let sent = 0;
+      const timer = setInterval(
+        () => {
+          if (!big && sent >= 20) return void (clearInterval(timer), response.end());
+          sent += 1;
+          response.write(Buffer.alloc(big ? 64 * 1024 : 4096, 1));
+        },
+        big ? 5 : 50,
+      );
+      response.on('close', () => clearInterval(timer));
+      return;
+    }
+    if (url.pathname === '/files' && url.searchParams.has('big')) {
+      response.writeHead(200, { 'content-type': 'text/html', 'set-cookie': 'big=1; Path=/' });
+      return response.end(pages['/files']);
     }
     if (url.pathname === '/done') {
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
@@ -653,6 +677,34 @@ test('a download a new tab starts is also stopped while it transfers', async t =
   assert.match(result.notice ?? '', /"stream.bin" was not saved: files are limited to 0 MiB/);
   assert.ok(stopped.includes('/stream.bin?tab'), 'the browser stopped receiving it');
   assert.ok(Date.now() - started < 3000, 'without waiting for it to finish');
+});
+
+test('two sessions downloading the same file are each held to their own limits', async t => {
+  const host = await createBrowserHost({
+    ...options,
+    allowPrivateNetworks: true,
+    maxDownloadBytes: 256 * 1024,
+    downloadWaitMs: 3000,
+  });
+  t.after(() => host.shutdown());
+  const other = '00000000-0000-4000-8000-000000000002';
+  for (let round = 0; round < 3; round += 1) {
+    await host.open(sessionId);
+    await host.open(other);
+    const big = await host.act(sessionId, { action: 'navigate', url: `${origin}/files?big` });
+    const small = await host.act(other, { action: 'navigate', url: `${origin}/files` });
+    const click = (id, result) =>
+      host.act(id, { action: 'click', ref: ref(result.snapshot, /link "Download shared"/) });
+    const [stoppedResult, savedResult] = await Promise.all([click(sessionId, big), click(other, small)]);
+    assert.match(stoppedResult.notice ?? '', /"shared.bin" was not saved: files are limited to 0 MiB/);
+    assert.deepEqual(
+      savedResult.downloads?.map(({ name, size }) => ({ name, size })),
+      [{ name: 'shared.bin', size: 20 * 4096 }],
+      savedResult.notice,
+    );
+    await host.close(sessionId);
+    await host.close(other);
+  }
 });
 
 test('downloads in progress count toward the held limit, and held bytes are capped', async t => {
