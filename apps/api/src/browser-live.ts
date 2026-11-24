@@ -10,7 +10,7 @@ import {
   type BrowserHostClient,
 } from '@tulipfarm/browser';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
-import { errorAttributes } from '@tulipfarm/observability';
+import { errorAttributes, isFeatureEnabled } from '@tulipfarm/observability';
 import type { registerAuth } from './auth.ts';
 import { authConfig } from './auth.ts';
 import { authenticateRoutes } from './authenticated-routes.ts';
@@ -57,6 +57,7 @@ function registerLiveRoutes(
   app: FastifyInstance,
   auth: Pick<ReturnType<typeof registerAuth>['auth'], 'api'>,
   client: BrowserHostClient | undefined,
+  enabled: (workspaceId: string) => Promise<boolean>,
   streams: Set<() => void>,
   owner: Owner,
 ) {
@@ -96,10 +97,17 @@ function registerLiveRoutes(
       request.log.error(errorAttributes(error), 'browser_live_failed');
       return reply.code(503).send({ error: 'browser-unavailable' });
     });
+    /** Whether the member may see the owner and browser use is on in its workspace. */
+    async function visible(workspaceId: string, userId: string, id: string) {
+      await owner.read(workspaceId, userId, id);
+      return enabled(workspaceId);
+    }
     /** Authorizes the reader and returns the host and this owner's browser session. */
     async function session(params: unknown, userId: string) {
       const { workspaceId, id } = owner.params.parse(params);
-      await owner.read(workspaceId, userId, id);
+      // With browser use off, no browser is reachable, as if it had closed.
+      if (!(await visible(workspaceId, userId, id)))
+        throw new BrowserHostError('session-not-found', 'Browser use is turned off', 404);
       if (!client) throw new BrowserHostError('unavailable', 'Browser use is not configured');
       return { client, sessionId: owner.sessionId(workspaceId, id), workspaceId, id };
     }
@@ -112,9 +120,8 @@ function registerLiveRoutes(
       },
       async request => {
         const { workspaceId, id } = owner.params.parse(request.params);
-        await owner.read(workspaceId, user(request), id);
-        // Without a browser host there is simply no browser.
-        if (!client) return { browser: null };
+        // Without a browser host, or with browser use off, there is simply no browser.
+        if (!(await visible(workspaceId, user(request), id)) || !client) return { browser: null };
         return { browser: await client.state(owner.sessionId(workspaceId, id)) };
       },
     );
@@ -203,12 +210,12 @@ function registerLiveRoutes(
         reply.raw.once('close', end);
         body.once('error', end);
         timers.push(setTimeout(end, liveLifetimeMs));
-        // A member who loses access stops seeing the browser within half a minute.
+        // A member who loses access, or whose workspace turns browser use off, stops seeing it within half a minute.
         const recheck = () =>
           timers.push(
             setTimeout(async () => {
               try {
-                await owner.read(workspaceId, userId, id);
+                if (!(await visible(workspaceId, userId, id))) return end();
               } catch {
                 return end();
               }
@@ -244,14 +251,17 @@ export function registerBrowserLive(
       wake(workspaceId: string, taskId: string): Promise<void>;
     };
     client: BrowserHostClient | undefined;
+    /** Whether browser use is on in a workspace; the `browser-use` flag unless a test replaces it. */
+    enabled?: (workspaceId: string) => Promise<boolean>;
   },
 ) {
   const { chats, tasks, client, auth } = dependencies;
+  const enabled = dependencies.enabled ?? (workspaceId => isFeatureEnabled('browser-use', null, { id: workspaceId }));
   const streams = new Set<() => void>();
   app.addHook('preClose', async () => {
     for (const end of streams) end();
   });
-  registerLiveRoutes(app, auth, client, streams, {
+  registerLiveRoutes(app, auth, client, enabled, streams, {
     base: '/workspaces/:workspaceId/conversations/:chatId/browser',
     params: chatParams.transform(({ workspaceId, chatId }) => ({ workspaceId, id: chatId })),
     paramsSchema: chatParams,
@@ -264,7 +274,7 @@ export function registerBrowserLive(
     sessionId: (workspaceId, chatId) => browserSessionId(workspaceId, { conversationId: chatId }),
   });
   if (tasks)
-    registerLiveRoutes(app, auth, client, streams, {
+    registerLiveRoutes(app, auth, client, enabled, streams, {
       base: '/workspaces/:workspaceId/agent-tasks/:taskId/browser',
       params: taskParams.transform(({ workspaceId, taskId }) => ({ workspaceId, id: taskId })),
       paramsSchema: taskParams,
