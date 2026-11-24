@@ -135,7 +135,7 @@ recorded as `too-large`, and a later part of a file found to be binary as
 `unsupported`. Neither is published. An item whose read Markdown exceeds 1 MiB, or
 whose title exceeds 512 characters, is also recorded as `too-large`. Later passes
 skip a `too-large` item without downloading it until its revision changes.
-When the workspace already holds its 50,000 Knowledge documents, an item without
+When the workspace already holds its 10,000,000 Knowledge documents, an item without
 a document is recorded as `resource-limited` and is not downloaded. Every pass
 checks again, and the item is read once there is room.
 

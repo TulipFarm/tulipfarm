@@ -570,7 +570,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     );
 
     await t.test('usage totals stay equal to stored rows and enforce each quota at its exact limit', async () => {
-      const limits = { documents: 50_000, retainedChunks: 750_000, retainedBytes: 5 * 1024 * 1024 * 1024 };
+      const limits = { documents: 10_000_000, retainedChunks: 750_000, retainedBytes: 5 * 1024 * 1024 * 1024 };
       const scanned = async () =>
         (
           await db.platform.query(`SELECT

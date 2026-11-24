@@ -555,21 +555,23 @@ test('conversation Knowledge publishes saved recaps and dynamically retains the 
       await service.publish(shared);
     });
     await t.test('grouping preserves the document quota and permits idempotent publication at capacity', async () => {
-      const count = (await db.platform.query(`SELECT count(*)::int AS count FROM ${table('documents')}`)).rows[0].count;
-      await db.platform.query(
-        `INSERT INTO ${table('documents')} (id,source_id,native_id)
-        SELECT gen_random_uuid(),$1,'document-quota-'||n FROM generate_series(1,$2::int) n`,
-        [sharedHit.citation.sourceId, knowledgeLimits.documents - count],
-      );
-      await assert.rejects(
-        service.publish(await recap()),
-        error => error instanceof KnowledgeError && error.code === 'quota',
-      );
-      await service.publish(shared);
-      assert.equal(
-        (await db.platform.query(`SELECT count(*)::int AS count FROM ${table('documents')}`)).rows[0].count,
-        knowledgeLimits.documents,
-      );
+      // The maintained usage row is what the quota reads, so filling it stands in for millions of documents.
+      const usage = table('usage');
+      const { documents } = (await db.platform.query(`SELECT documents FROM ${usage} WHERE id=1`)).rows[0];
+      await db.platform.query(`UPDATE ${usage} SET documents=$1 WHERE id=1`, [knowledgeLimits.documents]);
+      try {
+        await assert.rejects(
+          service.publish(await recap()),
+          error => error instanceof KnowledgeError && error.code === 'quota',
+        );
+        await service.publish(shared);
+        assert.equal(
+          Number((await db.platform.query(`SELECT documents FROM ${usage} WHERE id=1`)).rows[0].documents),
+          knowledgeLimits.documents,
+        );
+      } finally {
+        await db.platform.query(`UPDATE ${usage} SET documents=$1 WHERE id=1`, [documents]);
+      }
     });
   } finally {
     await search?.close();

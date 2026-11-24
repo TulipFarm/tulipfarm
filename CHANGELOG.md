@@ -19,6 +19,8 @@ One version identifies all apps and images of a release.
 
 ### Changed
 
+- A workspace can hold 10,000,000 Knowledge documents, up from 50,000. The
+  byte and chunk limits are unchanged.
 - The worker serves every Knowledge workflow (Google, Slack, GitHub,
   Atlassian, automatic integration Knowledge and Keep delivery) from the one
   `<TEMPORAL_TASK_QUEUE>-knowledge` task queue with a single Temporal worker,
@@ -130,7 +132,7 @@ One version identifies all apps and images of a release.
 ### Fixed
 
 - GitHub Knowledge no longer downloads new files when the workspace is at its
-  50,000-document limit. Those files are recorded as `resource-limited` and are
+  document limit. Those files are recorded as `resource-limited` and are
   read once there is room. Before, every sync downloaded each one again, only
   for the document store to refuse it.
 - GitHub Knowledge no longer downloads an oversized file on every sync. A file
