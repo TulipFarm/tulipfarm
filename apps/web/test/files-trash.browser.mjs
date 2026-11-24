@@ -208,7 +208,7 @@ test(
       const storage = page.getByRole('region', { name: 'Storage' });
       await storage.getByText('1 KB', { exact: true }).waitFor();
       await storage.getByText('of 1 GB used, including Trash.').waitFor();
-      await storage.getByText('Up to 10 MB per file.').waitFor();
+      await storage.getByText('Up to 100 MB per file.').waitFor();
       for (const width of [1280, 375]) {
         await page.setViewportSize({ width, height: width === 375 ? 760 : 850 });
         await page.screenshot({ path: `${shots}/trash-${width}.png`, fullPage: true });

@@ -90,7 +90,7 @@ const messages: Record<string, string> = {
   'file-not-found': 'This item is unavailable, or your access changed.',
   'file-conflict': 'This item changed while you were working. Refresh the list and try again.',
   'file-quota': 'Workspace storage is full. Files in Trash still use storage.',
-  'file-size': 'This file is empty or larger than the 10 MB upload limit.',
+  'file-size': 'This file is empty or larger than the 100 MB upload limit.',
   'file-busy': 'Several transfers are already running. Try this one again in a moment.',
   'invalid-request': 'Check the name. Names cannot contain slashes or control characters.',
   'file-invalid-move': 'A folder can’t move into itself or into a folder inside it.',
