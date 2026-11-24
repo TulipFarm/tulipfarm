@@ -287,7 +287,8 @@ function createdFile(row: { tool: string; status: string; output?: unknown }) {
     const output = z.object({ result: z.object({ diffFile: z.object({ id: uuidSchema }) }) }).safeParse(row.output);
     return output.success ? { fileId: output.data.result.diffFile.id } : {};
   }
-  if (row.tool === 'execution.run' && row.status === 'completed') {
+  // execution.run saves its program's files, and a browser step the files the page downloaded.
+  if ((row.tool === 'execution.run' || row.tool.startsWith('browser.')) && row.status === 'completed') {
     const output = z
       .object({ result: z.object({ files: z.array(z.object({ id: uuidSchema })).max(10) }) })
       .safeParse(row.output);

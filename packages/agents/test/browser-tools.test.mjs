@@ -35,7 +35,7 @@ test('Chat lists the browser tools only when the reply offers a browser', () => 
   assert.ok(offered.includes('browser.act') && offered.includes('browser.handoff'));
   assert.equal(discoverToolNames({ kind: 'agent', tools: ['browser.act'] }).includes('browser.act'), false);
   // A browser step can take a minute and signing in opens its own secrets transaction, so none holds the reply's.
-  for (const tool of ['browser.act', 'browser.handoff', 'browser.signIn'])
+  for (const tool of ['browser.act', 'browser.handoff', 'browser.signIn', 'browser.upload'])
     assert.equal(isExternalTool(tool), true, tool);
 });
 
@@ -252,4 +252,130 @@ test('A host refusal to type becomes an instruction', async () => {
   assert.equal(output.result.error, 'field-refused');
   assert.match(output.result.instruction, /password box/);
   assert.deepEqual(uses, []);
+});
+
+const fileSource = '3c9f0d2e-7b1a-4e5f-9a8b-2c1d0e9f8a7b';
+function fakeFiles(
+  read,
+  save = async download => ({
+    file: {
+      id: '5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d',
+      name: download.name,
+      mediaType: 'text/csv',
+      size: download.bytes.byteLength,
+    },
+  }),
+) {
+  const calls = [];
+  return {
+    calls,
+    files: {
+      read: async source => (calls.push(['read', source]), read(source)),
+      save: async (download, folderId) => (calls.push(['save', download, folderId]), save(download, folderId)),
+    },
+  };
+}
+
+test('Upload sends a file the chat may read and refuses one it may not', async () => {
+  const bytes = new TextEncoder().encode('a,b\n1,2\n');
+  const fileSources = [{ kind: 'file', fileId: fileSource }];
+  const { client, calls } = fakeClient({
+    state: async id => (calls.push(['state', id]), state),
+    upload: async (id, upload, body) => (
+      calls.push(['upload', id, upload, body]),
+      { state, snapshot: '- button "Choose file" [ref=e2]', truncated: false }
+    ),
+  });
+  const { files } = fakeFiles(source =>
+    source === fileSource
+      ? { name: 'report.csv', mediaType: 'text/csv', bytes, sources: fileSources }
+      : { error: 'file-not-found' },
+  );
+  const output = await invokeBrowser(
+    { client, imageInput: false },
+    origin,
+    { tool: 'browser.upload', file: fileSource, ref: 'e2' },
+    files,
+  );
+  const sent = calls.find(call => call[0] === 'upload');
+  assert.deepEqual(sent[2], { ref: 'e2', name: 'report.csv', mediaType: 'text/csv' });
+  assert.equal(sent[3], bytes);
+  assert.equal(output.result.uploaded, 'report.csv');
+  assert.deepEqual(output.sources, [
+    { kind: 'private-conversation', conversationId: origin.conversationId },
+    ...fileSources,
+  ]);
+
+  calls.length = 0;
+  const refused = await invokeBrowser(
+    { client, imageInput: false },
+    origin,
+    { tool: 'browser.upload', file: 'someone-elses-file', ref: 'e2' },
+    files,
+  );
+  assert.equal(refused.result.error, 'file-not-found');
+  assert.equal(
+    calls.some(call => call[0] === 'upload'),
+    false,
+  );
+  const unavailable = await invokeBrowser({ client, imageInput: false }, origin, {
+    tool: 'browser.upload',
+    file: fileSource,
+    ref: 'e2',
+  });
+  assert.equal(unavailable.result.error, 'files-unavailable');
+});
+
+test('A step saves what the page downloaded to Files and says so', async () => {
+  const downloads = [
+    { id: '1d2c3b4a-5e6f-4a7b-8c9d-0e1f2a3b4c5d', name: 'report.csv', size: 4 },
+    { id: '2e3d4c5b-6f7a-4b8c-9d0e-1f2a3b4c5d6e', name: 'big/../..\u0001.bin', size: 4 },
+    { id: '3f4e5d6c-7a8b-4c9d-8e0f-2a3b4c5d6e7f', name: 'gone.txt', size: 4 },
+  ];
+  const { client, calls } = fakeClient({
+    act: async () => ({ state, snapshot: '', truncated: false, downloads }),
+    download: async (id, downloadId) => {
+      calls.push(['download', id, downloadId]);
+      if (downloadId === downloads[2].id) throw new BrowserHostError('download-not-found', 'gone', 404);
+      return { name: 'x', bytes: new Uint8Array([1, 2, 3, 4]) };
+    },
+  });
+  const { files, calls: fileCalls } = fakeFiles(
+    () => ({ error: 'file-not-found' }),
+    async download =>
+      download.name === 'report.csv'
+        ? { file: { id: '5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d', name: 'report.csv', mediaType: 'text/csv', size: 4 } }
+        : { error: 'quota-exceeded', instruction: 'Storage is full.' },
+  );
+  const folderId = '7b6a5f4e-3d2c-4b1a-9f8e-7d6c5b4a3f2e';
+  const output = await invokeBrowser(
+    { client, imageInput: false },
+    origin,
+    { tool: 'browser.act', action: { action: 'click', ref: 'e3' }, folderId },
+    files,
+  );
+  assert.deepEqual(output.result.files, [{ id: '5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d', name: 'report.csv', size: 4 }]);
+  assert.deepEqual(output.result.downloadsNotSaved, [
+    { name: downloads[1].name, error: 'quota-exceeded', instruction: 'Storage is full.' },
+  ]);
+  assert.match(output.result.downloadInstruction, /saved them to Files/);
+  const saves = fileCalls.filter(call => call[0] === 'save');
+  assert.deepEqual(
+    saves.map(call => [call[1].id, call[1].name, call[2]]),
+    [
+      [downloads[0].id, 'report.csv', folderId],
+      [downloads[1].id, 'big_.._.._.bin', folderId],
+    ],
+  );
+  assert.deepEqual(saves[0][1].bytes, new Uint8Array([1, 2, 3, 4]));
+
+  const noFiles = await invokeBrowser({ client, imageInput: false }, origin, {
+    tool: 'browser.act',
+    action: { action: 'snapshot' },
+  });
+  assert.equal(noFiles.result.files, undefined);
+  assert.deepEqual(
+    noFiles.result.downloadsNotSaved,
+    downloads.map(download => download.name),
+  );
 });

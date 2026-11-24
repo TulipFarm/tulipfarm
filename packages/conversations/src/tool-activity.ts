@@ -105,6 +105,7 @@ export const toolActivityLabels = {
   'browser.act': 'Using the browser',
   'browser.handoff': 'Asking you to take over the browser',
   'browser.signIn': 'Signing in to a site',
+  'browser.upload': 'Uploading a file in the browser',
   'packages.inspect': 'Inspecting a system package',
   'conversation.messages.read': 'Rereading an earlier message',
   'files.read': 'Reading a file',
