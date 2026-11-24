@@ -155,19 +155,24 @@ export async function chargeComputeWindow(tx: Transaction, input: { windowStart:
 export const browserUsageCompatibility = Object.freeze({ minimum: 112, maximum: commonCompatibility.maximum });
 // A workspace still on an older schema has no browser usage to record or charge.
 const lacksBrowserUsage = (tx: Transaction) => (tx.commonVersion ?? browserUsageCompatibility.minimum) < 112;
+// Recording and closing one session take turns, so a report never reopens a session closed while it was recorded.
+const lockBrowserSession = (tx: Transaction, sessionId: string) =>
+  tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 761041))', [`${tx.schema}:browser:${sessionId}`]);
 
 /**
  * Records that a browser session was used, with the times its host reported: `at` is when the host last saw it used.
  * The first use of a session opened at `openedAt` needs the `flowId` it is charged to, and ends the stretch of any
  * earlier opening of the same session; a use without a flow, such as a person watching, only extends a session already
  * recorded. A use after the session's stretch was charged starts a new stretch in the same flow, unless the opening
- * was closed or the report is no newer than the charged stretch: a late report then changes nothing.
+ * was closed or the report has no newer use and no later close than the charged stretch: a late report then changes
+ * nothing.
  */
 export async function recordBrowserUsage(
   tx: Transaction,
   input: { sessionId: string; openedAt: Date; closesAt: Date; at: Date; flowId?: string | undefined },
 ) {
   if (lacksBrowserUsage(tx)) return;
+  await lockBrowserSession(tx, input.sessionId);
   const usage = qualified(tx.schema, 'tf_browser_usage');
   const updated = await tx.client.query(
     `UPDATE ${usage}
@@ -179,7 +184,7 @@ export async function recordBrowserUsage(
   if (updated.rowCount) return;
   const { rows } = await tx.client.query(
     `SELECT flow_id, ended_at,
-       bool_or(closed) OVER () OR ended_at >= $3::timestamptz OR ended_at >= $4::timestamptz AS stale
+       bool_or(closed) OVER () OR last_active_at >= $3::timestamptz OR ended_at >= $4::timestamptz AS stale
      FROM ${usage} WHERE session_id = $1 AND opened_at = $2 ORDER BY started_at DESC LIMIT 1`,
     [input.sessionId, input.openedAt, input.at, input.closesAt],
   );
@@ -188,12 +193,8 @@ export async function recordBrowserUsage(
   const flowId = previous?.flow_id ?? input.flowId;
   if (!flowId) return;
   const startedAt = previous?.ended_at ?? input.openedAt;
-  if (!previous)
-    await tx.client.query(
-      `UPDATE ${usage} SET ended_at = GREATEST(started_at, LEAST(closes_at, $2::timestamptz))
-       WHERE session_id = $1 AND opened_at < $2::timestamptz AND ended_at IS NULL AND charged_at IS NULL`,
-      [input.sessionId, input.openedAt],
-    );
+  // The host closed any earlier opening of the session before opening it again.
+  if (!previous) await closeBrowserOpenings(tx, input.sessionId, input.openedAt, '<');
   await tx.client.query(
     `INSERT INTO ${usage} (session_id, opened_at, started_at, flow_id, last_active_at, closes_at)
      VALUES ($1, $2, $3::timestamptz, $4, $5, GREATEST($3::timestamptz, $6::timestamptz)) ON CONFLICT DO NOTHING`,
@@ -207,13 +208,17 @@ export async function recordBrowserUsage(
  */
 export async function endBrowserUsage(tx: Transaction, sessionId: string, at: Date) {
   if (lacksBrowserUsage(tx)) return;
-  await tx.client.query(
+  await lockBrowserSession(tx, sessionId);
+  await closeBrowserOpenings(tx, sessionId, at, '<=');
+}
+
+const closeBrowserOpenings = (tx: Transaction, sessionId: string, at: Date, openedBefore: '<' | '<=') =>
+  tx.client.query(
     `UPDATE ${qualified(tx.schema, 'tf_browser_usage')}
      SET ended_at = COALESCE(ended_at, GREATEST(started_at, LEAST(closes_at, $2::timestamptz))), closed = true
-     WHERE session_id = $1 AND opened_at <= $2::timestamptz AND NOT closed`,
+     WHERE session_id = $1 AND opened_at ${openedBefore} $2::timestamptz AND NOT closed`,
     [sessionId, at],
   );
-}
 
 /**
  * Charges every browser stretch that ended, or whose host closed it unused, in its own flow, rounded up to whole

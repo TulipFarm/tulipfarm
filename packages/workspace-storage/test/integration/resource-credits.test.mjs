@@ -216,6 +216,45 @@ test(
         await run(() => endBrowserUsage(tx, held, at(3030)));
         assert.equal(await run(() => chargeBrowserUsage(tx, at(4000), minute)), 1n);
 
+        // Use the host saw before the idle close, reported after the charge, is charged from where the charge ended.
+        const late = '55555555-5555-4555-8555-555555555555';
+        const lateOpening = { sessionId: late, openedAt: at(5000), flowId: 'flow-held' };
+        await run(() => recordBrowserUsage(tx, { ...lateOpening, closesAt: at(5600), at: at(5000) }));
+        assert.equal(await run(() => chargeBrowserUsage(tx, at(5700), minute)), 10n);
+        await run(() => recordBrowserUsage(tx, { ...lateOpening, closesAt: at(6199), at: at(5599) }));
+        assert.equal(
+          await run(() => chargeBrowserUsage(tx, at(6300), minute)),
+          10n,
+          'the 599 seconds after the charge',
+        );
+        await run(() => recordBrowserUsage(tx, { ...lateOpening, closesAt: at(5900), at: at(5300) }));
+        assert.equal(await run(() => chargeBrowserUsage(tx, at(9000), minute)), 0n, 'an older report changes nothing');
+
+        // A run closes its browser while a report of new use is being recorded: the close waits for it, then ends it.
+        const raced = '66666666-6666-4666-8666-666666666666';
+        const racedOpening = { sessionId: raced, openedAt: at(10_000), flowId: 'flow-held' };
+        await run(() => recordBrowserUsage(tx, { ...racedOpening, closesAt: at(10_600), at: at(10_000) }));
+        assert.equal(await run(() => chargeBrowserUsage(tx, at(10_700), minute)), 10n);
+        const closer = await connect(db.login(workspace));
+        try {
+          await runtime.query('BEGIN');
+          await recordBrowserUsage(tx, { ...racedOpening, closesAt: at(10_650 + 86_400), at: at(10_650) });
+          await closer.query('BEGIN');
+          const closing = endBrowserUsage({ client: closer, schema: workspace.names.schema }, raced, at(10_660)).then(
+            () => closer.query('COMMIT'),
+          );
+          await new Promise(resolve => setTimeout(resolve, 200));
+          await runtime.query('COMMIT');
+          await closing;
+        } finally {
+          await closer.end();
+        }
+        assert.equal(
+          await run(() => chargeBrowserUsage(tx, at(10_000 + 90_000), minute)),
+          1n,
+          'only the minute until the close',
+        );
+
         const { rows } = await runtime.query(
           `SELECT flow_id, model_id, activity, charged::text FROM ${workspace.names.schema}.tf_credit_usage WHERE flow_id <> 'flow-held' ORDER BY id`,
         );
@@ -227,7 +266,7 @@ test(
             ['flow-chat', 'compute-browser', 'compute', '1'],
           ],
         );
-        assert.equal(debits.length, 5);
+        assert.equal(debits.length, 9);
         assert.ok(debits.every(([id]) => id.startsWith('browser:')));
 
         // A model call in a flow with browser time is charged the same as in a flow without it.
