@@ -52,7 +52,7 @@ import {
   type ConversationModel,
 } from './conversation-model.ts';
 import { pausedFamilyReplacement } from '@tulipfarm/agents/model-policy';
-import { hasMcpDerivedSources, withMcpSourceContext, type HumanActor } from '@tulipfarm/access';
+import { hasMcpDerivedSources, withMcpSourceContext } from '@tulipfarm/access';
 import { withKnowledgeSourceAuthorization } from '@tulipfarm/knowledge';
 import type { ChatFiles, KnowledgeToolsFactory } from '@tulipfarm/agents/tools';
 import { createKnowledgeTools } from './knowledge-tools-composition.ts';
@@ -95,7 +95,7 @@ import type { Subscriptions } from '@tulipfarm/integrations/subscriptions';
 import { conversationTitleActivity } from './conversation-title.ts';
 import type { ConversationTitleWork } from '@tulipfarm/conversations/titles';
 import { conversationInventoryReads, type ConversationInventoryReads } from './conversation-inventory.ts';
-import { secretsServices } from './secrets-composition.ts';
+import { chatBrowserSecrets, secretsServices } from './secrets-composition.ts';
 import { heldSecrets } from '@tulipfarm/secrets/send';
 import { resumeApiCall, type ApiCallFiles } from '@tulipfarm/api-calls';
 import type { AppPages } from '@tulipfarm/agents/app-page-tools';
@@ -378,19 +378,7 @@ export function meteredReply(
           ? {
               client: createBrowserHostClient(browserHost),
               imageInput: routeCapabilities(validatedRoute).imageInput,
-              secrets: secretServices.secrets.capabilities().enabled
-                ? (holder: { workspaceId: string; actor: HumanActor; conversationId: string }) => {
-                    const held = heldSecrets(secretServices.secrets, secretServices.requests, {
-                      workspaceId: holder.workspaceId,
-                      actor: holder.actor,
-                      origin: { kind: 'chat', conversationId: holder.conversationId },
-                    });
-                    return {
-                      resolve: held.resolve,
-                      recordUse: (id: string, url: string) => held.recordUse(id, url, 'browser.signIn'),
-                    };
-                  }
-                : undefined,
+              secrets: chatBrowserSecrets(secretServices),
             }
           : undefined
         : undefined;
