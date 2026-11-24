@@ -7,6 +7,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from '@tulipfarm/sprout/input';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { describedBy, Labelled } from '@/features/secrets/fields';
+import { useMemberDirectory } from '@/features/secrets/queries';
+import { useFeatureScope } from '@/lib/query';
 import type { BrowserSessionState } from './api';
 import {
   browserLoginErrorMessage,
@@ -15,6 +17,37 @@ import {
   useBrowserLoginsApi,
   type BrowserLoginSummary,
 } from './logins';
+
+const formatDate = (value: string) =>
+  new Date(value).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+const formatTime = (value: string) => new Date(value).toLocaleTimeString(undefined, { timeStyle: 'short' });
+
+/**
+ * Who saved each login and when, so logins sharing a name can be told apart. The owner is fixed when a login is
+ * created, so the date is its creation; when two rows still read the same, both get the time too.
+ */
+export function savedByLines(
+  logins: readonly Pick<BrowserLoginSummary, 'id' | 'name' | 'ownerMembershipId' | 'createdAt'>[],
+  you: string,
+  members: readonly { id: string; name: string }[] | null,
+) {
+  const owner = (id: string) =>
+    id === you ? 'you' : members ? (members.find(member => member.id === id)?.name ?? 'a former member') : null;
+  const line = (login: (typeof logins)[number], when: string) => {
+    const by = owner(login.ownerMembershipId);
+    return by ? `Saved by ${by} on ${when}` : `Saved on ${when}`;
+  };
+  const plain = new Map(logins.map(login => [login.id, line(login, formatDate(login.createdAt))]));
+  const shown = (login: (typeof logins)[number]) => `${login.name}\n${plain.get(login.id)}`;
+  return new Map(
+    logins.map(login => [
+      login.id,
+      logins.some(other => other.id !== login.id && shown(other) === shown(login))
+        ? line(login, `${formatDate(login.createdAt)}, ${formatTime(login.createdAt)}`)
+        : plain.get(login.id)!,
+    ]),
+  );
+}
 
 export const loadedLoginPrompt = (site: string) => `I’ve loaded a saved login for ${site}. Continue.`;
 
@@ -41,10 +74,17 @@ export function SignInPicker({
 }) {
   const api = useBrowserLoginsApi(workspaceId);
   const read = useBrowserLogins(workspaceId, site);
+  const scope = useFeatureScope();
+  const directory = useMemberDirectory(workspaceId);
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState('');
   const usable =
     read.state.kind === 'ready' ? read.state.data.logins.filter(login => login.status !== 'suspended') : [];
+  const savedBy = savedByLines(
+    usable,
+    scope.kind === 'workspace' ? scope.membershipId : '',
+    directory.state.kind === 'ready' ? directory.state.data : null,
+  );
   const load = async (login: BrowserLoginSummary) => {
     setLoading(login.id);
     setError('');
@@ -72,18 +112,31 @@ export function SignInPicker({
             <ul aria-label={`Saved logins for ${site}`} className="flex flex-col gap-1">
               {usable.map(login => (
                 <li key={login.id} className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span id={`browser-login-${login.id}`} className="truncate font-medium">
-                      {login.name}
+                  <span className="flex min-w-0 flex-col">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span id={`browser-login-${login.id}`} className="truncate font-medium">
+                        {login.name}
+                      </span>
+                      {login.status === 'needs-sign-in' && (
+                        <Badge id={`browser-login-${login.id}-signed-out`} variant="warning">
+                          Signed out
+                        </Badge>
+                      )}
                     </span>
-                    {login.status === 'needs-sign-in' && <Badge variant="warning">Signed out</Badge>}
+                    <span id={`browser-login-${login.id}-saved`} className="text-muted-foreground">
+                      {savedBy.get(login.id)}
+                    </span>
                   </span>
                   <Button
                     size="sm"
                     variant="outline"
                     disabled={busy || loading !== null}
                     aria-busy={loading === login.id}
-                    aria-describedby={`browser-login-${login.id}`}
+                    aria-describedby={[
+                      `browser-login-${login.id}`,
+                      ...(login.status === 'needs-sign-in' ? [`browser-login-${login.id}-signed-out`] : []),
+                      `browser-login-${login.id}-saved`,
+                    ].join(' ')}
                     onClick={() => void load(login)}
                   >
                     {loading === login.id ? 'Loading…' : 'Use this login'}
