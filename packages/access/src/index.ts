@@ -60,6 +60,11 @@ export type AuthorizationTransaction = {
   knowledgeSourceDependencies?: (
     source: Extract<SourceDependency, { kind: 'knowledge-document' }>,
   ) => Promise<SourceDependency[]>;
+  /**
+   * The transaction only reads and writes nothing. Its GitHub chat and account checks then read the rows without the
+   * locks that writing callers take, so concurrent readers and a running reply do not queue behind one another.
+   */
+  readOnly?: boolean;
 };
 type GitHubSourceCheck = (
   actor: HumanActor,

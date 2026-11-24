@@ -6,6 +6,14 @@ import { requireGitHubTask } from './github-task.ts';
 const table = (tx: AuthorizationTransaction, name: string) =>
   `${escapeIdentifier(tx.schema)}.${escapeIdentifier(name)}`;
 
+/**
+ * A writing caller locks the chat and account rows it checks: it goes on to change them in the same transaction, for
+ * example refreshing or revoking the account's token or adding a turn, so the lock serializes it with revocation and
+ * avoids two transactions upgrading a shared lock into a deadlock. A read-only transaction changes neither row and
+ * reads the committed rows, as every other chat read does, so it skips the locks and never queues behind a reply.
+ */
+const lock = (tx: AuthorizationTransaction, clause: string) => (tx.readOnly ? '' : ` ${clause}`);
+
 export async function requireOrdinaryGitHubChat(
   tx: AuthorizationTransaction,
   actor: HumanActor,
@@ -16,7 +24,7 @@ export async function requireOrdinaryGitHubChat(
     `SELECT c.id FROM ${table(tx, 'tf_conversations')} c WHERE c.id=$1 AND c.kind='private' AND c.owner_user_id=$2 AND c.owner_membership_id=$3
     AND c.deleted_at IS NULL AND (c.project_id IS NULL OR EXISTS (SELECT 1 FROM ${table(tx, 'tf_projects')} p JOIN ${table(tx, 'tf_project_members')} m ON m.project_id=p.id WHERE p.id=c.project_id AND p.archived_at IS NULL AND m.membership_id=$3 AND m.removed_at IS NULL))
     AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_slack_dm_roots')} s WHERE s.conversation_id=c.id)
-    AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_slack_default_turns')} s WHERE s.conversation_id=c.id) FOR UPDATE`,
+    AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_slack_default_turns')} s WHERE s.conversation_id=c.id)${lock(tx, 'FOR UPDATE')}`,
     [conversationId, actor.userId, actor.membershipId],
   );
   if (!allowed.rowCount) throw new AccessDenied();
@@ -30,7 +38,7 @@ export async function requirePersonalGitHubSelection(
   if (source.origin === 'task') {
     await requireGitHubTask(tx, actor, source.taskId);
     const allowed = await tx.client.query(
-      `SELECT a.id FROM ${table(tx, 'tf_github_accounts')} a JOIN ${table(tx, 'tf_github_task_selection')} s ON s.account_id=a.id WHERE a.id=$1 AND a.owner_membership_id=$2 AND a.generation=$3 AND a.state='active' AND a.credential IS NOT NULL AND (a.expires_at IS NULL OR a.expires_at>clock_timestamp()) AND s.task_id=$4 AND s.account_generation=a.generation AND s.version=$5 FOR UPDATE OF a FOR SHARE OF s`,
+      `SELECT a.id FROM ${table(tx, 'tf_github_accounts')} a JOIN ${table(tx, 'tf_github_task_selection')} s ON s.account_id=a.id WHERE a.id=$1 AND a.owner_membership_id=$2 AND a.generation=$3 AND a.state='active' AND a.credential IS NOT NULL AND (a.expires_at IS NULL OR a.expires_at>clock_timestamp()) AND s.task_id=$4 AND s.account_generation=a.generation AND s.version=$5${lock(tx, 'FOR UPDATE OF a FOR SHARE OF s')}`,
       [source.accountId, source.membershipId, source.generation, source.taskId, source.selectionVersion],
     );
     if (!allowed.rowCount) throw new AccessDenied();
@@ -42,7 +50,7 @@ export async function requirePersonalGitHubSelection(
   const allowed = await tx.client.query(
     `SELECT a.id FROM ${table(tx, 'tf_github_accounts')} a JOIN ${table(tx, 'tf_github_chat_selection')} s ON s.account_id=a.id
     WHERE a.id=$1 AND a.owner_membership_id=$2 AND a.generation=$3 AND a.state='active' AND a.credential IS NOT NULL${chatUse}
-    AND (a.expires_at IS NULL OR a.expires_at>clock_timestamp()) AND s.conversation_id=$4 AND s.account_generation=a.generation AND s.version=$5 FOR UPDATE OF a FOR SHARE OF s`,
+    AND (a.expires_at IS NULL OR a.expires_at>clock_timestamp()) AND s.conversation_id=$4 AND s.account_generation=a.generation AND s.version=$5${lock(tx, 'FOR UPDATE OF a FOR SHARE OF s')}`,
     [source.accountId, source.membershipId, source.generation, source.conversationId, source.selectionVersion],
   );
   if (!allowed.rowCount) throw new AccessDenied();

@@ -20,7 +20,7 @@ import { authConfig, type registerAuth } from './auth.ts';
 import { authenticateRoutes } from './authenticated-routes.ts';
 import type { ReplyDispatch } from './conversation-dispatch.ts';
 import { routeValidation } from './route-validation.ts';
-import { requestBoundaryError } from './security.ts';
+import { requestBoundaryError, sourceCheckUnavailable } from './security.ts';
 
 const params = z.strictObject({ workspaceId: z.uuid(), chatId: z.uuid(), messageId: z.uuid() });
 const callSchema = z.strictObject({
@@ -74,6 +74,7 @@ export function registerLayoutInteractions(
     const user = authenticateRoutes(routes, dependencies.auth, { origin: () => authConfig().webOrigin });
     routes.setErrorHandler((error, _request, reply) => {
       if (requestBoundaryError(error, reply)) return;
+      if (sourceCheckUnavailable(error, reply, 'layouts-unavailable')) return;
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'layout-not-found' });
       if (error instanceof ConversationConflict) return reply.code(409).send({ error: error.code });
       if (error instanceof StorageUnavailableError) return reply.code(503).send({ error: 'layouts-unavailable' });

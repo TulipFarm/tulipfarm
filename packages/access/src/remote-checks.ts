@@ -3,14 +3,15 @@ import { SourceAuthorizationUnavailable } from './index.ts';
 
 type Outcome = { ok: true } | { ok: false; error: unknown };
 type Scope = { outcomes: Map<string, Outcome>; pending: Map<string, () => Promise<void>>; inline: boolean };
-type Budget = { deadline: number; checks: number; unavailable: boolean };
+type Budget = { deadline: number | null; checks: number; unavailable: boolean };
 const scopes = new AsyncLocalStorage<Scope>();
 const budgets = new AsyncLocalStorage<Budget>();
 const memos = new AsyncLocalStorage<Map<string, number>>();
 
 /**
  * What one call may spend on remote source checks, shared by every check it runs, including checks nested in other
- * checks. Once the time or check count is spent, or one source has been unavailable, the remaining sources are
+ * checks. The time starts with the first remote check, so waiting for database locks before it spends none. Once the
+ * time or check count is spent, or one source has been unavailable, the remaining sources are
  * reported unavailable without contacting the provider. Properties only so tests can shorten them.
  */
 export const remoteSourceCheckLimits = { milliseconds: 10_000, checks: 32, reuseMilliseconds: 60_000 };
@@ -49,7 +50,15 @@ function remembered(key: string) {
 }
 
 function spent(budget: Budget) {
-  return budget.unavailable || budget.checks >= remoteSourceCheckLimits.checks || Date.now() >= budget.deadline;
+  return (
+    budget.unavailable ||
+    budget.checks >= remoteSourceCheckLimits.checks ||
+    (budget.deadline !== null && Date.now() >= budget.deadline)
+  );
+}
+
+function start(budget: Budget) {
+  return (budget.deadline ??= Date.now() + remoteSourceCheckLimits.milliseconds);
 }
 
 /**
@@ -58,15 +67,13 @@ function spent(budget: Budget) {
  */
 export function withRemoteSourceCheckBudget<T>(operation: () => Promise<T>): Promise<T> {
   if (budgets.getStore()) return operation();
-  return budgets.run(
-    { deadline: Date.now() + remoteSourceCheckLimits.milliseconds, checks: 0, unavailable: false },
-    operation,
-  );
+  return budgets.run({ deadline: null, checks: 0, unavailable: false }, operation);
 }
 
 /** When a remote check that starts now must give up: the shared budget's deadline, or `milliseconds` from now. */
 export function remoteSourceCheckDeadline(milliseconds = remoteSourceCheckLimits.milliseconds) {
-  return Math.min(Date.now() + milliseconds, budgets.getStore()?.deadline ?? Infinity);
+  const budget = budgets.getStore();
+  return Math.min(Date.now() + milliseconds, budget ? start(budget) : Infinity);
 }
 
 /** Ends a transaction whose remote source checks still have to run. `deferRemoteSourceChecks` retries it. */
@@ -108,6 +115,7 @@ async function deferWithin<T>(budget: Budget, operation: () => Promise<T>, round
           continue;
         }
         budget.checks++;
+        start(budget);
         try {
           await scopes.exit(check);
           scope.outcomes.set(key, { ok: true });
@@ -140,7 +148,10 @@ export function remoteSourceCheck(key: string, check: () => Promise<void>): 'inl
   const budget = budgets.getStore();
   if (budget && spent(budget)) throw new SourceAuthorizationUnavailable();
   if (!scope || scope.inline) {
-    if (budget) budget.checks++;
+    if (budget) {
+      budget.checks++;
+      start(budget);
+    }
     return 'inline';
   }
   scope.pending.set(key, check);

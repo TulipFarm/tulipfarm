@@ -16,6 +16,11 @@ export class TableRequestError extends Error {
   readonly fieldId: string | undefined;
   /** The unique key's fields when a write collides with another row. */
   readonly fieldIds: string[] | undefined;
+  /**
+   * Whether a 401, 403 or 404 means the resource or access is gone, which clears loaded data. False for a 404 that
+   * did not come from the resource's own not-found answer, such as a route a deploy has not reached yet.
+   */
+  accessLost = true;
   constructor(status: number, code: string, message: string, fieldId?: string, fieldIds?: string[]) {
     super(message);
     this.status = status;
@@ -30,7 +35,7 @@ export function beginRead<T>(state: ReadState<T>): ReadState<T> {
 }
 
 export function failedRead<T>(state: ReadState<T>, error: unknown): ReadState<T> {
-  if (error instanceof TableRequestError && [401, 403, 404].includes(error.status)) {
+  if (error instanceof TableRequestError && error.accessLost && [401, 403, 404].includes(error.status)) {
     return { kind: 'unavailable', status: error.status };
   }
   const message =

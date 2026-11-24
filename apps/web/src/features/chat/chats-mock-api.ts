@@ -85,7 +85,7 @@ export function createChatsMock(scenario: string) {
     const match = path.match(/\/conversations\/([^/]+)(\/messages)?$/);
     if (!match || match[1] === '99999999-9999-4999-8999-999999999999') return null;
     const chat = chats.find(item => item.id === match[1]);
-    if (!chat) return Response.json({ error: 'chat-not-found' }, { status: 404 });
+    if (!chat) return Response.json({ error: 'conversation-not-found' }, { status: 404 });
     if (method === 'GET' && match[2])
       return Response.json({
         messages: [

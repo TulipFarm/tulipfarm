@@ -32,7 +32,7 @@ import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { authenticateRoutes } from './authenticated-routes.ts';
 import { authConfig } from './auth.ts';
 import { routeValidation } from './route-validation.ts';
-import { requestBoundaryError } from './security.ts';
+import { requestBoundaryError, sourceCheckUnavailable } from './security.ts';
 
 const workspaceParams = z.strictObject({ workspaceId: uuidSchema });
 const itemParams = workspaceParams.extend({ fileId: uuidSchema });
@@ -149,6 +149,7 @@ export function registerFiles(
     });
     routes.setErrorHandler((error, _request, reply) => {
       if (requestBoundaryError(error, reply)) return;
+      if (sourceCheckUnavailable(error, reply, 'files-unavailable')) return;
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'file-not-found' });
       if (error instanceof StorageUnavailableError) return reply.code(503).send({ error: 'files-unavailable' });
       if (error instanceof FileError) {

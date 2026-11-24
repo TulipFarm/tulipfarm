@@ -31,7 +31,7 @@ import {
 import { authConfig, type registerAuth } from './auth.ts';
 import { authenticateRoutes } from './authenticated-routes.ts';
 import { routeValidation } from './route-validation.ts';
-import { requestBoundaryError } from './security.ts';
+import { requestBoundaryError, sourceCheckUnavailable } from './security.ts';
 import { executionCompatibility } from '@tulipfarm/tables/execution';
 import { createTableService, mutationSchema } from '@tulipfarm/tables/service';
 import { GenerationError } from '@tulipfarm/tables/store';
@@ -156,12 +156,11 @@ export function registerTableChanges(
     routes.setErrorHandler((error, request, reply) => {
       if (requestBoundaryError(error, reply)) return;
       if (error instanceof SkillUnavailable) return reply.code(409).send({ error: error.code });
-      if (error instanceof AccessDenied)
-        return reply.code(404).send({
-          error: request.routeOptions.url?.includes('/workspaces/:workspaceId/tables')
-            ? 'table-unavailable'
-            : 'proposal-unavailable',
-        });
+      const missing = request.routeOptions.url?.includes('/workspaces/:workspaceId/tables')
+        ? 'table-unavailable'
+        : 'proposal-unavailable';
+      if (sourceCheckUnavailable(error, reply, missing)) return;
+      if (error instanceof AccessDenied) return reply.code(404).send({ error: missing });
       if (error instanceof TableProposalValidationError) return reply.code(409).send(error.validation);
       if (error instanceof TableProposalError)
         return reply.code(error.code === 'proposal-storage-unavailable' ? 503 : 409).send({ error: error.code });

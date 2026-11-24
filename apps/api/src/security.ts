@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import type { FastifyInstance, FastifyReply, FastifyServerOptions } from 'fastify';
 import { z } from 'zod';
+import { SourceAuthorizationUnavailable } from '@tulipfarm/access';
 import { StorageUnavailableError, transientStorageError } from '@tulipfarm/workspace-storage/runtime';
 import { publicGuideOrigins } from './public-guide-config.ts';
 
@@ -53,6 +54,17 @@ export const workspaceUpdatingRetrySeconds = 5;
 export function workspaceUpdatingError(error: unknown, reply: FastifyReply): boolean {
   if (!(error instanceof StorageUnavailableError && error.code === 'updating')) return false;
   reply.code(503).header('Retry-After', workspaceUpdatingRetrySeconds).send({ error: 'workspace-updating' });
+  return true;
+}
+
+/**
+ * Answers a request whose source check could not reach its provider, such as GitHub timing out, with a retryable 503.
+ * `SourceAuthorizationUnavailable` is an `AccessDenied`, so call this before mapping `AccessDenied` to not found: the
+ * check proved nothing about access, and a 404 would tell the client the resource or its access is gone.
+ */
+export function sourceCheckUnavailable(error: unknown, reply: FastifyReply, code: string): boolean {
+  if (!(error instanceof SourceAuthorizationUnavailable)) return false;
+  reply.code(503).header('Retry-After', 5).send({ error: code });
   return true;
 }
 

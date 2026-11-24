@@ -7,6 +7,7 @@ import { createGitHubReads } from '@tulipfarm/github/reads';
 import { createGitHubCorpusProvider } from '@tulipfarm/github/corpus';
 import { withGitHubSourceAuthorization } from '@tulipfarm/github/source-runtime';
 import { createConversations } from '../../conversations/dist/index.js';
+import { connect } from '../../workspace-storage/test/integration/fixture.mjs';
 import { githubFixture } from './fixture.mjs';
 
 async function promptly(operation) {
@@ -363,6 +364,98 @@ test('prepared and served downloads fetch bytes outside authority locks and disc
     }
     await rejected;
   } finally {
+    globalThis.fetch = originalFetch;
+    await f.close();
+  }
+});
+
+test('chat reads with a personal GitHub source neither queue behind a running reply nor reread GitHub per request', async () => {
+  const f = await githubFixture();
+  const originalFetch = globalThis.fetch;
+  const worker = await connect(f.db.connectionString);
+  try {
+    const actor = { kind: 'human', ...f.member };
+    const conversationId = randomUUID();
+    const plain = createConversations(f.runtime);
+    await plain.create(f.one.id, actor.userId, { chatId: conversationId, commandId: randomUUID() });
+    const accountId = await f.connect();
+    const reads = createGitHubReads({
+      runtime: f.runtime,
+      accounts: f.service,
+      fetcher: async () => Response.json({ id: 1, name: 'private' }),
+    });
+    await reads.select(f.one.id, actor.userId, conversationId, { accountId, expectedVersion: 0 });
+    const sent = await plain.send(f.one.id, actor.userId, conversationId, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      model: 'claude-sonnet',
+      parts: [{ kind: 'text', text: 'Read the repository.' }],
+    });
+    await f.db.platform.query(
+      `UPDATE ${f.table('tf_conversation_turns')} SET status='processing',lease_until=clock_timestamp()+interval '5 minutes' WHERE id=$1`,
+      [sent.turnId],
+    );
+    const read = await reads.read(
+      f.one.id,
+      actor,
+      { conversationId, turnId: sent.turnId },
+      { kind: 'repository.read', owner: 'octocat', repo: 'private' },
+    );
+    const responseId = randomUUID();
+    await f.db.platform.query(
+      `INSERT INTO ${f.table('tf_conversation_messages')} (id,conversation_id,sequence,author_kind) VALUES ($1,$2,2,'assistant')`,
+      [responseId, conversationId],
+    );
+    await f.db.platform.query(
+      `INSERT INTO ${f.table('tf_conversation_results')} (conversation_id,turn_id,message_id,sources) VALUES ($1,$2,$3,$4)`,
+      [conversationId, sent.turnId, responseId, JSON.stringify(read.sources)],
+    );
+    await f.db.platform.query(
+      `INSERT INTO ${f.table('tf_conversation_parts')} (conversation_id,message_id,ordinal,kind,text) VALUES ($1,$2,0,'text','PRIVATE answer')`,
+      [conversationId, responseId],
+    );
+    await f.db.platform.query(
+      `UPDATE ${f.table('tf_conversation_turns')} SET status='completed',lease_until=NULL,response_message_id=$2 WHERE id=$1`,
+      [sent.turnId, responseId],
+    );
+    let blocked = gate();
+    let rereads = 0;
+    globalThis.fetch = async () => {
+      rereads++;
+      await blocked.wait();
+      return Response.json({ id: 1, name: 'private' });
+    };
+    const store = createConversations(
+      withGitHubSourceAuthorization(f.runtime, {
+        INTEGRATION_CREDENTIAL_KEY_ID: 'test',
+        INTEGRATION_CREDENTIAL_KEY: f.keyring.keys.test,
+        GITHUB_OAUTH_CLIENT_ID: f.configuration.clientId,
+        GITHUB_OAUTH_CLIENT_SECRET: f.configuration.clientSecret,
+        GITHUB_OAUTH_REDIRECT_URI: f.configuration.redirectUri,
+      }),
+    );
+    // A reply holds its chat row locked while it works, as the conversation worker does.
+    await worker.query('BEGIN');
+    await worker.query(`SELECT id FROM ${f.table('tf_conversations')} WHERE id=$1 FOR UPDATE`, [conversationId]);
+    // One page load reads the chat several times at once.
+    const pending = Array.from({ length: 3 }, () => store.history(f.one.id, actor.userId, conversationId));
+    await promptly(blocked.ready);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    blocked.release();
+    for (const history of await promptly(Promise.all(pending)))
+      assert.match(JSON.stringify(history.messages), /PRIVATE answer/);
+    assert.equal(rereads, 1, 'concurrent reads share one GitHub reread');
+    await worker.query('COMMIT');
+
+    // Disconnecting the account still hides the answer from the next read.
+    blocked = gate();
+    blocked.release();
+    await f.service.disconnect(f.one.id, actor.userId, accountId);
+    const after = await store.history(f.one.id, actor.userId, conversationId);
+    assert.doesNotMatch(JSON.stringify(after.messages), /PRIVATE answer/);
+  } finally {
+    await worker.query('ROLLBACK').catch(() => {});
+    await worker.end();
     globalThis.fetch = originalFetch;
     await f.close();
   }

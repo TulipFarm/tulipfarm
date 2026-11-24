@@ -26,7 +26,7 @@ import {
 import { loadModelCatalog } from '@tulipfarm/config';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { authConfig, type registerAuth } from './auth.ts';
-import { requestBoundaryError } from './security.ts';
+import { requestBoundaryError, sourceCheckUnavailable } from './security.ts';
 import {
   AttachmentError,
   attachmentLimit,
@@ -256,6 +256,7 @@ export function registerConversations(
     });
     routes.setErrorHandler((error, _request, reply) => {
       if (requestBoundaryError(error, reply)) return;
+      if (sourceCheckUnavailable(error, reply, 'conversations-unavailable')) return;
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'conversation-not-found' });
       if (error instanceof ConversationConflict) return reply.code(409).send({ error: error.code });
       if (error instanceof TableError) return reply.code(error.status).send({ error: error.code });

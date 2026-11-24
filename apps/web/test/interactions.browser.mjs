@@ -195,7 +195,7 @@ try {
     else status = 404;
     await route.fulfill({
       status,
-      json: status === 200 ? json : { error: 'unavailable' },
+      json: status === 200 ? json : { error: status === 404 ? 'conversation-not-found' : 'unavailable' },
       headers: { 'access-control-allow-origin': origin, 'access-control-allow-credentials': 'true' },
     });
   });
