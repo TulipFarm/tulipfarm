@@ -50,7 +50,7 @@ import { createBrowserHandBack } from '@tulipfarm/agents/task-progress';
 import { registerSkills } from './skills.ts';
 import { registerSkillImports } from './skill-imports.ts';
 import { registerAgentTasks } from './agent-tasks.ts';
-import { planDocumentStart, planWake, taskActionWake, taskWake } from './task-dispatch.ts';
+import { deliverTaskWake, planDocumentStart, planWake, taskActionWake, taskWake } from './task-dispatch.ts';
 import { registerAgentPlans } from './agent-plans.ts';
 import { createTaskApprovalDecision } from '@tulipfarm/agents/task-approvals';
 import { registerAuthoringDrafts } from './authoring-drafts.ts';
@@ -288,7 +288,8 @@ export function registerStorageComposition(
     tasks: {
       read: (workspaceId, userId, taskId) => browserTasks.read(workspaceId, userId, taskId),
       handBack: createBrowserHandBack(runtime),
-      wake: wakeTask,
+      // The hand back must know whether the wake arrived, so this one reports failures.
+      wake: deliverTaskWake(temporal),
     },
     client: browserClient,
   });

@@ -7,20 +7,28 @@ import { errorAttributes } from '@tulipfarm/observability';
 import type { PlanDocumentMode } from '@tulipfarm/agents/plan-document-store';
 import { planDocumentRenderQueue } from '@tulipfarm/plan-documents';
 
+/** Signals a task's runner, rejecting when Temporal can't take the signal. */
+export function deliverTaskWake(temporal: Pick<ReturnType<typeof createTemporalClient>, 'connection' | 'client'>) {
+  return async (workspaceId: string, taskId: string) => {
+    await temporal.connection.withDeadline(Date.now() + 5000, () =>
+      temporal.client.workflow.signalWithStart('agentTaskStep', {
+        workflowId: `agent-task-v1-${workspaceId}-${taskId}`,
+        taskQueue: process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm',
+        args: [workspaceId, taskId],
+        signal: 'wakeAgentTask',
+        signalArgs: [],
+        workflowIdConflictPolicy: 'USE_EXISTING',
+        workflowIdReusePolicy: 'ALLOW_DUPLICATE',
+      }),
+    );
+  };
+}
+
 export function taskWake(app: FastifyInstance, temporal: ReturnType<typeof createTemporalClient>) {
+  const deliver = deliverTaskWake(temporal);
   return async (workspaceId: string, taskId: string) => {
     try {
-      await temporal.connection.withDeadline(Date.now() + 5000, () =>
-        temporal.client.workflow.signalWithStart('agentTaskStep', {
-          workflowId: `agent-task-v1-${workspaceId}-${taskId}`,
-          taskQueue: process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm',
-          args: [workspaceId, taskId],
-          signal: 'wakeAgentTask',
-          signalArgs: [],
-          workflowIdConflictPolicy: 'USE_EXISTING',
-          workflowIdReusePolicy: 'ALLOW_DUPLICATE',
-        }),
-      );
+      await deliver(workspaceId, taskId);
     } catch (error) {
       app.log.error(
         { workspaceId, taskId, ...errorAttributes(error) },

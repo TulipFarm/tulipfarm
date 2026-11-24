@@ -5,6 +5,7 @@ import Fastify from 'fastify';
 import { AccessDenied } from '@tulipfarm/access';
 import { BrowserHostError, browserSessionId } from '@tulipfarm/browser';
 import { registerBrowserLive } from '../src/browser-live.ts';
+import { deliverTaskWake } from '../src/task-dispatch.ts';
 
 const origin = 'http://localhost:5173';
 const auth = {
@@ -205,6 +206,51 @@ test('a hand back that neither records nor wakes the run is an error, while eith
   wake = failing;
   const lost = await handBack();
   assert.deepEqual([lost.statusCode, lost.json()], [503, { error: 'browser-unavailable' }]);
+});
+
+test('the run wake Temporal refuses fails a hand back that could not be recorded', async t => {
+  const app = Fastify();
+  t.after(() => app.close());
+  const workspaceId = randomUUID();
+  const taskId = randomUUID();
+  const signalled = [];
+  let refuse = true;
+  const temporal = {
+    connection: { withDeadline: (_deadline, send) => send() },
+    client: {
+      workflow: {
+        signalWithStart: async (workflow, options) => {
+          if (refuse) throw new Error('temporal unavailable');
+          signalled.push([workflow, options.workflowId, options.signal]);
+        },
+      },
+    },
+  };
+  registerBrowserLive(app, {
+    auth,
+    chats: { read: async () => assert.fail('a run is not a chat') },
+    enabled: async () => true,
+    tasks: {
+      read: async () => ({}),
+      handBack: async () => {
+        throw new Error('database unavailable');
+      },
+      wake: deliverTaskWake(temporal),
+    },
+    client: { control: async (id, control) => ({ ...state(id), controller: control.controller }) },
+  });
+  const handBack = () =>
+    app.inject({
+      method: 'POST',
+      url: `/workspaces/${workspaceId}/agent-tasks/${taskId}/browser/control`,
+      payload: { controller: 'agent' },
+      headers: { cookie: 'session=reader', origin },
+    });
+  const lost = await handBack();
+  assert.deepEqual([lost.statusCode, lost.json()], [503, { error: 'browser-unavailable' }]);
+  refuse = false;
+  assert.equal((await handBack()).statusCode, 200);
+  assert.deepEqual(signalled, [['agentTaskStep', `agent-task-v1-${workspaceId}-${taskId}`, 'wakeAgentTask']]);
 });
 
 test('with browser use off no browser is reachable, and a live view ends once it is turned off', async t => {
