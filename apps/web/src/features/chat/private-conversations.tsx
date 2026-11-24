@@ -81,8 +81,7 @@ import { useIntegrationKeywords } from '@/features/integrations/keywords';
 import { ChatModelStatus, useChatModelFor, useChatModels } from './chat-models';
 import { usePlanAccount } from './plan-account';
 import { useFlag } from '@/lib/feature-flags';
-import { BrowserActivityCard, useLiveBrowserOpening } from '@/features/browser/browser-card';
-import { isBrowserTool } from '@/features/browser/live-browser';
+import { BrowserActivityCard, useLiveBrowserOpening, usedBrowser } from '@/features/browser/browser-card';
 import { StartingTasks } from './starting-tasks';
 import { ChatPlans } from './plans';
 import { ChatPackages, PackageChatProvider, useChatPackages } from '@/features/packages/chat-packages';
@@ -2472,9 +2471,7 @@ function ConversationTools({
               onSettled={changed}
             />
           ))}
-      {browserUse && message.tools.some(tool => isBrowserTool(tool.tool)) && (
-        <BrowserActivityCard workspaceId={workspace.id} chatId={chatId} />
-      )}
+      {browserUse && usedBrowser(message.tools) && <BrowserActivityCard workspaceId={workspace.id} chatId={chatId} />}
       {message.tools
         .filter(tool => tool.images?.length)
         .map(tool => (

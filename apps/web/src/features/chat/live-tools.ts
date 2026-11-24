@@ -11,6 +11,11 @@ export function succeeded(tool: Tool) {
   return tool.status === 'completed' && tool.activityStatus !== 'failed' && !unsavedOutcomes.has(tool);
 }
 
+/** Whether the tool has ended and its saved receipt, with the outcome, has arrived. */
+export function outcomeSaved(tool: Tool) {
+  return tool.status !== 'running' && !unsavedOutcomes.has(tool);
+}
+
 export function reconcileLiveTools(
   messages: ConversationMessage[],
   updates?: ReadonlyMap<string, StreamTool>,

@@ -264,6 +264,14 @@ function integrationCard(row: { tool: string; status: string; output?: unknown }
   );
   return card.success ? { integration: card.data } : {};
 }
+/** A browser call refused before any browser opened, such as while all the workspace's browsers are in use. */
+function browserNotOpened(row: { tool: string; output?: unknown }) {
+  if (!row.tool.startsWith('browser.')) return {};
+  const output = z
+    .object({ result: z.object({ error: z.enum(['browser-busy', 'out-of-credits', 'credit-allowance-used']) }) })
+    .safeParse(row.output);
+  return output.success ? { browserNotOpened: true as const } : {};
+}
 function skillImportOutput(row: { tool: string; status: string; output?: unknown }) {
   if (
     row.status !== 'completed' ||
@@ -1142,6 +1150,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
                   : apiCallReceipt(row.tool, row.output, row.tool === 'api.request' && digestedApiCalls.has(row.id)),
                 execution: hidden.size ? null : executionReceipt(row.tool, row.call, row.output),
                 ...(recordedCodingRuns.has(row.id) ? { codingRun: true } : {}),
+                ...browserNotOpened(row),
                 knowledge: await knowledgeActivityForHistory(tx, actor, {
                   ...(chat.projectId ? { projectChatId: chatId } : {}),
                   tool: row.tool,
