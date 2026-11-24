@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
+import { useId, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type Ref } from 'react';
 import type { Extensions } from '@tiptap/core';
 import { editorDocument, type ChatDraft } from './editor-document';
 import { packageReferenceExtension } from './package-reference';
@@ -159,6 +159,17 @@ export function Composer({
   const send = () => {
     if (canSend && !disabled && !sending) onSend();
   };
+  const [dragging, setDragging] = useState(false);
+  const dropsFiles = (event: DragEvent) => !compact && event.dataTransfer.types.includes('Files');
+  // Capture runs before the editor, which would otherwise let the browser open a dropped file.
+  const dragOver = (event: DragEvent) => {
+    if (!dropsFiles(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const blocked = disabled || sending;
+    event.dataTransfer.dropEffect = blocked ? 'none' : 'copy';
+    setDragging(!blocked);
+  };
 
   return (
     <TooltipProvider>
@@ -166,6 +177,20 @@ export function Composer({
         ref={form}
         className="relative"
         data-condensed={condensed || undefined}
+        data-dragging={dragging || undefined}
+        onDragEnterCapture={dragOver}
+        onDragOverCapture={dragOver}
+        onDragLeave={event => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false);
+        }}
+        onDropCapture={event => {
+          if (!dropsFiles(event)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          setDragging(false);
+          const files = Array.from(event.dataTransfer.files);
+          if (!disabled && !sending && files.length > 0) onFiles(files);
+        }}
         onFocusCapture={() => setFocused(true)}
         onBlurCapture={event => {
           if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
