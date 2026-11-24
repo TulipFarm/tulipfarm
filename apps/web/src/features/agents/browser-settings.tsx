@@ -96,7 +96,7 @@ export function AgentBrowserSettingsSection({
             ...available.map(login => ({ value: login.id, label: login.name, description: login.site })),
             ...hidden.map(id => ({
               value: id,
-              label: 'A login you can’t use',
+              label: 'A saved login you don’t have access to',
               description: 'You don’t have access to this login. If you clear it, you can’t choose it again.',
             })),
           ]}
@@ -119,17 +119,20 @@ export function BrowserSettingsReview({
   const chosen = settings?.logins ?? [];
   const read = useBrowserLogins(workspaceId, undefined, chosen.length > 0);
   const known = read.state.kind === 'ready' ? read.state.data.logins : [];
+  const loading = chosen.length > 0 && read.state.kind === 'loading';
   const names = chosen.map(id => {
     const login = known.find(candidate => candidate.id === id);
     if (login) return `${login.name} (${login.site})`;
-    return read.state.kind === 'ready' ? 'A login you can’t use' : 'A saved login';
+    return read.state.kind === 'ready' ? 'A saved login you don’t have access to' : 'Couldn’t show this saved login';
   });
   return (
     <div>
       <p>Browser</p>
       <ul>
-        <li>Sites it can open: {settings?.sites?.join(', ') || 'Any website'}</li>
-        <li>Logins it loads: {names.join(', ') || 'None'}</li>
+        <li>Sites it can open: {settings?.sites?.join(', ') || 'Any site'}</li>
+        <li aria-busy={loading || undefined}>
+          Saved logins it loads: {loading ? 'Loading…' : names.join(', ') || 'None'}
+        </li>
       </ul>
     </div>
   );

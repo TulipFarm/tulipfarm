@@ -255,7 +255,10 @@ test('a manager limits an agent’s browser to listed sites and preselects login
     await page.getByRole('tab', { name: 'Instructions', exact: true }).click();
     const sites = page.getByRole('textbox', { name: /Allowed sites/ });
     assert.equal(await sites.inputValue(), 'orchid.example');
-    assert.equal(await page.getByRole('checkbox', { name: /A login you can’t use/ }).isChecked(), true);
+    assert.equal(
+      await page.getByRole('checkbox', { name: /A saved login you don’t have access to/ }).isChecked(),
+      true,
+    );
     await sites.fill('orchid.example\nhttps://shop.orchid.example/cart');
     await page.getByRole('button', { name: 'Save agent', exact: true }).click();
     await page

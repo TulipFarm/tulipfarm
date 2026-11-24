@@ -272,7 +272,7 @@ test('a limited session follows no redirect to another site, and that site never
   otherSiteHits.length = 0;
   await host.open(sessionId, ['127.0.0.1']);
   const moved = await host.act(sessionId, { action: 'navigate', url: `${origin}/to-other` });
-  assert.match(moved.snapshot, /Blocked by the browser host/);
+  assert.match(moved.snapshot, /This agent isn’t allowed to open this site\./);
   assert.equal(moved.notice, `Blocked http://localhost:${site.address().port}: this browser can only open 127.0.0.1.`);
   const page = await host.act(sessionId, { action: 'navigate', url: `${origin}/redirecting` });
   assert.equal(page.state.title, 'Redirecting');

@@ -323,7 +323,9 @@ test('existing-agent instructions save and activation in the real app', { timeou
       const dialog = page.getByRole('alertdialog');
       await dialog.getByText('Sites it can open: orchid.example, petals.example', { exact: true }).waitFor();
       await dialog
-        .getByText('Logins it loads: Orchid Club (orchid.example), A login you can’t use', { exact: true })
+        .getByText('Saved logins it loads: Orchid Club (orchid.example), A saved login you don’t have access to', {
+          exact: true,
+        })
         .waitFor();
       assert.deepEqual(state.writes, []);
     });

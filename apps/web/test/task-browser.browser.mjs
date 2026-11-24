@@ -138,7 +138,7 @@ test(
       await page.getByText('Needs you in the browser', { exact: true }).first().waitFor();
       await page
         .getByText(
-          'The agent is waiting for someone to take over its browser. Take over, finish the step, then hand back.',
+          'The agent is waiting for someone to finish a step in its browser. Take over, finish it, then hand back. If no one does, the run stops after 24 hours.',
         )
         .waitFor();
       assert.equal(await page.getByText('Needs your review').count(), 0);
