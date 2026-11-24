@@ -178,6 +178,25 @@ test('secrets', async t => {
     assert.ok((await f.secrets.get(ws, ana, secret.id)).lastUsedAt);
   });
 
+  await t.test('a site login is stored for typing into the browser', async () => {
+    const login = { username: 'ada@example.com', password: 'synthetic-site-pass' };
+    const secret = await f.secrets.create(
+      ws,
+      ana,
+      f.input({
+        name: 'Example login',
+        kind: 'username-password',
+        value: login,
+        placement: { kind: 'browser' },
+        destinations: [{ kind: 'host', host: 'accounts.example.com' }],
+      }),
+    );
+    assert.deepEqual(secret.placement, { kind: 'browser' });
+    const resolved = await f.send(ana, secret.id, 'https://accounts.example.com/sign-in');
+    assert.deepEqual([resolved.placement, resolved.value], [{ kind: 'browser' }, login]);
+    await assert.rejects(f.secrets.create(ws, ana, f.input({ placement: { kind: 'browser' } })), code('invalid-input'));
+  });
+
   await t.test('temporary secrets stay in their chat, cannot be shared and always expire', async () => {
     const chat = { kind: 'chat', conversationId: randomUUID() };
     const secret = await f.secrets.create(

@@ -189,6 +189,7 @@ export function defaultPlacement(kind: PlacementKind, secret: SecretKind): Place
   switch (kind) {
     case 'bearer':
     case 'basic':
+    case 'browser':
       return { kind };
     case 'header':
     case 'cookie':
@@ -199,10 +200,15 @@ export function defaultPlacement(kind: PlacementKind, secret: SecretKind): Place
   }
 }
 
-/** The ways a kind of secret can be sent. A username and password goes as a sign-in or in the body. */
+/**
+ * The ways a kind of secret can be sent. A username and password goes as a sign-in, in the body or into a sign-in
+ * form; only a password can also be typed into a sign-in form.
+ */
 export function placementChoices(kind: SecretKind) {
   return placementKinds.filter(option =>
-    kind === 'username-password' ? option === 'basic' || option === 'body' : option !== 'basic',
+    kind === 'username-password'
+      ? option === 'basic' || option === 'body' || option === 'browser'
+      : option !== 'basic' && (option !== 'browser' || kind === 'password'),
   );
 }
 

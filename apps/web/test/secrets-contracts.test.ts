@@ -47,3 +47,18 @@ test('suggested names follow the kind and are always valid', () => {
   for (const name of names)
     assert.ok(web.variableNameSchema.safeParse(web.suggestVariableName(name, 'api-key')).success);
 });
+
+test('the web fits placements to kinds exactly as the server does', () => {
+  assert.deepEqual([...web.placementKinds].sort(), [...api.placementKinds].sort());
+  const placements = [
+    { kind: 'bearer' },
+    { kind: 'basic' },
+    { kind: 'browser' },
+    { kind: 'header', name: 'x-api-key' },
+    { kind: 'body', format: 'form', fields: ['user', 'pass'] },
+    { kind: 'body', format: 'json', fields: ['token'] },
+  ] as const;
+  for (const kind of web.secretKinds)
+    for (const placement of placements)
+      assert.equal(web.placementFits(kind, placement), api.placementFits(kind, placement), `${kind} ${placement.kind}`);
+});

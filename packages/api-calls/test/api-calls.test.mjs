@@ -375,6 +375,11 @@ test('secrets are placed, redacted, recorded and never reflected back', async t 
         placement: { kind: 'body', format: 'json', fields: ['token'] },
         value: { value: 'body-0123456' },
       },
+      BROWSER: {
+        name: 'Site login',
+        placement: { kind: 'browser' },
+        value: { username: 'ana', password: 'site-pass-0123' },
+      },
       ELSEWHERE: {
         name: 'Elsewhere',
         host: 'other.example.test',
@@ -424,6 +429,7 @@ test('secrets are placed, redacted, recorded and never reflected back', async t 
     [{ secrets: [{ variable: 'MISSING' }] }, 'not-found'],
     [{ secrets: [{ variable: 'ELSEWHERE' }] }, 'destination-denied'],
     [{ secrets: [{ variable: 'BODY' }] }, 'placement-unsupported'],
+    [{ secrets: [{ variable: 'BROWSER' }] }, 'placement-unsupported'],
     [{ secrets: [{ variable: 'HEADER' }], headers: { 'X-Api-Key': 'typed' } }, 'credential-in-request'],
     [{ secrets: [{ variable: 'QUERY' }], query: [{ name: 'key', value: 'typed' }] }, 'credential-in-request'],
     [{ secrets: [{ variable: 'BEARER' }, { variable: 'BEARER' }] }, 'invalid-request'],
