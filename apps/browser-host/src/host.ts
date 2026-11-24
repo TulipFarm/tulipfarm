@@ -1,7 +1,21 @@
+import { randomUUID } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { isIP } from 'node:net';
-import { chromium, type Browser, type BrowserContext, type CDPSession, type Page, type Request } from 'playwright-core';
 import {
+  chromium,
+  type Browser,
+  type BrowserContext,
+  type CDPSession,
+  type Download,
+  type Frame,
+  type Page,
+  type Request,
+} from 'playwright-core';
+import {
+  browserFileBytes,
   browserViewport,
   type BrowserAction,
   type BrowserActionResult,
@@ -16,6 +30,7 @@ import {
   type BrowserSessionState,
   type BrowserSiteState,
   type BrowserTypeSecret,
+  type BrowserUpload,
   browserSiteOf,
   siteAllows,
   siteIncludes,
@@ -47,6 +62,18 @@ export type HostOptions = {
   allowAddress?: (address: string) => boolean;
   /** Most characters of snapshot returned to the agent. */
   snapshotChars?: number;
+  /** Largest download kept. Defaults to the largest file in Files. */
+  maxDownloadBytes?: number;
+  /** How long a step waits for the downloads it started to finish before it returns. */
+  downloadWaitMs?: number;
+  /** How long a download may take before it is cancelled. */
+  downloadTimeoutMs?: number;
+  /** How long a finished download waits to be saved before it is deleted. */
+  downloadHoldMs?: number;
+  /** Most downloads a session may hold or have in progress at once. */
+  maxHeldDownloads?: number;
+  /** Most bytes a session's held and in-progress downloads may take on disk together. */
+  maxHeldDownloadBytes?: number;
   now?: () => number;
 };
 
@@ -87,6 +114,21 @@ class Session {
   lastUsed: number;
   notice: string | undefined;
   title = '';
+  /** Finished downloads, kept on disk until the agent's tool takes them to save in Files or they expire. */
+  readonly downloads = new Map<
+    string,
+    { id: string; name: string; size: number; download: Download; expiresAt: number }
+  >();
+  /** Downloads still in progress, with their names and the work that keeps them when they finish. */
+  readonly downloading = new Map<Download, { name: string; work: Promise<void> }>();
+  /** The browser's own record of each download in progress, by its id, with the bytes received so far. */
+  readonly transfers = new Map<string, { url: string; name: string; received: number; download?: Download }>();
+  /** The browser's id for this session's context, which its download events are traced back to. */
+  contextId = '';
+  /** Why a download was stopped, for the notice the agent gets. */
+  readonly stopped = new WeakMap<Download, string>();
+  /** What happened to downloads since the agent's last step, such as one too large to keep. */
+  downloadNotices: string[] = [];
   /** Every form of the secrets typed in this session, longest first, to keep out of what the host returns. */
   private typed: string[] = [];
   private cdp: CDPSession | undefined;
@@ -147,6 +189,35 @@ class Session {
       .filter(form => form.length)
       .slice(0, 400)
       .sort((a, b) => b.length - a.length);
+    this.dropDownloads();
+  }
+
+  /**
+   * A page can write a typed secret into a file, and redaction covers only what the host returns as text, so once
+   * a secret is typed no download leaves this browser: held ones are deleted and those in progress stopped.
+   */
+  private dropDownloads() {
+    for (const held of this.downloads.values()) {
+      void held.download.delete().catch(() => undefined);
+      this.downloadNotices.push(notSaved(held.name, secretTyped));
+    }
+    this.downloads.clear();
+    for (const [download, { name }] of this.downloading) this.stop(download, notSaved(name, secretTyped));
+  }
+
+  /** Cancels a download in progress, keeping why for the agent's notice. */
+  stop(download: Download, reason: string) {
+    if (this.stopped.has(download)) return;
+    this.stopped.set(download, reason);
+    void download.cancel().catch(() => undefined);
+  }
+
+  /** Bytes the session's downloads take on disk, held or in progress, leaving out one being checked. */
+  downloadBytes(except?: Download) {
+    let bytes = 0;
+    for (const held of this.downloads.values()) bytes += held.size;
+    for (const transfer of this.transfers.values()) if (transfer.download !== except) bytes += transfer.received;
+    return bytes;
   }
 
   redact(text: string): string {
@@ -246,9 +317,18 @@ class Session {
 
   async close() {
     this.listeners.clear();
+    this.downloads.clear();
     await this.context.close().catch(() => undefined);
   }
 }
+
+const secretTyped = 'downloads aren’t saved after a password is typed in this browser.';
+const tooManyDownloads = 'too many downloads are waiting to be saved.';
+const notSaved = (name: string, reason: string) => `"${name}" was not saved: ${reason}`;
+
+type FrameTree = { frame: { id: string }; childFrames?: FrameTree[] };
+const hasFrame = (tree: FrameTree, frameId: string): boolean =>
+  tree.frame.id === frameId || (tree.childFrames ?? []).some(child => hasFrame(child, frameId));
 
 const markerPrefix = '__tulipfarm_login_';
 const loadMarker = `${markerPrefix}load`;
@@ -275,6 +355,13 @@ export function blockedNotice(origin: string, sites: readonly string[]) {
 export async function createBrowserHost(options: HostOptions) {
   const now = options.now ?? Date.now;
   const snapshotChars = options.snapshotChars ?? 24_000;
+  const maxDownloadBytes = options.maxDownloadBytes ?? browserFileBytes;
+  const downloadWaitMs = options.downloadWaitMs ?? 30_000;
+  const downloadTimeoutMs = options.downloadTimeoutMs ?? 5 * 60_000;
+  const downloadHoldMs = options.downloadHoldMs ?? 5 * 60_000;
+  const maxHeldDownloads = options.maxHeldDownloads ?? 20;
+  const maxHeldDownloadBytes = options.maxHeldDownloadBytes ?? 2 * maxDownloadBytes;
+  const tooLarge = `files are limited to ${Math.floor(maxDownloadBytes / 1024 / 1024)} MiB.`;
   const sessions = new Map<string, Session>();
   const opening = new Map<string, Promise<Session>>();
   let browser: Promise<Browser> | undefined;
@@ -282,9 +369,167 @@ export async function createBrowserHost(options: HostOptions) {
   const egress = options.allowPrivateNetworks ? undefined : await startEgressProxy({ allowed: allowAddress });
   const resolved = new Map<string, { publicOnly: boolean; at: number }>();
 
+  // Downloads in progress the browser reported whose session is still being found, by the browser's id.
+  const unclaimed = new Map<string, { url: string; name: string; received: number; frameId: string }>();
+  // The browser context of every page and frame the host has seen, kept for a while after the frame is gone, so a
+  // download is traced to its session even when the frame that started it was removed straight away.
+  const frameContexts = new Map<string, string>();
+  // When each frame that is gone was removed, oldest first. A download no session can be found for is stopped, so
+  // forgetting a frame only stops a download it starts after this long.
+  const removedFrames = new Map<string, number>();
+  const removedFrameMs = 60_000;
+  const maxRemovedFrames = 2000;
+
+  function trackFrame(frameId: string, contextId: string) {
+    frameContexts.set(frameId, contextId);
+    removedFrames.delete(frameId);
+  }
+
+  function removeFrames(frameIds: Iterable<string>) {
+    for (const frameId of frameIds) {
+      if (!frameContexts.has(frameId)) continue;
+      removedFrames.delete(frameId);
+      removedFrames.set(frameId, now());
+    }
+    forgetFrames();
+  }
+
+  /** Forgets frames removed over a minute ago, and the oldest beyond the cap for a context. */
+  function forgetFrames() {
+    const needed = new Set([...unclaimed.values()].map(transfer => transfer.frameId));
+    const counts = new Map<string, number>();
+    for (const frameId of removedFrames.keys()) {
+      const contextId = frameContexts.get(frameId) ?? '';
+      counts.set(contextId, (counts.get(contextId) ?? 0) + 1);
+    }
+    for (const [frameId, at] of removedFrames) {
+      if (needed.has(frameId)) continue;
+      const contextId = frameContexts.get(frameId) ?? '';
+      const count = counts.get(contextId) ?? 0;
+      if (now() - at < removedFrameMs && count <= maxRemovedFrames) continue;
+      removedFrames.delete(frameId);
+      frameContexts.delete(frameId);
+      counts.set(contextId, count - 1);
+    }
+  }
+  // Downloads stopped because no session could be found for them, by address and file name, so the session
+  // Playwright reports them to gets the reason.
+  const untraced = new Set<string>();
+  // The browser's own download events cover every context and tab, so a download a new tab starts before the host
+  // could watch that tab is still stopped mid-transfer.
+  let monitor: Promise<{ cdp: CDPSession; downloadsPath: string }> | undefined;
+
+  const sessionIn = (contextId: string | undefined) =>
+    contextId ? [...sessions.values()].find(session => session.contextId === contextId) : undefined;
+
+  async function watchDownloads(cdp: CDPSession, downloadsPath: string) {
+    cdp.on('Target.targetCreated', ({ targetInfo }) => {
+      if (targetInfo.browserContextId) trackFrame(targetInfo.targetId, targetInfo.browserContextId);
+    });
+    cdp.on('Target.targetDestroyed', ({ targetId }) => removeFrames([targetId]));
+    cdp.on('Browser.downloadWillBegin', event => {
+      const transfer = { url: event.url, name: event.suggestedFilename, received: 0, frameId: event.frameId };
+      const known = sessionIn(frameContexts.get(event.frameId));
+      if (known) {
+        known.transfers.set(event.guid, transfer);
+        link(known);
+        return;
+      }
+      unclaimed.set(event.guid, transfer);
+      void ownerOf(cdp, event.frameId).then(owner => {
+        if (!unclaimed.delete(event.guid)) return;
+        if (owner) {
+          owner.transfers.set(event.guid, transfer);
+          link(owner);
+          return;
+        }
+        // A download no session can be found for is never let through unbounded.
+        untraced.add(`${transfer.url}\n${transfer.name}`);
+        const contexts = new Set([...sessions.values()].map(session => session.contextId));
+        const contextId = frameContexts.get(event.frameId);
+        if (contextId) contexts.add(contextId);
+        void Promise.allSettled(
+          [...contexts].map(browserContextId =>
+            cdp.send('Browser.cancelDownload', { guid: event.guid, browserContextId }),
+          ),
+        ).then(() => rm(join(downloadsPath, event.guid), { force: true }));
+      });
+    });
+    cdp.on('Browser.downloadProgress', event => {
+      const owner = [...sessions.values()].find(session => session.transfers.has(event.guid));
+      const transfer = owner?.transfers.get(event.guid) ?? unclaimed.get(event.guid);
+      if (!transfer) return;
+      if (event.state !== 'inProgress') {
+        unclaimed.delete(event.guid);
+        owner?.transfers.delete(event.guid);
+        return;
+      }
+      transfer.received = Math.max(event.receivedBytes, event.totalBytes);
+      if (owner) checkTransfer(owner, transfer);
+    });
+    await cdp.send('Target.setDiscoverTargets', { discover: true });
+  }
+
+  /**
+   * Finds the session a download's frame belongs to when it wasn't seen being created: a page or an iframe in its
+   * own process is a browser target, and any other iframe is looked up in its page's frame tree.
+   */
+  async function ownerOf(cdp: CDPSession, frameId: string) {
+    const known = sessionIn(frameContexts.get(frameId));
+    if (known) return known;
+    const { targetInfos } = await cdp.send('Target.getTargets').catch(() => ({ targetInfos: [] }));
+    const target = targetInfos.find(info => info.targetId === frameId);
+    if (target) return sessionIn(target.browserContextId);
+    for (const session of sessions.values())
+      for (const page of session.context.pages()) {
+        const pageCdp = await session.context.newCDPSession(page).catch(() => undefined);
+        if (!pageCdp) continue;
+        const { frameTree } = await pageCdp.send('Page.getFrameTree').catch(() => ({ frameTree: undefined }));
+        await pageCdp.detach().catch(() => undefined);
+        if (frameTree && hasFrame(frameTree, frameId)) return session;
+      }
+    return undefined;
+  }
+
+  /**
+   * Records the context of a page's frames as they are attached, including ones already there. Closing a page sends
+   * no removal for its own iframes, so they are all removed with it.
+   */
+  async function trackFrames(context: BrowserContext, contextId: string, page: Page) {
+    const frames = new Set<string>();
+    const track = (frameId: string) => {
+      frames.add(frameId);
+      trackFrame(frameId, contextId);
+    };
+    page.once('close', () => {
+      removeFrames(frames);
+      frames.clear();
+    });
+    const cdp = await context.newCDPSession(page).catch(() => undefined);
+    if (!cdp) return;
+    cdp.on('Page.frameAttached', event => track(event.frameId));
+    cdp.on('Page.frameNavigated', event => track(event.frame.id));
+    // A frame swapped into its own process lives on as a browser target, so only a removal counts.
+    cdp.on('Page.frameDetached', event => {
+      if (event.reason !== 'remove') return;
+      frames.delete(event.frameId);
+      removeFrames([event.frameId]);
+    });
+    await cdp.send('Page.enable').catch(() => undefined);
+    const { frameTree } = await cdp.send('Page.getFrameTree').catch(() => ({ frameTree: undefined }));
+    const add = (tree: FrameTree) => {
+      track(tree.frame.id);
+      for (const child of tree.childFrames ?? []) add(child);
+    };
+    if (frameTree) add(frameTree);
+    if (page.isClosed()) removeFrames(frames);
+  }
+
   const launch = () => {
-    browser ??= chromium
-      .launch({
+    browser ??= (async () => {
+      const downloadsPath = await mkdtemp(join(tmpdir(), 'tulipfarm-downloads-'));
+      const started = await chromium.launch({
+        downloadsPath,
         ...(options.executablePath ? { executablePath: options.executablePath } : {}),
         chromiumSandbox: options.sandbox ?? false,
         // Every connection, loopback included, goes through the egress proxy. QUIC and direct WebRTC UDP would not.
@@ -297,19 +542,28 @@ export async function createBrowserHost(options: HostOptions) {
           '--disable-quic',
           '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
         ],
-      })
-      .then(started => {
-        started.on('disconnected', () => {
-          browser = undefined;
-          for (const session of sessions.values()) void session.close();
-          sessions.clear();
-        });
-        return started;
-      })
-      .catch(error => {
-        browser = undefined;
-        throw error;
       });
+      started.on('disconnected', () => {
+        browser = undefined;
+        monitor = undefined;
+        unclaimed.clear();
+        frameContexts.clear();
+        removedFrames.clear();
+        void rm(downloadsPath, { recursive: true, force: true });
+        for (const session of sessions.values()) void session.close();
+        sessions.clear();
+      });
+      monitor = started.newBrowserCDPSession().then(async cdp => {
+        await watchDownloads(cdp, downloadsPath);
+        return { cdp, downloadsPath };
+      });
+      await monitor;
+      return started;
+    })().catch(error => {
+      browser = undefined;
+      monitor = undefined;
+      throw error;
+    });
     return browser;
   };
 
@@ -354,7 +608,7 @@ export async function createBrowserHost(options: HostOptions) {
       .newContext({
         ...(limit ? { proxy: { server: limit.server, bypass: '<-loopback>' } } : {}),
         viewport: browserViewport,
-        acceptDownloads: false,
+        acceptDownloads: true,
         serviceWorkers: 'block',
         locale: 'en-US',
         timezoneId: 'UTC',
@@ -390,11 +644,34 @@ export async function createBrowserHost(options: HostOptions) {
       socket.connectToServer();
     });
     const page = await context.newPage();
+    const contextId = await watchContextDownloads(context, page);
     session = new Session(sessionId, context, page, now());
+    session.contextId = contextId;
+    await trackFrames(context, contextId, page);
+    context.on('close', () => {
+      for (const [frameId, owner] of frameContexts)
+        if (owner === contextId) {
+          frameContexts.delete(frameId);
+          removedFrames.delete(frameId);
+        }
+    });
     const opened = session;
+    const watch = (watched: Page) => watched.on('download', download => keep(opened, download));
+    watch(page);
     context.on('page', added => {
-      void added.waitForLoadState('domcontentloaded').catch(() => undefined);
-      void opened.switchTo(added);
+      watch(added);
+      void trackFrames(context, contextId, added);
+      // A tab opened only to download a file never shows a page and can't be captured, so follow a tab once it
+      // shows something.
+      if (added.url()) void opened.switchTo(added);
+      else {
+        const follow = (frame: Frame) => {
+          if (frame !== added.mainFrame() || !frame.url()) return;
+          added.off('framenavigated', follow);
+          if (!added.isClosed()) void opened.switchTo(added);
+        };
+        added.on('framenavigated', follow);
+      }
       added.on('close', () => {
         const remaining = context.pages().filter(open => !open.isClosed());
         const last = remaining.at(-1);
@@ -412,6 +689,124 @@ export async function createBrowserHost(options: HostOptions) {
       if (frame === opened.page.mainFrame()) void opened.emitState();
     });
     return session;
+  }
+
+  /**
+   * Turns on the browser's download events for a new context before it opens anything, with the same settings
+   * Playwright uses, so its own download handling is unchanged.
+   */
+  async function watchContextDownloads(context: BrowserContext, page: Page) {
+    const { cdp, downloadsPath } = await (monitor ?? Promise.reject(new Error('The browser is not running.')));
+    const target = await context.newCDPSession(page);
+    const { targetInfo } = await target.send('Target.getTargetInfo');
+    await target.detach().catch(() => undefined);
+    if (!targetInfo.browserContextId) throw new Error('The browser did not report the page’s context.');
+    await cdp.send('Browser.setDownloadBehavior', {
+      behavior: 'allowAndName',
+      browserContextId: targetInfo.browserContextId,
+      downloadPath: downloadsPath,
+      eventsEnabled: true,
+    });
+    return targetInfo.browserContextId;
+  }
+
+  /**
+   * Pairs each download in progress with the browser's record of it, which Playwright reports separately. Both belong
+   * to this session already, so only identical downloads in the same session could swap records.
+   */
+  function link(session: Session) {
+    const paired = new Set([...session.transfers.values()].map(transfer => transfer.download));
+    for (const transfer of session.transfers.values()) {
+      if (transfer.download) continue;
+      const download = [...session.downloading.keys()].find(
+        candidate =>
+          !paired.has(candidate) && candidate.url() === transfer.url && candidate.suggestedFilename() === transfer.name,
+      );
+      if (!download) continue;
+      paired.add(download);
+      transfer.download = download;
+      checkTransfer(session, transfer);
+    }
+  }
+
+  function checkTransfer(session: Session, transfer: { received: number; download?: Download }) {
+    const download = transfer.download;
+    const name = download && session.downloading.get(download)?.name;
+    if (!download || !name) return;
+    if (transfer.received > maxDownloadBytes) session.stop(download, notSaved(name, tooLarge));
+    else if (session.downloadBytes() > maxHeldDownloadBytes) session.stop(download, notSaved(name, tooManyDownloads));
+  }
+
+  /** Keeps a page's download once it finishes, unless it is too large or the session already holds too many. */
+  function keep(session: Session, download: Download) {
+    const name = session.redact(download.suggestedFilename().trim()).slice(-255) || 'download';
+    const refused = session.hasTypedSecret
+      ? secretTyped
+      : session.downloads.size + session.downloading.size >= maxHeldDownloads
+        ? tooManyDownloads
+        : undefined;
+    if (refused) {
+      session.downloadNotices.push(notSaved(name, refused));
+      void download
+        .cancel()
+        .then(() => download.delete())
+        .catch(() => undefined);
+      return;
+    }
+    const work = (async () => {
+      const timer = setTimeout(() => void download.cancel().catch(() => undefined), downloadTimeoutMs);
+      try {
+        const path = await download.path().catch(() => null);
+        const stopped = session.stopped.get(download);
+        if (!path || stopped) {
+          await download.delete().catch(() => undefined);
+          const failed = stopped ? null : await download.failure().catch(() => 'failed');
+          const traced = !untraced.delete(`${download.url()}\n${download.suggestedFilename()}`);
+          session.downloadNotices.push(
+            stopped ??
+              (!traced
+                ? notSaved(name, 'the browser couldn’t tell which page started it.')
+                : failed === 'canceled'
+                  ? `The download of "${name}" took too long and was stopped.`
+                  : `The download of "${name}" failed.`),
+          );
+          return;
+        }
+        const { size } = await stat(path);
+        const reason = session.hasTypedSecret
+          ? secretTyped
+          : size > maxDownloadBytes
+            ? tooLarge
+            : session.downloads.size >= maxHeldDownloads ||
+                session.downloadBytes(download) + size > maxHeldDownloadBytes
+              ? tooManyDownloads
+              : undefined;
+        if (reason) {
+          await download.delete().catch(() => undefined);
+          session.downloadNotices.push(notSaved(name, reason));
+          return;
+        }
+        const id = randomUUID();
+        session.downloads.set(id, { id, name, size, download, expiresAt: now() + downloadHoldMs });
+      } finally {
+        clearTimeout(timer);
+        for (const [guid, transfer] of session.transfers)
+          if (transfer.download === download) session.transfers.delete(guid);
+      }
+    })();
+    session.downloading.set(download, { name, work });
+    void work.finally(() => session.downloading.delete(download));
+    link(session);
+  }
+
+  /** Deletes finished downloads that waited too long to be saved, even while the session is in use. */
+  function expireDownloads(session: Session) {
+    for (const [id, held] of session.downloads) {
+      if (now() < held.expiresAt) continue;
+      session.downloads.delete(id);
+      void held.download.delete().catch(() => undefined);
+      session.downloadNotices.push(notSaved(held.name, 'it waited too long to be saved.'));
+    }
   }
 
   /** Opens a session, or returns the open one. Allowed sites apply only when the session is created. */
@@ -438,6 +833,14 @@ export async function createBrowserHost(options: HostOptions) {
   async function result(session: Session): Promise<BrowserActionResult> {
     const page = session.page;
     await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined);
+    if (session.downloading.size) {
+      let timer: NodeJS.Timeout | undefined;
+      await Promise.race([
+        Promise.allSettled([...session.downloading.values()].map(({ work }) => work)),
+        new Promise(resolve => (timer = setTimeout(resolve, downloadWaitMs))),
+      ]);
+      clearTimeout(timer);
+    }
     let snapshot = '';
     try {
       snapshot = await page.ariaSnapshot({ mode: 'ai', timeout: 10_000 });
@@ -452,19 +855,26 @@ export async function createBrowserHost(options: HostOptions) {
       ? undefined
       : (await page.screenshot({ type: 'jpeg', quality: 55, timeout: 10_000 })).toString('base64');
     await session.refreshTitle();
+    expireDownloads(session);
     const notices = [
       session.notice && session.redact(session.notice),
       withheld &&
         'Screenshots are off in this browser after a sign-in with a secret. The accessibility snapshot still works.',
+      ...session.downloadNotices,
+      session.downloading.size > 0 &&
+        'A download is still in progress. Take a snapshot later to save it when it finishes.',
     ].filter(Boolean);
     session.notice = undefined;
+    session.downloadNotices = [];
     snapshot = session.redact(snapshot);
+    const downloads = [...session.downloads.values()].map(({ id, name, size }) => ({ id, name, size }));
     return {
       state: session.state(),
       snapshot: truncated ? `${snapshot.slice(0, snapshotChars)}\n… (snapshot truncated)` : snapshot,
       truncated,
       ...(screenshot ? { screenshot } : {}),
       ...(notices.length ? { notice: notices.join(' ') } : {}),
+      ...(downloads.length ? { downloads } : {}),
     };
   }
 
@@ -495,7 +905,8 @@ export async function createBrowserHost(options: HostOptions) {
       switch (action.action) {
         case 'navigate':
           await page.goto(action.url, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(error => {
-            if (!session.notice) throw error;
+            // An address that serves a file starts a download instead of a page.
+            if (!session.notice && !/Download is starting/i.test((error as Error).message)) throw error;
           });
           await page.waitForLoadState('load', { timeout: 5_000 }).catch(() => undefined);
           break;
@@ -656,6 +1067,83 @@ export async function createBrowserHost(options: HostOptions) {
       await page.waitForTimeout(300);
       return result(session);
     });
+  }
+
+  /**
+   * Sets a file on a file input: the element `ref`, the input a label is for, or the only file input inside the
+   * element, as sites often hide the input inside a styled upload button. Nothing else is accepted.
+   */
+  async function upload(sessionId: string, input: BrowserUpload, bytes: Buffer): Promise<BrowserActionResult> {
+    const session = get(sessionId);
+    return session.run(async () => {
+      if (session.controller === 'person')
+        throw new HostError(
+          'person-in-control',
+          'A member has taken over this browser. Wait until they hand it back before acting.',
+          409,
+        );
+      session.needsPerson = null;
+      session.signIn = null;
+      const page = session.page;
+      const handle = await page
+        .locator(`aria-ref=${input.ref}`)
+        .elementHandle({ timeout: 2_000 })
+        .catch(() => null);
+      if (!handle) throw new HostError('ref-not-found', `No element has ref ${input.ref}. Take a new snapshot.`, 422);
+      const target = (
+        await handle
+          .evaluateHandle(element => {
+            type Node = {
+              tagName: string;
+              type?: string;
+              control?: Node | null;
+              querySelectorAll(selector: string): ArrayLike<Node>;
+            };
+            const fileInput = (node: Node | null | undefined) =>
+              node?.tagName === 'INPUT' && node.type?.toLowerCase() === 'file' ? node : null;
+            const node = element as unknown as Node;
+            const inside = node.querySelectorAll('input[type=file]');
+            return (
+              fileInput(node) ??
+              (node.tagName === 'LABEL' ? fileInput(node.control) : null) ??
+              (inside.length === 1 ? inside[0]! : null)
+            );
+          })
+          .catch(() => null)
+      )?.asElement();
+      if (!target)
+        throw new HostError(
+          'field-refused',
+          `Element ${input.ref} is not a file upload box. Point at the page's file input or its upload button.`,
+          422,
+        );
+      try {
+        await target.setInputFiles({ name: input.name, mimeType: input.mediaType, buffer: bytes }, { timeout: 10_000 });
+      } catch (error) {
+        throw new HostError(
+          'action-failed',
+          session.redact((error as Error).message.split('\n')[0] ?? 'The file could not be set.'),
+          422,
+        );
+      }
+      await page.waitForTimeout(300);
+      return result(session);
+    });
+  }
+
+  /** Hands a finished download over once. The caller deletes it with `done` after reading it. */
+  function takeDownload(sessionId: string, downloadId: string) {
+    const session = get(sessionId);
+    expireDownloads(session);
+    const held = session.downloads.get(downloadId);
+    if (!held) throw new HostError('download-not-found', 'No download with this ID is waiting.', 404);
+    session.downloads.delete(downloadId);
+    return {
+      name: held.name,
+      size: held.size,
+      read: () => held.download.createReadStream(),
+      done: () => held.download.delete().catch(() => undefined),
+    };
   }
 
   async function control(sessionId: string, input: BrowserControl): Promise<BrowserSessionState> {
@@ -830,7 +1318,9 @@ export async function createBrowserHost(options: HostOptions) {
 
   async function sweep(): Promise<number> {
     let closed = 0;
+    forgetFrames();
     for (const [id, session] of sessions) {
+      expireDownloads(session);
       const limit = session.needsPerson || session.controller === 'person' ? options.holdMs : options.idleMs;
       if (now() - session.lastUsed >= limit) {
         sessions.delete(id);
@@ -850,6 +1340,8 @@ export async function createBrowserHost(options: HostOptions) {
     },
     act,
     typeSecret,
+    upload,
+    takeDownload,
     control,
     needsPerson,
     loadLogin,
@@ -859,6 +1351,8 @@ export async function createBrowserHost(options: HostOptions) {
     close,
     sweep,
     size: () => sessions.size,
+    /** How many pages and frames the host is tracking, so tests can see removed ones are forgotten. */
+    trackedFrames: () => frameContexts.size,
     async shutdown() {
       for (const session of sessions.values()) await session.close();
       sessions.clear();

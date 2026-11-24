@@ -82,7 +82,7 @@ export function createFileJobGuard(
           fileSavedClaim.test(text) ||
           readyFileClaim.test(text)));
   const record = (call: { tool: string }, value: unknown) => {
-    if (call.tool === 'execution.run') {
+    if (call.tool === 'execution.run' || call.tool.startsWith('browser.')) {
       saved ||= programSaved.safeParse(value).success;
       return;
     }

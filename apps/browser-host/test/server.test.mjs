@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import { Readable } from 'node:stream';
 import { test } from 'node:test';
+import { createBrowserHostClient } from '@tulipfarm/browser';
 import { HostError } from '../src/host.ts';
 import { createBrowserHostServer } from '../src/server.ts';
 
@@ -13,6 +15,8 @@ const state = {
   controller: 'agent',
   needsPerson: null,
   controlledBy: null,
+  signIn: null,
+  logins: [],
 };
 
 async function serve(host) {
@@ -95,4 +99,39 @@ test('the live view streams state and frames as server-sent events', async t => 
   controller.abort();
   await new Promise(resolve => setTimeout(resolve, 50));
   assert.equal(unsubscribed, true);
+});
+
+test('the client uploads a file as the body and takes a download once', async t => {
+  const uploads = [];
+  let taken = 0;
+  let deleted = 0;
+  const { server, base } = await serve({
+    upload: async (id, input, bytes) => (
+      uploads.push([input, bytes.toString()]),
+      { state, snapshot: '', truncated: false }
+    ),
+    takeDownload: () => {
+      if (taken++) throw new HostError('download-not-found', 'No download with this ID is waiting.', 404);
+      return {
+        name: 'März report.csv',
+        size: 5,
+        read: async () => Readable.from([Buffer.from('a,b\n1')]),
+        done: async () => void deleted++,
+      };
+    },
+  });
+  t.after(() => server.close());
+  const client = createBrowserHostClient({ endpoint: base, headers: { authorization: `Bearer ${token}` } });
+  await client.upload(sessionId, { ref: 'e4', name: 'invoice.pdf', mediaType: 'application/pdf' }, Buffer.from('%PDF'));
+  assert.deepEqual(uploads, [[{ ref: 'e4', name: 'invoice.pdf', mediaType: 'application/pdf' }, '%PDF']]);
+  await assert.rejects(client.upload(sessionId, { ref: 'e4', name: 'x', mediaType: 'not a type' }, Buffer.from('x')), {
+    code: 'invalid-request',
+  });
+
+  const downloadId = '00000000-0000-4000-8000-000000000002';
+  const download = await client.download(sessionId, downloadId);
+  assert.equal(download.name, 'März report.csv');
+  assert.equal(Buffer.from(download.bytes).toString(), 'a,b\n1');
+  assert.equal(deleted, 1);
+  await assert.rejects(client.download(sessionId, downloadId), { code: 'download-not-found' });
 });

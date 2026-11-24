@@ -517,6 +517,7 @@ export async function resultSources(
     case 'browser.act':
     case 'browser.handoff':
     case 'browser.signIn':
+    case 'browser.upload':
       throw new AccessDenied();
     default: {
       const exhaustive: never = call;

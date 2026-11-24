@@ -7,6 +7,10 @@ export const browserCallSchemas = [
     action: browserActionSchema.describe(
       'One step: navigate to a URL, take a snapshot, click, type into, or select in an element by its ref from the latest snapshot, press a key such as Enter or Tab, scroll, go back, or wait.',
     ),
+    folderId: z
+      .uuid()
+      .optional()
+      .describe("In a chat, the Files folder for files this step downloads. Omit to save them to the person's files."),
   }),
   z.strictObject({
     tool: z.literal('browser.handoff'),
@@ -44,4 +48,18 @@ export const browserCallSchemas = [
       .describe('The ref of the sign-in button to click after typing, from the latest snapshot.'),
   }),
 ] as const;
-export type BrowserCall = z.infer<(typeof browserCallSchemas)[number]>;
+/** Chat only: a run has no Files to upload from. */
+export const browserUploadCallSchema = z.strictObject({
+  tool: z.literal('browser.upload'),
+  file: z
+    .string()
+    .min(1)
+    .max(200)
+    .describe(
+      'The file to upload: an attachment-id or file-id from a file block of this chat, the source of an api.request response file, or a file ID from files.list.',
+    ),
+  ref: browserRefSchema.describe(
+    "The ref of the page's file input or upload button, from the latest snapshot. A file input shows as a button.",
+  ),
+});
+export type BrowserCall = z.infer<(typeof browserCallSchemas)[number] | typeof browserUploadCallSchema>;

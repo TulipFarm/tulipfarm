@@ -12,6 +12,7 @@ import {
   type BrowserSessionState,
   type BrowserSiteState,
   type BrowserTypeSecret,
+  type BrowserUpload,
   browserSiteStateSchema,
 } from './contracts.ts';
 
@@ -37,18 +38,44 @@ export type BrowserHostClient = ReturnType<typeof createBrowserHostClient>;
 export function createBrowserHostClient(connection: BrowserHostConnection, fetchImpl: typeof fetch = fetch) {
   const url = (path: string) => new URL(path, connection.endpoint).toString();
 
-  async function call(method: string, path: string, body?: unknown, timeoutMs = 60_000): Promise<unknown> {
-    let response: Response;
+  async function request(method: string, path: string, init: RequestInit, timeoutMs: number): Promise<Response> {
     try {
-      response = await fetchImpl(url(path), {
-        method,
-        headers: { ...connection.headers, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        signal: AbortSignal.timeout(timeoutMs),
-      });
+      return await fetchImpl(url(path), { ...init, method, signal: AbortSignal.timeout(timeoutMs) });
     } catch (error) {
       throw new BrowserHostError('unavailable', `The browser host could not be reached: ${(error as Error).message}`);
     }
+  }
+
+  async function failure(response: Response): Promise<BrowserHostError> {
+    // A rejected token is a deployment fault, not a fault in the call.
+    if (response.status === 401 || response.status === 403)
+      return new BrowserHostError('unavailable', 'The browser host refused this service', response.status);
+    const parsed = browserHostErrorSchema.safeParse(await response.json().catch(() => null));
+    if (parsed.success) return new BrowserHostError(parsed.data.error, parsed.data.message, response.status);
+    return new BrowserHostError('unavailable', `The browser host answered ${response.status}`, response.status);
+  }
+
+  async function call(
+    method: string,
+    path: string,
+    body?: unknown,
+    timeoutMs = 60_000,
+    bytes?: Uint8Array,
+  ): Promise<unknown> {
+    const response = await request(
+      method,
+      path,
+      bytes
+        ? {
+            headers: { ...connection.headers, 'content-type': 'application/octet-stream' },
+            body: bytes as Uint8Array<ArrayBuffer>,
+          }
+        : {
+            headers: { ...connection.headers, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+            ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          },
+      timeoutMs,
+    );
     const text = await response.text().catch(() => '');
     let json: unknown = null;
     try {
@@ -97,6 +124,30 @@ export function createBrowserHostClient(connection: BrowserHostConnection, fetch
     async typeSecret(sessionId: string, input: BrowserTypeSecret): Promise<BrowserActionResult> {
       return browserActionResultSchema.parse(await call('POST', `${session(sessionId)}/secrets`, input, 90_000));
     },
+    /** Sets a file on the page's file input `ref`, then returns the page. */
+    async upload(sessionId: string, upload: BrowserUpload, bytes: Uint8Array): Promise<BrowserActionResult> {
+      const query = new URLSearchParams({ ref: upload.ref, name: upload.name, mediaType: upload.mediaType });
+      return browserActionResultSchema.parse(
+        await call('POST', `${session(sessionId)}/files?${query}`, undefined, 180_000, bytes),
+      );
+    },
+    /** Takes a finished download from the session: the host hands it over once and then forgets it. */
+    async download(sessionId: string, downloadId: string): Promise<{ name: string; bytes: Uint8Array }> {
+      const response = await request(
+        'GET',
+        `${session(sessionId)}/downloads/${encodeURIComponent(downloadId)}`,
+        { headers: connection.headers },
+        180_000,
+      );
+      if (!response.ok) throw await failure(response);
+      let bytes: Uint8Array;
+      try {
+        bytes = new Uint8Array(await response.arrayBuffer());
+      } catch (error) {
+        throw new BrowserHostError('unavailable', `The download could not be read: ${(error as Error).message}`);
+      }
+      return { name: decodeURIComponent(response.headers.get('x-download-name') ?? 'download'), bytes };
+    },
     async control(sessionId: string, control: BrowserControl): Promise<BrowserSessionState> {
       return browserSessionStateSchema.parse(await call('POST', `${session(sessionId)}/control`, control));
     },
@@ -130,11 +181,7 @@ export function createBrowserHostClient(connection: BrowserHostConnection, fetch
         if (signal.aborted) throw error;
         throw new BrowserHostError('unavailable', `The browser host could not be reached: ${(error as Error).message}`);
       }
-      if (!response.ok || !response.body) {
-        const parsed = browserHostErrorSchema.safeParse(await response.json().catch(() => null));
-        if (parsed.success) throw new BrowserHostError(parsed.data.error, parsed.data.message, response.status);
-        throw new BrowserHostError('unavailable', `The browser host answered ${response.status}`, response.status);
-      }
+      if (!response.ok || !response.body) throw await failure(response);
       return response;
     },
   };

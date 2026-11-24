@@ -214,6 +214,7 @@ const coreChatTools = new Set(
     'browser.act',
     'browser.handoff',
     'browser.signIn',
+    'browser.upload',
     'execution.run',
     'files.read',
     'images.generate',

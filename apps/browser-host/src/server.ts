@@ -1,8 +1,11 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { pipeline } from 'node:stream/promises';
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import {
   browserActionSchema,
+  browserFileBytes,
+  browserUploadSchema,
   browserControlSchema,
   browserInputsSchema,
   browserNeedsPersonSchema,
@@ -28,7 +31,7 @@ function send(response: ServerResponse, status: number, body?: unknown) {
   response.end(text);
 }
 
-async function readJson(request: IncomingMessage, limit = maxBody): Promise<unknown> {
+async function readBody(request: IncomingMessage, limit: number): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
@@ -36,9 +39,14 @@ async function readJson(request: IncomingMessage, limit = maxBody): Promise<unkn
     if (size > limit) throw new HostError('invalid-request', 'The request body is too large.', 413);
     chunks.push(chunk as Buffer);
   }
-  if (!size) return {};
+  return Buffer.concat(chunks);
+}
+
+async function readJson(request: IncomingMessage, limit = maxBody): Promise<unknown> {
+  const body = await readBody(request, limit);
+  if (!body.length) return {};
   try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    return JSON.parse(body.toString('utf8'));
   } catch {
     throw new HostError('invalid-request', 'The request body is not JSON.', 400);
   }
@@ -85,6 +93,13 @@ export function createBrowserHostServer(host: BrowserHost, token: string): Serve
       return send(response, 200, await host.open(sessionId, allowedSites));
     }
     const match = /^\/v1\/sessions\/([^/]+)(?:\/([a-z-]+))?$/.exec(url.pathname);
+    const download = /^\/v1\/sessions\/([^/]+)\/downloads\/([^/]+)$/.exec(url.pathname);
+    if (download && method === 'GET')
+      return sendDownload(
+        parse(browserSessionIdSchema, decodeURIComponent(download[1] ?? '')),
+        parse(z.uuid(), decodeURIComponent(download[2] ?? '')),
+        response,
+      );
     if (!match) return send(response, 404, { error: 'invalid-request', message: 'Not found' });
     const sessionId = parse(browserSessionIdSchema, decodeURIComponent(match[1] ?? ''));
     const route = `${method} ${match[2] ?? ''}`;
@@ -102,6 +117,12 @@ export function createBrowserHostServer(host: BrowserHost, token: string): Serve
           200,
           await host.typeSecret(sessionId, parse(browserTypeSecretSchema, await readJson(request))),
         );
+      case 'POST files': {
+        const upload = parse(browserUploadSchema, Object.fromEntries(url.searchParams));
+        const bytes = await readBody(request, browserFileBytes);
+        if (!bytes.length) throw new HostError('invalid-request', 'The file is empty.', 400);
+        return send(response, 200, await host.upload(sessionId, upload, bytes));
+      }
       case 'POST control':
         return send(response, 200, await host.control(sessionId, parse(browserControlSchema, await readJson(request))));
       case 'POST needs-person':
@@ -127,6 +148,21 @@ export function createBrowserHostServer(host: BrowserHost, token: string): Serve
         return frames(sessionId, request, response);
       default:
         return send(response, 404, { error: 'invalid-request', message: 'Not found' });
+    }
+  }
+
+  async function sendDownload(sessionId: string, downloadId: string, response: ServerResponse) {
+    const held = host.takeDownload(sessionId, downloadId);
+    try {
+      const stream = await held.read();
+      response.writeHead(200, {
+        'content-type': 'application/octet-stream',
+        'content-length': held.size,
+        'x-download-name': encodeURIComponent(held.name),
+      });
+      await pipeline(stream, response);
+    } finally {
+      await held.done();
     }
   }
 

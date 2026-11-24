@@ -167,6 +167,28 @@ export const browserSessionStateSchema = z.strictObject({
 });
 export type BrowserSessionState = z.infer<typeof browserSessionStateSchema>;
 
+/** The largest file a session downloads or uploads, the same as the largest file in Files. */
+export const browserFileBytes = 100 * 1024 * 1024;
+
+/** A file the page downloaded, held by the browser host until it is saved to Files. */
+export const browserDownloadSchema = z.strictObject({
+  id: z.uuid(),
+  name: z.string().min(1).max(255),
+  size: z.int().min(0),
+});
+export type BrowserDownload = z.infer<typeof browserDownloadSchema>;
+
+/** Where to put a file the agent uploads: the file input or upload control with `ref`. The bytes are the body. */
+export const browserUploadSchema = z.strictObject({
+  ref: browserRefSchema,
+  name: z.string().trim().min(1).max(255),
+  mediaType: z
+    .string()
+    .max(255)
+    .regex(/^[\w.+-]+\/[\w.+-]+$/, 'Use a media type such as application/pdf'),
+});
+export type BrowserUpload = z.infer<typeof browserUploadSchema>;
+
 export const browserActionResultSchema = z.strictObject({
   state: browserSessionStateSchema,
   /** The page's accessibility snapshot, with refs for elements the agent can act on. Truncated when long. */
@@ -176,6 +198,8 @@ export const browserActionResultSchema = z.strictObject({
   screenshot: z.string().optional(),
   /** What happened that the agent should know, such as a blocked address. */
   notice: z.string().optional(),
+  /** Finished downloads the host holds, to save to Files. */
+  downloads: z.array(browserDownloadSchema).optional(),
 });
 export type BrowserActionResult = z.infer<typeof browserActionResultSchema>;
 
@@ -246,6 +270,7 @@ export const browserHostErrorCodeSchema = z.enum([
   'destination-denied',
   'field-refused',
   'ref-not-found',
+  'download-not-found',
   'action-failed',
   'capacity',
   'invalid-request',

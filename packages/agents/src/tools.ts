@@ -216,7 +216,9 @@ import { appToolCallSchemas, appToolDescriptions, type AppEditing } from './app-
 import {
   browserTaskToolDescriptions,
   browserToolDescriptions,
+  browserUploadCallSchema,
   invokeBrowser,
+  type BrowserFiles,
   type ChatBrowser,
 } from './browser-tools.ts';
 
@@ -252,6 +254,7 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
   budPreferenceAskSchema,
   budPreferenceProposeSchema,
   ...toolCallSchema.options,
+  browserUploadCallSchema,
   createRecordBatchSchema,
   updateRecordBatchSchema,
   ...atlassianCallSchema.options,
@@ -3036,6 +3039,7 @@ export function createChatTools(
       case 'browser.act':
       case 'browser.handoff':
       case 'browser.signIn':
+      case 'browser.upload':
         // Sub-agents and the browser run outside a transaction through invokeWithSources.
         throw new AccessDenied();
       default:
@@ -3096,6 +3100,34 @@ export function createChatTools(
       imageInput: chatFiles.imageInput,
     });
     return output;
+  }
+  /**
+   * Files for the chat's browser: `browser.upload` reads a file the requester may read, as `execution.run` inputs
+   * are read, and each download is saved like a program's output, under the same destination rule as `files.create`.
+   */
+  function browserFiles(context: Parameters<typeof invoke>[0]): BrowserFiles | undefined {
+    const origin = context.origin;
+    if (!origin || !chatFiles || !outputs) return undefined;
+    const { workspaceId, actor } = context;
+    return {
+      read: source =>
+        readChatFileBytes({
+          workspaceId,
+          conversationId: origin.conversationId,
+          turnId: origin.turnId,
+          actor,
+          source,
+          transaction: operation => withHuman(runtime, workspaceId, actor, 'read', operation),
+          files: chatFiles.files,
+          attachments: chatFiles.turnFiles.attachments,
+        }),
+      save: (download, folderId) =>
+        createProgramOutput(
+          outputs.files,
+          { workspaceId, actor, autonomous: outputs.autonomous, origin, callId: context.callId, inputs: [] },
+          { path: `browser/${download.id}/${download.name}`, bytes: download.bytes, folderId },
+        ),
+    };
   }
   /**
    * `execution.run`: copies the named chat and Files files into the chat's computer, runs the program, and saves the
@@ -3651,12 +3683,18 @@ export function createChatTools(
       );
       return { result, sources };
     }
-    if (call.tool === 'browser.act' || call.tool === 'browser.handoff' || call.tool === 'browser.signIn') {
+    if (
+      call.tool === 'browser.act' ||
+      call.tool === 'browser.handoff' ||
+      call.tool === 'browser.signIn' ||
+      call.tool === 'browser.upload'
+    ) {
       if (!browser || !context.origin || telemetryRuntime !== 'chat') throw new AccessDenied();
       return invokeBrowser(
         browser,
         { workspaceId: context.workspaceId, conversationId: context.origin.conversationId, actor: context.actor },
         call,
+        browserFiles(context),
       );
     }
     if (call.tool === 'files.read') return readFileTool(context, call);
