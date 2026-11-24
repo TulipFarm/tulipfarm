@@ -1,5 +1,12 @@
 # Resource proposal contracts
 
+In private Bud chat, one explicitly requested new table can enter the existing
+publication and execution path under the workspace review policy. Its receipt
+binds the exact proposal digest, turn, and policy revision. It is not a human
+decision. The worker still checks current sources and creation permission;
+schema edits, imports, revisions of pending proposals, and manual dialogs do
+not acquire this authority.
+
 ## Workspace member protection amendment, 14 October 2026
 
 Proposal previews and approval/resume checks enforce the same protected member

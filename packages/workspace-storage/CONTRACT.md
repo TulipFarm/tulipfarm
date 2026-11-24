@@ -12,6 +12,15 @@ The provisioning/common-migration login owns every `tf_` table and the workspace
 `packages/tables` owns resource catalog behavior, migration planning, confirmation, and record operations.
 Domain maintainers add reviewed forward common migrations. They never create common tables as a workspace login.
 
+Private Bud chat callers use `@tulipfarm/workspace-storage/action-review` to
+read and lock the policy in the effect transaction, then call `shouldAsk` on
+the actual operation. A false result removes only the workspace review gate,
+never existing permissions or mandatory review. A failed read stops the write.
+Migration 113 preserves existing workspace behavior; only fresh workspaces start
+in Auto. Only an explicit admin save changes the revision. Ask saves require a
+preview bound to that admin, workspace, rule, interpretation, and revision.
+After an unknown save outcome, read settings again rather than blindly retrying.
+
 ## Names and entry points
 
 `workspaceNames(workspaceId)` validates a UUID and returns `schema`, `runtime`, `migration`, `confirmation`, and `customOwner`.

@@ -126,7 +126,27 @@ export const tableProposalSupersededCondition = (table: (name: string) => string
           OR (jsonb_typeof(np->'before')='null' AND jsonb_typeof(op->'before')='null'
             AND lower(btrim(np->'after'->>'label'))=lower(btrim(op->'after'->>'label')))))))`;
 
-// A proposal's tool result is saved as pending; its review happens later, so read its current state.
+/** A policy receipt authorizes just the single, exact new-table manifest, never a human decision. */
+export function tablePolicyReceipt(table: (name: string) => string, version: number, current = false) {
+  if (version < 113) return 'false';
+  return `EXISTS (SELECT 1 FROM ${table('tf_action_review_receipts')} receipt
+    ${
+      current
+        ? `JOIN ${table('tf_action_review')} policy ON policy.id=1 AND policy.revision=receipt.revision
+      AND (policy.mode='auto' OR (policy.mode='ask' AND NOT ('create-table'=ANY(policy.actions))))`
+        : ''
+    }
+    WHERE receipt.call_id=p.id AND receipt.conversation_id=p.conversation_id AND receipt.turn_id=p.turn_id
+    AND receipt.action='create-table' AND receipt.result->>'digest'=p.digest AND jsonb_array_length(p.manifest->'plans')=1
+    AND p.manifest#>>'{plans,0,input,kind}'='schema' AND p.manifest#>'{plans,0,input,expectedRevision}'='null'::jsonb
+    AND p.manifest#>'{plans,0,before}'='null'::jsonb)`;
+}
+
+export function tablePolicyState(table: (name: string) => string, version: number) {
+  return `CASE WHEN ${tablePolicyReceipt(table, version, true)} THEN 'current'
+    WHEN ${tablePolicyReceipt(table, version)} THEN 'stopped' ELSE 'none' END`;
+}
+
 async function tableProposalActivity(tx: AuthorizationTransaction, id: string): Promise<StoredToolActivity | null> {
   const table = (name: string) => qualified(tx.schema, name);
   if (!(await tx.client.query('SELECT to_regclass($1) AS name', [table('tf_table_proposals')])).rows[0]?.name)
@@ -136,7 +156,8 @@ async function tableProposalActivity(tx: AuthorizationTransaction, id: string): 
       `SELECT p.expires_at<=clock_timestamp() AS expired,jsonb_array_length(p.manifest->'plans') AS plans,
         (SELECT decision FROM ${table('tf_table_proposal_decisions')} WHERE proposal_id=p.id) AS decision,
         (SELECT operation FROM ${table('tf_table_proposal_controls')} WHERE proposal_id=p.id ORDER BY sequence DESC LIMIT 1) AS control,
-        r.completed,r.failed,${tableProposalSupersededCondition(table)} AS superseded
+        r.completed,r.failed,${tableProposalSupersededCondition(table)} AS superseded,
+        ${tablePolicyState(table, Number('commonVersion' in tx && tx.commonVersion))} AS policy
       FROM ${table('tf_table_proposals')} p
       CROSS JOIN LATERAL (SELECT count(*) FILTER (WHERE receipt->>'status'='completed')::int AS completed,count(*) FILTER (WHERE receipt->>'status'='failed')::int AS failed
         FROM (SELECT DISTINCT ON(table_id) receipt FROM ${table('tf_table_proposal_receipts')} WHERE proposal_id=p.id ORDER BY table_id,attempt DESC) latest) r
@@ -153,6 +174,7 @@ async function tableProposalActivity(tx: AuthorizationTransaction, id: string): 
       completed: z.int(),
       failed: z.int(),
       superseded: z.boolean(),
+      policy: z.enum(['none', 'current', 'stopped']),
     })
     .safeParse(row);
   if (!proposal.success) return null;
@@ -161,7 +183,9 @@ async function tableProposalActivity(tx: AuthorizationTransaction, id: string): 
   if (value.decision === 'reject') return { status: 'blocked' };
   if (value.control === 'cancel' || value.expired) return { status: 'cancelled' };
   if (value.completed || value.failed) return { status: 'failed' };
-  if (value.decision === 'approve') return { status: 'running' };
+  if (value.decision === 'approve' || value.policy === 'current') return { status: 'running' };
+  if (value.policy === 'stopped')
+    return { status: 'cancelled', detail: 'Workspace permissions changed. Ask Bud to create the table again.' };
   return value.superseded ? { status: 'completed', detail: 'Replaced by a revision.' } : { status: 'waiting' };
 }
 
@@ -305,9 +329,11 @@ export async function storedToolActivity(
     const workflows =
       error === 'workflow-active' ? blockingWorkflowsSchema.safeParse(outcome.data?.workflows).data : undefined;
     if (detail) return { status: 'completed', detail, ...(workflows?.length ? { workflows } : {}) };
-    const proposal = z.object({ id: z.uuid(), status: z.literal('pending') }).safeParse(output);
+    const proposal = z.object({ id: z.uuid(), status: z.enum(['pending', 'saving']) }).safeParse(output);
     const activity = proposal.success ? await tableProposalActivity(tx, proposal.data.id) : null;
     if (activity) return { ...activity, proposal: true };
+    if (proposal.success && proposal.data.status === 'saving')
+      return { status: 'blocked', detail: 'Table creation could not be verified.' };
   }
   if (row.status === 'completed' && row.tool === 'tables.import.file') {
     const result = z.object({ result: z.unknown() }).safeParse(row.output);

@@ -8,7 +8,8 @@ import { inTransaction } from '@tulipfarm/workspace-storage/provisioning';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { createGeneration, activateGeneration } from '@tulipfarm/tables/store';
 import { createTableService } from '@tulipfarm/tables/service';
-import { createTableExecution, executionCompatibility } from '@tulipfarm/tables/execution';
+import { createTableExecution, createTablePublication, executionCompatibility } from '@tulipfarm/tables/execution';
+import { tableExecutionAccess } from '../../../apps/worker/src/table-access.ts';
 import { createTableProposalDecisions } from '@tulipfarm/tables/proposals';
 import { importWorkbook, importObjectFixture } from '../../tables/test/import-object-fixture.mjs';
 import { createChatTools } from '../src/tools.ts';
@@ -18,6 +19,140 @@ import { requireTableSources, requireTableImportReference } from '../src/table-s
 import { tableDefinitionMessages } from '@tulipfarm/tables/definition';
 import { tableProposalRules } from '@tulipfarm/tables/proposal-contracts';
 import { tableProposalJsonSchema } from '@tulipfarm/tables/proposal-json-schema';
+import { conversationFixture } from '../../conversations/test/fixture.mjs';
+import { tableDefinition } from '../../tables/test/fixture.mjs';
+import { createActionReviewService } from '@tulipfarm/workspaces/action-review';
+
+test('direct private Bud queues one new table per turn and honors a saved table review rule', async t => {
+  const f = await conversationFixture();
+  t.after(() => f.close());
+  const { workspace: w, runtime } = f;
+  const actor = { kind: 'human', userId: w.userId, membershipId: w.membershipId };
+  const team = (await f.db.platform.query(`SELECT id FROM ${f.table('tf_teams')} WHERE name='_everyone'`)).rows[0].id;
+  await f.db.platform.query(`UPDATE ${f.table('tf_soul_head')} SET revision=$1 WHERE id=1`, ['a'.repeat(40)]);
+  const tools = createChatTools(runtime, { privateBud: { link: async (_, kind, id) => `/test/${kind}/${id}` } });
+  async function request(text) {
+    const conversationId = randomUUID();
+    await f.store.create(w.id, w.userId, { chatId: conversationId, commandId: randomUUID() });
+    const { turnId } = await f.store.send(w.id, w.userId, conversationId, {
+      model: 'gpt-astra',
+      messageId: randomUUID(),
+      commandId: randomUUID(),
+      parts: [{ kind: 'text', text }],
+    });
+    const target = tableDefinition({ owningTeamId: team, label: 'Orders' });
+    const invoke = async (label = target.label, callId = randomUUID()) =>
+      (
+        await tools.invokeWithSources(
+          { workspaceId: w.id, actor, callId, origin: { conversationId, turnId, sources: [] } },
+          {
+            tool: 'tables.propose',
+            input: JSON.stringify({
+              plans: [
+                {
+                  kind: 'schema',
+                  tableId: target.id,
+                  expectedRevision: null,
+                  dependsOn: [],
+                  target: { ...target, label },
+                  transforms: { outputs: [] },
+                },
+              ],
+            }),
+          },
+        )
+      ).result;
+    return { invoke, target, origin: { conversationId, turnId, sources: [] } };
+  }
+  const direct = await request('Create a table named Orders.');
+  const callId = randomUUID();
+  const queued = await direct.invoke('Orders', callId);
+  assert.equal(queued.status, 'saving');
+  assert.equal(queued.decision, 'workspace-policy');
+  assert.equal(queued.url, undefined);
+  assert.deepEqual(await direct.invoke(), queued);
+  assert.equal((await direct.invoke('Orders revised', callId)).error, 'idempotency-conflict');
+  assert.equal((await direct.invoke('Orders revised')).status, 'pending');
+  const advance = createTableExecution({
+    ...tableExecutionAccess,
+    resolveMigrationCredential: async () => f.db.login(w, 'migration'),
+  });
+  const publish = createTablePublication({
+    runtime,
+    ...tableExecutionAccess,
+    prepareRevision: async input => ({
+      commit: 'b'.repeat(40),
+      parentCommit: input.expectedParentCommit,
+      bundle: { key: `test/${input.commandId}`, sha256: 'c'.repeat(64) },
+      projection: { definition: input.definition },
+    }),
+  });
+  let state;
+  for (let i = 0; i < 10 && state !== 'completed' && state !== 'blocked'; i++) {
+    state = await advance(w.id, queued.id);
+    if (state === 'publish') await publish(w.id, queued.id);
+  }
+  assert.equal(state, 'completed');
+  assert.ok(
+    (
+      await f.db.platform.query(`SELECT applied_revision FROM ${f.table('tf_table_catalog')} WHERE id=$1`, [
+        direct.target.id,
+      ])
+    ).rows[0]?.applied_revision,
+  );
+  assert.equal(
+    (await (await request('Show me what a table named Orders would look like.')).invoke()).status,
+    'pending',
+  );
+
+  const settings = createActionReviewService({ runtime });
+  async function addRow(value) {
+    const { origin } = await request(`Can you add ${value} to Orders?`);
+    const callId = randomUUID();
+    await f.db.platform.query(
+      `INSERT INTO ${f.table('tf_conversation_tool_calls')}(id,conversation_id,turn_id,sequence,tool,status) VALUES ($1,$2,$3,1,'rows.create','running')`,
+      [callId, origin.conversationId, origin.turnId],
+    );
+    return (
+      await tools.invokeWithSources(
+        { workspaceId: w.id, actor, callId, origin },
+        {
+          tool: 'rows.create',
+          tableId: direct.target.id,
+          expectedAppliedRevision: 'b'.repeat(40),
+          values: { [direct.target.fields[0].id]: { kind: 'text', value } },
+        },
+      )
+    ).result;
+  }
+  assert.ok((await addRow('Acme')).id);
+  const rule = 'ask before creating a table or an agent';
+  const { revision, confirmation } = await settings.preview(w.id, w.userId, { rule });
+  await settings.save(w.id, w.userId, { mode: 'ask', expectedRevision: revision, confirmation, rule });
+  assert.ok((await addRow('Maple')).id);
+  assert.equal((await (await request('Create a table named Orders.')).invoke()).status, 'pending');
+  const rowRule = 'ask before adding rows';
+  const preview = await settings.preview(w.id, w.userId, { rule: rowRule });
+  await settings.save(w.id, w.userId, {
+    mode: 'ask',
+    expectedRevision: preview.revision,
+    confirmation: preview.confirmation,
+    rule: rowRule,
+  });
+  assert.ok((await addRow('Elm')).draftId);
+  assert.equal(
+    (
+      await f.db.platform.query(
+        `SELECT call_id FROM ${f.table('tf_action_review_receipts')} WHERE action='create-table'`,
+      )
+    ).rowCount,
+    1,
+  );
+  assert.equal(
+    (await f.db.platform.query(`SELECT proposal_id FROM ${f.table('tf_table_proposal_decisions')}`)).rowCount,
+    0,
+  );
+});
 
 test('chat distinguishes creation eligibility, validates proposal arguments, and enforces current authority', async t => {
   const db = await fixture();

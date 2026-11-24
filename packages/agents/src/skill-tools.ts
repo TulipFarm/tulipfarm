@@ -17,6 +17,7 @@ import {
 } from './skill-package-contracts.ts';
 import { workspaceSkillDefinitionSchema } from './workspace-skill-contracts.ts';
 import type { SkillPackageFile } from './skill-packages.ts';
+import { inspectSkillFiles } from './skill-package-review.ts';
 
 export const skillDraftInputSchema = z
   .strictObject({
@@ -38,6 +39,22 @@ export const skillDraftInputSchema = z
     input => (input.definition === undefined) !== (input.files === undefined),
     'Supply package file changes or a legacy procedure, not both',
   );
+
+function procedureFile(definition: NonNullable<z.infer<typeof skillDraftInputSchema>['definition']>) {
+  if ('package' in definition) throw new SkillPackageError('invalid-package');
+  const name = definition.name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 64)
+    .replace(/-$/, '');
+  return {
+    path: 'SKILL.md',
+    bytes: Buffer.from(
+      `---\nname: ${JSON.stringify(name)}\ndescription: ${JSON.stringify(definition.description ?? definition.name)}\n---\n${definition.instructions}\n`,
+    ),
+  };
+}
 
 export function createSkillTools(runtime: AgentStorage, bytes?: Pick<FileBytes, 'putIfAbsent' | 'read'>) {
   const skills = createWorkspaceSkills(runtime),
@@ -83,22 +100,7 @@ export function createSkillTools(runtime: AgentStorage, bytes?: Pick<FileBytes, 
         throw new SkillPackageError('import-conflict');
     }
     if (input.definition) {
-      if ('package' in input.definition) throw new SkillPackageError('invalid-package');
-      const name = input.definition.name
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-|-$/g, '')
-        .slice(0, 64)
-        .replace(/-$/, '');
-      files = [
-        ...files.filter(file => file.path !== 'SKILL.md'),
-        {
-          path: 'SKILL.md',
-          bytes: Buffer.from(
-            `---\nname: ${JSON.stringify(name)}\ndescription: ${JSON.stringify(input.definition.description ?? input.definition.name)}\n---\n${input.definition.instructions}\n`,
-          ),
-        },
-      ];
+      files = [...files.filter(file => file.path !== 'SKILL.md'), procedureFile(input.definition)];
     } else {
       const map = new Map(files.map(file => [file.path, file]));
       const changed = new Set<string>();
@@ -154,5 +156,49 @@ export function createSkillTools(runtime: AgentStorage, bytes?: Pick<FileBytes, 
       nextOffset: offset + 16000 < text.length ? offset + 16000 : null,
     };
   }
-  return { draft, readFile };
+  // Saving an inert, authored procedure is not package installation or safety approval.
+  async function prepareInactive(
+    workspaceId: string,
+    actor: HumanActor,
+    id: string,
+    input: z.infer<typeof skillDraftInputSchema>,
+    sources: readonly SourceDependency[],
+    url: string,
+  ) {
+    if (!objects || input.expectedVersion !== 0) return null;
+    if (input.files?.some(file => file.content === null || file.encoding !== 'utf8' || !file.path.endsWith('.md')))
+      return null;
+    const files = input.definition
+      ? [procedureFile(input.definition)]
+      : input.files!.map(file => ({
+          path: file.path,
+          bytes: Buffer.from(file.content ?? '', file.encoding),
+        }));
+    // Binary assets, scripts and packages with findings keep the existing safety review.
+    const inspected = inspectSkillFiles(files, false);
+    if (inspected.findings.length || inspected.unreviewedFiles.length) return null;
+    const prepared = input.files ? await objects.stage(workspaceId, actor, id, files, sources) : null;
+    const definition = prepared?.definition ?? input.definition;
+    if (!definition || (!input.definition?.description && !prepared)) return null;
+    return async (bound: AgentStorage) => {
+      const receipt = await createWorkspaceSkills(bound).save(
+        workspaceId,
+        actor,
+        id,
+        { requestId: id, expectedVersion: 0, definition },
+        sources,
+        prepared?.id,
+      );
+      return {
+        skillId: id,
+        receipt,
+        url,
+        status: 'saved',
+        decision: 'workspace-policy',
+        enabled: false,
+        instruction: 'Link to the saved private skill. It has not been reviewed or enabled.',
+      };
+    };
+  }
+  return { draft, readFile, prepareInactive };
 }

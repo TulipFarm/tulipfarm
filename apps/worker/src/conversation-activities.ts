@@ -57,6 +57,8 @@ import { withKnowledgeSourceAuthorization } from '@tulipfarm/knowledge';
 import type { ChatFiles, KnowledgeToolsFactory } from '@tulipfarm/agents/tools';
 import { createKnowledgeTools } from './knowledge-tools-composition.ts';
 import { slackActionsFromEnvironment, slackAgentSetupFromEnvironment } from '@tulipfarm/agents/slack-environment';
+import { catalogEligibility } from '@tulipfarm/evals/workspace';
+import { modelEnvironment } from '@tulipfarm/agents/model-environment';
 import type { SlackActionsFactory } from '@tulipfarm/agents/slack-actions';
 import { withGitHubSourceAuthorization } from '@tulipfarm/github/source-runtime';
 import type { TableImportOptions } from '@tulipfarm/tables/imports';
@@ -503,6 +505,15 @@ export function meteredReply(
               const invoke = () =>
                 createChatTools(context.runtime, {
                   ...chatToolOptions(context.runtime, call.tool),
+                  privateBud: appChat
+                    ? {
+                        eligible: request => catalogEligibility(modelEnvironment())(request),
+                        link: async (workspaceId, kind, id) => {
+                          const slug = await workspaceSlug?.(workspaceId);
+                          return slug ? `/${encodeURIComponent(slug)}/${kind}/${encodeURIComponent(id)}` : undefined;
+                        },
+                      }
+                    : undefined,
                   subagents:
                     call.tool === 'agents.delegate'
                       ? createSubagentDelegation({

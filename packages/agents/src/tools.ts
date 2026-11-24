@@ -51,6 +51,8 @@ import {
   toolCallSchema,
 } from './contracts.ts';
 import { createToolRegistry } from './registry.ts';
+import { policyWrite, type PrivateBudReview } from './chat-action-review.ts';
+import type { ModelFamilyEligibility } from './model-policy-contracts.ts';
 import { verifiedMcpApps } from './verified-mcp.ts';
 import { mcpCatalogAppByEndpoint } from '@tulipfarm/mcp-catalog';
 import { createAgentAuthoring } from './authoring.ts';
@@ -1185,6 +1187,7 @@ type Runtime = AgentStorage;
 /** Files publication for agent outputs. `autonomous` is true when no person requested the turn in a private chat. */
 export type ChatFileOutputs = { files: FileOutputStore; autonomous: boolean };
 export type ChatToolsOptions = {
+  privateBud?: (PrivateBudReview & { eligible: ModelFamilyEligibility }) | undefined;
   integrations?: Pick<IntegrationService, 'readIssue'> | undefined;
   atlassian?: AtlassianTools | undefined;
   google?: GoogleOperationsFactory | undefined;
@@ -1317,6 +1320,7 @@ export function createChatTools(
     apiApprovals,
     apiPrivateHosts,
     workflowLink,
+    privateBud,
   }: ChatToolsOptions = {},
 ) {
   const resources = createAgentRecordTools(runtime);
@@ -1755,6 +1759,35 @@ export function createChatTools(
             }),
           ),
         );
+        const plan = input.plans.length === 1 && input.plans[0];
+        if (plan && plan.kind === 'schema' && plan.expectedRevision === null && !input.revises && !deferred.length) {
+          const applied = await policyWrite(runtime, privateBud, context, 'create-table', input, async bound => {
+            const url = await privateBud!.link(workspaceId, 'tables', plan.tableId);
+            if (!url) return null;
+            const result = await createChatTableProposals(bound, objects).propose(
+              workspaceId,
+              actor,
+              callId,
+              origin,
+              input,
+            );
+            if (!('id' in result && 'digest' in result && result.status === 'pending')) return null;
+            return {
+              id: result.id,
+              digest: result.digest,
+              tableId: plan.tableId,
+              url,
+              status: 'saving',
+              decision: 'workspace-policy',
+              instruction:
+                'Table creation is queued. Do not link to the table or say it exists until publication completes.',
+            };
+          });
+          if (applied && 'result' in applied) {
+            const { url: _publicationLink, ...output } = applied.result;
+            return output;
+          }
+        }
         const result = await proposals.propose(workspaceId, actor, callId, context.origin, input);
         let tables: { id: string; name: string }[] | undefined;
         let reviewSummary: string | undefined;
@@ -1993,23 +2026,93 @@ export function createChatTools(
           evalCases?.length && (await isFeatureEnabled('agent-evals', null, { id: workspaceId }).catch(() => false))
             ? { ...rest, evalCases }
             : rest;
-        return createAuthoringDrafts(runtime).propose(workspaceId, actor, callId, context.origin, {
-          kind: 'agent',
+        const origin = context.origin;
+        const proposal = {
+          kind: 'agent' as const,
           ...(call.agent === 'new'
             ? { targetId: randomUUID(), input: { ...input, expectedSavedRevision: null } }
             : { targetId: call.agent.id, input: { ...input, expectedSavedRevision: call.agent.savedRevision } }),
-        });
+        };
+        const setup = input.setup;
+        if (
+          call.agent === 'new' &&
+          input.owningTeamId === null &&
+          (!setup ||
+            (!setup.enrollment.length &&
+              !setup.scope.length &&
+              !setup.limits.length &&
+              !setup.policy.grants.length &&
+              !setup.policy.personGrants.length &&
+              !setup.triggers.length &&
+              !setup.slackChannels.length))
+        ) {
+          const applied = await policyWrite(
+            runtime,
+            privateBud,
+            context,
+            'create-agent',
+            call,
+            async (bound, tx, revision) => {
+              const url = await privateBud!.link(workspaceId, 'agents', proposal.targetId);
+              if (!url) return null;
+              const draft = await createAuthoringDrafts(bound).propose(workspaceId, actor, callId, origin, proposal);
+              const receipt = await createAgentAuthoring(bound, privateBud!.eligible).save(
+                workspaceId,
+                actor,
+                proposal.targetId,
+                {
+                  requestId: callId,
+                  expectedSavedRevision: null,
+                  expectedSoulRevision: input.expectedSoulRevision,
+                  owningTeamId: null,
+                  definition: input.definition,
+                },
+              );
+              await tx.client.query(
+                `INSERT INTO ${relation(tx, 'tf_chat_authoring_decisions')} (draft_id,membership_id,command_id,input,outcome) VALUES ($1,$2,$1,$3,$4)`,
+                [
+                  callId,
+                  actor.membershipId,
+                  { decision: 'workspace-policy', revision, digest: draft.digest },
+                  { kind: 'agent', receipt },
+                ],
+              );
+              return {
+                agentId: proposal.targetId,
+                receipt,
+                url,
+                status: 'saving',
+                decision: 'workspace-policy',
+                instruction:
+                  'The private, inactive agent is being saved. Link to the agent; do not claim it is active.',
+              };
+            },
+          );
+          if (applied && 'result' in applied) return applied.result;
+        }
+        return createAuthoringDrafts(runtime).propose(workspaceId, actor, callId, origin, proposal);
       }
-      case 'skills.draft':
+      case 'skills.draft': {
         if (!context.origin) throw new AccessDenied();
-        return createSkillTools(runtime, objects?.snapshots).draft(
-          workspaceId,
-          actor,
-          callId,
-          call.skillId,
-          call.input,
-          [{ kind: 'private-conversation', conversationId: context.origin.conversationId }, ...context.origin.sources],
-        );
+        const origin = [
+          { kind: 'private-conversation' as const, conversationId: context.origin.conversationId },
+          ...context.origin.sources,
+        ];
+        const skills = createSkillTools(runtime, objects?.snapshots);
+        if (call.skillId === 'new' && call.input.expectedVersion === 0 && objects?.snapshots && privateBud) {
+          const check = await policyWrite(runtime, privateBud, context, 'create-skill', call);
+          if (check && 'result' in check) return check.result;
+          if (check && 'eligible' in check) {
+            const url = await privateBud.link(workspaceId, 'skills', callId);
+            const save = url && (await skills.prepareInactive(workspaceId, actor, callId, call.input, origin, url));
+            if (save) {
+              const applied = await policyWrite(runtime, privateBud, context, 'create-skill', call, save);
+              if (applied && 'result' in applied) return applied.result;
+            }
+          }
+        }
+        return skills.draft(workspaceId, actor, callId, call.skillId, call.input, origin);
+      }
       case 'skills.workspace.read':
         return createWorkspaceSkills(runtime).read(workspaceId, actor, call.skillId);
       case 'skills.load': {
@@ -2166,6 +2269,40 @@ export function createChatTools(
           };
         const problem = await createWorkflowDrafts(runtime, workspaceId).problem(actor, definition);
         if (problem) return problem;
+        if (!call.workflowId && !call.activate) {
+          const origin = context.origin;
+          const applied = await policyWrite(
+            runtime,
+            privateBud,
+            context,
+            'create-workflow',
+            call,
+            async (bound, tx, revision) => {
+              const proposal = {
+                kind: 'workflow' as const,
+                targetId: callId,
+                input: { expectedRevision: null, definition, activate: false },
+              };
+              const url = await privateBud!.link(workspaceId, 'workflows', callId);
+              if (!url) return null;
+              const draft = await createAuthoringDrafts(bound).propose(workspaceId, actor, callId, origin, proposal);
+              const outcome = await createWorkflowDrafts(bound, workspaceId).apply(actor, callId, callId, proposal);
+              await tx.client.query(
+                `INSERT INTO ${relation(tx, 'tf_chat_authoring_decisions')} (draft_id,membership_id,command_id,input,outcome) VALUES ($1,$2,$1,$3,$4)`,
+                [callId, actor.membershipId, { decision: 'workspace-policy', revision, digest: draft.digest }, outcome],
+              );
+              return {
+                workflowId: callId,
+                url,
+                status: 'saved',
+                enabled: false,
+                decision: 'workspace-policy',
+                instruction: 'Link to the saved workflow. It is off.',
+              };
+            },
+          );
+          if (applied && 'result' in applied) return applied.result;
+        }
         return workflowStale(
           createAuthoringDrafts(runtime).propose(workspaceId, actor, callId, context.origin, {
             kind: 'workflow',
@@ -2973,8 +3110,21 @@ export function createChatTools(
         const trusted =
           !usedUntrustedContent(sources, actor) &&
           !(await importedSkillPackages(workspaceId, actor, origin.conversationId));
-        const guard = trusted ? await chatRowReview(runtime, workspaceId, actor, origin, callId, call) : null;
-        if (trusted && !guard) return registry.invoke(context, call);
+        let guard = trusted ? await chatRowReview(runtime, workspaceId, actor, origin, callId, call) : null;
+        if (trusted && !guard) {
+          const action = call.tool.startsWith('rows.create')
+            ? 'create-row'
+            : call.tool.startsWith('rows.update')
+              ? 'update-row'
+              : 'delete-row';
+          const applied = await policyWrite(runtime, privateBud, context, action, call, async bound => {
+            const result = await createToolRegistry({ records: createAgentRecordTools(bound) }).invoke(context, call);
+            return z.record(z.string(), z.unknown()).parse(result);
+          });
+          if (applied && 'result' in applied) return applied.result;
+          if (!applied) return registry.invoke(context, call);
+          guard = { instruction: 'Workspace review holds this entire row change for approval.' };
+        }
         if (guard && 'error' in guard) return guard;
         const review = guard;
         const written = review?.written;
