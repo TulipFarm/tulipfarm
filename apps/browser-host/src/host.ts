@@ -592,7 +592,7 @@ export async function createBrowserHost(options: HostOptions) {
         void rm(downloadsPath, { recursive: true, force: true });
         for (const session of sessions.values()) void session.close();
         sessions.clear();
-        for (const workspaceId of [...queues.keys()]) admitNext(workspaceId);
+        for (const workspaceId of queues.keys()) admitNext(workspaceId);
       });
       monitor = started.newBrowserCDPSession().then(async cdp => {
         await watchDownloads(cdp, downloadsPath);
