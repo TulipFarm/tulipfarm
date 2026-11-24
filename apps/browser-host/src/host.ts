@@ -12,6 +12,7 @@ import {
   type BrowserSessionState,
 } from '@tulipfarm/browser/contracts';
 import { publicAddress } from '@tulipfarm/workspace-mcp-transport';
+import { startEgressProxy } from './egress.ts';
 
 export class HostError extends Error {
   readonly code: BrowserHostErrorCode;
@@ -33,6 +34,8 @@ export type HostOptions = {
   holdMs: number;
   /** Lets pages reach private and loopback addresses. Only for tests against a local site. */
   allowPrivateNetworks?: boolean;
+  /** Which resolved addresses pages may reach. Defaults to public addresses only; tests narrow it. */
+  allowAddress?: (address: string) => boolean;
   /** Most characters of snapshot returned to the agent. */
   snapshotChars?: number;
   now?: () => number;
@@ -55,12 +58,20 @@ class Session {
   private screencasting = false;
   private lastFrame: BrowserFrame | undefined;
   private readonly listeners = new Set<Listener>();
+  private queue: Promise<unknown> = Promise.resolve();
 
   constructor(id: string, context: BrowserContext, page: Page, now: number) {
     this.id = id;
     this.context = context;
     this.page = page;
     this.lastUsed = now;
+  }
+
+  /** Agent actions, a person's input and control changes run one at a time, so a takeover waits for the agent's action. */
+  run<T>(work: () => Promise<T>): Promise<T> {
+    const next = this.queue.then(work, work);
+    this.queue = next.catch(() => undefined);
+    return next;
   }
 
   state(): BrowserSessionState {
@@ -103,14 +114,9 @@ class Session {
   }
 
   async session(): Promise<CDPSession> {
-    this.cdp ??= await this.context.newCDPSession(this.page);
-    return this.cdp;
-  }
-
-  private async startScreencast() {
-    if (this.screencasting) return;
-    this.screencasting = true;
-    const cdp = await this.session();
+    if (this.cdp) return this.cdp;
+    const cdp = await this.context.newCDPSession(this.page);
+    // One frame handler per CDP session; screencasting starts and stops many times on it.
     cdp.on('Page.screencastFrame', frame => {
       void cdp.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => undefined);
       this.lastFrame = {
@@ -120,6 +126,14 @@ class Session {
       };
       this.emit({ type: 'frame', frame: this.lastFrame });
     });
+    this.cdp = cdp;
+    return cdp;
+  }
+
+  private async startScreencast() {
+    if (this.screencasting) return;
+    this.screencasting = true;
+    const cdp = await this.session();
     await cdp.send('Page.startScreencast', {
       format: 'jpeg',
       quality: 60,
@@ -160,6 +174,8 @@ export async function createBrowserHost(options: HostOptions) {
   const sessions = new Map<string, Session>();
   const opening = new Map<string, Promise<Session>>();
   let browser: Promise<Browser> | undefined;
+  const allowAddress = options.allowAddress ?? publicAddress;
+  const egress = options.allowPrivateNetworks ? undefined : await startEgressProxy({ allowed: allowAddress });
   const resolved = new Map<string, { publicOnly: boolean; at: number }>();
 
   const launch = () => {
@@ -167,7 +183,16 @@ export async function createBrowserHost(options: HostOptions) {
       .launch({
         ...(options.executablePath ? { executablePath: options.executablePath } : {}),
         chromiumSandbox: options.sandbox ?? false,
-        args: ['--no-first-run', '--disable-extensions', '--disable-background-networking', '--disable-dev-shm-usage'],
+        // Every connection, loopback included, goes through the egress proxy. QUIC and direct WebRTC UDP would not.
+        ...(egress ? { proxy: { server: egress.server, bypass: '<-loopback>' } } : {}),
+        args: [
+          '--no-first-run',
+          '--disable-extensions',
+          '--disable-background-networking',
+          '--disable-dev-shm-usage',
+          '--disable-quic',
+          '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
+        ],
       })
       .then(started => {
         started.on('disconnected', () => {
@@ -187,14 +212,14 @@ export async function createBrowserHost(options: HostOptions) {
   async function publicHost(hostname: string): Promise<boolean> {
     if (options.allowPrivateNetworks) return true;
     const host = hostname.replace(/^\[|\]$/g, '');
-    if (isIP(host)) return publicAddress(host);
+    if (isIP(host)) return allowAddress(host);
     if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.internal')) return false;
     const cached = resolved.get(host);
     if (cached && now() - cached.at < 60_000) return cached.publicOnly;
     let publicOnly = false;
     try {
       const addresses = await lookup(host, { all: true, verbatim: true });
-      publicOnly = addresses.length > 0 && addresses.every(({ address }) => publicAddress(address));
+      publicOnly = addresses.length > 0 && addresses.every(({ address }) => allowAddress(address));
     } catch {
       publicOnly = false;
     }
@@ -294,6 +319,10 @@ export async function createBrowserHost(options: HostOptions) {
 
   async function act(sessionId: string, action: BrowserAction): Promise<BrowserActionResult> {
     const session = get(sessionId);
+    return session.run(() => perform(session, action));
+  }
+
+  async function perform(session: Session, action: BrowserAction): Promise<BrowserActionResult> {
     if (session.controller === 'person')
       throw new HostError(
         'person-in-control',
@@ -356,16 +385,18 @@ export async function createBrowserHost(options: HostOptions) {
 
   async function control(sessionId: string, input: BrowserControl): Promise<BrowserSessionState> {
     const session = get(sessionId);
-    if (input.controller === 'person') {
-      session.controller = 'person';
-      session.controlledBy = input.memberId;
-    } else {
-      session.controller = 'agent';
-      session.controlledBy = null;
-      session.needsPerson = null;
-    }
-    await session.emitState();
-    return session.state();
+    return session.run(async () => {
+      if (input.controller === 'person') {
+        session.controller = 'person';
+        session.controlledBy = input.memberId;
+      } else {
+        session.controller = 'agent';
+        session.controlledBy = null;
+        session.needsPerson = null;
+      }
+      await session.emitState();
+      return session.state();
+    });
   }
 
   async function needsPerson(sessionId: string, reason: string): Promise<BrowserSessionState> {
@@ -377,6 +408,10 @@ export async function createBrowserHost(options: HostOptions) {
 
   async function input(sessionId: string, event: BrowserInput): Promise<void> {
     const session = get(sessionId);
+    return session.run(() => dispatch(session, event));
+  }
+
+  async function dispatch(session: Session, event: BrowserInput): Promise<void> {
     if (session.controller !== 'person')
       throw new HostError('agent-in-control', 'Take over the browser before using it.', 409);
     const cdp = await session.session();
@@ -466,6 +501,7 @@ export async function createBrowserHost(options: HostOptions) {
       for (const session of sessions.values()) await session.close();
       sessions.clear();
       await (await browser?.catch(() => undefined))?.close();
+      await egress?.close();
     },
   };
 }

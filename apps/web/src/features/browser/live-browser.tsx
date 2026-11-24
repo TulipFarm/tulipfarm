@@ -15,6 +15,8 @@ import {
   type BrowserSessionState,
 } from './api';
 
+const startingMs = 60_000;
+
 export const handBackPrompt = 'I’ve finished in the browser. Continue.';
 
 type Live =
@@ -41,14 +43,23 @@ export function LiveBrowserCanvas({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
+  // The panel can open while the agent's first browser action is still starting the browser.
+  const opening = useRef({ since: 0, seen: false });
+
+  useEffect(() => {
+    opening.current = { since: Date.now(), seen: false };
+  }, [api]);
 
   useEffect(() => {
     setLive({ kind: 'connecting' });
     const controller = new AbortController();
+    let retry: ReturnType<typeof setTimeout> | undefined;
     const source = new EventSource(api.liveUrl, { withCredentials: true });
     source.addEventListener('state', event => {
       const parsed = browserSessionStateSchema.safeParse(JSON.parse((event as MessageEvent<string>).data));
-      if (parsed.success) setLive({ kind: 'open', state: parsed.data });
+      if (!parsed.success) return;
+      opening.current.seen = true;
+      setLive({ kind: 'open', state: parsed.data });
     });
     source.addEventListener('frame', event => {
       const parsed = browserFrameSchema.safeParse(JSON.parse((event as MessageEvent<string>).data));
@@ -58,8 +69,16 @@ export function LiveBrowserCanvas({
     source.addEventListener('error', () => {
       api.state(controller.signal).then(
         state => {
-          if (state) return;
+          if (state) {
+            // A refused stream does not reconnect by itself, though the browser has opened since.
+            if (source.readyState === EventSource.CLOSED) setAttempt(value => value + 1);
+            return;
+          }
           source.close();
+          if (!opening.current.seen && Date.now() - opening.current.since < startingMs) {
+            retry = setTimeout(() => setAttempt(value => value + 1), 2_000);
+            return;
+          }
           setLive({ kind: 'closed' });
         },
         failure => {
@@ -71,6 +90,7 @@ export function LiveBrowserCanvas({
     });
     return () => {
       controller.abort();
+      clearTimeout(retry);
       source.close();
     };
   }, [api, attempt]);
@@ -182,7 +202,13 @@ export function LiveBrowserCanvas({
     return (
       <CanvasSection title="Browser">
         <StatePanel kind="error" heading="h3" title="Couldn’t show the browser" description={live.message}>
-          <Button variant="outline" onClick={() => setAttempt(value => value + 1)}>
+          <Button
+            variant="outline"
+            onClick={() => {
+              opening.current = { since: Date.now(), seen: false };
+              setAttempt(value => value + 1);
+            }}
+          >
             Try again
           </Button>
         </StatePanel>

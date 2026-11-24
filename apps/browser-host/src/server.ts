@@ -109,6 +109,7 @@ export function createBrowserHostServer(host: BrowserHost, token: string): Serve
   async function frames(sessionId: string, request: IncomingMessage, response: ServerResponse) {
     let unsubscribe: (() => void) | undefined;
     let started = false;
+    let pendingFrame: string | undefined;
     const write = (event: string, data: unknown) => {
       if (!started) {
         response.writeHead(200, {
@@ -119,7 +120,19 @@ export function createBrowserHostServer(host: BrowserHost, token: string): Serve
         });
         started = true;
       }
-      response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+      // A slow viewer gets only the newest frame once it catches up, so frames never pile up in memory.
+      if (event === 'frame' && response.writableNeedDrain) {
+        if (pendingFrame === undefined) response.once('drain', flush);
+        pendingFrame = message;
+        return;
+      }
+      response.write(message);
+    };
+    const flush = () => {
+      const message = pendingFrame;
+      pendingFrame = undefined;
+      if (message !== undefined && !response.destroyed) response.write(message);
     };
     const heartbeat = setInterval(() => started && response.write(': keep-alive\n\n'), 15_000);
     const stop = () => {

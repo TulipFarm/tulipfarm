@@ -16,13 +16,27 @@ const pages = {
     </form>
     <a href="/popup" target="_blank">Open help</a>`,
   '/popup': `<!doctype html><title>Help</title><p>Help centre</p>`,
+  '/slow': `<!doctype html><title>Slow</title>
+    <button disabled onclick="document.title = 'Clicked'">Continue</button>
+    <script>setTimeout(() => (document.querySelector('button').disabled = false), 1200)</script>`,
 };
 
 let site;
 let origin;
+let internal;
 before(async () => {
+  internal = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/html' });
+    response.end('<!doctype html><title>Internal</title><p>internal secret</p>');
+  });
+  internal.listen(0, '::1');
+  await once(internal, 'listening');
   site = createServer((request, response) => {
     const url = new URL(request.url, 'http://x');
+    if (url.pathname === '/redirect') {
+      response.writeHead(302, { location: `http://[::1]:${internal.address().port}/` });
+      return response.end();
+    }
     if (url.pathname === '/done') {
       response.writeHead(200, { 'content-type': 'text/html' });
       return response.end(
@@ -36,7 +50,10 @@ before(async () => {
   await once(site, 'listening');
   origin = `http://127.0.0.1:${site.address().port}`;
 });
-after(() => site.close());
+after(() => {
+  site.close();
+  internal.close();
+});
 
 const executablePath = process.env.CHROMIUM_EXECUTABLE_PATH || undefined;
 const sessionId = '00000000-0000-4000-8000-000000000001';
@@ -121,6 +138,28 @@ test('private addresses are blocked unless allowed', async t => {
   const result = await host.act(sessionId, { action: 'navigate', url: `${origin}/` });
   assert.match(result.notice ?? '', /only opens public websites/);
   assert.notEqual(result.state.title, 'Sign up');
+});
+
+test('a redirect to a blocked address is refused at every hop', async t => {
+  const host = await createBrowserHost({ ...options, allowAddress: address => address === '127.0.0.1' });
+  t.after(() => host.shutdown());
+  await host.open(sessionId);
+  const result = await host.act(sessionId, { action: 'navigate', url: `${origin}/redirect` });
+  assert.notEqual(result.state.title, 'Internal');
+  assert.doesNotMatch(result.snapshot, /internal secret/);
+});
+
+test('taking over waits for the agent action already running', async t => {
+  const host = await createBrowserHost({ ...options, allowPrivateNetworks: true });
+  t.after(() => host.shutdown());
+  await host.open(sessionId);
+  const page = await host.act(sessionId, { action: 'navigate', url: `${origin}/slow` });
+  const clicking = host.act(sessionId, { action: 'click', ref: ref(page.snapshot, /button "Continue"/) });
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const state = await host.control(sessionId, { controller: 'person', memberId: 'member-1' });
+  assert.equal(state.title, 'Clicked');
+  assert.equal(state.controller, 'person');
+  await clicking;
 });
 
 test('idle sessions close, and sessions waiting for a person are held longer', async t => {
