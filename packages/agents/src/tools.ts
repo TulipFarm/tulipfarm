@@ -106,7 +106,12 @@ import { slackOutboundEnabled } from './slack-outbound.ts';
 import type { ChatExecution } from './chat-execution.ts';
 import { codingRunCallSchema, type CodingRuns } from './coding-runs.ts';
 import { GitHubReadError } from '@tulipfarm/github/read-contracts';
-import { GitHubSourceDenied } from '@tulipfarm/github/source-runtime';
+import {
+  GitHubSourceDenied,
+  GitHubSourceUnavailable,
+  rememberFreshGitHubSources,
+  type GitHubSourceFailure,
+} from '@tulipfarm/github/source-runtime';
 import { GitHubAccountError } from '@tulipfarm/github';
 import type { createGitHubReads } from '@tulipfarm/github/reads';
 import type { createGitHubInvestigation } from '@tulipfarm/github/investigation';
@@ -3460,12 +3465,14 @@ export function createChatTools(
           sources: [],
         };
       }
+      if (call.tool === 'github.personal.read')
+        rememberFreshGitHubSources(context.workspaceId, context.actor, output.sources);
       try {
         await withHuman(runtime, context.workspaceId, context.actor, 'read', tx =>
           requireDraftSources(tx, context.actor, output.sources),
         );
       } catch (error) {
-        if (!(error instanceof GitHubSourceDenied)) throw error;
+        if (!(error instanceof GitHubSourceDenied) && !(error instanceof GitHubSourceUnavailable)) throw error;
         return {
           result: { provider: 'github-personal', error: error.code, instruction: githubSourceRecovery[error.code] },
           sources: [],
@@ -3815,11 +3822,15 @@ const githubReadRecovery: Record<GitHubReadError['code'], string> = {
     'The reviewed GitHub tool rejected this read. Retry once with simpler arguments; if it fails again, tell the human this read is unavailable.',
 };
 // A completed read is withheld when rereading what it returned, with the same account, fails or differs.
-const githubSourceRecovery: Record<GitHubSourceDenied['code'], string> = {
+const githubSourceRecovery: Record<GitHubSourceFailure, string> = {
   'source-access-revoked':
     'GitHub answered, but rereading at least one returned repository or item with the selected account was refused, so the whole page was withheld. This is not GitHub denying the request or an empty result. To list the selected account’s own repositories use repository.list; otherwise narrow the query to repositories this account can read (for example with user:, org: or repo:) and retry once. If it fails again, tell the human which read was withheld and that a result could not be reread with this account.',
   'source-changed':
     'The GitHub result changed while it was being verified, so it was withheld. Retry the same read once; if it changes again, tell the human the data is changing too quickly to verify.',
+  'github-unavailable':
+    'GitHub answered, but it could not be reached again in time to confirm access to what it returned, so the result was withheld. This is not an empty result or revoked access. Retry the same read once; if it fails again, tell the human GitHub is not responding and to try again shortly.',
+  'github-rate-limited':
+    'GitHub rate-limited this account while access to the result was being confirmed, so it was withheld. Do not retry now; tell the human to try again in a few minutes. Do not switch credentials.',
 };
 const workflowChanged = {
   error: 'draft-stale',

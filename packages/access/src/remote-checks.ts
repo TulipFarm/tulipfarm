@@ -6,13 +6,47 @@ type Scope = { outcomes: Map<string, Outcome>; pending: Map<string, () => Promis
 type Budget = { deadline: number; checks: number; unavailable: boolean };
 const scopes = new AsyncLocalStorage<Scope>();
 const budgets = new AsyncLocalStorage<Budget>();
+const memos = new AsyncLocalStorage<Map<string, number>>();
 
 /**
  * What one call may spend on remote source checks, shared by every check it runs, including checks nested in other
  * checks. Once the time or check count is spent, or one source has been unavailable, the remaining sources are
  * reported unavailable without contacting the provider. Properties only so tests can shorten them.
  */
-export const remoteSourceCheckLimits = { milliseconds: 10_000, checks: 32 };
+export const remoteSourceCheckLimits = { milliseconds: 10_000, checks: 32, reuseMilliseconds: 60_000 };
+
+/** A key for `remoteSourceCheck` that ignores object key order, which changes when a source is read back from jsonb. */
+export function remoteSourceCheckKey(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) =>
+    item && typeof item === 'object' && !Array.isArray(item)
+      ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : item,
+  );
+}
+
+/**
+ * Runs `operation`, such as one reply attempt, so that a remote check that passed in it counts as passed for
+ * `reuseMilliseconds` across its later transactions: they only revalidate the database, instead of asking the provider
+ * again. Failed checks are not remembered. Inside an existing memo, `operation` just runs.
+ */
+export function withRemoteSourceCheckMemo<T>(operation: () => Promise<T>): Promise<T> {
+  if (memos.getStore()) return operation();
+  return memos.run(new Map(), operation);
+}
+
+/** Records that the source behind `key` was just checked remotely, or freshly read, and passed. */
+export function rememberRemoteSourceCheck(key: string) {
+  memos.getStore()?.set(key, Date.now());
+}
+
+function remembered(key: string) {
+  const memo = memos.getStore();
+  const at = memo?.get(key);
+  if (at === undefined) return false;
+  if (Date.now() - at < remoteSourceCheckLimits.reuseMilliseconds) return true;
+  memo!.delete(key);
+  return false;
+}
 
 function spent(budget: Budget) {
   return budget.unavailable || budget.checks >= remoteSourceCheckLimits.checks || Date.now() >= budget.deadline;
@@ -77,6 +111,7 @@ async function deferWithin<T>(budget: Budget, operation: () => Promise<T>, round
         try {
           await scopes.exit(check);
           scope.outcomes.set(key, { ok: true });
+          rememberRemoteSourceCheck(key);
         } catch (error) {
           if (error instanceof SourceAuthorizationUnavailable) budget.unavailable = true;
           scope.outcomes.set(key, { ok: false, error });
@@ -88,7 +123,8 @@ async function deferWithin<T>(budget: Budget, operation: () => Promise<T>, round
 
 /**
  * Called by a provider inside a transaction before it checks a source remotely. `inline` means check it now, as
- * before. `verified` means `check` passed earlier in this call, so only cheap database revalidation is left; a failed
+ * before, then call `rememberRemoteSourceCheck` once it passes. `verified` means `check` passed earlier in this call
+ * or recently in the surrounding `withRemoteSourceCheckMemo`, so only cheap database revalidation is left; a failed
  * earlier check is rethrown here. `deferred` means `check` will run after this transaction, which the provider must
  * then end with `RemoteSourceChecksDeferred`; treat the source as allowed until then, since nothing commits. Once the
  * call's budget is spent, an unchecked source throws `SourceAuthorizationUnavailable` instead.
@@ -100,6 +136,7 @@ export function remoteSourceCheck(key: string, check: () => Promise<void>): 'inl
     if (!outcome.ok) throw outcome.error;
     return 'verified';
   }
+  if (remembered(key)) return 'verified';
   const budget = budgets.getStore();
   if (budget && spent(budget)) throw new SourceAuthorizationUnavailable();
   if (!scope || scope.inline) {

@@ -18,6 +18,7 @@ import {
   lockAuthorization,
   uuidSchema,
   canAccessTable,
+  withRemoteSourceCheckMemo,
   type HumanActor,
   type AuthorizationTransaction,
 } from '@tulipfarm/access';
@@ -3435,7 +3436,12 @@ export function createConversationExecutor(
     await transaction(fence.workspaceId, tx => noteReplyTiming(tx, fence.turnId, ['cancelled'])).catch(() => undefined);
   }
 
-  async function process(
+  /** One attempt checks each source with its provider once, not again in every transaction that reads it. */
+  function process(value: unknown, onTitle?: TitleListener) {
+    return withRemoteSourceCheckMemo(() => processAttempt(value, onTitle));
+  }
+
+  async function processAttempt(
     value: unknown,
     onTitle?: TitleListener,
   ): Promise<'completed' | 'idle' | 'retry' | 'failed' | 'stale'> {

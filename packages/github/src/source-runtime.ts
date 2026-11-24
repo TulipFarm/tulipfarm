@@ -3,8 +3,10 @@ import { z } from 'zod';
 import {
   AccessDenied,
   deferRemoteSourceChecks,
+  rememberRemoteSourceCheck,
   remoteSourceCheck,
   remoteSourceCheckDeadline,
+  remoteSourceCheckKey,
   requirePersonalGitHubSelection,
   RemoteSourceChecksDeferred,
   requireProtectedSource,
@@ -57,6 +59,27 @@ export const githubSourceDigest = (value: unknown) => createHash('sha256').updat
 
 type PersonalSource = Extract<SourceDependency, { kind: 'github-personal' }>;
 type Proof = NonNullable<PersonalSource['proof']>;
+
+const personalCheckKey = (workspaceId: string, actor: HumanActor, source: PersonalSource) =>
+  remoteSourceCheckKey(['github-personal', workspaceId, actor, source]);
+
+/**
+ * Counts the sources a read just returned as checked, within the surrounding `withRemoteSourceCheckMemo`: the read
+ * itself proved the actor's account can see them, so rereading them from GitHub straight after would add nothing.
+ * Downloads and task sources still get their full check.
+ */
+export function rememberFreshGitHubSources(
+  workspaceId: string,
+  actor: HumanActor,
+  sources: readonly SourceDependency[],
+) {
+  for (const source of sources)
+    if (source.kind === 'github-personal' && source.proof && !source.proof.download && source.origin !== 'task')
+      rememberRemoteSourceCheck(personalCheckKey(workspaceId, actor, source));
+}
+
+/** How many of a pinned search's access targets are reread from GitHub at once. */
+const accessTargetConcurrency = 8;
 
 /** Rereads a GitHub source with the actor's account and fails unless it still shows what the proof recorded. */
 async function verifyGitHubProof(
@@ -155,10 +178,20 @@ async function verifyGitHubProof(
         return output;
       }
       if (pinnedSearch && proof.accessTargets) {
-        for (const operation of proof.accessTargets) {
+        for (const operation of proof.accessTargets)
           if (!hasFixedAccessTarget(operation) || limits.attempts++ >= 32) throw new AccessDenied();
-          await dispatchGitHubRead({ operation, credential, bindings: [], fetcher });
-        }
+        const targets = [...proof.accessTargets];
+        let failure: { error: unknown } | undefined;
+        // Workers stop taking targets after the first failure and all settle before it is thrown.
+        await Promise.all(
+          Array.from({ length: Math.min(accessTargetConcurrency, targets.length) }, async () => {
+            for (let operation = targets.shift(); operation && !failure; operation = targets.shift())
+              await dispatchGitHubRead({ operation, credential, bindings: [], fetcher }).catch((error: unknown) => {
+                failure ??= { error };
+              });
+          }),
+        );
+        if (failure) throw failure.error;
       }
       return dispatchGitHubRead({
         operation: proof.operation,
@@ -293,7 +326,7 @@ export function withGitHubSourceAuthorization<T extends AccountRuntime>(
               // Batch checks may refresh the account's single-use token, which must not be rolled back with a
               // deferred transaction, so a deferred batch check runs whole outside it, with its own deferred sources.
               const remote = remoteSourceCheck(
-                JSON.stringify(['github-batch', workspaceId, actor, source]),
+                remoteSourceCheckKey(['github-batch', workspaceId, actor, source]),
                 async () => {
                   const view = await deferRemoteSourceChecks(() =>
                     outsideBatches().verify(workspaceId, actor, { taskId: source.taskId }, batchId),
@@ -347,7 +380,8 @@ export function withGitHubSourceAuthorization<T extends AccountRuntime>(
               !bindings.some(binding => binding.operation === proof.operation.kind)
             )
               throw new AccessDenied();
-            const remote = remoteSourceCheck(JSON.stringify(['github-personal', workspaceId, actor, source]), () =>
+            const remoteKey = personalCheckKey(workspaceId, actor, source);
+            const remote = remoteSourceCheck(remoteKey, () =>
               verifyGitHubProof(
                 source,
                 proof,
@@ -377,6 +411,7 @@ export function withGitHubSourceAuthorization<T extends AccountRuntime>(
               } finally {
                 attempts = limits.attempts;
               }
+              rememberRemoteSourceCheck(remoteKey);
             }
             checked.add(key);
           };
