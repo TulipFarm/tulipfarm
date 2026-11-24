@@ -52,7 +52,7 @@ import {
   type ConversationModel,
 } from './conversation-model.ts';
 import { pausedFamilyReplacement } from '@tulipfarm/agents/model-policy';
-import { hasMcpDerivedSources, withMcpSourceContext } from '@tulipfarm/access';
+import { hasMcpDerivedSources, withMcpSourceContext, type HumanActor } from '@tulipfarm/access';
 import { withKnowledgeSourceAuthorization } from '@tulipfarm/knowledge';
 import type { ChatFiles, KnowledgeToolsFactory } from '@tulipfarm/agents/tools';
 import { createKnowledgeTools } from './knowledge-tools-composition.ts';
@@ -375,7 +375,23 @@ export function meteredReply(
         ? (await observeChatDetail('feature-flag', () =>
             isFeatureEnabled('browser-use', null, { id: fence.workspaceId }),
           ))
-          ? { client: createBrowserHostClient(browserHost), imageInput: routeCapabilities(validatedRoute).imageInput }
+          ? {
+              client: createBrowserHostClient(browserHost),
+              imageInput: routeCapabilities(validatedRoute).imageInput,
+              secrets: secretServices.secrets.capabilities().enabled
+                ? (holder: { workspaceId: string; actor: HumanActor; conversationId: string }) => {
+                    const held = heldSecrets(secretServices.secrets, secretServices.requests, {
+                      workspaceId: holder.workspaceId,
+                      actor: holder.actor,
+                      origin: { kind: 'chat', conversationId: holder.conversationId },
+                    });
+                    return {
+                      resolve: held.resolve,
+                      recordUse: (id: string, url: string) => held.recordUse(id, url, 'browser.signIn'),
+                    };
+                  }
+                : undefined,
+            }
           : undefined
         : undefined;
     const appChat =

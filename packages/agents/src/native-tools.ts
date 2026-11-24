@@ -213,6 +213,7 @@ const coreChatTools = new Set(
     // Offered only when this chat has a cloud browser; the model must not mistake a site task for a web.fetch.
     'browser.act',
     'browser.handoff',
+    'browser.signIn',
     'execution.run',
     'files.read',
     'images.generate',

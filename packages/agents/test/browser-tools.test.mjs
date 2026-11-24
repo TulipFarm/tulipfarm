@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BrowserHostError } from '@tulipfarm/browser';
+import { SecretError } from '@tulipfarm/secrets';
 import { invokeBrowser } from '../src/browser-tools.ts';
 import { outboundRefusal } from '../src/mcp-catalog-egress.ts';
 import { discoverToolNames } from '../src/tools.ts';
@@ -8,6 +9,7 @@ import { discoverToolNames } from '../src/tools.ts';
 const origin = {
   workspaceId: '6f1c2b8e-1a2b-4c3d-8e9f-0a1b2c3d4e5f',
   conversationId: '0b0e7a51-3c5d-4b8e-9f21-6d2a7c4e1f00',
+  actor: { kind: 'human', userId: 'u1', membershipId: '9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a' },
 };
 const state = { sessionId: 's', url: 'https://example.com/', title: 'Example', controller: 'agent', needsPerson: null };
 
@@ -134,4 +136,106 @@ test('With MCP tools offered, the browser opens only sites the person named', ()
     outboundRefusal({ tool: 'browser.act', action: { action: 'click', ref: 'e1' } }, { person: '', web: '' }),
     undefined,
   );
+});
+
+const login = { username: 'ada@example.com', password: 'correct horse battery' };
+
+function fakeSecrets(secret, uses = []) {
+  return {
+    uses,
+    secrets: holder => ({
+      resolve: async ({ reference }, url) => {
+        assert.equal(holder.conversationId, origin.conversationId);
+        if (reference !== 'ref-1') throw new SecretError('not-found');
+        if (new URL(url).hostname !== 'example.com') throw new SecretError('destination-denied');
+        return {
+          secretId: 'sec-1',
+          kind: 'username-password',
+          placement: { kind: 'browser' },
+          destinations: [{ kind: 'host', value: 'example.com' }],
+          value: login,
+          ...secret,
+        };
+      },
+      recordUse: async (id, url) => void uses.push([id, url]),
+    }),
+  };
+}
+
+const signedIn = { state, snapshot: '- heading "Welcome" [ref=e9]', truncated: false, screenshot: 'BBBB' };
+
+test('Sign-in types the secret through the host and never returns it', async () => {
+  const { client, calls } = fakeClient({
+    state: async id => (calls.push(['state', id]), state),
+    typeSecret: async (id, input) => (calls.push(['typeSecret', id, input]), signedIn),
+  });
+  const { secrets, uses } = fakeSecrets();
+  const output = await invokeBrowser({ client, imageInput: true, secrets }, origin, {
+    tool: 'browser.signIn',
+    secret: 'ref-1',
+    username: 'e1',
+    password: 'e2',
+    submit: 'e3',
+  });
+  assert.deepEqual(calls.at(-1)[2], {
+    hosts: ['example.com'],
+    fields: [
+      { ref: 'e1', kind: 'username', value: login.username },
+      { ref: 'e2', kind: 'password', value: login.password },
+    ],
+    submit: 'e3',
+  });
+  assert.deepEqual(uses, [['sec-1', 'https://example.com/']]);
+  const text = JSON.stringify(output);
+  assert.equal(text.includes(login.username) || text.includes(login.password), false);
+  assert.equal(output.result.snapshot, signedIn.snapshot);
+});
+
+test('Sign-in refuses unusable secrets and mismatched fields without typing', async () => {
+  const { client, calls } = fakeClient({
+    state: async id => (calls.push(['state', id]), state),
+    typeSecret: async () => assert.fail('typed'),
+  });
+  const call = { tool: 'browser.signIn', secret: 'ref-1', username: 'e1', password: 'e2' };
+  const run = (secret, overrides = {}) =>
+    invokeBrowser({ client, imageInput: false, secrets: fakeSecrets(secret).secrets }, origin, {
+      ...call,
+      ...overrides,
+    });
+  assert.equal((await run({ placement: { kind: 'basic' } })).result.error, 'placement-unsupported');
+  assert.equal((await run({}, { secret: 'other' })).result.error, 'secret-not-found');
+  assert.equal((await run({ kind: 'password', value: { value: 'hunter2' } })).result.error, 'invalid-fields');
+  assert.equal((await run({}, { username: undefined })).result.error, 'invalid-fields');
+  assert.equal(
+    (await run({ destinations: [{ kind: 'endpoint', value: 'https://example.com/api' }] })).result.error,
+    'secret-destination-denied',
+  );
+  const elsewhere = fakeClient({ state: async () => ({ ...state, url: 'https://evil.example/' }) });
+  const denied = await invokeBrowser(
+    { client: elsewhere.client, imageInput: false, secrets: fakeSecrets().secrets },
+    origin,
+    call,
+  );
+  assert.equal(denied.result.error, 'secret-destination-denied');
+  const none = await invokeBrowser({ client, imageInput: false }, origin, call);
+  assert.equal(none.result.error, 'secrets-unavailable');
+});
+
+test('A host refusal to type becomes an instruction', async () => {
+  const { client } = fakeClient({
+    state: async () => state,
+    typeSecret: async () => {
+      throw new BrowserHostError('field-refused', 'That field is not a password box', 422);
+    },
+  });
+  const { secrets, uses } = fakeSecrets();
+  const output = await invokeBrowser({ client, imageInput: false, secrets }, origin, {
+    tool: 'browser.signIn',
+    secret: 'ref-1',
+    username: 'e1',
+    password: 'e2',
+  });
+  assert.equal(output.result.error, 'field-refused');
+  assert.match(output.result.instruction, /password box/);
+  assert.deepEqual(uses, []);
 });
