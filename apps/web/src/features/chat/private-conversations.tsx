@@ -81,6 +81,8 @@ import { useIntegrationKeywords } from '@/features/integrations/keywords';
 import { ChatModelStatus, useChatModelFor, useChatModels } from './chat-models';
 import { usePlanAccount } from './plan-account';
 import { useFlag } from '@/lib/feature-flags';
+import { BrowserActivityCard, useLiveBrowserOpening } from '@/features/browser/browser-card';
+import { isBrowserTool } from '@/features/browser/live-browser';
 import { StartingTasks } from './starting-tasks';
 import { ChatPlans } from './plans';
 import { ChatPackages, PackageChatProvider, useChatPackages } from '@/features/packages/chat-packages';
@@ -533,6 +535,8 @@ function ConversationDetail({
   const text = validContent ? chatDocumentText(validContent) : '';
   const composerInput = useRef<RichTextEditorHandle>(null);
   const canvas = useCanvas();
+  const browserUse = useFlag('browser-use');
+  useLiveBrowserOpening(workspace.id, chatId, activityTools, browserUse && privateChat && !compact);
   const { setOpen: setNavigationOpen } = useSidebar();
   const canvasWasOpen = useRef(canvas.open);
   const navigationCollapsedFor = useRef<string | null>(null);
@@ -2313,6 +2317,7 @@ function ConversationTools({
   const slack = useMemo(() => agentApi(workspace.id), [workspace.id]);
   const recordChanges = useMemo(() => recordChangesForTools(message.id, message.tools), [message.id, message.tools]);
   const codingRuns = useFlag('coding-runs');
+  const browserUse = useFlag('browser-use');
   return (
     <section aria-label={`Activity for message ${message.sequence}`} className="space-y-3">
       {message.tools
@@ -2467,6 +2472,9 @@ function ConversationTools({
               onSettled={changed}
             />
           ))}
+      {browserUse && message.tools.some(tool => isBrowserTool(tool.tool)) && (
+        <BrowserActivityCard workspaceId={workspace.id} chatId={chatId} />
+      )}
       {message.tools
         .filter(tool => tool.images?.length)
         .map(tool => (

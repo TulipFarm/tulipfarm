@@ -54,6 +54,9 @@ jobs:
           - image: render-worker
             dockerfile: apps/render-worker/Dockerfile
             target: render-worker
+          - image: browser-host
+            dockerfile: apps/browser-host/Dockerfile
+            target: browser-host
           - image: snippet-broker
             dockerfile: apps/snippet-broker/Dockerfile
             target: production

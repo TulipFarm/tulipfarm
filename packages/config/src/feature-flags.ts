@@ -165,6 +165,13 @@ export const featureFlags = {
     scope: 'workspace',
     env: 'FEATURE_FLAG_CODING_RUNS',
   },
+  'browser-use': {
+    description:
+      'Chat offers a cloud browser: the agent opens websites, clicks and types to finish tasks no API covers, while members watch it live next to the chat and take over for captchas, sign-ins or consent. Needs a browser host (BROWSER_HOST_ENDPOINT).',
+    default: false,
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_BROWSER_USE',
+  },
   'agent-evals': {
     description:
       "An Evals tab on saved agents: members write test cases, run them against the agent's model or up to three models, and see pass rates. Runs use workspace credits and never write to tables, tasks or chats.",

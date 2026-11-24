@@ -1,0 +1,19 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "dev": {
+      "passThroughEnv": [
+        "$TURBO_EXTENDS$",
+        "BROWSER_HOST_TOKEN",
+        "BROWSER_HOST_PORT",
+        "BROWSER_HOST_MAX_SESSIONS",
+        "BROWSER_HOST_IDLE_MINUTES",
+        "BROWSER_HOST_HOLD_MINUTES",
+        "BROWSER_HOST_ALLOW_PRIVATE_NETWORKS",
+        "CHROMIUM_EXECUTABLE_PATH",
+        "CHROMIUM_SANDBOX",
+        "PLAYWRIGHT_BROWSERS_PATH"
+      ]
+    }
+  }
+}

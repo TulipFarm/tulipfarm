@@ -514,6 +514,8 @@ export async function resultSources(
     case 'plans.report':
     case 'plans.start':
     case 'agents.delegate':
+    case 'browser.act':
+    case 'browser.handoff':
       throw new AccessDenied();
     default: {
       const exhaustive: never = call;

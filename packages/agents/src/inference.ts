@@ -1467,6 +1467,8 @@ export type ToolInferenceContext = {
   chatFiles?: boolean;
   /** The person may run coding agents here, so the model may call `coding.run`. */
   codingRuns?: boolean;
+  /** This chat has a cloud browser, so the model may call `browser.*`. */
+  browser?: boolean;
   /** The kind of app this chat edits, when the person may edit it, so the model may call that kind's `apps.*` tools. */
   apps?: AppKind | undefined;
   /** Deferred chat tools, by framework name, offered from the first round without a `tools_search`. */
@@ -5210,6 +5212,7 @@ export async function inferWithTools(
         tools?.chatFiles ?? false,
         tools?.codingRuns ?? false,
         tools?.apps,
+        tools?.browser ?? false,
       );
       chatToolNameMention = toolNamePattern(catalog.tools);
       previousCatalog = catalogKey(mcp);
@@ -5473,6 +5476,7 @@ export async function inferWithTools(
               tools?.chatFiles ?? false,
               tools?.codingRuns ?? false,
               tools?.apps,
+              tools?.browser ?? false,
             ),
           );
           chatToolNameMention = toolNamePattern(catalog.tools);
@@ -5491,6 +5495,7 @@ export async function inferWithTools(
                   earlierMessages: tools?.earlierMessages ?? false,
                   chatFiles: tools?.chatFiles ?? false,
                   codingRuns: tools?.codingRuns ?? false,
+                  browser: tools?.browser ?? false,
                   personalMemory,
                   inventory,
                 },
@@ -6578,6 +6583,7 @@ export async function inferWithTools(
             earlierMessages: tools?.earlierMessages ?? false,
             chatFiles: tools?.chatFiles ?? false,
             codingRuns: tools?.codingRuns ?? false,
+            browser: tools?.browser ?? false,
           }),
         );
         if (instruction && value && typeof value === 'object') value = { ...value, instruction };

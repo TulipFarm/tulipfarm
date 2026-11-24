@@ -28,6 +28,12 @@ const objectStorage = {
 // Matches the keep service in compose.yaml. Local development only.
 const keep = { KEEP_ENDPOINT: 'http://127.0.0.1:7357', KEEP_TOKEN: 'local-keep-token' };
 
+// Matches apps/browser-host's local .env.local below. Local development only.
+const browserHost = {
+  BROWSER_HOST_ENDPOINT: 'http://127.0.0.1:3010',
+  BROWSER_HOST_TOKEN: 'local-browser-host-token-not-a-secret',
+};
+
 type State = { keys: SetupKeys; passwords: Record<string, string> };
 
 // Encrypted workspace credentials depend on these keys, so they are generated once and reused.
@@ -92,17 +98,28 @@ async function main() {
       'HUNTSMAN_TOKEN',
       'SEARXNG_ENDPOINT',
       'SEARXNG_TOKEN',
+      'BROWSER_HOST_ENDPOINT',
+      'BROWSER_HOST_TOKEN',
       'KEEP_ENDPOINT',
       'KEEP_TOKEN',
     ]
       .filter(name => process.env[name] !== undefined)
       .map(name => [name, process.env[name]!]),
   );
-  await write('apps/api/.env.local', { ...env.api, ...keep, ...connections });
+  await write('apps/api/.env.local', { ...env.api, ...keep, ...browserHost, ...connections });
   await write('apps/worker/.env.local', {
     ...env.worker,
     ...keep,
+    ...browserHost,
     ...connections,
+  });
+  await write('apps/browser-host/.env.local', {
+    BROWSER_HOST_TOKEN: browserHost.BROWSER_HOST_TOKEN,
+    ...Object.fromEntries(
+      ['CHROMIUM_EXECUTABLE_PATH', 'BROWSER_HOST_ALLOW_PRIVATE_NETWORKS']
+        .filter(name => process.env[name] !== undefined)
+        .map(name => [name, process.env[name]!]),
+    ),
   });
   await write('apps/render-worker/.env.local', {
     ...env.renderWorker,

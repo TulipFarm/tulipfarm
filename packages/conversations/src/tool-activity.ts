@@ -102,6 +102,8 @@ export const toolActivityLabels = {
   'integrations.mcp.connect': 'Preparing a card to connect an MCP server',
   'web.fetch': 'Reading a web page',
   'api.request': 'Calling an API',
+  'browser.act': 'Using the browser',
+  'browser.handoff': 'Asking you to take over the browser',
   'packages.inspect': 'Inspecting a system package',
   'conversation.messages.read': 'Rereading an earlier message',
   'files.read': 'Reading a file',

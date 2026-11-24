@@ -27,6 +27,7 @@ import { useCanvas, type CanvasContent, type CanvasItem } from './canvas-state';
 import { PlanCanvas } from './plans';
 import { workspaceRoute } from '@/router';
 import { ActivityResultDetails } from './activity-result-card';
+import { LiveBrowserCanvas } from '@/features/browser/live-browser';
 
 import { lazyCard } from '@/components/lazy-card';
 
@@ -76,6 +77,7 @@ const icons: Record<CanvasContent['kind'], ComponentType<{ size?: number }>> = {
   plan: TasksIcon,
   code: CodeIcon,
   browser: GlobeIcon,
+  'live-browser': GlobeIcon,
   file: DocumentTextIcon,
   'workspace-file': DocumentTextIcon,
   'calendar-read': CalendarIcon,
@@ -299,6 +301,8 @@ export function CanvasItemView({
           <CodeBlock code={content.code} language={content.language} filename={content.filename ?? item.title} />
         </CanvasSection>
       );
+    case 'live-browser':
+      return <LiveBrowserItem workspaceId={content.workspaceId} chatId={content.chatId} />;
     case 'browser':
       return (
         <CanvasSection
@@ -404,4 +408,15 @@ export function ChatCanvasToggle() {
   return canvas.items.length ? (
     <CanvasToggle open={canvas.open} count={canvas.items.length} onToggle={canvas.toggle} />
   ) : null;
+}
+
+function LiveBrowserItem({ workspaceId, chatId }: { workspaceId: string; chatId: string }) {
+  const canvas = useCanvas();
+  return (
+    <LiveBrowserCanvas
+      workspaceId={workspaceId}
+      chatId={chatId}
+      onHandBack={prompt => canvas.requestComposer(prompt, [], { caretAtPrompt: true })}
+    />
+  );
 }

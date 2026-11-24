@@ -39,6 +39,7 @@
     "@tulipfarm/agents": "workspace:*",
     "@tulipfarm/api-calls": "workspace:*",
     "@tulipfarm/apps": "workspace:*",
+    "@tulipfarm/browser": "workspace:*",
     "@tulipfarm/atlassian": "workspace:*",
     "@tulipfarm/build-info": "workspace:*",
     "@tulipfarm/config": "workspace:*",

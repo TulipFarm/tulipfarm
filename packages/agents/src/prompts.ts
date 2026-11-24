@@ -261,6 +261,7 @@ type ContextInput =
       earlierMessages?: boolean;
       chatFiles?: boolean;
       codingRuns?: boolean;
+      browser?: boolean;
       personalMemory?: PersonalMemoryContext | undefined;
       inventory?: WorkspaceInventory | undefined;
     }
@@ -284,6 +285,7 @@ export function runtimeReminder(context: ContextInput, timeZone: string | null =
                 earlierMessages: context.earlierMessages ?? false,
                 chatFiles: context.chatFiles ?? false,
                 codingRuns: context.codingRuns ?? false,
+                browser: context.browser ?? false,
               },
         );
   const has = (name: string) => tools.some(tool => tool === name);

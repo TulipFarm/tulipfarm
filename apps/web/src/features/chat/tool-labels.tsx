@@ -34,7 +34,7 @@ export function toolVisual(tool: string, brand?: Brand | null) {
   if (tool.startsWith('knowledge.')) return <BookOpenIcon size="sm" />;
   if (tool.startsWith('agents.')) return <UsersIcon size="sm" />;
   if (tool === 'web.fetch' || tool === 'files.read') return <BookOpenIcon size="sm" />;
-  if (tool.startsWith('web.') || tool === 'api.request') return <GlobeIcon size="sm" />;
+  if (tool.startsWith('web.') || tool.startsWith('browser.') || tool === 'api.request') return <GlobeIcon size="sm" />;
   if (tool.startsWith('mcp.')) return <PlugIcon size="sm" />;
   return <SparkleIcon size="sm" />;
 }
