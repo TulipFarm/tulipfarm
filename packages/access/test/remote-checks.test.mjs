@@ -6,8 +6,11 @@ import {
   remoteSourceCheck,
   remoteSourceCheckDeadline,
   remoteSourceCheckLimits,
+  rememberRemoteSourceCheck,
+  remoteSourceCheckKey,
   RemoteSourceChecksDeferred,
   withRemoteSourceCheckBudget,
+  withRemoteSourceCheckMemo,
 } from '../src/remote-checks.ts';
 
 /** A transaction that, like the GitHub source wrapper, ends with `RemoteSourceChecksDeferred` after deferring a check. */
@@ -194,4 +197,59 @@ test('the check cap covers checks nested in other checks and later calls in the 
   });
   assert.deepEqual(started, ['outer', 'n1', 'n2']);
   assert.ok(remoteSourceCheckDeadline(5) <= Date.now() + 5);
+});
+
+test('within a memo, a passed check is reused by later calls for any key order, until it expires', async t => {
+  t.mock.method(Date, 'now', () => now);
+  let now = 0;
+  const first = remoteSourceCheckKey(['github', { a: 1, b: { c: 2, d: 3 } }]);
+  const reordered = remoteSourceCheckKey(['github', { b: { d: 3, c: 2 }, a: 1 }]);
+  assert.equal(first, reordered);
+  const log = [];
+  await withRemoteSourceCheckMemo(async () => {
+    assert.deepEqual(await deferRemoteSourceChecks(transaction(log, [[first, async () => {}]])), [`${first}:verified`]);
+    log.length = 0;
+    assert.deepEqual(await transaction(log, [[reordered, async () => {}]])(), [`${reordered}:verified`]);
+    rememberRemoteSourceCheck('fresh');
+    assert.equal(
+      remoteSourceCheck('fresh', async () => {}),
+      'verified',
+    );
+    now = remoteSourceCheckLimits.reuseMilliseconds;
+    assert.equal(
+      remoteSourceCheck(first, async () => {}),
+      'inline',
+    );
+  });
+  assert.deepEqual(log, ['begin', 'end']);
+});
+
+test('a memo keeps no failed checks, and nothing is remembered outside one', async () => {
+  await withRemoteSourceCheckMemo(async () => {
+    await assert.rejects(
+      deferRemoteSourceChecks(
+        transaction(
+          [],
+          [
+            [
+              'gone',
+              async () => {
+                throw new SourceAuthorizationUnavailable();
+              },
+            ],
+          ],
+        ),
+      ),
+      SourceAuthorizationUnavailable,
+    );
+    assert.equal(
+      remoteSourceCheck('gone', async () => {}),
+      'inline',
+    );
+  });
+  rememberRemoteSourceCheck('outside');
+  assert.equal(
+    remoteSourceCheck('outside', async () => {}),
+    'inline',
+  );
 });

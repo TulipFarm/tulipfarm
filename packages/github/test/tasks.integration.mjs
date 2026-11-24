@@ -29,6 +29,7 @@ import {
   deferRemoteSourceChecks,
   lockAuthorization,
   SourceAuthorizationUnavailable,
+  withRemoteSourceCheckMemo,
 } from '@tulipfarm/access';
 import { loadPlatformBaseline } from '../../workspace-storage/test/integration/fixture.mjs';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
@@ -103,7 +104,7 @@ const refreshTokens = n => ({
   refresh_token: `refresh-${n}`,
   refresh_token_expires_in: 15811200,
 });
-async function setup(t, mcpSlots, { refreshable = false } = {}) {
+async function setup(t, mcpSlots, { refreshable = false, read } = {}) {
   const f = await githubFixture();
   if (refreshable)
     f.setBehavior(async (url, init) =>
@@ -136,8 +137,8 @@ async function setup(t, mcpSlots, { refreshable = false } = {}) {
   const run = await createTaskApprovals(f.runtime).bindRun(f.one.id, actor.userId, task.id, { generation: 0 });
   const accountId = await f.connect();
   const effects = [];
-  const fetcher = async (_url, init) => {
-    if (init.method === 'GET') return Response.json({ id: 1, name: 'private' });
+  const fetcher = async (url, init) => {
+    if (init.method === 'GET') return read ? read(url) : Response.json({ id: 1, name: 'private' });
     const result = { id: 10, number: 1, ...JSON.parse(init.body), user: { id: 123 } };
     effects.push(result);
     return Response.json(result, { status: 201 });
@@ -812,6 +813,42 @@ test('deferred GitHub source reverification fetches with no database lock held a
     undefined,
     false,
   );
+});
+
+test('a repository list rereads its repositories in parallel, and once per memo', async t => {
+  const repository = n => ({
+    url: `https://api.github.com/repos/octocat/r${n}`,
+    html_url: `https://github.com/octocat/r${n}`,
+    full_name: `octocat/r${n}`,
+    name: `r${n}`,
+    owner: { login: 'octocat' },
+    private: true,
+    fork: false,
+  });
+  const list = async () => Response.json(Array.from({ length: 20 }, (_, n) => repository(n)));
+  const f = await setup(t, undefined, { read: list });
+  await f.select();
+  const read = await f.queue({ tool: 'github.personal.read', operation: { kind: 'repository.list' } });
+  assert.equal(await f.executor.execute(read), 'completed');
+  let active = 0;
+  let peak = 0;
+  let rereads = 0;
+  globalThis.fetch = async url => {
+    if (new URL(url).pathname === '/user/repos') return list();
+    rereads++;
+    peak = Math.max(peak, ++active);
+    await delay(5);
+    active--;
+    return Response.json({ id: 1 });
+  };
+  await withRemoteSourceCheckMemo(async () => {
+    assert.equal((await f.executor.readResult(read, f.actor)).result.data.data.items.length, 20);
+    assert.deepEqual([rereads, peak], [20, 8]);
+    await f.executor.readResult(read, f.actor);
+    assert.equal(rereads, 20, 'a passed check is not repeated within the memo');
+  });
+  await f.executor.readResult(read, f.actor);
+  assert.equal(rereads, 40, 'outside a memo every check rereads GitHub');
 });
 
 test('a deferred batch source refreshes its credential once, outside the rolled-back transaction, with no lock held during GitHub reads', async t => {
