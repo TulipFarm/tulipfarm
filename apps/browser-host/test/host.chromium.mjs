@@ -387,6 +387,7 @@ test('a secret is redacted in the forms the browser and the snapshot change it t
     ['ada@example.com', 'DUMMY-New\nLine-123'],
     ['ada@example.com', 'DUMMY-Zero\u200bWidth-123'],
     ['ada@example.com', 'DUMMY-Soft\u00adHyphen-123'],
+    ['ada@example.com', 'DUMMY-Zero\u200bJoin\u200cWidth-123'],
   ]) {
     const page = await host.act(sessionId, { action: 'navigate', url: `${origin}/login` });
     const done = await host.typeSecret(sessionId, {

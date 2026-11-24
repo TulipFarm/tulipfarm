@@ -121,6 +121,7 @@ class Session {
   remember(value: string) {
     const changes = [
       (text: string) => text.replace(/[\r\n]/g, ''),
+      (text: string) => text.replace(/[\u200b\u00ad]/g, ''),
       (text: string) => text.replace(/[\u200b-\u200d\u2060\ufeff\u00ad]/g, ''),
       (text: string) => text.trim(),
       (text: string) => text.replace(/\s+/g, ' '),
