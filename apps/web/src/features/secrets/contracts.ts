@@ -31,11 +31,11 @@ export const placementKinds = ['bearer', 'basic', 'header', 'cookie', 'query', '
 export const placementOptions: Record<PlacementKind, { label: string; hint: string }> = {
   bearer: { label: 'As a bearer token', hint: 'Most APIs. Authorization: Bearer …' },
   header: { label: 'In a header', hint: 'Like X-Api-Key' },
-  basic: { label: 'As a sign-in', hint: 'Username and password' },
+  basic: { label: 'As a basic sign-in', hint: 'Username and password' },
   query: { label: 'In the web address', hint: 'Like ?key=…' },
   cookie: { label: 'In a cookie', hint: 'For sites that sign in with a cookie' },
   body: { label: 'In the request body', hint: 'A JSON or form field' },
-  browser: { label: 'Typed into the site’s sign-in form', hint: 'For signing in through the browser' },
+  browser: { label: 'In the site’s sign-in form', hint: 'Typed in for you in the browser' },
 };
 
 const destinationSchema = z.object({
@@ -195,7 +195,7 @@ export function placementPhrase(placement: Placement) {
     case 'body':
       return 'in the request body';
     case 'browser':
-      return 'by typing it into the site’s sign-in form';
+      return 'through the site’s sign-in form';
   }
 }
 
@@ -281,8 +281,10 @@ export function placementError(kind: SecretKind, placement: Placement): string |
   }
   if (!placementFits(kind, placement))
     return placement.kind === 'browser'
-      ? 'Only a password or a username and password can be typed into a sign-in form.'
-      : 'Send a username and password with basic sign-in, two body fields or the sign-in form.';
+      ? 'Only a password or a username and password can be typed into the sign-in form. Choose another way to send it.'
+      : kind === 'username-password'
+        ? 'Send a username and password as a basic sign-in, in two body fields or in the site’s sign-in form.'
+        : 'Send a username and password with basic sign-in or two body fields.';
   return null;
 }
 
