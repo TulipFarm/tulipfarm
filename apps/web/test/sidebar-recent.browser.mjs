@@ -41,12 +41,15 @@ test(
         createdAt: now,
         soulCommit: 'a'.repeat(40),
       };
-      // Chats and Agents are plain core links with eager Recents groups; these sections sit under More.
-      const sections = { Workflows: 'workflows', Tables: 'tables', Files: 'files' };
+      // Chats read eagerly under Recent chats; Agents, Workflows, Tables and Files expand lazily.
+      const sections = { Agents: 'agents', Workflows: 'workflows', Tables: 'tables', Files: 'files' };
       const items = Object.fromEntries(
-        ['conversations', 'agents', ...Object.values(sections)].map(domain => [
+        ['conversations', ...Object.values(sections)].map(domain => [
           domain,
-          Array.from({ length: 4 }, (_, i) => ({ id: randomUUID(), name: `${domain} ${i}` })),
+          Array.from({ length: domain === 'conversations' ? 7 : 4 }, (_, i) => ({
+            id: randomUUID(),
+            name: `${domain} ${i}`,
+          })),
         ]),
       );
       const pinned = new Set();
@@ -158,25 +161,25 @@ test(
           .filter({ has: page.getByRole('button', { name: new RegExp(`^(Collapse|Expand) ${label}$`) }) })
           .getByRole('list');
       await nav.getByRole('button', { name: 'Expand Workflows', exact: true }).waitFor();
-      await group('Recents').getByRole('link').nth(3).waitFor();
-      await group('Recent agents').getByRole('link').nth(2).waitFor();
+      await group('Recent chats').getByRole('link').nth(4).waitFor();
       assert.deepEqual(
-        await group('Recents').getByRole('link').allTextContents(),
+        await group('Recent chats').getByRole('link').allTextContents(),
+        items.conversations.slice(0, 5).map(item => item.name),
+        'Recent chats defaults to 5 items',
+      );
+      await group('Recent chats').getByRole('button', { name: 'Show 2 more', exact: true }).click();
+      await group('Recent chats').getByRole('link').nth(6).waitFor();
+      assert.deepEqual(
+        await group('Recent chats').getByRole('link').allTextContents(),
         items.conversations.map(item => item.name),
       );
+      await group('Recent chats').getByRole('button', { name: 'Show fewer', exact: true }).click();
+      assert.equal(await group('Recent chats').getByRole('link').count(), 5);
       assert.equal(
-        await group('Recents').getByRole('link').first().getAttribute('href'),
+        await group('Recent chats').getByRole('link').first().getAttribute('href'),
         `/${slug}/chat/${items.conversations[0].id}`,
       );
-      assert.deepEqual(
-        await group('Recent agents').getByRole('link').allTextContents(),
-        items.agents.slice(0, 3).map(item => item.name),
-      );
-      assert.equal(
-        await group('Recent agents').getByRole('link').first().getAttribute('href'),
-        `/${slug}/agents/${items.agents[0].id}`,
-      );
-      assert.deepEqual(Object.keys(counts).sort(), ['agents', 'conversations'], 'closed sections do not fetch');
+      assert.deepEqual(Object.keys(counts).sort(), ['conversations'], 'closed sections do not fetch');
       for (const [label, domain] of Object.entries(sections)) {
         await nav.getByRole('button', { name: `Expand ${label}`, exact: true }).click();
         await list(label).getByRole('status').waitFor();
@@ -192,7 +195,7 @@ test(
         );
       }
       assert.equal(counts.files, 2, 'fills three entries across source-filtered file pages');
-      for (const label of ['Chats', 'Agents', 'Integrations'])
+      for (const label of ['Chats', 'Integrations'])
         assert.equal(await nav.getByRole('button', { name: new RegExp(label) }).count(), 0);
 
       const pinnedChat = items.conversations[3];
@@ -201,8 +204,10 @@ test(
       await page.getByRole('menuitem', { name: 'Pin', exact: true }).click();
       await group('Pinned').getByRole('link', { name: pinnedChat.name, exact: true }).waitFor();
       assert.equal(await group('Pinned').getByRole('link').count(), 1, 'mutation updates the sidebar list');
-      await group('Recents').getByRole('link', { name: pinnedChat.name, exact: true }).waitFor({ state: 'hidden' });
-      assert.equal(await group('Recents').getByRole('link').count(), 3, 'a pinned chat leaves Recents');
+      await group('Recent chats')
+        .getByRole('link', { name: pinnedChat.name, exact: true })
+        .waitFor({ state: 'hidden' });
+      assert.equal(await group('Recent chats').getByRole('link').count(), 5, 'a pinned chat leaves Recent chats');
       await group('Pinned').getByRole('link').first().click();
       await page.waitForURL(`${origin}/${slug}/chat/${pinnedChat.id}`);
       assert.equal(await group('Pinned').getByRole('link').first().getAttribute('aria-current'), 'page');
@@ -223,20 +228,16 @@ test(
       await list('Workflows').getByText('Recent items are unavailable.', { exact: false }).waitFor();
       assert.equal(await list('Workflows').getByRole('link').count(), 0, 'denied reads remove protected names');
       status.agents = 404;
-      const toggle = page.getByRole('button', { name: 'Toggle sidebar', exact: true });
-      await toggle.click();
-      await page.locator('[data-sprout-sidebar][data-state="collapsed"]').waitFor();
+      await nav.getByRole('button', { name: 'Collapse Agents', exact: true }).click();
       await page.clock.fastForward(61000);
-      await toggle.click();
-      await page.locator('[data-sprout-sidebar][data-state="expanded"]').waitFor();
-      await group('Recent agents').waitFor({ state: 'detached' });
-      assert.equal(await nav.getByRole('link', { name: items.agents[0].name }).count(), 0, 'denied agents leave');
+      await nav.getByRole('button', { name: 'Expand Agents', exact: true }).click();
+      await list('Agents').getByText('Recent items are unavailable.', { exact: false }).waitFor();
+      assert.equal(await list('Agents').getByRole('link').count(), 0, 'denied agents leave');
 
       delete status.workflows;
       status.tables = 503;
       items.workflows = [];
       await page.reload();
-      await nav.getByRole('button', { name: 'More', exact: true }).click();
       await nav.getByRole('button', { name: 'Expand Tables', exact: true }).click();
       await list('Tables').getByRole('alert').waitFor();
       assert.equal(

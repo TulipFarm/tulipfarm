@@ -1118,7 +1118,7 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
           .count(),
         0,
       );
-      assert.equal(await page.getByRole('link', { name: 'Back to app', exact: true }).count(), 1);
+      assert.equal(await page.getByRole('link', { name: 'Back to Acme', exact: true }).count(), 1);
     });
 
     await scenario(
