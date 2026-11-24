@@ -52,6 +52,15 @@ before(async () => {
         </script>`,
       );
     }
+    // An allowed site that sends the page, or one of its images, on to another site.
+    if (url.pathname === '/to-other' || url.pathname === '/to-other-image') {
+      response.writeHead(302, { location: `http://localhost:${site.address().port}${url.pathname}-landing` });
+      return response.end();
+    }
+    if (url.pathname === '/redirecting') {
+      response.writeHead(200, { 'content-type': 'text/html' });
+      return response.end('<!doctype html><title>Redirecting</title><img alt="Moved image" src="/to-other-image">');
+    }
     if (url.pathname === '/redirect') {
       response.writeHead(302, { location: `http://[::1]:${internal.address().port}/` });
       return response.end();
@@ -254,6 +263,20 @@ test('a limited session’s pages reach no other site: no frame, resource, fetch
   assert.equal(page.state.title, 'Mixed');
   await host.act(sessionId, { action: 'click', ref: ref(page.snapshot, /link "Other help"/) });
   await new Promise(resolve => setTimeout(resolve, 500));
+  assert.deepEqual(otherSiteHits, []);
+});
+
+test('a limited session follows no redirect to another site, and that site never hears of it', async t => {
+  const host = await createBrowserHost({ ...options, allowPrivateNetworks: true });
+  t.after(() => host.shutdown());
+  otherSiteHits.length = 0;
+  await host.open(sessionId, ['127.0.0.1']);
+  const moved = await host.act(sessionId, { action: 'navigate', url: `${origin}/to-other` });
+  assert.match(moved.snapshot, /Blocked by the browser host/);
+  assert.equal(moved.notice, `Blocked http://localhost:${site.address().port}: this browser can only open 127.0.0.1.`);
+  const page = await host.act(sessionId, { action: 'navigate', url: `${origin}/redirecting` });
+  assert.equal(page.state.title, 'Redirecting');
+  await new Promise(resolve => setTimeout(resolve, 300));
   assert.deepEqual(otherSiteHits, []);
 });
 

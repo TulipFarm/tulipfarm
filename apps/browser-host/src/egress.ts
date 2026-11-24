@@ -6,6 +6,8 @@ export type EgressOptions = {
   /** Whether Chromium may connect to this resolved address. */
   allowed: (address: string) => boolean;
   resolve?: (host: string) => Promise<string[]>;
+  /** Whether Chromium may reach this host name at all, such as only a session's allowed sites. */
+  host?: (hostname: string) => boolean;
 };
 
 const resolveAll = async (host: string) =>
@@ -21,6 +23,7 @@ export async function startEgressProxy(options: EgressOptions) {
 
   async function destination(host: string): Promise<string | null> {
     const bare = host.replace(/^\[|\]$/g, '');
+    if (options.host && !options.host(bare)) return null;
     const addresses = isIP(bare) ? [bare] : await resolve(bare).catch(() => []);
     if (!addresses.length || !addresses.every(options.allowed)) return null;
     return addresses[0]!;

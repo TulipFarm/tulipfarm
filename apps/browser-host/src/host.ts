@@ -341,15 +341,29 @@ export async function createBrowserHost(options: HostOptions) {
   async function create(sessionId: string, allowedSites: readonly string[] | undefined): Promise<Session> {
     if (sessions.size + opening.size >= options.maxSessions)
       throw new HostError('capacity', 'The browser host is running as many sessions as it can. Try again soon.', 503);
-    const context = await (
-      await launch()
-    ).newContext({
-      viewport: browserViewport,
-      acceptDownloads: false,
-      serviceWorkers: 'block',
-      locale: 'en-US',
-      timezoneId: 'UTC',
-    });
+    const started = await launch();
+    // Routes don't see redirect hops, so a limited session gets its own egress proxy that refuses other sites on every
+    // hop, as well as private addresses unless the host allows them.
+    const limit = allowedSites
+      ? await startEgressProxy({
+          allowed: options.allowPrivateNetworks ? () => true : allowAddress,
+          host: hostname => siteAllows(allowedSites, hostname),
+        })
+      : undefined;
+    const context = await started
+      .newContext({
+        ...(limit ? { proxy: { server: limit.server, bypass: '<-loopback>' } } : {}),
+        viewport: browserViewport,
+        acceptDownloads: false,
+        serviceWorkers: 'block',
+        locale: 'en-US',
+        timezoneId: 'UTC',
+      })
+      .catch(async error => {
+        await limit?.close();
+        throw error;
+      });
+    if (limit) context.on('close', () => void limit.close());
     let session: Session | undefined;
     await context.route('**/*', async route => {
       const url = new URL(route.request().url());
@@ -387,6 +401,13 @@ export async function createBrowserHost(options: HostOptions) {
         if (opened.page === added && last) void opened.switchTo(last);
       });
     });
+    // The proxy refuses a redirect to another site; the agent hears why, as for a link to it.
+    if (allowedSites)
+      context.on('request', request => {
+        if (!request.redirectedFrom() || frameOf(request) !== opened.page.mainFrame()) return;
+        const url = URL.parse(request.url());
+        if (url && !siteAllows(allowedSites, url.hostname)) opened.notice = blockedNotice(url.origin, allowedSites);
+      });
     page.on('framenavigated', frame => {
       if (frame === opened.page.mainFrame()) void opened.emitState();
     });
