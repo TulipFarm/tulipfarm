@@ -49,8 +49,8 @@ type Owner = {
   /** Throws `AccessDenied` unless the member may see the chat or run. */
   read(workspaceId: string, userId: string, id: string): Promise<unknown>;
   sessionId(workspaceId: string, id: string): string;
-  /** Runs after a member hands the browser back. */
-  handedBack?(workspaceId: string, id: string): Promise<void>;
+  /** Runs after a member hands the browser back; throws when nothing will resume the owner. */
+  handedBack?(workspaceId: string, id: string, log: (error: unknown) => void): Promise<void>;
 };
 
 function registerLiveRoutes(
@@ -138,9 +138,9 @@ function registerLiveRoutes(
           controller === 'person' ? { controller, memberId: userId } : { controller },
         );
         if (controller === 'agent')
-          await owner.handedBack?.(workspaceId, id).catch(error => {
-            request.log.warn(errorAttributes(error), 'browser_hand_back_wake_failed');
-          });
+          await owner.handedBack?.(workspaceId, id, error =>
+            request.log.warn(errorAttributes(error), 'browser_hand_back_wake_failed'),
+          );
         return { browser };
       },
     );
@@ -239,6 +239,8 @@ export function registerBrowserLive(
     chats: { read(workspaceId: string, userId: string, chatId: string): Promise<unknown> };
     tasks?: {
       read(workspaceId: string, userId: string, taskId: string): Promise<unknown>;
+      /** Records the hand back on the run, so the minutely recovery resumes it even if the wake is lost. */
+      handBack(workspaceId: string, taskId: string): Promise<unknown>;
       wake(workspaceId: string, taskId: string): Promise<void>;
     };
     client: BrowserHostClient | undefined;
@@ -273,6 +275,17 @@ export function registerBrowserLive(
       unavailable: 'task-operation-unavailable',
       read: tasks.read,
       sessionId: (workspaceId, taskId) => browserSessionId(workspaceId, { runId: taskId }),
-      handedBack: tasks.wake,
+      // Either a recorded hand back or a delivered wake resumes the run; with neither, the member must try again.
+      handedBack: async (workspaceId, taskId, log) => {
+        const recorded = await tasks.handBack(workspaceId, taskId).then(
+          () => true,
+          error => (log(error), false),
+        );
+        const woken = await tasks.wake(workspaceId, taskId).then(
+          () => true,
+          error => (log(error), false),
+        );
+        if (!recorded && !woken) throw new Error('run-not-resumed');
+      },
     });
 }

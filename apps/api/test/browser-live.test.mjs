@@ -125,6 +125,7 @@ test('whoever can see a run watches and takes over its browser, and handing it b
   const taskId = randomUUID();
   const calls = [];
   const woken = [];
+  const recorded = [];
   registerBrowserLive(app, {
     auth,
     chats: { read: async () => assert.fail('a run is not a chat') },
@@ -133,6 +134,7 @@ test('whoever can see a run watches and takes over its browser, and handing it b
         if (workspace !== workspaceId || task !== taskId || user !== 'reader') throw new AccessDenied();
         return {};
       },
+      handBack: async (workspace, task) => recorded.push([workspace, task]),
       wake: async (workspace, task) => woken.push([workspace, task]),
     },
     client: {
@@ -156,9 +158,43 @@ test('whoever can see a run watches and takes over its browser, and handing it b
   assert.deepEqual(woken, [], 'taking over does not wake the run');
   assert.equal((await as('POST', taskId, '/control', { controller: 'agent' })).statusCode, 200);
   assert.deepEqual(woken, [[workspaceId, taskId]]);
+  assert.deepEqual(recorded, [[workspaceId, taskId]], 'the hand back is recorded on the run');
   assert.deepEqual(calls[1], ['control', sessionId, { controller: 'person', memberId: 'reader' }]);
 
   const other = await as('POST', randomUUID(), '/control', { controller: 'person' });
   assert.deepEqual([other.statusCode, other.json()], [404, { error: 'task-not-found' }]);
   assert.equal(calls.length, 3, "a run the member can't see never reaches the host");
+});
+
+test('a hand back that neither records nor wakes the run is an error, while either one alone resumes it', async t => {
+  const app = Fastify();
+  t.after(() => app.close());
+  const workspaceId = randomUUID();
+  const taskId = randomUUID();
+  let record = async () => undefined;
+  let wake = async () => undefined;
+  registerBrowserLive(app, {
+    auth,
+    chats: { read: async () => assert.fail('a run is not a chat') },
+    tasks: { read: async () => ({}), handBack: (...a) => record(...a), wake: (...a) => wake(...a) },
+    client: { control: async (id, control) => ({ ...state(id), controller: control.controller }) },
+  });
+  const handBack = () =>
+    app.inject({
+      method: 'POST',
+      url: `/workspaces/${workspaceId}/agent-tasks/${taskId}/browser/control`,
+      payload: { controller: 'agent' },
+      headers: { cookie: 'session=reader', origin },
+    });
+  const failing = async () => {
+    throw new Error('unavailable');
+  };
+  wake = failing;
+  assert.equal((await handBack()).statusCode, 200, 'a recorded hand back resumes the run without its wake');
+  record = failing;
+  wake = async () => undefined;
+  assert.equal((await handBack()).statusCode, 200, 'a delivered wake resumes the run');
+  wake = failing;
+  const lost = await handBack();
+  assert.deepEqual([lost.statusCode, lost.json()], [503, { error: 'browser-unavailable' }]);
 });
