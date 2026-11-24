@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { AccessDenied } from '@tulipfarm/access';
 import {
   BrowserHostError,
-  browserInputSchema,
+  browserInputsSchema,
   browserSessionId,
   browserSessionStateSchema,
   type BrowserHostClient,
@@ -158,14 +158,14 @@ function registerLiveRoutes(
         logLevel: 'silent',
         schema: schema(
           `send${owner.operation}BrowserInputV1`,
-          `Send a pointer or key event to a ${owner.noun}'s browser`,
+          `Send pointer and key events to a ${owner.noun}'s browser`,
           okResponse,
-          browserInputSchema,
+          browserInputsSchema,
         ),
       },
       async request => {
         const { client, sessionId } = await session(request.params, user(request));
-        await client.input(sessionId, browserInputSchema.parse(request.body));
+        await client.input(sessionId, browserInputsSchema.parse(request.body));
         return { ok: true as const };
       },
     );

@@ -171,8 +171,19 @@ test('the agent fills a form and the person takes over to tick a box', async t =
   const unsubscribe = await host.subscribe(sessionId, event => events.push(event.type));
   // The person clicks the terms label through the live view, in viewport pixels.
   const [x, y] = [300, 440];
-  for (const event of ['mousePressed', 'mouseReleased'])
-    await host.input(sessionId, { type: 'mouse', event, x, y, button: 'left', clickCount: 1, modifiers: 0 });
+  // Inputs sent together run in order: the press, then the release.
+  await host.input(
+    sessionId,
+    ['mousePressed', 'mouseReleased'].map(event => ({
+      type: 'mouse',
+      event,
+      x,
+      y,
+      button: 'left',
+      clickCount: 1,
+      modifiers: 0,
+    })),
+  );
   await new Promise(resolve => setTimeout(resolve, 300));
   unsubscribe();
   assert.ok(events.includes('state'));

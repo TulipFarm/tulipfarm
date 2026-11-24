@@ -9,6 +9,7 @@ import {
   type BrowserFrame,
   type BrowserHostErrorCode,
   type BrowserInput,
+  type BrowserInputs,
   type BrowserLoadedLogin,
   type BrowserLoadLogin,
   type BrowserNeedsPerson,
@@ -741,9 +742,11 @@ export async function createBrowserHost(options: HostOptions) {
     });
   }
 
-  async function input(sessionId: string, event: BrowserInput): Promise<void> {
+  async function input(sessionId: string, events: BrowserInputs): Promise<void> {
     const session = get(sessionId);
-    return session.run(() => dispatch(session, event));
+    return session.run(async () => {
+      for (const event of Array.isArray(events) ? events : [events]) await dispatch(session, event);
+    });
   }
 
   async function dispatch(session: Session, event: BrowserInput): Promise<void> {

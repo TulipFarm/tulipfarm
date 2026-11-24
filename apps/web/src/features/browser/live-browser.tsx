@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BrowserInput } from '@tulipfarm/browser/contracts';
 import { browserViewport } from '@tulipfarm/browser/contracts';
-import { inputModifiers, typedText, viewportPoint } from './screen-input';
+import { inputBatch, inputModifiers, typedText, viewportPoint } from './screen-input';
 import { Alert, AlertDescription, AlertTitle } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { CanvasSection } from '@tulipfarm/sprout/canvas';
@@ -141,15 +141,33 @@ export function LiveBrowserCanvas({
     }
   };
 
-  // Inputs go one at a time so a click lands before the keys typed after it.
-  const queue = useRef(Promise.resolve());
+  // Inputs go in order, one request at a time, so a click lands before the keys typed after it. Inputs made while a
+  // request is out go together in the next one: a request per key would soon pass the API's rate limit.
+  const pending = useRef<{ api: typeof api; inputs: BrowserInput[]; sending: boolean }>({
+    api,
+    inputs: [],
+    sending: false,
+  });
   const send = useCallback(
     (input: BrowserInput) => {
-      queue.current = queue.current.then(
-        () => api.input(input),
-        () => api.input(input),
-      );
-      queue.current.catch(failure => setError(browserErrorMessage(failure)));
+      const queue = pending.current;
+      if (queue.api !== api) pending.current = { api, inputs: [], sending: false };
+      pending.current.inputs.push(input);
+      if (pending.current.sending) return;
+      const current = pending.current;
+      current.sending = true;
+      void (async () => {
+        while (current.inputs.length) {
+          const batch = current.inputs.splice(0, inputBatch(current.inputs));
+          try {
+            await current.api.input(batch);
+            setError('');
+          } catch (failure) {
+            setError(browserErrorMessage(failure));
+          }
+        }
+        current.sending = false;
+      })();
     },
     [api],
   );

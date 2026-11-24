@@ -6,7 +6,7 @@ import {
   type BrowserActionResult,
   type BrowserControl,
   type BrowserHostErrorCode,
-  type BrowserInput,
+  type BrowserInputs,
   type BrowserLoadLogin,
   type BrowserNeedsPerson,
   type BrowserSessionState,
@@ -111,7 +111,7 @@ export function createBrowserHostClient(connection: BrowserHostConnection, fetch
     async siteState(sessionId: string, site: string): Promise<BrowserSiteState> {
       return browserSiteStateSchema.parse(await call('POST', `${session(sessionId)}/site-state`, { site }));
     },
-    async input(sessionId: string, input: BrowserInput): Promise<void> {
+    async input(sessionId: string, input: BrowserInputs): Promise<void> {
       await call('POST', `${session(sessionId)}/input`, input, 10_000);
     },
     async close(sessionId: string): Promise<void> {

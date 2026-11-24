@@ -52,8 +52,8 @@ export function browserApi(workspaceId: string, target: BrowserTarget) {
     control: async (controller: 'person' | 'agent') =>
       stateResponse.parse(await request(`${base}/control`, AbortSignal.timeout(15_000), 'POST', { controller }))
         .browser,
-    input: async (input: BrowserInput) => {
-      await request(`${base}/input`, AbortSignal.timeout(10_000), 'POST', input);
+    input: async (inputs: BrowserInput[]) => {
+      await request(`${base}/input`, AbortSignal.timeout(10_000), 'POST', inputs);
     },
   };
 }

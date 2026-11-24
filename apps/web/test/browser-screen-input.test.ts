@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { inputModifiers, typedText, viewportPoint } from '../src/features/browser/screen-input.ts';
+import { inputBatch, inputModifiers, typedText, viewportPoint } from '../src/features/browser/screen-input.ts';
 
 test('a click on the scaled screen lands on the same spot in the browser', () => {
   const rect = { left: 100, top: 50, width: 640, height: 400 };
@@ -19,4 +19,12 @@ test('keys carry their modifiers and only printable keys type text', () => {
   assert.equal(typedText({ key: 'a', metaKey: false, ctrlKey: false }), 'a');
   assert.equal(typedText({ key: 'Enter', metaKey: false, ctrlKey: false }), undefined);
   assert.equal(typedText({ key: 'a', metaKey: true, ctrlKey: false }), undefined);
+});
+
+test('waiting inputs go together in order, within the host’s request size', () => {
+  const key = { type: 'key' as const, event: 'keyDown' as const, key: 'a', code: 'KeyA', text: 'a', modifiers: 0 };
+  const paste = { type: 'text' as const, text: 'x'.repeat(2000) };
+  assert.equal(inputBatch([key]), 1);
+  assert.equal(inputBatch(Array(80).fill(key)), 50);
+  assert.equal(inputBatch(Array(20).fill(paste)), 8);
 });

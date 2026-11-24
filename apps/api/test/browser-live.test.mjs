@@ -67,10 +67,15 @@ test('a reader sees the chat browser, takes it over as themselves and hands it b
   const click = { type: 'mouse', event: 'mousePressed', x: 300, y: 440, button: 'left', clickCount: 1 };
   const sent = await as('POST', '/input', click);
   assert.equal(sent.statusCode, 200, sent.body);
+  // Keys typed while a request is out go together, in order.
+  const keys = ['keyDown', 'keyUp'].map(event => ({ type: 'key', event, key: 'a', code: 'KeyA', modifiers: 0 }));
+  assert.equal((await as('POST', '/input', keys)).statusCode, 200);
+  assert.equal((await as('POST', '/input', [])).statusCode, 400);
   assert.equal((await as('POST', '/control', { controller: 'agent' })).statusCode, 200);
   assert.deepEqual(calls[1], ['control', sessionId, { controller: 'person', memberId: 'reader' }]);
   assert.equal(calls[2][0], 'input');
-  assert.deepEqual(calls[3], ['control', sessionId, { controller: 'agent' }]);
+  assert.deepEqual(calls[3], ['input', sessionId, keys]);
+  assert.deepEqual(calls[4], ['control', sessionId, { controller: 'agent' }]);
 });
 
 test('others get nothing, a forged member is ignored and host refusals map to statuses', async t => {

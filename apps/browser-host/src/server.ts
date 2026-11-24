@@ -4,7 +4,7 @@ import { z } from 'zod';
 import {
   browserActionSchema,
   browserControlSchema,
-  browserInputSchema,
+  browserInputsSchema,
   browserNeedsPersonSchema,
   browserOpenSchema,
   browserLoadLoginSchema,
@@ -121,7 +121,7 @@ export function createBrowserHostServer(host: BrowserHost, token: string): Serve
         return send(response, 200, await host.siteState(sessionId, site));
       }
       case 'POST input':
-        await host.input(sessionId, parse(browserInputSchema, await readJson(request)));
+        await host.input(sessionId, parse(browserInputsSchema, await readJson(request)));
         return send(response, 204);
       case 'GET frames':
         return frames(sessionId, request, response);

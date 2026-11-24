@@ -224,6 +224,10 @@ export const browserInputSchema = z.discriminatedUnion('type', [
 ]);
 export type BrowserInput = z.infer<typeof browserInputSchema>;
 
+/** One input, or several sent together in order so fast typing doesn't need a request per key. */
+export const browserInputsSchema = z.union([browserInputSchema, z.array(browserInputSchema).min(1).max(50)]);
+export type BrowserInputs = z.infer<typeof browserInputsSchema>;
+
 export const browserViewport = { width: 1280, height: 800 } as const;
 
 export const browserFrameSchema = z.strictObject({
