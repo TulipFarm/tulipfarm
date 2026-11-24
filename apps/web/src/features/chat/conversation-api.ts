@@ -325,7 +325,7 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
           : response.status === 409
             ? 'This file expired or changed. Remove it and select it again.'
             : response.status === 413
-              ? 'The file is too large. Choose a file no larger than 10 MiB.'
+              ? 'The file is too large. Choose a file no larger than 100 MiB.'
               : 'The file is unavailable. Retry, or remove it from your draft.',
       );
     }

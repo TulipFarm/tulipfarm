@@ -299,13 +299,13 @@ test(
       await drag(list, [
         { name: 'Receipts', size: 0, type: '' },
         { name: 'Empty notes.txt', size: 0, type: 'text/plain' },
-        { name: 'Warehouse scan.pdf', size: 11 * 1024 * 1024, type: 'application/pdf' },
+        { name: 'Warehouse scan.pdf', size: 101 * 1024 * 1024, type: 'application/pdf' },
       ]);
       await text(
         'Receipts: Folders can’t be uploaded. Open the folder on your device and upload the files inside it.',
       ).waitFor();
       await text('Empty notes.txt: This file is empty.').waitFor();
-      await text('Warehouse scan.pdf: This file is 11.0 MB. The upload limit is 10 MB.').waitFor();
+      await text('Warehouse scan.pdf: This file is 101.0 MB. The upload limit is 100 MB.').waitFor();
       assert.equal(
         await page.getByRole('button', { name: 'Retry uploading Receipts' }).count(),
         0,

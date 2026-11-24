@@ -103,7 +103,14 @@ import { personalDefinitionSources } from './personal-definition-sources.ts';
 import type { SlackActionsFactory } from './slack-actions.ts';
 import { slackResolveSchema, slackThreadReactionSchema, SlackChannelAccessError } from '@tulipfarm/slack';
 import { slackOutboundEnabled } from './slack-outbound.ts';
-import type { ChatExecution } from './chat-execution.ts';
+import {
+  chatFileBytes,
+  chatJobMs,
+  chatMachineMs,
+  type ChatExecution,
+  type ChatExecutionOutput,
+} from './chat-execution.ts';
+import { executionPathSchema } from '@tulipfarm/execution-contract';
 import { codingRunCallSchema, type CodingRuns } from './coding-runs.ts';
 import { GitHubReadError } from '@tulipfarm/github/read-contracts';
 import {
@@ -141,10 +148,18 @@ import {
 } from '@tulipfarm/tables/imports';
 import { currentTableSources, humanReadableTableFiles, requireTableSources } from './table-sources.ts';
 import { isMcpTool, isMcpCall, type McpModelCatalog } from './mcp-contracts.ts';
-import { createFileCallSchema, createFileOutput, type FileOutputStore } from '@tulipfarm/conversations/file-outputs';
+import {
+  createFileCallSchema,
+  createFileOutput,
+  canReadFileSources,
+  createProgramOutput,
+  machineFileSources,
+  type FileOutputStore,
+} from '@tulipfarm/conversations/file-outputs';
 import type { FileContent, FileSource, GoogleFileReader } from '@tulipfarm/conversations/file-references';
 import {
   readChatFile,
+  readChatFileBytes,
   readFetchedFile,
   type AttachmentReader,
   type TurnFiles,
@@ -242,6 +257,21 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
     tool: z.literal('execution.run'),
     language: z.enum(['python', 'javascript', 'typescript', 'bash']),
     code: z.string().min(1).max(32768),
+    inputs: z
+      .array(z.string().trim().min(1).max(256))
+      .max(10)
+      .optional()
+      .describe(
+        'Files to copy into /workspace/inputs/ before the run, under their own names, so the program reads them at relative paths such as inputs/report.docx: an attachment-id or file-id from a file block of this chat, the source of an api.request response file, or a file ID from files.list.',
+      ),
+    outputs: z
+      .array(executionPathSchema)
+      .max(10)
+      .optional()
+      .describe(
+        'Paths, relative to /workspace, of files the program writes that the person should get, such as "out/report.pdf". Each is saved to Files and shown as a download card under your reply.',
+      ),
+    folderId: z.uuid().optional().describe("The Files folder for outputs. Omit to save them to the person's files."),
   }),
   codingRunCallSchema,
   z.strictObject({ tool: z.literal('tables.propose'), input: tableProposalInput }),
@@ -870,7 +900,7 @@ const descriptions: Record<ToolName, string> = {
   'skills.execute':
     'Run a Bash, Python, or Node file from an exact reviewed package. No network, secrets, or installs. Outputs support text, JSON, CSV, Markdown, PNG, and JPEG. If pending, reuse its invocationId with the exact same arguments; never rerun an unknown outcome with a new ID. Tests run only when requested.',
   'execution.run':
-    'Run a short Python, JavaScript (Node.js), TypeScript (Node.js, ES module), or Bash program in a fresh isolated machine and return its exit code, stdout, and stderr. Use it to calculate, check, or transform data exactly instead of guessing. Print the answer. Each call starts empty: no files persist, and no secrets are available.',
+    "Run a Python, JavaScript (Node.js), TypeScript (Node.js, ES module), or Bash program on this chat's own isolated Linux computer and return its exit code, stdout, and stderr. Use it to calculate, check, or transform data exactly instead of guessing, and for any job a command-line tool can do: converting, merging, splitting, compressing, cropping, or rotating documents, images, audio, and video. LibreOffice, ffmpeg, ImageMagick, Ghostscript, qpdf, poppler-utils, pandoc, and Python with pip are usually installed; install anything else with sudo apt-get install -y, pip install, or npm install. It has public internet access, so it can download a link the person gave. The working directory is /workspace. Files in it, and installed tools, stay for this chat's later runs until the computer has been idle 30 minutes, but it can be reset at any time, so check before relying on them. Pass inputs to copy chat or Files files into inputs/ and outputs to give the person files the program wrote. Outputs are returned only when the program exits 0 and wrote them during this run; to return an unchanged file from an earlier run, touch it first. A file TulipFarm cannot read itself, such as a Word, audio, video, or very large file, can still be an input. Each run may take up to 5 minutes. No secrets are available. Print what you need to know.",
   'coding.run':
     "Run a coding agent (Claude Code, Codex or Copilot CLI) on a GitHub repository in a fresh isolated machine, on the person's own plan for that agent. Clones with their selected personal GitHub account, makes the requested change and returns the agent's final message, the changed files and the diff, with the full diff saved as a chat file. Nothing is pushed. Always waits for the person to approve the exact run. Give the full task; the agent sees nothing from this chat. Takes up to 30 minutes.",
   'skills.import':
@@ -912,7 +942,7 @@ const descriptions: Record<ToolName, string> = {
   'files.create':
     'Create and save one user-requested output file in Files; set folderId only when the user named an accessible folder. For docx, xlsx, or pptx, content is a JSON spec; read the word-document, excel-workbook, or powerpoint-deck skill first. Returns the created-file record, not a hidden local download or approval. This changes storage and is idempotent only for the same tool call—do not retry an uncertain new call.',
   'images.generate':
-    'Generate/edit images into Files and inline cards. Costs credits; identical calls in this turn reuse results. Set folderId only for a named accessible folder. For social posts set channel; offer only usable images.',
+    'Generate/edit images into Files and inline cards with an AI model that redraws them; not for exact conversion, rotation, cropping, resizing, or compression. Costs credits; identical calls in this turn reuse results. Set folderId only for a named accessible folder. For social posts set channel; offer only usable images.',
   'files.list':
     "List or search the files and folders the human can open in Files, with each ID, kind, name, folder ID, role and Trash state, 100 at a time. Give query to match part of a name, folderId for one folder's contents (null for the top level), or trash=true for items in Trash. Read a file's contents with files.read and its ID. Changes nothing.",
   'files.rename':
@@ -1090,6 +1120,26 @@ export function discoverTools(access: ToolAccess) {
     inputSchema: toolInputSchema(schema),
     external: isExternalTool(schema.shape.tool.value),
   }));
+}
+/** A file name that is one safe path part on the chat's computer. */
+function inputName(name: string) {
+  const safe = [...name.trim()]
+    .map(char => (char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127 || /[/\\:]/u.test(char) ? '_' : char))
+    .join('')
+    .slice(0, 200);
+  return safe && safe !== '.' && safe !== '..' ? safe : 'file';
+}
+const outputFailures: Record<Extract<ChatExecutionOutput, { error: string }>['error'], string> = {
+  missing: 'No file is at this path, relative to /workspace.',
+  'not-a-file': 'This path is a folder or a link, not a file.',
+  unchanged: 'This run did not write this file; it is left from an earlier run. Touch it to return it unchanged.',
+  'too-large': 'The file is over 100 MiB, or the run returned over 200 MiB in all.',
+  unreadable: 'The file could not be read back. Try again.',
+  'not-run': 'Nothing was saved because the program failed. Fix the error, then run it again.',
+};
+function numbered(name: string, copy: number) {
+  const dot = name.lastIndexOf('.');
+  return dot > 0 ? `${name.slice(0, dot)}-${copy}${name.slice(dot)}` : `${name}-${copy}`;
 }
 export function isExternalTool(tool: ToolName) {
   return (
@@ -1977,11 +2027,7 @@ export function createChatTools(
           call,
         );
       case 'execution.run':
-        if (!chatExecution || !context.origin) throw new AccessDenied();
-        return chatExecution(
-          { workspaceId, conversationId: context.origin.conversationId, language: call.language, code: call.code },
-          context.signal,
-        );
+        return (await runExecutionTool(context, call)).result;
       case 'apps.status':
       case 'apps.files.list':
       case 'apps.files.read':
@@ -3039,6 +3085,163 @@ export function createChatTools(
     return output;
   }
   /**
+   * `execution.run`: copies the named chat and Files files into the chat's computer, runs the program, and saves the
+   * files it was asked to return into Files. The files it read become the call's sources.
+   */
+  async function runExecutionTool(
+    context: Parameters<typeof invoke>[0],
+    call: Extract<FrameworkCall, { tool: 'execution.run' }>,
+  ): Promise<{ result: unknown; sources: SourceDependency[] }> {
+    const origin = context.origin;
+    if (!chatExecution || !origin) throw new AccessDenied();
+    const { workspaceId, actor } = context;
+    const requested = call.outputs ?? [];
+    if (requested.length && (!outputs || (outputs.autonomous && !call.folderId)))
+      return {
+        result: {
+          error: 'destination-required',
+          instruction:
+            'Nothing ran. Work that no person requested in a private chat must name a Files folder the requester can add to for its outputs. Ask for a destination folder.',
+        },
+        sources: [],
+      };
+    if (call.inputs?.length && !chatFiles) throw new AccessDenied();
+    // Files that earlier runs copied into this chat's machine may still be there. When the requester can no longer
+    // read one of them, the run starts on a new machine instead.
+    const earlier = await withHuman(runtime, workspaceId, actor, 'read', tx =>
+      machineFileSources(tx, origin.conversationId, chatMachineMs + chatJobMs),
+    );
+    const fresh =
+      earlier.length > 0 &&
+      !(await withHuman(runtime, workspaceId, actor, 'read', tx => canReadFileSources(tx, actor, earlier)));
+    const kept = fresh ? [] : earlier;
+    const inputs: string[] = [];
+    const sources: SourceDependency[] = [];
+    const names = new Set<string>();
+    let inputBytes = 0;
+    let refusal: { error: string; source?: string; instruction: string } | undefined;
+    const files: { id: string; name: string; path: string }[] = [];
+    const missing: { path: string; error: string; instruction?: string }[] = [];
+    // Each source once, so a long chat's receipts don't grow with every run.
+    const unique = <T>(list: T[]) => [...new Map(list.map(source => [JSON.stringify(source), source])).values()];
+    const fileSources = () =>
+      unique([
+        ...kept,
+        ...sources.filter(
+          (source): source is FileSource => source.kind === 'tulipfarm-file' || source.kind === 'library-file',
+        ),
+      ]);
+    const run = await chatExecution(
+      {
+        workspaceId,
+        conversationId: origin.conversationId,
+        language: call.language,
+        code: call.code,
+        outputs: requested,
+        fresh,
+        // One input is read and copied at a time, so only one is held in memory.
+        stage: async write => {
+          for (const source of call.inputs ?? []) {
+            const read = await readChatFileBytes({
+              workspaceId,
+              conversationId: origin.conversationId,
+              turnId: origin.turnId,
+              actor,
+              source,
+              transaction: operation => withHuman(runtime, workspaceId, actor, 'read', operation),
+              files: chatFiles!.files,
+              attachments: chatFiles!.turnFiles.attachments,
+            });
+            if ('error' in read) {
+              refusal = {
+                error: read.error,
+                source,
+                instruction:
+                  read.error === 'file-trashed'
+                    ? `Nothing ran. File ${source} is in Trash. Restore it, then try again.`
+                    : read.error === 'file-busy'
+                      ? 'Nothing ran. Files is busy. Try again shortly.'
+                      : read.error === 'file-unsupported'
+                        ? `Nothing ran. ${source} is a Google file, which a program can't open. Read it with files.read instead.`
+                        : `Nothing ran. No file you may read has the id ${source}. Use an attachment-id or file-id from a file block of this chat, or a file ID from files.list.`,
+              };
+              return false;
+            }
+            inputBytes += read.bytes.byteLength;
+            if (inputBytes > 2 * chatFileBytes) {
+              refusal = {
+                error: 'inputs-too-large',
+                instruction: 'Nothing ran. Inputs are limited to 200 MiB per run.',
+              };
+              return false;
+            }
+            const base = inputName(read.name);
+            let name = base;
+            for (let copy = 2; names.has(name); copy++) name = numbered(base, copy);
+            names.add(name);
+            sources.push(...read.sources);
+            await write(`inputs/${name}`, read.bytes);
+            inputs.push(`inputs/${name}`);
+          }
+          return true;
+        },
+        save: async output => {
+          if ('error' in output) {
+            missing.push({ path: output.path, error: output.error, instruction: outputFailures[output.error] });
+            return;
+          }
+          const saved = await createProgramOutput(
+            outputs!.files,
+            {
+              workspaceId,
+              actor,
+              autonomous: outputs!.autonomous,
+              origin,
+              callId: context.callId,
+              inputs: fileSources(),
+            },
+            { path: output.path, bytes: output.bytes, folderId: call.folderId },
+          );
+          if ('error' in saved) missing.push({ path: output.path, error: saved.error, instruction: saved.instruction });
+          else files.push({ id: saved.file.id, name: saved.file.name, path: output.path });
+        },
+      },
+      context.signal,
+    );
+    if (!run) return { result: refusal, sources: [] };
+    return {
+      result: {
+        ...run,
+        ...(fresh
+          ? {
+              machine: 'new',
+              notice:
+                'This run started on a new computer because the person can no longer read a file an earlier run used. Files and tools from earlier runs are gone.',
+            }
+          : {}),
+        ...(inputs.length ? { inputs } : {}),
+        ...(requested.length ? { files, missing } : {}),
+        ...(files.length || missing.length
+          ? {
+              instruction: [
+                ...(files.length
+                  ? [
+                      'The saved files are shown as download cards under your reply. Refer to them by name; do not paste their content or a link.',
+                    ]
+                  : []),
+                ...(missing.length
+                  ? [
+                      'The files in missing were not saved; never say they were. Fix the cause, such as an output path that differs from where the program wrote the file or an input read from the wrong place (paths are relative to /workspace; inputs are at the paths in inputs), and run again, or tell the person.',
+                    ]
+                  : []),
+              ].join(' '),
+            }
+          : {}),
+      },
+      sources: unique([...kept, ...sources]),
+    };
+  }
+  /**
    * `web.fetch` while the workspace reads images: a link that serves a file is read like an attached file and not
    * kept; a page, a failure or the flag off falls through to the Markdown fetch unchanged.
    */
@@ -3444,6 +3647,7 @@ export function createChatTools(
       );
     }
     if (call.tool === 'files.read') return readFileTool(context, call);
+    if (call.tool === 'execution.run') return runExecutionTool(context, call);
     if (call.tool === 'web.fetch') {
       const fetched = await fetchFileTool(context, call);
       if (fetched) return fetched;

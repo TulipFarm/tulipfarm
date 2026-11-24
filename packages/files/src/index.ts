@@ -172,7 +172,7 @@ const objectPath = (workspaceId: string, item: Pick<FileItem, 'object_key' | 'ob
 const lockStorage = (tx: AuthorizationTransaction) =>
   tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 209871))', [tx.schema]);
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
-const maximumFileBytes = 10 * 1024 * 1024;
+const maximumFileBytes = 100 * 1024 * 1024;
 const compatibility = commonCompatibility;
 /** File versions, system folders, and grant origins arrive with common migration 33. */
 export const fileVersionCompatibility = Object.freeze({ minimum: 33, maximum: commonCompatibility.maximum });

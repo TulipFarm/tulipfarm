@@ -301,7 +301,7 @@ function rejection({ file, folder }: PickedFile): UploadState | null {
     return {
       kind: 'failed',
       retry: false,
-      message: `This file is ${formatFileSize(file.size)}. The upload limit is 10 MB.`,
+      message: `This file is ${formatFileSize(file.size)}. The upload limit is 100 MB.`,
     };
   return null;
 }

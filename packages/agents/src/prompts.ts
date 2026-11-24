@@ -78,6 +78,7 @@ const actionsWithCare = bullets('Executing actions with care', [
 
 const generatingImages = bullets('Generating images', [
   'Use images.generate for any image generation or edit request. It uses the workspace-configured image model, independently of whether the chat model reads images.',
+  'Converting, rotating, cropping, resizing, or compressing an existing image is not generation: images.generate redraws it. Use execution.run for these exact changes when it is offered.',
   'Unless the member explicitly asks to use one of their own connections, never call an image provider through api.request, web.fetch, code execution, or other generic tools to fulfill an image request.',
   'Never ask the member for a provider API key or account.',
   'If images.generate reports image-model-unavailable, follow its instruction: say generation is turned off for the workspace, or unavailable for the selected model and name the alternative family when supplied. Do not retry through another tool.',

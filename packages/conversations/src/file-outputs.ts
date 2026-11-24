@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { AccessDenied, type HumanActor } from '@tulipfarm/access';
+import { AccessDenied, type AuthorizationTransaction, type HumanActor } from '@tulipfarm/access';
+import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import { FileError, requireReadableFile, type createFiles } from '@tulipfarm/files';
 import { bindFileSources, type FileSource } from './file-references.ts';
 import { requireFileSources } from './source-access.ts';
+import { sourceDependenciesSchema } from './results.ts';
 import {
   OfficeSpecError,
   officeFormats,
@@ -15,7 +17,7 @@ import {
   type OfficeImage,
 } from './office-documents.ts';
 
-const maximumBytes = 10 * 1024 * 1024;
+const maximumBytes = 100 * 1024 * 1024;
 
 export const createFileCallSchema = z.strictObject({
   tool: z.literal('files.create'),
@@ -68,7 +70,7 @@ export function fileOutputId(turnId: string, call: CreateFileCall) {
 }
 
 const publishFailures = {
-  size: 'No file was created. Files are limited to 10 MiB.',
+  size: 'No file was created. Files are limited to 100 MiB.',
   quota: 'No file was created. Workspace storage is full.',
   busy: 'No file was created. Files is busy. Try again shortly.',
   conflict: 'No file was created. A different file already uses this request.',
@@ -195,6 +197,173 @@ export async function createFileOutput(
       ],
       instruction:
         'The file is saved in Files and shown as a card under your reply. Refer to it by name. Do not paste its full content again.',
+    };
+  } catch (error) {
+    if (error instanceof FileError && isPublishFailure(error.code))
+      return { error: error.code, instruction: publishFailures[error.code] };
+    throw error;
+  }
+}
+
+/** Media types for the extensions a program usually writes; anything else is stored as plain bytes. */
+const programOutputTypes: Record<string, string> = {
+  pdf: 'application/pdf',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  doc: 'application/msword',
+  xls: 'application/vnd.ms-excel',
+  ppt: 'application/vnd.ms-powerpoint',
+  odt: 'application/vnd.oasis.opendocument.text',
+  ods: 'application/vnd.oasis.opendocument.spreadsheet',
+  odp: 'application/vnd.oasis.opendocument.presentation',
+  rtf: 'application/rtf',
+  epub: 'application/epub+zip',
+  txt: 'text/plain',
+  md: 'text/markdown',
+  csv: 'text/csv',
+  tsv: 'text/tab-separated-values',
+  json: 'application/json',
+  xml: 'application/xml',
+  html: 'text/html',
+  htm: 'text/html',
+  yaml: 'application/yaml',
+  yml: 'application/yaml',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  avif: 'image/avif',
+  heic: 'image/heic',
+  bmp: 'image/bmp',
+  tif: 'image/tiff',
+  tiff: 'image/tiff',
+  svg: 'image/svg+xml',
+  ico: 'image/vnd.microsoft.icon',
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  ogg: 'audio/ogg',
+  m4a: 'audio/mp4',
+  flac: 'audio/flac',
+  aac: 'audio/aac',
+  mp4: 'video/mp4',
+  mov: 'video/quicktime',
+  webm: 'video/webm',
+  mkv: 'video/x-matroska',
+  avi: 'video/x-msvideo',
+  zip: 'application/zip',
+  gz: 'application/gzip',
+  tar: 'application/x-tar',
+  '7z': 'application/x-7z-compressed',
+};
+export function programOutputType(name: string) {
+  const extension = name.includes('.') ? name.split('.').at(-1)!.toLowerCase() : '';
+  return programOutputTypes[extension] ?? 'application/octet-stream';
+}
+
+/** One id per tool call and output path, so a retried call replays the same file instead of creating another. */
+const machineStepSchema = z.object({ result: z.unknown(), sources: sourceDependenciesSchema });
+const freshMachineSchema = z.object({ machine: z.literal('new') });
+
+/**
+ * The files this chat's earlier runs copied into its machine, which may still hold them: those of every
+ * `execution.run` within the machine's longest life, back to the run that last started a new machine.
+ */
+export async function machineFileSources(
+  tx: AuthorizationTransaction,
+  conversationId: string,
+  lifeMs: number,
+): Promise<FileSource[]> {
+  const steps = await tx.client.query<{ output: unknown }>(
+    `SELECT s.output FROM ${qualified(tx.schema, 'tf_conversation_execution_steps')} s
+      JOIN ${qualified(tx.schema, 'tf_conversation_tool_calls')} c ON c.id=s.call_id
+      WHERE c.conversation_id=$1 AND c.tool='execution.run' AND s.output IS NOT NULL
+        AND c.created_at > clock_timestamp() - make_interval(secs => $2)
+      ORDER BY c.created_at DESC, c.id DESC LIMIT 1000`,
+    [conversationId, lifeMs / 1000],
+  );
+  const result = new Map<string, FileSource>();
+  for (const step of steps.rows) {
+    const output = machineStepSchema.safeParse(step.output);
+    if (!output.success) continue;
+    for (const source of output.data.sources)
+      if (source.kind === 'tulipfarm-file' || source.kind === 'library-file')
+        result.set(JSON.stringify(source), source);
+    if (freshMachineSchema.safeParse(output.data.result).success) break;
+  }
+  return [...result.values()];
+}
+
+/** Whether the requester can still read every file in `sources`. */
+export async function canReadFileSources(
+  tx: AuthorizationTransaction,
+  actor: HumanActor,
+  sources: readonly FileSource[],
+) {
+  try {
+    await requireFileSources(bindFileSources(tx), actor, sources);
+    return true;
+  } catch (error) {
+    if (error instanceof AccessDenied) return false;
+    throw error;
+  }
+}
+
+export function programOutputId(callId: string, path: string) {
+  const hash = createHash('sha256')
+    .update(JSON.stringify(['program-output-v1', callId, path]))
+    .digest();
+  hash.writeUInt8((hash.readUInt8(6) & 0x0f) | 0x80, 6);
+  hash.writeUInt8((hash.readUInt8(8) & 0x3f) | 0x80, 8);
+  const hex = hash.subarray(0, 16).toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export type ProgramOutputResult =
+  | { file: { id: string; name: string; mediaType: string; size: number } }
+  | { error: 'destination-required' | 'invalid-content' | keyof typeof publishFailures; instruction: string };
+
+/**
+ * Saves a file a program wrote into Files, under the same destination rule as `files.create`. The turn's referenced
+ * files and the files the program read are checked again in the publishing transaction, so a revoked input blocks it.
+ */
+export async function createProgramOutput(
+  files: FileOutputStore,
+  context: FileOutputContext & { callId: string; inputs: readonly FileSource[] },
+  output: { path: string; bytes: Uint8Array; folderId?: string | undefined },
+): Promise<ProgramOutputResult> {
+  if (context.autonomous && !output.folderId)
+    return {
+      error: 'destination-required',
+      instruction:
+        'No file was saved. Work that no person requested in a private chat must name a Files folder the requester can add to. Ask for a destination folder.',
+    };
+  const name = output.path.split('/').at(-1)!.trim();
+  if (!name || name.length > 200 || !output.bytes.byteLength)
+    return {
+      error: 'invalid-content',
+      instruction: 'No file was saved. Write a non-empty file whose name has at most 200 characters.',
+    };
+  if (output.bytes.byteLength > maximumBytes) return { error: 'size', instruction: publishFailures.size };
+  const mediaType = programOutputType(name);
+  const sources = [...(context.origin.files ?? []), ...context.inputs];
+  try {
+    const file = await files.createDerived(
+      context.workspaceId,
+      context.actor.userId,
+      programOutputId(context.callId, output.path),
+      { name, parentId: output.folderId ?? null, mediaType },
+      output.bytes,
+      tx => requireFileSources(bindFileSources(tx), context.actor, sources),
+    );
+    return {
+      file: {
+        id: file.id,
+        name: file.name,
+        mediaType: file.mediaType ?? mediaType,
+        size: file.size ?? output.bytes.byteLength,
+      },
     };
   } catch (error) {
     if (error instanceof FileError && isPublishFailure(error.code))

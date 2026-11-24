@@ -67,8 +67,8 @@ export function useConversationAttachments(api: ConversationApi, chatId: string)
       setError('Attach at most five files per message.');
       return;
     }
-    if (picked.some(file => file.size === 0 || file.size > 10 * 1024 * 1024)) {
-      setError('Choose nonempty files no larger than 10 MiB each.');
+    if (picked.some(file => file.size === 0 || file.size > 100 * 1024 * 1024)) {
+      setError('Choose nonempty files no larger than 100 MiB each.');
       return;
     }
     setError('');
