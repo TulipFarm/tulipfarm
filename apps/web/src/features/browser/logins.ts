@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { z } from 'zod';
-import { browserSessionStateSchema } from '@tulipfarm/browser/contracts';
+import { browserSessionStateSchema, browserSiteOf } from '@tulipfarm/browser/contracts';
 import { browserLoginSummarySchema, type BrowserLoginSummary } from '@tulipfarm/browser/login-contracts';
 import type { SecretGrant } from '@/features/secrets/contracts';
 import { apiOrigin } from '@/lib/auth';
@@ -82,12 +82,5 @@ export function useBrowserLoginChanges() {
   return useMemo(() => ({ changed: () => change({ keys: [browserLoginKeys.all] }) }), [change]);
 }
 
-/** A login's site from a page address: its host without `www.`, or empty for pages that aren't on a website. */
-export function siteOfPage(url: string) {
-  try {
-    const { protocol, hostname } = new URL(url);
-    return protocol === 'http:' || protocol === 'https:' ? hostname.toLowerCase().replace(/^www\./, '') : '';
-  } catch {
-    return '';
-  }
-}
+/** A login's site from a page address, or empty for pages that aren't on a named public host. */
+export const siteOfPage = (url: string) => browserSiteOf(url) ?? '';
