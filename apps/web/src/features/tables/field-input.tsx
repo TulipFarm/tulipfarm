@@ -529,7 +529,7 @@ function FileUpload({
       return;
     }
     if (file.size > maxUploadBytes) {
-      setProblem(`${file.name} is ${formatFileSize(file.size)}. The upload limit is 10 MB.`);
+      setProblem(`${file.name} is ${formatFileSize(file.size)}. The upload limit is 100 MB.`);
       return;
     }
     setProblem('');
@@ -558,7 +558,7 @@ function FileUpload({
         >
           {state.kind === 'sending' ? `Uploading file to ${field.label}…` : `Upload file to ${field.label}`}
         </Button>
-        <span className="text-xs text-muted-foreground">Uploads go to My files. Up to 10 MB.</span>
+        <span className="text-xs text-muted-foreground">Uploads go to My files. Up to 100 MB.</span>
       </div>
       {state.kind === 'sending' && (
         <p role="status" className="text-sm text-muted-foreground">

@@ -235,6 +235,11 @@ export interface ExecutionBackend {
       readonly secrets?: readonly ExecutionSecret[];
       /** The workspace that pays for the machine, so a backend can report its compute per workspace. */
       readonly workspaceId?: string;
+      /**
+       * The caller keeps the allocation between jobs and may never destroy it, so the backend destroys it after this
+       * many seconds without a request. `deadline` still caps the time it runs.
+       */
+      readonly idleSeconds?: number;
     },
     operation: Operation,
   ): Promise<ExecutionAllocationState>;

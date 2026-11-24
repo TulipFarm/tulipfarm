@@ -15,7 +15,7 @@ import { chargedBytes, type createFiles } from '@tulipfarm/files';
 import { sniffMediaType } from '@tulipfarm/media';
 import { linkReadsInstalled, messageLinkReads, type KeepLink, type LinkRead } from './links.ts';
 
-export const attachmentLimit = 10 * 1024 * 1024;
+export const attachmentLimit = 100 * 1024 * 1024;
 export const reserveAttachmentSchema = z.strictObject({
   filename: z
     .string()

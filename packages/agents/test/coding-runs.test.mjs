@@ -251,7 +251,7 @@ test('A failed or timed-out machine is still destroyed', async () => {
   assert.equal(slow.calls.at(-1)[0], 'destroy');
 });
 
-test('Coding runs get their own 30-minute limit while ordinary jobs keep the policy limit of 60 seconds', async () => {
+test('Coding runs get their own 30-minute limit while chat runs get 5 minutes', async () => {
   const shipped = {
     ...configuration,
     policy: { ...configuration.policy, limits: { ...configuration.policy.limits, jobTimeoutSeconds: 60 } },
@@ -271,9 +271,9 @@ test('Coding runs get their own 30-minute limit while ordinary jobs keep the pol
   await createChatExecution(
     ordinary.backend,
     shipped,
-  )({ conversationId: randomUUID(), language: 'bash', code: 'true' });
+  )({ workspaceId: randomUUID(), conversationId: randomUUID(), language: 'bash', code: 'true' });
   const [, ordinaryJob] = ordinary.calls.find(([name]) => name === 'startJob');
-  assert.ok(minutes(ordinaryJob.deadline) > 0.98 && minutes(ordinaryJob.deadline) <= 1, ordinaryJob.deadline);
+  assert.ok(minutes(ordinaryJob.deadline) > 4.98 && minutes(ordinaryJob.deadline) <= 5, ordinaryJob.deadline);
 });
 
 test('An agent stopped by its own time limit reports timed-out with the work so far', async () => {

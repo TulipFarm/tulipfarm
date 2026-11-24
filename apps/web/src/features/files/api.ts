@@ -72,7 +72,7 @@ export function libraryFilters(search: FilesSearch, today = new Date()): Library
     ...(before ? { modifiedBefore: before.toISOString() } : {}),
   };
 }
-export const maxUploadBytes = 10 * 1024 * 1024;
+export const maxUploadBytes = 100 * 1024 * 1024;
 
 export const fileKeys = {
   all: ['files'] as const,

@@ -370,10 +370,13 @@ async function readDocument(
  * slide or sheet with embedded images recognised, images as images for families that read them and as recognised
  * text otherwise, ZIP archives as a listing, and audio, video, encrypted and unknown files as a reason.
  */
+const readableBytes = 10 * 1024 * 1024;
 export async function readFile(
   file: { name: string; mediaType: string; bytes: Uint8Array },
   options: ReadOptions,
 ): Promise<FileReading> {
+  // Larger files can be kept and handed to a program, but are not read into a reply.
+  if (file.bytes.byteLength > readableBytes) return { kind: 'unreadable', reason: 'too-large' };
   const sniffed = sniffMediaType(file.bytes);
   switch (sniffed?.family) {
     case 'audio':
@@ -1080,6 +1083,53 @@ async function libraryFile(tx: AuthorizationTransaction, actor: HumanActor, sour
  * `files.read`: reads one file attached to or referenced in this chat, or any Files item by its ID, under the requester's current access, with the
  * turn's pinned models, in the same labelled block a turn would show. Images reach image-reading families as images.
  */
+/**
+ * The chat part, link read, API response file or Files item a chat tool may name by `source`: an attachment of this
+ * chat, a file or Google file the requester referenced in it, or a Files item they can open.
+ */
+async function chatFilePart(
+  tx: AuthorizationTransaction & { commonVersion?: number },
+  input: { conversationId: string; turnId: string; actor: HumanActor; source: string },
+) {
+  const part = (
+    await tx.client.query(
+      `SELECT p.kind,p.message_id AS "messageId",p.attachment_id AS "attachmentId",p.file_id AS "fileId",p.google_file AS google
+      FROM ${qualified(tx.schema, 'tf_conversation_parts')} p
+      JOIN ${qualified(tx.schema, 'tf_conversation_messages')} m ON m.id=p.message_id AND m.conversation_id=p.conversation_id
+      WHERE p.conversation_id=$1 AND m.author_kind='human' AND (
+        (p.kind='attachment' AND p.attachment_id::text=$2)
+        OR (m.membership_id=$3 AND ((p.kind='file' AND p.file_id::text=$2) OR (p.kind='google-file' AND p.google_file->>'fileId'=$2))))
+      ORDER BY m.sequence DESC,p.ordinal LIMIT 1`,
+      [input.conversationId, input.source, input.actor.membershipId],
+    )
+  ).rows[0];
+  if (part) return part;
+  if (await linkReadsInstalled(tx)) {
+    const link = (
+      await tx.client.query(
+        `SELECT 'attachment' AS kind,l.message_id AS "messageId",l.attachment_id AS "attachmentId",a.source_url AS "sourceUrl"
+        FROM ${qualified(tx.schema, 'tf_conversation_link_reads')} l
+        JOIN ${qualified(tx.schema, 'tf_conversation_messages')} m ON m.id=l.message_id AND m.conversation_id=l.conversation_id
+        JOIN ${qualified(tx.schema, 'tf_conversation_attachments')} a ON a.id=l.attachment_id AND a.conversation_id=l.conversation_id
+        WHERE l.conversation_id=$1 AND m.author_kind='human' AND l.outcome='file' AND l.attachment_id::text=$2 LIMIT 1`,
+        [input.conversationId, input.source],
+      )
+    ).rows[0];
+    if (link) return link;
+  }
+  // An API call's response file, read only by the member who made the call.
+  const api = (
+    await tx.client.query(
+      `SELECT 'attachment' AS kind,a.message_id AS "messageId",a.id AS "attachmentId",a.source_url AS "sourceUrl",true AS api
+      FROM ${qualified(tx.schema, 'tf_conversation_attachments')} a
+      JOIN ${qualified(tx.schema, 'tf_conversation_tool_calls')} c ON c.id=a.id AND c.conversation_id=a.conversation_id
+      WHERE a.conversation_id=$1 AND a.id::text=$2 AND a.membership_id=$3 AND a.state='bound' AND c.tool='api.request'`,
+      [input.conversationId, input.source, input.actor.membershipId],
+    )
+  ).rows[0];
+  return api ?? (await libraryFile(tx, input.actor, input.source, input.turnId));
+}
+
 export async function readChatFile(input: {
   workspaceId: string;
   conversationId: string;
@@ -1102,42 +1152,7 @@ export async function readChatFile(input: {
       sources: [],
     };
   const found = await input.transaction(async tx => {
-    const part =
-      (
-        await tx.client.query(
-          `SELECT p.kind,p.message_id AS "messageId",p.attachment_id AS "attachmentId",p.file_id AS "fileId",p.google_file AS google
-        FROM ${qualified(tx.schema, 'tf_conversation_parts')} p
-        JOIN ${qualified(tx.schema, 'tf_conversation_messages')} m ON m.id=p.message_id AND m.conversation_id=p.conversation_id
-        WHERE p.conversation_id=$1 AND m.author_kind='human' AND (
-          (p.kind='attachment' AND p.attachment_id::text=$2)
-          OR (m.membership_id=$3 AND ((p.kind='file' AND p.file_id::text=$2) OR (p.kind='google-file' AND p.google_file->>'fileId'=$2))))
-        ORDER BY m.sequence DESC,p.ordinal LIMIT 1`,
-          [input.conversationId, input.call.source, input.actor.membershipId],
-        )
-      ).rows[0] ??
-      ((await linkReadsInstalled(tx))
-        ? (
-            await tx.client.query(
-              `SELECT 'attachment' AS kind,l.message_id AS "messageId",l.attachment_id AS "attachmentId",a.source_url AS "sourceUrl"
-              FROM ${qualified(tx.schema, 'tf_conversation_link_reads')} l
-              JOIN ${qualified(tx.schema, 'tf_conversation_messages')} m ON m.id=l.message_id AND m.conversation_id=l.conversation_id
-              JOIN ${qualified(tx.schema, 'tf_conversation_attachments')} a ON a.id=l.attachment_id AND a.conversation_id=l.conversation_id
-              WHERE l.conversation_id=$1 AND m.author_kind='human' AND l.outcome='file' AND l.attachment_id::text=$2 LIMIT 1`,
-              [input.conversationId, input.call.source],
-            )
-          ).rows[0]
-        : undefined) ??
-      // An API call's response file, read only by the member who made the call.
-      (
-        await tx.client.query(
-          `SELECT 'attachment' AS kind,a.message_id AS "messageId",a.id AS "attachmentId",a.source_url AS "sourceUrl",true AS api
-          FROM ${qualified(tx.schema, 'tf_conversation_attachments')} a
-          JOIN ${qualified(tx.schema, 'tf_conversation_tool_calls')} c ON c.id=a.id AND c.conversation_id=a.conversation_id
-          WHERE a.conversation_id=$1 AND a.id::text=$2 AND a.membership_id=$3 AND a.state='bound' AND c.tool='api.request'`,
-          [input.conversationId, input.call.source, input.actor.membershipId],
-        )
-      ).rows[0] ??
-      (await libraryFile(tx, input.actor, input.call.source, input.turnId));
+    const part = await chatFilePart(tx, { ...input, source: input.call.source });
     if (!part) return null;
     if (part.error === 'file-trashed') return { error: 'file-trashed' as const };
     const turn = z
@@ -1272,6 +1287,92 @@ export async function readChatFile(input: {
         }
       : {}),
   };
+}
+
+export type ChatFileBytes =
+  | { name: string; mediaType: string; bytes: Uint8Array; sources: SourceDependency[] }
+  | { error: 'file-not-found' | 'file-trashed' | 'file-busy' | 'file-unsupported' };
+
+/**
+ * The exact bytes of a file a chat tool names by `source`, under the requester's current access, for tools that hand
+ * the file itself to a program. Access is checked before and after the download. Google files are read only as text.
+ */
+export async function readChatFileBytes(input: {
+  workspaceId: string;
+  conversationId: string;
+  turnId: string;
+  actor: HumanActor;
+  source: string;
+  transaction: ChatFileTransaction;
+  files: FileContent | undefined;
+  attachments: AttachmentReader;
+}): Promise<ChatFileBytes> {
+  const { actor } = input;
+  const found = await input.transaction(tx => chatFilePart(tx, input));
+  if (!found) return { error: 'file-not-found' };
+  if (found.error === 'file-trashed') return { error: 'file-trashed' };
+  if (found.kind === 'attachment') {
+    const attachmentId = z.uuid().parse(found.attachmentId);
+    try {
+      const file = await input.attachments.download(
+        input.workspaceId,
+        actor.userId,
+        input.conversationId,
+        attachmentId,
+      );
+      const sources: SourceDependency[] =
+        found.api === true
+          ? [
+              found.sourceUrl
+                ? { kind: 'public-web', url: z.string().parse(found.sourceUrl) }
+                : { kind: 'private-conversation', conversationId: input.conversationId },
+            ]
+          : [];
+      return { name: file.filename, mediaType: file.mediaType, bytes: file.bytes, sources };
+    } catch (error) {
+      if (error instanceof AccessDenied || (error instanceof AttachmentError && error.code === 'attachment-integrity'))
+        return { error: 'file-not-found' };
+      if (error instanceof AttachmentError && error.code === 'attachment-busy') return { error: 'file-busy' };
+      throw error;
+    }
+  }
+  if (found.kind !== 'file' && found.kind !== 'library') return { error: 'file-unsupported' };
+  if (!input.files) throw new Error('conversation-files-unavailable');
+  const fileId = z.uuid().parse(found.fileId);
+  const reference =
+    found.kind === 'library'
+      ? { kind: 'library-file' as const, fileId, membershipId: actor.membershipId }
+      : {
+          kind: 'tulipfarm-file' as const,
+          fileId,
+          conversationId: input.conversationId,
+          membershipId: actor.membershipId,
+        };
+  const check = (tx: AuthorizationTransaction) =>
+    reference.kind === 'library-file'
+      ? requireLibraryFileReference(tx, actor, reference)
+      : requireTulipFarmFileReference(tx, actor, reference);
+  try {
+    await input.transaction(check);
+    const file = await input.files.download(input.workspaceId, actor.userId, fileId);
+    await input.transaction(check);
+    return {
+      name: file.name,
+      mediaType: file.mediaType ?? 'application/octet-stream',
+      bytes: file.bytes,
+      sources: [
+        {
+          ...reference,
+          read: { readAt: new Date().toISOString(), sha256: sha256(file.bytes), representation: 'extracted' },
+        },
+      ],
+    };
+  } catch (error) {
+    if (error instanceof AccessDenied || (error instanceof FileError && error.code === 'integrity'))
+      return { error: 'file-not-found' };
+    if (error instanceof FileError && error.code === 'busy') return { error: 'file-busy' };
+    throw error;
+  }
 }
 
 /**

@@ -35,6 +35,7 @@ const receipt = z.object({
   }),
 });
 const failure = z.object({ error: z.string(), instruction: z.string().optional() });
+const programSaved = z.object({ files: z.array(z.object({ id: z.uuid() })).min(1) });
 
 /** Only standalone library lookups are routed here; requests to read or change their contents stay with the model. */
 export function fileListingQuery(request: string): string | undefined {
@@ -81,6 +82,10 @@ export function createFileJobGuard(
           fileSavedClaim.test(text) ||
           readyFileClaim.test(text)));
   const record = (call: { tool: string }, value: unknown) => {
+    if (call.tool === 'execution.run') {
+      saved ||= programSaved.safeParse(value).success;
+      return;
+    }
     if (!call.tool.startsWith('files.')) return;
     calls++;
     const parsed = failure.safeParse(value);

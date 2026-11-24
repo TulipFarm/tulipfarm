@@ -287,6 +287,14 @@ function createdFile(row: { tool: string; status: string; output?: unknown }) {
     const output = z.object({ result: z.object({ diffFile: z.object({ id: uuidSchema }) }) }).safeParse(row.output);
     return output.success ? { fileId: output.data.result.diffFile.id } : {};
   }
+  if (row.tool === 'execution.run' && row.status === 'completed') {
+    const output = z
+      .object({ result: z.object({ files: z.array(z.object({ id: uuidSchema })).max(10) }) })
+      .safeParse(row.output);
+    return output.success && output.data.result.files.length
+      ? { fileIds: output.data.result.files.map(file => file.id) }
+      : {};
+  }
   const output =
     row.tool === 'files.create' && row.status === 'completed' ? createdFileOutput.safeParse(row.output) : null;
   return output?.success ? { fileId: output.data.result.file.id } : {};
