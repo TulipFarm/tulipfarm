@@ -871,6 +871,15 @@ try {
   await page.getByRole('region', { name: 'Conversation', exact: true }).getByRole('heading', { level: 2 }).waitFor();
   assert.equal(await page.getByLabel('Message', { exact: true }).textContent(), '');
   assert.equal(chats.length, beforeAttachment + 1);
+  // Files dropped on the message attach instead of the browser opening them.
+  const dropped = await page.evaluateHandle(() => {
+    const data = new DataTransfer();
+    data.items.add(new File(['Dropped attachment'], 'dropped.txt', { type: 'text/plain' }));
+    return data;
+  });
+  const message = page.getByLabel('Message', { exact: true });
+  for (const type of ['dragenter', 'dragover', 'drop']) await message.dispatchEvent(type, { dataTransfer: dropped });
+  await page.locator('[data-state="ready"]', { hasText: 'dropped.txt' }).waitFor();
   assert.deepEqual(errors, []);
   console.log(
     'PASS private conversation browser recovery, ordered parts, queued sends, controls, archive, search, themes, access concealment and workspace isolation',

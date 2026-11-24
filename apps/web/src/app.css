@@ -1164,6 +1164,10 @@
     border-color: var(--chat-mode);
     box-shadow: 0 0 0 3px color-mix(in oklab, var(--chat-mode) 14%, transparent);
   }
+  form[data-dragging] > .sprout-input-group {
+    border-color: var(--sprout-focus);
+    background: var(--sprout-hover);
+  }
   .sprout-input-group[data-mode] [data-mode-chip] {
     background: color-mix(in oklab, var(--chat-mode) 14%, transparent);
     color: var(--chat-mode);
