@@ -32,7 +32,13 @@ export const browserLoginSummarySchema = z.strictObject({
 });
 export type BrowserLoginSummary = z.infer<typeof browserLoginSummarySchema>;
 
-export const browserLoginErrorCodeSchema = z.enum(['disabled', 'invalid-input', 'unavailable', 'too-large']);
+export const browserLoginErrorCodeSchema = z.enum([
+  'disabled',
+  'invalid-input',
+  'unavailable',
+  'too-large',
+  'project-chat',
+]);
 export type BrowserLoginErrorCode = z.infer<typeof browserLoginErrorCodeSchema>;
 
 export class BrowserLoginError extends Error {

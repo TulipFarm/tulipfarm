@@ -462,7 +462,8 @@ export function createBrowserLogins(options: BrowserLoginsOptions) {
           if (error instanceof AccessDenied) return 'skipped';
           throw error;
         }
-        if (!(await access(tx, actor.membershipId, row)).use) return 'skipped';
+        const rights = await access(tx, actor.membershipId, row);
+        if (!rights.use) return 'skipped';
         if (signedOut) {
           if (!row.needs_sign_in) {
             await tx.client.query(`UPDATE ${table(tx, 's')} SET needs_sign_in = true WHERE id = $1`, [row.id]);
@@ -471,6 +472,8 @@ export function createBrowserLogins(options: BrowserLoginsOptions) {
           return 'needs-sign-in';
         }
         if (!state) return 'skipped';
+        // Signing a login in again is a manage right, so a member who may only use it can't replace it with their own sign-in.
+        if (row.needs_sign_in && !rights.manage) return 'skipped';
         const version = row.version + 1;
         let envelope;
         try {

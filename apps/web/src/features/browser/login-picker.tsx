@@ -61,14 +61,21 @@ export function SignInPicker({
       <AlertTitle>Sign in to {site}</AlertTitle>
       <AlertDescription>
         <div className="flex flex-col gap-2">
-          <p>{reason} Use a saved login, or take over and sign in yourself.</p>
+          <p>
+            {reason}{' '}
+            {usable.length > 0
+              ? 'Use a saved login, or sign in yourself.'
+              : 'Sign in yourself, then you can save the login for next time.'}
+          </p>
           {read.state.kind === 'loading' && <Skeleton />}
           {usable.length > 0 && (
             <ul aria-label={`Saved logins for ${site}`} className="flex flex-col gap-1">
               {usable.map(login => (
                 <li key={login.id} className="flex flex-wrap items-center justify-between gap-2">
                   <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate font-medium">{login.name}</span>
+                    <span id={`browser-login-${login.id}`} className="truncate font-medium">
+                      {login.name}
+                    </span>
                     {login.status === 'needs-sign-in' && <Badge variant="warning">Signed out</Badge>}
                   </span>
                   <Button
@@ -76,6 +83,7 @@ export function SignInPicker({
                     variant="outline"
                     disabled={busy || loading !== null}
                     aria-busy={loading === login.id}
+                    aria-describedby={`browser-login-${login.id}`}
                     onClick={() => void load(login)}
                   >
                     {loading === login.id ? 'Loading…' : 'Use this login'}
@@ -85,7 +93,7 @@ export function SignInPicker({
             </ul>
           )}
           {read.state.kind === 'ready' && !usable.length && (
-            <p className="text-muted-foreground">You have no saved logins for {site}.</p>
+            <p className="text-muted-foreground">No saved logins for {site} yet.</p>
           )}
           {error && (
             <p role="alert" className="text-destructive">
@@ -152,8 +160,8 @@ export function SaveLoginDialog({
         <DialogHeader>
           <DialogTitle>Save login</DialogTitle>
           <DialogDescription>
-            Saves this browser’s sign-in for the site, so agents can use it in later chats without signing in again.
-            Nobody can read it back. Only you can use it until you share it.
+            Next time an agent asks you to sign in to this site, pick this login instead. Only you can use it until you
+            share it.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -178,7 +186,7 @@ export function SaveLoginDialog({
           <Labelled
             id={`${id}-site`}
             label="Site"
-            helper="Its cookies and saved data are kept, including for its subdomains."
+            helper="Saves its cookies and site data, including for its subdomains."
             error={siteError}
           >
             <Input

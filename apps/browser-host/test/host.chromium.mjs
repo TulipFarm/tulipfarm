@@ -238,3 +238,44 @@ test('a saved login carries a site’s cookies and storage into a new session', 
   assert.equal(state.signIn, null);
   assert.deepEqual(state.logins, [{ id: login, site, signedOut: false }]);
 });
+
+test('loading another login for a site replaces the sign-in, and reloading one applies its newer storage', async t => {
+  const host = await createBrowserHost({ ...options, allowPrivateNetworks: true });
+  t.after(() => host.shutdown());
+  const site = '127.0.0.1';
+  await host.open(sessionId);
+  await host.act(sessionId, { action: 'navigate', url: `${origin}/sign-in` });
+  const ada = await host.siteState(sessionId, site);
+  const account = (member, cart) => ({
+    cookies: ada.cookies.map(cookie => ({ ...cookie, value: member })),
+    origins: [{ origin, localStorage: [{ name: 'cart', value: cart }] }],
+  });
+  await host.close(sessionId);
+
+  const next = '00000000-0000-4000-8000-000000000002';
+  await host.open(next);
+  const first = '7d3f1e2a-4b5c-4d6e-8f70-1a2b3c4d5e6f';
+  const second = '8e4f2f3b-5c6d-4e7f-9081-2b3c4d5e6f70';
+  await host.loadLogin(next, { id: first, site, state: account('ada', '3 items') });
+  const switched = await host.loadLogin(next, { id: second, site, state: account('bob', '1 item') });
+  assert.deepEqual(
+    switched.logins,
+    [{ id: second, site, signedOut: false }],
+    'only the latest login describes the site',
+  );
+  let result = await host.act(next, { action: 'navigate', url: `${origin}/account` });
+  assert.equal(result.state.title, 'Account of bob');
+  assert.match(result.snapshot, /Cart: 1 item/);
+  assert.deepEqual(
+    (await host.siteState(next, site)).cookies.map(cookie => cookie.value),
+    ['bob'],
+    'the first account’s cookies are gone',
+  );
+
+  await host.loadLogin(next, { id: first, site, state: account('ada', '5 items') });
+  result = await host.act(next, { action: 'navigate', url: `${origin}/account` });
+  assert.equal(result.state.title, 'Account of ada');
+  assert.match(result.snapshot, /Cart: 5 items/, 'a login loaded again replaces the storage it set before');
+  result = await host.act(next, { action: 'navigate', url: `${origin}/account` });
+  assert.match(result.snapshot, /Cart: 5 items/, 'an earlier load’s storage never comes back');
+});

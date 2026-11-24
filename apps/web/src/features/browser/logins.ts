@@ -24,10 +24,11 @@ const browserLoginSummarySchema = z.object({
 export type BrowserLoginSummary = z.infer<typeof browserLoginSummarySchema>;
 
 const messages: Record<string, string> = {
-  'invalid-request': 'Check the name and site, then try again. The site must have signed-in data to save.',
-  'browser-login-not-found': 'This login is no longer available to you.',
+  'invalid-request': 'Check the name and site. To save a login, sign in to the site in this browser first.',
+  'browser-login-not-found': 'This login was deleted or is no longer shared with you.',
   'browser-login-unavailable':
-    'This login can’t be used or copied right now. Its owner may have left, or it belongs to someone else.',
+    'This login can’t be used or saved here. Its owner may have left the workspace, or it’s someone else’s login.',
+  'browser-login-project-chat': 'Saved logins work only in your own chats outside projects.',
   'browser-login-too-large': 'This site keeps too much data to save as a login.',
   'browser-logins-unavailable': 'Logins aren’t available right now. Try again later.',
   'browser-not-found': 'This browser has closed. Ask the agent to open it again.',
@@ -35,7 +36,9 @@ const messages: Record<string, string> = {
 };
 
 export function browserLoginErrorMessage(error: unknown) {
-  return error instanceof TableRequestError ? error.message : 'Couldn’t confirm the outcome. Check your connection.';
+  return error instanceof TableRequestError
+    ? error.message
+    : 'Couldn’t confirm whether this worked. Check your connection.';
 }
 
 const listSchema = z.object({ enabled: z.boolean(), logins: z.array(browserLoginSummarySchema) });

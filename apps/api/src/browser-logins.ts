@@ -75,7 +75,7 @@ export function registerBrowserLogins(
   app: FastifyInstance,
   dependencies: {
     auth: Pick<ReturnType<typeof registerAuth>['auth'], 'api'>;
-    chats: { read(workspaceId: string, userId: string, chatId: string): Promise<unknown> };
+    chats: { read(workspaceId: string, userId: string, chatId: string): Promise<{ projectId: string | null }> };
     client: BrowserHostClient | undefined;
     logins: BrowserLogins;
     enabled?: (workspaceId: string) => Promise<boolean>;
@@ -99,6 +99,7 @@ export function registerBrowserLogins(
         if (error.code === 'invalid-input') return reply.code(400).send({ error: 'invalid-request' });
         if (error.code === 'too-large') return reply.code(413).send({ error: 'browser-login-too-large' });
         if (error.code === 'unavailable') return reply.code(409).send({ error: 'browser-login-unavailable' });
+        if (error.code === 'project-chat') return reply.code(409).send({ error: 'browser-login-project-chat' });
         return reply.code(503).send({ error: 'browser-logins-unavailable' });
       }
       if (error instanceof BrowserHostError) {
@@ -116,10 +117,14 @@ export function registerBrowserLogins(
     async function gate(workspaceId: string) {
       if (!(await enabled(workspaceId))) throw new FeatureOff();
     }
-    /** Authorizes a reader of the chat and returns its browser session. */
+    /**
+     * Authorizes the chat's owner and returns its browser session. Project members can watch a project chat's browser,
+     * so logins are saved and loaded only in a member's own chats outside projects.
+     */
     async function session(request: FastifyRequest, params: { workspaceId: string; chatId: string }) {
       await gate(params.workspaceId);
-      await chats.read(params.workspaceId, user(request), params.chatId);
+      const chat = await chats.read(params.workspaceId, user(request), params.chatId);
+      if (chat.projectId) throw new BrowserLoginError('project-chat');
       if (!client) throw new BrowserHostError('unavailable', 'Browser use is not configured');
       return { client, sessionId: browserSessionId(params.workspaceId, { conversationId: params.chatId }) };
     }
@@ -219,19 +224,30 @@ export function registerBrowserLogins(
         const userId = user(request);
         const current = await client.state(sessionId);
         if (!current) throw new BrowserHostError('session-not-found', 'The browser has closed');
-        // Saving copies the session's sign-in. Another member's login loaded here may only be copied by its managers.
-        const loaded = current.logins.filter(
-          login => siteIncludes(login.site, input.site) || siteIncludes(input.site, login.site),
+        const state = await client.siteState(sessionId, input.site);
+        if (!state.cookies.length && !state.origins.length) throw new BrowserLoginError('invalid-input');
+        // Saving copies the session's sign-in. A login loaded here whose cookies or storage are in the copy, including
+        // a parent domain's shared with a sibling site, may only be copied by its managers.
+        const domains = [
+          ...state.cookies.map(cookie => cookie.domain),
+          ...state.origins.map(o => new URL(o.origin).hostname),
+        ];
+        const copied = current.logins.filter(
+          login =>
+            siteIncludes(login.site, input.site) ||
+            siteIncludes(input.site, login.site) ||
+            domains.some(domain => siteIncludes(login.site, domain)),
         );
-        if (loaded.length) {
+        if (copied.length) {
           const manageable = new Set(
             (await logins.list(params.workspaceId, userId)).filter(login => login.canManage).map(login => login.id),
           );
-          if (loaded.some(login => !manageable.has(login.id))) throw new BrowserLoginError('unavailable');
+          if (copied.some(login => !manageable.has(login.id))) throw new BrowserLoginError('unavailable');
         }
-        const state = await client.siteState(sessionId, input.site);
-        if (!state.cookies.length && !state.origins.length) throw new BrowserLoginError('invalid-input');
-        return logins.save(params.workspaceId, userId, input, state);
+        const saved = await logins.save(params.workspaceId, userId, input, state);
+        // The session now holds this login, so its later refreshes and sign-outs are saved back to it.
+        await client.loadLogin(sessionId, { id: saved.id, site: saved.site, state });
+        return saved;
       },
     );
 

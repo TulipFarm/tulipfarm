@@ -52,7 +52,7 @@ export function BrowserLoginsSettingsPage() {
         titleId="browser-logins-heading"
         focusable
         title="Browser logins"
-        description="Sign-ins saved from a chat’s browser, so agents can use websites without signing in again. Nobody can read them back."
+        description="Saved sign-ins for websites. When an agent asks you to sign in, pick one instead. They’re encrypted and never shown."
       />
       {enabled ? (
         <Logins workspaceId={workspace.id} />
@@ -130,6 +130,9 @@ function Logins({ workspaceId }: { workspaceId: string }) {
         values={login => [
           { label: 'Owner', value: people.name(login.ownerMembershipId) },
           { label: 'Last used', value: login.lastUsedAt ? formatDate(login.lastUsedAt) : 'Never' },
+          ...(login.status === 'needs-sign-in' && login.canManage
+            ? [{ label: 'To fix', value: 'Use it in a chat, sign in again, then hand back' }]
+            : []),
         ]}
         renderActions={login =>
           login.canManage ? (
@@ -321,9 +324,9 @@ function SharingDialog({
         owner={login.ownerMembershipId}
         people={people}
         disabled={change.sending}
-        description="Agents in their chats and tasks can use this sign-in. Nobody can read it back."
+        description={`They can use it in their chats. Their agents act on ${login.site} with this account.`}
         roles={{
-          use: { label: 'Use it', hint: 'In their chats and tasks' },
+          use: { label: 'Use it', hint: 'In their chats' },
           manage: { label: 'Use and manage it', hint: 'Also rename, share or delete it' },
         }}
         onChange={next => {
@@ -356,7 +359,8 @@ function DeleteDialog({
       <AlertDialogContent>
         <AlertDialogTitle>Delete {login.name}?</AlertDialogTitle>
         <AlertDialogDescription>
-          Agents stop using it at once. Browsers already signed in stay signed in until they close.
+          It’s removed for everyone it’s shared with. Browsers already signed in with it stay signed in until they
+          close.
         </AlertDialogDescription>
         {change.error && (
           <Alert variant="destructive">

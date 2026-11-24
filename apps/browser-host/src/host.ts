@@ -59,6 +59,8 @@ class Session {
   needsPerson: string | null = null;
   signIn: string | null = null;
   readonly logins = new Map<string, BrowserLoadedLogin>();
+  /** Counts logins loaded, so each load's storage replaces the previous one's once. */
+  loads = 0;
   lastUsed: number;
   notice: string | undefined;
   title = '';
@@ -177,7 +179,9 @@ class Session {
 }
 
 const markerPrefix = '__tulipfarm_login_';
-const loginMarker = (id: string) => `${markerPrefix}${id}`;
+const loadMarker = `${markerPrefix}load`;
+/** Whether two sites can share sign-in cookies: one is the other or its parent. */
+const sitesOverlap = (a: string, b: string) => siteIncludes(a, b) || siteIncludes(b, a);
 
 export type BrowserHost = Awaited<ReturnType<typeof createBrowserHost>>;
 
@@ -406,7 +410,8 @@ export async function createBrowserHost(options: HostOptions) {
       } else {
         // A person who hands back after a sign-in request has signed in again, so the site's logins are current.
         if (session.signIn)
-          for (const login of session.logins.values()) if (login.site === session.signIn) login.signedOut = false;
+          for (const login of session.logins.values())
+            if (sitesOverlap(login.site, session.signIn)) login.signedOut = false;
         session.controller = 'agent';
         session.controlledBy = null;
         session.needsPerson = null;
@@ -422,7 +427,8 @@ export async function createBrowserHost(options: HostOptions) {
     session.needsPerson = request.reason;
     session.signIn = request.signIn ?? null;
     // Asked to sign in to a site whose login is loaded, the login has signed out.
-    for (const login of session.logins.values()) if (login.site === session.signIn) login.signedOut = true;
+    if (session.signIn)
+      for (const login of session.logins.values()) if (sitesOverlap(login.site, session.signIn)) login.signedOut = true;
     await session.emitState();
     return session.state();
   }
@@ -430,24 +436,36 @@ export async function createBrowserHost(options: HostOptions) {
   async function loadLogin(sessionId: string, login: BrowserLoadLogin): Promise<BrowserSessionState> {
     const session = get(sessionId);
     return session.run(async () => {
+      // A login replaces the site's sign-in, so a login loaded earlier for it no longer describes this browser.
+      for (const loaded of session.logins.values())
+        if (sitesOverlap(loaded.site, login.site)) session.logins.delete(loaded.id);
+      for (const cookie of await session.context.cookies())
+        if (siteIncludes(login.site, cookie.domain))
+          await session.context.clearCookies({ name: cookie.name, domain: cookie.domain, path: cookie.path });
       const cookies = login.state.cookies.filter(cookie => siteIncludes(login.site, cookie.domain));
       if (cookies.length) await session.context.addCookies(cookies);
-      const marker = loginMarker(login.id);
+      const load = ++session.loads;
       for (const { origin, localStorage } of login.state.origins) {
         if (!siteIncludes(login.site, new URL(origin).hostname) || !localStorage.length) continue;
-        // Storage is set once per origin, on its first page, so the site's later changes are kept.
+        // Storage is replaced once per origin and load, on its first page, so the site's later changes are kept and
+        // an earlier load's script never applies again.
         await session.context.addInitScript(
-          ({ origin, items, marker }) => {
+          ({ origin, items, marker, load }) => {
             // This runs in the page, where the DOM's globals exist.
             const page = globalThis as unknown as {
               location: { origin: string };
-              localStorage: { getItem(name: string): string | null; setItem(name: string, value: string): void };
+              localStorage: {
+                getItem(name: string): string | null;
+                setItem(name: string, value: string): void;
+                clear(): void;
+              };
             };
-            if (page.location.origin !== origin || page.localStorage.getItem(marker)) return;
+            if (page.location.origin !== origin || Number(page.localStorage.getItem(marker) ?? 0) >= load) return;
+            page.localStorage.clear();
             for (const { name, value } of items) page.localStorage.setItem(name, value);
-            page.localStorage.setItem(marker, '1');
+            page.localStorage.setItem(marker, String(load));
           },
-          { origin: new URL(origin).origin, items: localStorage, marker },
+          { origin: new URL(origin).origin, items: localStorage, marker: loadMarker, load },
         );
       }
       session.logins.set(login.id, { id: login.id, site: login.site, signedOut: false });

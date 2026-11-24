@@ -141,6 +141,19 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     assert.equal(await logins.saveBack(ws, ana, { id: randomUUID(), signedOut: false, state: state('x') }), 'skipped');
   });
 
+  await t.test('only a manager can sign a signed-out login in again', async () => {
+    const saved = await logins.save(ws, ana, { name: 'Sign in again', site: 'shop.example' }, state('owner'));
+    await logins.share(ws, ana, saved.id, {
+      grants: [{ grantee: { kind: 'member', membershipId: cy.membershipId }, role: 'use' }],
+    });
+    assert.equal(await logins.saveBack(ws, cy, { id: saved.id, signedOut: false, state: state('cy') }), 'saved');
+    await logins.saveBack(ws, cy, { id: saved.id, signedOut: true });
+    assert.equal(await logins.saveBack(ws, cy, { id: saved.id, signedOut: false, state: state('other') }), 'skipped');
+    assert.equal((await logins.use(ws, ana, saved.id)).state.cookies[0].value, 'cy');
+    assert.equal(await logins.saveBack(ws, ana, { id: saved.id, signedOut: false, state: state('again') }), 'saved');
+    assert.equal((await logins.list(ws, ana)).find(login => login.id === saved.id).status, 'active');
+  });
+
   await t.test('a state moved to another login cannot be read', async () => {
     const a = await logins.save(ws, ana, { name: 'A', site: 'shop.example' }, state('a'));
     const b = await logins.save(ws, ana, { name: 'B', site: 'shop.example' }, state('b'));
