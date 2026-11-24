@@ -117,3 +117,48 @@ test('the live view relays the host stream', async t => {
   assert.match(live.headers['content-type'], /text\/event-stream/);
   assert.match(live.body, /event: frame/);
 });
+
+test('whoever can see a run watches and takes over its browser, and handing it back wakes the run', async t => {
+  const app = Fastify();
+  t.after(() => app.close());
+  const workspaceId = randomUUID();
+  const taskId = randomUUID();
+  const calls = [];
+  const woken = [];
+  registerBrowserLive(app, {
+    auth,
+    chats: { read: async () => assert.fail('a run is not a chat') },
+    tasks: {
+      read: async (workspace, user, task) => {
+        if (workspace !== workspaceId || task !== taskId || user !== 'reader') throw new AccessDenied();
+        return {};
+      },
+      wake: async (workspace, task) => woken.push([workspace, task]),
+    },
+    client: {
+      state: async id => (calls.push(['state', id]), state(id)),
+      control: async (id, control) => (
+        calls.push(['control', id, control]),
+        { ...state(id), controller: control.controller }
+      ),
+    },
+  });
+  const sessionId = browserSessionId(workspaceId, { runId: taskId });
+  const as = (method, task, url, payload) =>
+    app.inject({
+      method,
+      url: `/workspaces/${workspaceId}/agent-tasks/${task}/browser${url}`,
+      payload,
+      headers: { cookie: 'session=reader', origin },
+    });
+  assert.deepEqual((await as('GET', taskId, '')).json(), { browser: state(sessionId) });
+  assert.equal((await as('POST', taskId, '/control', { controller: 'person' })).json().browser.controller, 'person');
+  assert.deepEqual(woken, [], 'taking over does not wake the run');
+  assert.equal((await as('POST', taskId, '/control', { controller: 'agent' })).statusCode, 200);
+  assert.deepEqual(woken, [[workspaceId, taskId]]);
+  assert.deepEqual(calls[1], ['control', sessionId, { controller: 'person', memberId: 'reader' }]);
+
+  const other = await as('POST', randomUUID(), '/control', { controller: 'person' });
+  assert.deepEqual([other.statusCode, other.json()], [404, { error: 'task-not-found' }]);
+  assert.equal(calls.length, 3, "a run the member can't see never reaches the host");
+});

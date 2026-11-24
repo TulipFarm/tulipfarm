@@ -280,7 +280,13 @@ export function registerStorageComposition(
   });
   const browserHost = browserHostConfiguration();
   const browserClient = browserHost ? createBrowserHostClient(browserHost) : undefined;
-  registerBrowserLive(app, { auth: dependencies.auth, chats: conversations, client: browserClient });
+  const browserTasks = createAgentTasks(runtime);
+  registerBrowserLive(app, {
+    auth: dependencies.auth,
+    chats: conversations,
+    tasks: { read: (workspaceId, userId, taskId) => browserTasks.read(workspaceId, userId, taskId), wake: wakeTask },
+    client: browserClient,
+  });
   registerBrowserLogins(app, {
     auth: dependencies.auth,
     chats: conversations,
