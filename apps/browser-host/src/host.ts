@@ -65,6 +65,12 @@ export type HostOptions = {
   downloadWaitMs?: number;
   /** How long a download may take before it is cancelled. */
   downloadTimeoutMs?: number;
+  /** How long a finished download waits to be saved before it is deleted. */
+  downloadHoldMs?: number;
+  /** Most downloads a session may hold or have in progress at once. */
+  maxHeldDownloads?: number;
+  /** Most bytes a session's held and in-progress downloads may take on disk together. */
+  maxHeldDownloadBytes?: number;
   now?: () => number;
 };
 
@@ -105,10 +111,17 @@ class Session {
   lastUsed: number;
   notice: string | undefined;
   title = '';
-  /** Finished downloads, kept on disk until the agent's tool takes them to save in Files. */
-  readonly downloads = new Map<string, { id: string; name: string; size: number; download: Download }>();
-  /** Downloads still in progress. */
-  readonly downloading = new Set<Promise<void>>();
+  /** Finished downloads, kept on disk until the agent's tool takes them to save in Files or they expire. */
+  readonly downloads = new Map<
+    string,
+    { id: string; name: string; size: number; download: Download; expiresAt: number }
+  >();
+  /** Downloads still in progress, with their names and the work that keeps them when they finish. */
+  readonly downloading = new Map<Download, { name: string; work: Promise<void> }>();
+  /** The browser's own record of each download in progress, by its id, with the bytes received so far. */
+  readonly transfers = new Map<string, { url: string; name: string; received: number; download?: Download }>();
+  /** Why a download was stopped, for the notice the agent gets. */
+  readonly stopped = new WeakMap<Download, string>();
   /** What happened to downloads since the agent's last step, such as one too large to keep. */
   downloadNotices: string[] = [];
   /** Every form of the secrets typed in this session, longest first, to keep out of what the host returns. */
@@ -171,6 +184,35 @@ class Session {
       .filter(form => form.length)
       .slice(0, 400)
       .sort((a, b) => b.length - a.length);
+    this.dropDownloads();
+  }
+
+  /**
+   * A page can write a typed secret into a file, and redaction covers only what the host returns as text, so once
+   * a secret is typed no download leaves this browser: held ones are deleted and those in progress stopped.
+   */
+  private dropDownloads() {
+    for (const held of this.downloads.values()) {
+      void held.download.delete().catch(() => undefined);
+      this.downloadNotices.push(notSaved(held.name, secretTyped));
+    }
+    this.downloads.clear();
+    for (const [download, { name }] of this.downloading) this.stop(download, notSaved(name, secretTyped));
+  }
+
+  /** Cancels a download in progress, keeping why for the agent's notice. */
+  stop(download: Download, reason: string) {
+    if (this.stopped.has(download)) return;
+    this.stopped.set(download, reason);
+    void download.cancel().catch(() => undefined);
+  }
+
+  /** Bytes the session's downloads take on disk, held or in progress, leaving out one being checked. */
+  downloadBytes(except?: Download) {
+    let bytes = 0;
+    for (const held of this.downloads.values()) bytes += held.size;
+    for (const transfer of this.transfers.values()) if (transfer.download !== except) bytes += transfer.received;
+    return bytes;
   }
 
   redact(text: string): string {
@@ -275,8 +317,9 @@ class Session {
   }
 }
 
-/** Downloads a session may hold at once that the agent has not taken yet. */
-const heldDownloads = 20;
+const secretTyped = 'downloads aren’t saved after a password is typed in this browser.';
+const tooManyDownloads = 'too many downloads are waiting to be saved.';
+const notSaved = (name: string, reason: string) => `"${name}" was not saved: ${reason}`;
 
 const markerPrefix = '__tulipfarm_login_';
 const loadMarker = `${markerPrefix}load`;
@@ -306,6 +349,10 @@ export async function createBrowserHost(options: HostOptions) {
   const maxDownloadBytes = options.maxDownloadBytes ?? browserFileBytes;
   const downloadWaitMs = options.downloadWaitMs ?? 30_000;
   const downloadTimeoutMs = options.downloadTimeoutMs ?? 5 * 60_000;
+  const downloadHoldMs = options.downloadHoldMs ?? 5 * 60_000;
+  const maxHeldDownloads = options.maxHeldDownloads ?? 20;
+  const maxHeldDownloadBytes = options.maxHeldDownloadBytes ?? 2 * maxDownloadBytes;
+  const tooLarge = `files are limited to ${Math.floor(maxDownloadBytes / 1024 / 1024)} MiB.`;
   const sessions = new Map<string, Session>();
   const opening = new Map<string, Promise<Session>>();
   let browser: Promise<Browser> | undefined;
@@ -423,7 +470,10 @@ export async function createBrowserHost(options: HostOptions) {
     const page = await context.newPage();
     session = new Session(sessionId, context, page, now());
     const opened = session;
-    const watch = (watched: Page) => watched.on('download', download => keep(opened, download));
+    const watch = (watched: Page) => {
+      watched.on('download', download => keep(opened, download));
+      void watchTransfers(opened, watched);
+    };
     watch(page);
     context.on('page', added => {
       watch(added);
@@ -448,40 +498,120 @@ export async function createBrowserHost(options: HostOptions) {
     return session;
   }
 
+  /**
+   * Follows the browser's progress events for a page's downloads, so a download is stopped as soon as it passes the
+   * size limit or the session's disk allowance, not after it finishes.
+   */
+  async function watchTransfers(session: Session, page: Page) {
+    try {
+      const cdp = await session.context.newCDPSession(page);
+      await cdp.send('Page.enable');
+      cdp.on('Page.downloadWillBegin', event => {
+        session.transfers.set(event.guid, { url: event.url, name: event.suggestedFilename, received: 0 });
+        link(session);
+      });
+      cdp.on('Page.downloadProgress', event => {
+        const transfer = session.transfers.get(event.guid);
+        if (!transfer) return;
+        if (event.state !== 'inProgress') return void session.transfers.delete(event.guid);
+        transfer.received = Math.max(event.receivedBytes, event.totalBytes);
+        checkTransfer(session, transfer);
+      });
+    } catch {
+      // The page closed first; the size is still checked when a download finishes.
+    }
+  }
+
+  /** Pairs each download in progress with the browser's record of it, which Playwright reports separately. */
+  function link(session: Session) {
+    for (const download of session.downloading.keys()) {
+      const transfers = [...session.transfers.values()];
+      if (transfers.some(transfer => transfer.download === download)) continue;
+      const transfer = transfers.find(
+        candidate =>
+          !candidate.download && candidate.url === download.url() && candidate.name === download.suggestedFilename(),
+      );
+      if (!transfer) continue;
+      transfer.download = download;
+      checkTransfer(session, transfer);
+    }
+  }
+
+  function checkTransfer(session: Session, transfer: { received: number; download?: Download }) {
+    const download = transfer.download;
+    const name = download && session.downloading.get(download)?.name;
+    if (!download || !name) return;
+    if (transfer.received > maxDownloadBytes) session.stop(download, notSaved(name, tooLarge));
+    else if (session.downloadBytes() > maxHeldDownloadBytes) session.stop(download, notSaved(name, tooManyDownloads));
+  }
+
   /** Keeps a page's download once it finishes, unless it is too large or the session already holds too many. */
   function keep(session: Session, download: Download) {
     const name = session.redact(download.suggestedFilename().trim()).slice(-255) || 'download';
+    const refused = session.hasTypedSecret
+      ? secretTyped
+      : session.downloads.size + session.downloading.size >= maxHeldDownloads
+        ? tooManyDownloads
+        : undefined;
+    if (refused) {
+      session.downloadNotices.push(notSaved(name, refused));
+      void download
+        .cancel()
+        .then(() => download.delete())
+        .catch(() => undefined);
+      return;
+    }
     const work = (async () => {
       const timer = setTimeout(() => void download.cancel().catch(() => undefined), downloadTimeoutMs);
       try {
         const path = await download.path().catch(() => null);
-        const failed = path ? null : await download.failure().catch(() => 'failed');
-        if (!path) {
+        const stopped = session.stopped.get(download);
+        if (!path || stopped) {
+          await download.delete().catch(() => undefined);
+          const failed = stopped ? null : await download.failure().catch(() => 'failed');
           session.downloadNotices.push(
-            failed === 'canceled'
-              ? `The download of "${name}" took too long and was stopped.`
-              : `The download of "${name}" failed.`,
+            stopped ??
+              (failed === 'canceled'
+                ? `The download of "${name}" took too long and was stopped.`
+                : `The download of "${name}" failed.`),
           );
           return;
         }
         const { size } = await stat(path);
-        if (size > maxDownloadBytes || session.downloads.size >= heldDownloads) {
+        const reason = session.hasTypedSecret
+          ? secretTyped
+          : size > maxDownloadBytes
+            ? tooLarge
+            : session.downloads.size >= maxHeldDownloads ||
+                session.downloadBytes(download) + size > maxHeldDownloadBytes
+              ? tooManyDownloads
+              : undefined;
+        if (reason) {
           await download.delete().catch(() => undefined);
-          session.downloadNotices.push(
-            size > maxDownloadBytes
-              ? `"${name}" was not saved: files are limited to ${Math.floor(maxDownloadBytes / 1024 / 1024)} MiB.`
-              : `"${name}" was not saved: too many downloads are waiting to be saved.`,
-          );
+          session.downloadNotices.push(notSaved(name, reason));
           return;
         }
         const id = randomUUID();
-        session.downloads.set(id, { id, name, size, download });
+        session.downloads.set(id, { id, name, size, download, expiresAt: now() + downloadHoldMs });
       } finally {
         clearTimeout(timer);
+        for (const [guid, transfer] of session.transfers)
+          if (transfer.download === download) session.transfers.delete(guid);
       }
     })();
-    session.downloading.add(work);
-    void work.finally(() => session.downloading.delete(work));
+    session.downloading.set(download, { name, work });
+    void work.finally(() => session.downloading.delete(download));
+    link(session);
+  }
+
+  /** Deletes finished downloads that waited too long to be saved, even while the session is in use. */
+  function expireDownloads(session: Session) {
+    for (const [id, held] of session.downloads) {
+      if (now() < held.expiresAt) continue;
+      session.downloads.delete(id);
+      void held.download.delete().catch(() => undefined);
+      session.downloadNotices.push(notSaved(held.name, 'it waited too long to be saved.'));
+    }
   }
 
   /** Opens a session, or returns the open one. Allowed sites apply only when the session is created. */
@@ -511,7 +641,7 @@ export async function createBrowserHost(options: HostOptions) {
     if (session.downloading.size) {
       let timer: NodeJS.Timeout | undefined;
       await Promise.race([
-        Promise.allSettled(session.downloading),
+        Promise.allSettled([...session.downloading.values()].map(({ work }) => work)),
         new Promise(resolve => (timer = setTimeout(resolve, downloadWaitMs))),
       ]);
       clearTimeout(timer);
@@ -530,6 +660,7 @@ export async function createBrowserHost(options: HostOptions) {
       ? undefined
       : (await page.screenshot({ type: 'jpeg', quality: 55, timeout: 10_000 })).toString('base64');
     await session.refreshTitle();
+    expireDownloads(session);
     const notices = [
       session.notice && session.redact(session.notice),
       withheld &&
@@ -808,6 +939,7 @@ export async function createBrowserHost(options: HostOptions) {
   /** Hands a finished download over once. The caller deletes it with `done` after reading it. */
   function takeDownload(sessionId: string, downloadId: string) {
     const session = get(sessionId);
+    expireDownloads(session);
     const held = session.downloads.get(downloadId);
     if (!held) throw new HostError('download-not-found', 'No download with this ID is waiting.', 404);
     session.downloads.delete(downloadId);
@@ -992,6 +1124,7 @@ export async function createBrowserHost(options: HostOptions) {
   async function sweep(): Promise<number> {
     let closed = 0;
     for (const [id, session] of sessions) {
+      expireDownloads(session);
       const limit = session.needsPerson || session.controller === 'person' ? options.holdMs : options.idleMs;
       if (now() - session.lastUsed >= limit) {
         sessions.delete(id);

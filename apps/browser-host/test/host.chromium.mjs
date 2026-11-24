@@ -19,6 +19,8 @@ const pages = {
   '/files': `<!doctype html><title>Files</title>
     <a href="/report.csv">Download report</a>
     <a href="/big.bin">Download archive</a>
+    <a href="/stream.bin">Download stream</a>
+    <a href="/slow.bin">Download slowly</a>
     <label>Invoice <input id="invoice" type="file"></label>
     <div role="button" aria-label="Upload photo" style="display:inline-block;padding:8px">Upload photo
       <input type="file" style="display:none" id="photo"></div>
@@ -38,6 +40,8 @@ const pages = {
 
 let site;
 let origin;
+/** Endless downloads the browser stopped, by path. */
+const stopped = [];
 let internal;
 // Requests that reached the site under its other name, localhost, which limited sessions must never reach.
 const otherSiteHits = [];
@@ -145,6 +149,20 @@ before(async () => {
       });
       return response.end(Buffer.alloc(4096, 1));
     }
+    // Endless downloads with no length, one fast and one slow, that stop only when the browser does.
+    if (url.pathname === '/stream.bin' || url.pathname === '/slow.bin') {
+      response.writeHead(200, {
+        'content-type': 'application/octet-stream',
+        'content-disposition': `attachment; filename="${url.pathname.slice(1)}"`,
+      });
+      const fast = url.pathname === '/stream.bin';
+      const timer = setInterval(() => response.write(Buffer.alloc(fast ? 64 * 1024 : 1, 1)), fast ? 5 : 200);
+      response.on('close', () => {
+        clearInterval(timer);
+        stopped.push(url.pathname);
+      });
+      return;
+    }
     if (url.pathname === '/done') {
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       return response.end(
@@ -164,6 +182,7 @@ before(async () => {
   origin = `http://127.0.0.1:${site.address().port}`;
 });
 after(() => {
+  site.closeAllConnections();
   site.close();
   internal.close();
 });
@@ -597,4 +616,107 @@ test('the agent uploads a file only into a file input', async t => {
     host.upload(sessionId, { ...file, ref: ref(result.snapshot, /button "Invoice"/) }, Buffer.from('x')),
     { code: 'person-in-control' },
   );
+});
+
+test('a download is stopped while it transfers once it passes the size limit', async t => {
+  const host = await createBrowserHost({
+    ...options,
+    allowPrivateNetworks: true,
+    maxDownloadBytes: 256 * 1024,
+    downloadWaitMs: 3000,
+  });
+  t.after(() => host.shutdown());
+  await host.open(sessionId);
+  let result = await host.act(sessionId, { action: 'navigate', url: `${origin}/files` });
+  const started = Date.now();
+  result = await host.act(sessionId, { action: 'click', ref: ref(result.snapshot, /link "Download stream"/) });
+  assert.equal(result.downloads, undefined);
+  assert.match(result.notice ?? '', /"stream.bin" was not saved: files are limited to 0 MiB/);
+  assert.ok(stopped.includes('/stream.bin'), 'the browser stopped receiving it');
+  assert.ok(Date.now() - started < 3000, 'without waiting for it to finish');
+});
+
+test('downloads in progress count toward the held limit, and held bytes are capped', async t => {
+  const host = await createBrowserHost({
+    ...options,
+    allowPrivateNetworks: true,
+    maxHeldDownloads: 1,
+    downloadWaitMs: 300,
+  });
+  t.after(() => host.shutdown());
+  await host.open(sessionId);
+  let result = await host.act(sessionId, { action: 'navigate', url: `${origin}/files` });
+  result = await host.act(sessionId, { action: 'click', ref: ref(result.snapshot, /link "Download slowly"/) });
+  assert.match(result.notice ?? '', /A download is still in progress/);
+  result = await host.act(sessionId, { action: 'click', ref: ref(result.snapshot, /link "Download report"/) });
+  assert.equal(result.downloads, undefined);
+  assert.match(result.notice ?? '', /"report.csv" was not saved: too many downloads are waiting to be saved/);
+
+  const capped = await createBrowserHost({ ...options, allowPrivateNetworks: true, maxHeldDownloadBytes: 30 });
+  t.after(() => capped.shutdown());
+  await capped.open(sessionId);
+  result = await capped.act(sessionId, { action: 'navigate', url: `${origin}/files` });
+  result = await capped.act(sessionId, { action: 'click', ref: ref(result.snapshot, /link "Download report"/) });
+  assert.equal(result.downloads?.length, 1);
+  result = await capped.act(sessionId, { action: 'click', ref: ref(result.snapshot, /link "Download report"/) });
+  assert.equal(result.downloads?.length, 1, 'the second would pass the bytes held');
+  assert.match(result.notice ?? '', /"report.csv" was not saved: too many downloads are waiting to be saved/);
+});
+
+test('a download waiting to be saved expires five minutes after it finished', async t => {
+  let clock = 1_000_000;
+  const host = await createBrowserHost({
+    ...options,
+    allowPrivateNetworks: true,
+    idleMs: 60 * 60_000,
+    now: () => clock,
+  });
+  t.after(() => host.shutdown());
+  await host.open(sessionId);
+  let result = await host.act(sessionId, { action: 'navigate', url: `${origin}/files` });
+  result = await host.act(sessionId, { action: 'click', ref: ref(result.snapshot, /link "Download report"/) });
+  const [download] = result.downloads;
+  clock += 4 * 60_000;
+  await host.sweep();
+  result = await host.act(sessionId, { action: 'snapshot' });
+  assert.equal(result.downloads?.[0]?.id, download.id, 'still held while the session is used');
+  clock += 60_000;
+  await host.sweep();
+  assert.throws(() => host.takeDownload(sessionId, download.id), { code: 'download-not-found' });
+  result = await host.act(sessionId, { action: 'snapshot' });
+  assert.equal(result.downloads, undefined);
+  assert.match(result.notice ?? '', /"report.csv" was not saved: it waited too long/);
+});
+
+test('downloads are not saved once a secret is typed in the session', async t => {
+  const host = await createBrowserHost({ ...options, allowPrivateNetworks: true, downloadWaitMs: 1000 });
+  t.after(() => host.shutdown());
+  await host.open(sessionId);
+  let result = await host.act(sessionId, { action: 'navigate', url: `${origin}/files` });
+  result = await host.act(sessionId, { action: 'click', ref: ref(result.snapshot, /link "Download report"/) });
+  const [held] = result.downloads;
+  result = await host.act(sessionId, { action: 'click', ref: ref(result.snapshot, /link "Download slowly"/) });
+  assert.match(result.notice ?? '', /A download is still in progress/);
+  const page = await host.act(sessionId, { action: 'navigate', url: `${origin}/login` });
+  result = await host.typeSecret(sessionId, {
+    hosts: ['127.0.0.1'],
+    fields: [
+      { ref: ref(page.snapshot, /textbox "Email"/), kind: 'username', value: 'ada@example.com' },
+      { ref: ref(page.snapshot, /textbox "Password"/), kind: 'password', value: 'DUMMY-pass-123' },
+    ],
+  });
+  assert.equal(result.downloads, undefined);
+  assert.match(result.notice ?? '', /"report.csv" was not saved: downloads aren’t saved after a password is typed/);
+  assert.match(result.notice ?? '', /"slow.bin" was not saved: downloads aren’t saved after a password is typed/);
+  assert.throws(() => host.takeDownload(sessionId, held.id), { code: 'download-not-found' });
+  result = await host.act(sessionId, { action: 'navigate', url: `${origin}/report.csv` });
+  assert.equal(result.downloads, undefined);
+  assert.match(result.notice ?? '', /downloads aren’t saved after a password is typed in this browser/);
+  result = await host.act(sessionId, { action: 'navigate', url: `${origin}/files` });
+  result = await host.upload(
+    sessionId,
+    { name: 'invoice.txt', mediaType: 'text/plain', ref: ref(result.snapshot, /button "Invoice"/) },
+    Buffer.from('Total: 42'),
+  );
+  assert.match(result.snapshot, /invoice: invoice.txt/, 'uploads still work');
 });
