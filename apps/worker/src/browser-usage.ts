@@ -79,15 +79,15 @@ function meterFor(
     },
     record: (state: BrowserSessionState) =>
       quietly('recorded', async () => {
-        if (!state.openedAt || !state.closesAt) return;
-        const { openedAt, closesAt } = state;
+        const { openedAt, activeAt, closesAt } = state;
+        if (!openedAt || !activeAt || !closesAt) return;
         await transact(async tx => {
           const flowId = await input.flow(tx);
           await recordBrowserUsage(tx, {
             sessionId: input.sessionId,
             openedAt: new Date(openedAt),
             closesAt: new Date(closesAt),
-            at: new Date(),
+            at: new Date(activeAt),
             flowId,
           });
         });

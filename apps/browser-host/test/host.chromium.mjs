@@ -518,7 +518,7 @@ test('a session that waits too long is told its place in line, and leaving the l
   assert.equal(host.size(), 2);
 });
 
-test('a session’s state says when it opened and when it closes unless used', async t => {
+test('a session’s state says when it opened, was last used and closes unless used', async t => {
   let clock = Date.parse('2026-01-01T00:00:00Z');
   const host = await createBrowserHost({ ...options, idleMs: 60_000, holdMs: 600_000, now: () => clock });
   t.after(() => host.shutdown());
@@ -529,6 +529,7 @@ test('a session’s state says when it opened and when it closes unless used', a
   await host.needsPerson(sessionId, { reason: 'Solve the captcha' });
   const waiting = await host.state(sessionId);
   assert.equal(waiting.openedAt, '2026-01-01T00:00:00.000Z');
+  assert.equal(waiting.activeAt, '2026-01-01T00:00:05.000Z');
   assert.equal(waiting.closesAt, '2026-01-01T00:10:05.000Z');
 });
 

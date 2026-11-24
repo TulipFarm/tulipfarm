@@ -78,6 +78,7 @@ test(
       controller: 'agent',
       needsPerson: null,
       openedAt: openedAt.toISOString(),
+      activeAt: openedAt.toISOString(),
       closesAt: new Date(now + 600_000).toISOString(),
     });
     await run.end();
@@ -93,6 +94,7 @@ test(
       controller: 'agent',
       needsPerson: null,
       openedAt: openedAt.toISOString(),
+      activeAt: openedAt.toISOString(),
       closesAt: new Date(now - 30_000).toISOString(),
     });
 

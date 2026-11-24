@@ -157,10 +157,11 @@ export const browserUsageCompatibility = Object.freeze({ minimum: 112, maximum: 
 const lacksBrowserUsage = (tx: Transaction) => (tx.commonVersion ?? browserUsageCompatibility.minimum) < 112;
 
 /**
- * Records that a browser session was used, with the times its host reported. The first use of a session opened at
- * `openedAt` needs the `flowId` it is charged to, and ends the stretch of any earlier opening of the same session; a
- * use without a flow, such as a person watching, only extends a session already recorded. A use after the session's
- * stretch was charged starts a new stretch in the same flow.
+ * Records that a browser session was used, with the times its host reported: `at` is when the host last saw it used.
+ * The first use of a session opened at `openedAt` needs the `flowId` it is charged to, and ends the stretch of any
+ * earlier opening of the same session; a use without a flow, such as a person watching, only extends a session already
+ * recorded. A use after the session's stretch was charged starts a new stretch in the same flow, unless the opening
+ * was closed or the report is no newer than the charged stretch: a late report then changes nothing.
  */
 export async function recordBrowserUsage(
   tx: Transaction,
@@ -177,9 +178,10 @@ export async function recordBrowserUsage(
   );
   if (updated.rowCount) return;
   const { rows } = await tx.client.query(
-    `SELECT flow_id, ended_at, ended_at >= $3::timestamptz AS stale FROM ${usage}
-     WHERE session_id = $1 AND opened_at = $2 ORDER BY started_at DESC LIMIT 1`,
-    [input.sessionId, input.openedAt, input.at],
+    `SELECT flow_id, ended_at,
+       bool_or(closed) OVER () OR ended_at >= $3::timestamptz OR ended_at >= $4::timestamptz AS stale
+     FROM ${usage} WHERE session_id = $1 AND opened_at = $2 ORDER BY started_at DESC LIMIT 1`,
+    [input.sessionId, input.openedAt, input.at, input.closesAt],
   );
   const previous = z.object({ flow_id: z.string(), ended_at: z.date(), stale: z.boolean() }).optional().parse(rows[0]);
   if (previous?.stale) return;
@@ -199,12 +201,16 @@ export async function recordBrowserUsage(
   );
 }
 
-/** Records that a browser session closed at `at`, or earlier if its host had already closed it unused. */
+/**
+ * Records that a browser session closed at `at`, or earlier if its host had already closed it unused. Each opening of
+ * it until then is closed for good: a later report of one changes nothing, and only a new opening is charged again.
+ */
 export async function endBrowserUsage(tx: Transaction, sessionId: string, at: Date) {
   if (lacksBrowserUsage(tx)) return;
   await tx.client.query(
-    `UPDATE ${qualified(tx.schema, 'tf_browser_usage')} SET ended_at = GREATEST(started_at, LEAST(closes_at, $2::timestamptz))
-     WHERE session_id = $1 AND ended_at IS NULL AND charged_at IS NULL`,
+    `UPDATE ${qualified(tx.schema, 'tf_browser_usage')}
+     SET ended_at = COALESCE(ended_at, GREATEST(started_at, LEAST(closes_at, $2::timestamptz))), closed = true
+     WHERE session_id = $1 AND opened_at <= $2::timestamptz AND NOT closed`,
     [sessionId, at],
   );
 }

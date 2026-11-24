@@ -271,6 +271,7 @@ class Session {
       signIn: this.signIn,
       logins: [...this.logins.values()],
       openedAt: new Date(this.openedAt).toISOString(),
+      activeAt: new Date(this.lastUsed).toISOString(),
       closesAt: new Date(this.lastUsed + this.idleLimit).toISOString(),
     };
   }

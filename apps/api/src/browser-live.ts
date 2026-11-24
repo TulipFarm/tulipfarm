@@ -76,15 +76,15 @@ export function browserUsage(
 ): BrowserUsage | undefined {
   if (!resourceMeter()) return undefined;
   return async (workspaceId, sessionId, state) => {
-    const { openedAt, closesAt } = state;
-    if (!openedAt || !closesAt) return;
+    const { openedAt, activeAt, closesAt } = state;
+    if (!openedAt || !activeAt || !closesAt) return;
     try {
       await runtime.transaction(workspaceId, browserUsageCompatibility, tx =>
         recordBrowserUsage(tx, {
           sessionId,
           openedAt: new Date(openedAt),
           closesAt: new Date(closesAt),
-          at: new Date(),
+          at: new Date(activeAt),
         }),
       );
     } catch (error) {

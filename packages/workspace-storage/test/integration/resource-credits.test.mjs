@@ -188,8 +188,36 @@ test(
         await run(() => endBrowserUsage(tx, unused, at(620)));
         assert.equal(await run(() => chargeBrowserUsage(tx, at(900), minute)), 1n, 'a short stretch is a whole minute');
 
+        // A run holding its browser for a person a whole day ends after a minute. A report read before the close that
+        // arrives after it, even stamped later, never bills the closed browser up to the old deadline.
+        const held = '44444444-4444-4444-8444-444444444444';
+        const hold = { sessionId: held, openedAt: at(1000), closesAt: at(1000 + 86_400) };
+        await run(() => recordBrowserUsage(tx, { ...hold, at: at(1000), flowId: 'flow-held' }));
+        await run(() => endBrowserUsage(tx, held, at(1060)));
+        await run(() => recordBrowserUsage(tx, { ...hold, at: at(1061) }));
+        await run(() => recordBrowserUsage(tx, { ...hold, at: at(1061), flowId: 'flow-held' }));
+        assert.equal(await run(() => chargeBrowserUsage(tx, at(2000), minute)), 1n);
+        await run(() => recordBrowserUsage(tx, { ...hold, at: at(2001), flowId: 'flow-held' }));
+        assert.equal(
+          await run(() => chargeBrowserUsage(tx, at(1000 + 90_000), minute)),
+          0n,
+          'a closed browser stays closed',
+        );
+        // Only a new opening of the same session is charged again.
+        await run(() =>
+          recordBrowserUsage(tx, {
+            sessionId: held,
+            openedAt: at(3000),
+            closesAt: at(3600),
+            at: at(3000),
+            flowId: 'flow-held',
+          }),
+        );
+        await run(() => endBrowserUsage(tx, held, at(3030)));
+        assert.equal(await run(() => chargeBrowserUsage(tx, at(4000), minute)), 1n);
+
         const { rows } = await runtime.query(
-          `SELECT flow_id, model_id, activity, charged::text FROM ${workspace.names.schema}.tf_credit_usage ORDER BY id`,
+          `SELECT flow_id, model_id, activity, charged::text FROM ${workspace.names.schema}.tf_credit_usage WHERE flow_id <> 'flow-held' ORDER BY id`,
         );
         assert.deepEqual(
           rows.map(row => [row.flow_id, row.model_id, row.activity, row.charged]),
@@ -199,7 +227,7 @@ test(
             ['flow-chat', 'compute-browser', 'compute', '1'],
           ],
         );
-        assert.equal(debits.length, 3);
+        assert.equal(debits.length, 5);
         assert.ok(debits.every(([id]) => id.startsWith('browser:')));
 
         // A model call in a flow with browser time is charged the same as in a flow without it.

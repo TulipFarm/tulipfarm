@@ -168,6 +168,8 @@ export const browserSessionStateSchema = z.strictObject({
   logins: z.array(browserLoadedLoginSchema),
   /** When the host opened this session. A session that closes and opens again gets a new time. */
   openedAt: z.string().optional(),
+  /** When something last used the session, by the host's clock. */
+  activeAt: z.string().optional(),
   /** When the host closes the session if nothing uses it before then. */
   closesAt: z.string().optional(),
 });
