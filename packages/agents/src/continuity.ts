@@ -32,15 +32,20 @@ import {
   retryRateLimitedModel,
   type ModelErrorClass,
 } from '@tulipfarm/observability';
-import type { ServedModelCatalog } from '@tulipfarm/config';
+import { isPlanProvider, type ServedModelCatalog } from '@tulipfarm/config';
 import { CreditsExhausted, requireCredits, reserveCredits, settleCredits } from '@tulipfarm/workspace-storage/credits';
 import { knowledgeTaskSpend } from '@tulipfarm/workspace-storage/knowledge-credits';
+import { recordModelUsage } from '@tulipfarm/workspace-storage/model-usage';
 import { modelCallTimeoutMs } from '@tulipfarm/config/timeouts';
 
 type Input = Parameters<AgentModel>[0];
+/** The member a run works for, whose plan a plan model answers on; null when the run works for no member. */
+export type RunMember = { workspaceId: string; membershipId: string | null };
 export type ModelContinuity = {
+  /** The bundle to admit `familyId` under: the server's, or a plan model's own. */
   activeBundle: (
     workspaceId: string,
+    familyId?: string,
   ) =>
     | { bundle: ModelBundle; activationRevision: number }
     | Promise<{ bundle: ModelBundle; activationRevision: number }>;
@@ -53,7 +58,13 @@ export type ModelContinuity = {
   allowed: (workspaceId: string, resolution: ResolvedModel) => boolean | Promise<boolean>;
   actualModelIds: (resolution: ResolvedModel) => readonly string[];
   health: ModelRouteHealth;
-  infer: (resolution: ResolvedModel, input: Input, timeoutMs: number, signal: AbortSignal) => Promise<InferenceResult>;
+  infer: (
+    resolution: ResolvedModel,
+    input: Input,
+    timeoutMs: number,
+    signal: AbortSignal,
+    member: RunMember,
+  ) => Promise<InferenceResult>;
   budgetPicoUsd: (workspaceId: string) => string | Promise<string>;
   /** The family of an agent that has none, or whose family the server no longer serves: the catalog default. */
   defaultFamily?: (workspaceId: string, agentId: string, definitionRevision: string) => string | undefined;
@@ -158,7 +169,7 @@ export async function admitGeneration(
     if (error instanceof CreditsExhausted) throw new AgentError('credits-exhausted', 409);
     throw error;
   }
-  const active = await config.activeBundle(workspaceId);
+  const active = await config.activeBundle(workspaceId, family);
   const bundle = modelBundleSchema.parse(active.bundle);
   const activationRevision = z.number().int().nonnegative().parse(active.activationRevision);
   // An agent on a family the server no longer serves moves to the default family.
@@ -167,7 +178,7 @@ export async function admitGeneration(
       ? family
       : (config.defaultFamily?.(workspaceId, agentId, revision) ?? family);
   if (!requested) throw new AgentError('legacy-model-binding-required', 503);
-  const availability = await modelAvailability(tx);
+  const availability = await modelAvailability(tx, [requested]);
   let primaryAvailability = availability.find(row => row.familyId === requested);
   if (!primaryAvailability?.enabled) throw new AgentError('workspace-disabled', 400);
   const restrictions = await config.restrictions(workspaceId);
@@ -175,13 +186,16 @@ export async function admitGeneration(
   let primary = resolve(requested);
   if (primary.familyId !== requested || !(await config.allowed(workspaceId, primary)))
     throw new AgentError('model-route-unavailable', 503);
+  // A plan model runs on the member's plan or not at all: it has no fallback and no paused replacement.
+  const plan = isPlanProvider(primary.route.provider);
   const policy = await rule(tx, requested);
   // A paused family hands an existing agent to its workspace fallback, when that family can run it, for the whole run.
-  const replacementAvailability = config.paused?.(requested)
-    ? availability.find(
-        row => row.familyId === policy.target_family_id && row.enabled && !config.paused?.(row.familyId),
-      )
-    : undefined;
+  const replacementAvailability =
+    !plan && config.paused?.(requested)
+      ? availability.find(
+          row => row.familyId === policy.target_family_id && row.enabled && !config.paused?.(row.familyId),
+        )
+      : undefined;
   if (replacementAvailability) {
     const replacement = (() => {
       try {
@@ -199,7 +213,9 @@ export async function admitGeneration(
     }
   }
   let fallbackAvailability =
-    primary.familyId === requested ? availability.find(row => row.familyId === policy.target_family_id) : undefined;
+    !plan && primary.familyId === requested
+      ? availability.find(row => row.familyId === policy.target_family_id)
+      : undefined;
   let fallback = fallbackAvailability?.enabled ? resolve(fallbackAvailability.familyId) : null;
   if (
     fallback &&
@@ -209,7 +225,7 @@ export async function admitGeneration(
   )
     throw new AgentError('model-route-unavailable', 503);
   // A workspace that never set a rule for the family uses the first available model of the catalog's fallback chain.
-  const catalogFallback = policy.revision === 0 && primary.familyId === requested;
+  const catalogFallback = !plan && policy.revision === 0 && primary.familyId === requested;
   if (catalogFallback)
     for (const familyId of config.fallbacks?.(requested) ?? []) {
       const row = availability.find(item => item.familyId === familyId);
@@ -300,7 +316,7 @@ export async function permitted(
   role: Attempt['role'],
 ) {
   parseModelResolution(resolution, await config.trustedBundle(generation.binding.bundleId));
-  const availability = await modelAvailability(tx);
+  const availability = await modelAvailability(tx, [generation.binding.primary.familyId]);
   const primary = availability.find(row => row.familyId === generation.binding.primary.familyId);
   if (!primary?.enabled || primary.lastDisabledRevision !== generation.binding.primaryLastDisabledRevision)
     return false;
@@ -565,6 +581,8 @@ export async function settleAttempt(
   const settled = definitiveCharge === null ? null : await settleCredits(tx, attempt.id, definitiveCharge);
   if (settled && usage.kind === 'known' && cost.kind === 'known')
     onMetered?.({ ...settled, ...usageTokenCounts(usage.tokens) });
+  if (usage.kind === 'known' && isPlanProvider(attempt.resolution.route.provider))
+    await recordPlanUsage(tx, attempt, usage.tokens, result.planConnectionId ?? null);
   if (!live.rowCount) {
     const corrected = await tx.client.query(
       `UPDATE ${relation(tx, 'tf_model_attempts')} SET outcome=COALESCE(outcome,'{}'::jsonb) || $2::jsonb,usage=$3,cost=$4 WHERE id=$1 AND usage->>'kind'='unknown' AND NOT COALESCE(outcome ? 'chargedPicoUsd',false) RETURNING id`,
@@ -641,6 +659,52 @@ export async function settleAttempt(
     );
   } else if (result.kind === 'failure') await failGeneration(tx, generation, result.reason);
   return true;
+}
+
+/** Records a call on a member's plan as a plan call for the Usage page, as chats record theirs. It costs no credits. */
+async function recordPlanUsage(
+  tx: AgentTransaction,
+  attempt: Attempt,
+  tokens: Extract<z.infer<typeof modelUsageSchema>, { kind: 'known' }>['tokens'],
+  connectionId: string | null,
+) {
+  const row = z
+    .object({ flow_id: z.string(), agent_id: z.string().nullable(), activity: z.string() })
+    .optional()
+    .parse(
+      (
+        await tx.client.query(
+          `SELECT u.flow_id,u.agent_id,CASE
+             WHEN EXISTS (SELECT 1 FROM ${relation(tx, 'tf_agent_tasks')} t WHERE t.flow_id::text=u.flow_id) THEN 'task'
+             WHEN EXISTS (SELECT 1 FROM ${relation(tx, 'tf_agent_runs')} r WHERE r.id::text=u.flow_id AND r.kind='scheduled') THEN 'scheduled'
+             ELSE 'agent' END AS activity
+           FROM ${relation(tx, 'tf_credit_usage')} u WHERE u.id=$1`,
+          [attempt.id],
+        )
+      ).rows[0],
+    );
+  if (!row) return;
+  const counts = usageTokenCounts(tokens);
+  await recordModelUsage(tx, [
+    {
+      id: attempt.id,
+      activity: row.activity,
+      flowId: row.flow_id,
+      // The member comes from the run's flow, as for other agent calls.
+      membershipId: null,
+      agentId: row.agent_id,
+      modelId: attempt.resolution.modelId,
+      modelProvider: attempt.resolution.route.provider,
+      paidBy: 'plan',
+      connectionId,
+      inputTokens: counts.inputTokens,
+      outputTokens: counts.outputTokens,
+      cachedTokens: tokens.cacheRead,
+      listPicoUsd: null,
+      pricingRevision: attempt.resolution.pricingRevision,
+      fallback: null,
+    },
+  ]);
 }
 
 /**

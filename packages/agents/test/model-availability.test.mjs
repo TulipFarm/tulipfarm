@@ -5,6 +5,7 @@ import {
   flaggedOffModels,
   modelAvailability,
   modelFamilyEnabled,
+  stepFamilyAvailable,
 } from '../src/model-availability.ts';
 
 const model = (id, overrides = {}) => ({
@@ -132,8 +133,22 @@ test("a plan model is offered only while its plan's workspace flag is on", async
       }),
     ],
   });
-  withEnv(t, { MODEL_CATALOG: plans, FEATURE_FLAG_CHATGPT_PLAN: 'false' });
+  withEnv(t, {
+    MODEL_CATALOG: plans,
+    ANTHROPIC_API_KEY: 'test-placeholder',
+    OPENAI_API_KEY: 'test-placeholder',
+    FEATURE_FLAG_CHATGPT_PLAN: 'false',
+  });
+  // A model the member's plan lists but the catalog does not name, such as one an agent prefers.
+  const listed = 'chatgpt-gpt-6--1-sol';
   assert.equal(await modelFamilyEnabled(tx, 'chatgpt-luna'), false);
+  assert.equal(await modelFamilyEnabled(tx, listed), false);
   process.env.FEATURE_FLAG_CHATGPT_PLAN = 'true';
   assert.equal(await modelFamilyEnabled(tx, 'chatgpt-luna'), true);
+  assert.equal(await modelFamilyEnabled(tx, listed), true);
+  assert.ok((await modelAvailability(tx, [listed])).some(row => row.familyId === listed));
+  assert.ok(!(await modelAvailability(tx)).some(row => row.familyId === listed));
+  // A specialist step carries no member's plan token, so a plan model never serves one.
+  assert.equal(await stepFamilyAvailable(tx, 'chatgpt-luna'), false);
+  assert.equal(await stepFamilyAvailable(tx, 'claude-sonnet'), true);
 });

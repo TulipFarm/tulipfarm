@@ -1,9 +1,17 @@
 import type { ModelCatalogFamily } from '@tulipfarm/config/model-catalog';
 import { ModelLogo } from './model-logo';
+import { familyPlan, type PlanProvider } from './chatgpt-plan-api';
 
 const credits = (value: number | null | undefined) => (value == null ? 'Not priced' : value.toLocaleString());
 
+const planNames: Record<PlanProvider, string> = {
+  chatgpt: 'ChatGPT plan',
+  claude: 'Claude plan',
+  copilot: 'GitHub Copilot plan',
+};
+
 export function ModelOption({ family, details = false }: { family: ModelCatalogFamily; details?: boolean }) {
+  const plan = familyPlan(family);
   return (
     <span className="flex min-w-0 items-center gap-2.5">
       <ModelLogo vendor={family.vendor} />
@@ -15,7 +23,9 @@ export function ModelOption({ family, details = false }: { family: ModelCatalogF
         </span>
         {details && (
           <span className="text-xs font-normal text-muted-foreground">
-            {family.inputCreditsPerMillionTokens == null && family.outputCreditsPerMillionTokens == null ? (
+            {plan ? (
+              `${planNames[plan]}, no workspace credits`
+            ) : family.inputCreditsPerMillionTokens == null && family.outputCreditsPerMillionTokens == null ? (
               'Not priced'
             ) : (
               <>

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   isPlanProvider,
   loadModelCatalog,
+  planModelOfFamily,
   planProviderNames,
   planProviders,
   readModelCatalog,
@@ -13,7 +14,11 @@ import { workspaceIdFromSchema } from '@tulipfarm/workspace-storage/runtime';
 import { relation, type AgentTransaction } from './store.ts';
 import { modelAvailabilitySchema } from './model-policy-contracts.ts';
 
-export async function modelAvailability(tx: AgentTransaction) {
+/**
+ * The workspace's model availability. `familyIds` may name models a member's plan lists that the catalog does not, such
+ * as one an agent prefers; each is included while its plan is on for the workspace.
+ */
+export async function modelAvailability(tx: AgentTransaction, familyIds: readonly string[] = []) {
   const rows = z
     .array(modelAvailabilitySchema.extend({ lastDisabledRevision: z.number().int().nonnegative() }))
     .parse(
@@ -28,8 +33,13 @@ export async function modelAvailability(tx: AgentTransaction) {
   const flaggedOff = await flaggedOffModels(tx);
   const plans = await plansOn(tx);
   const offered = (provider: string) => !isPlanProvider(provider) || plans.has(provider);
-  return (
-    [...catalog.models, ...catalog.imageModels]
+  const named = new Set([...catalog.models, ...catalog.imageModels].map(family => family.id));
+  const planListed = familyIds.filter(id => {
+    const plan = named.has(id) ? null : planModelOfFamily(id);
+    return plan !== null && plans.has(plan.provider);
+  });
+  return [
+    ...[...catalog.models, ...catalog.imageModels]
       .filter(family => !flaggedOff.has(family.id))
       // A plan model whose feature flag, such as chatgpt-plan, is off is not offered at all.
       .filter(family => !('routes' in family) || family.routes.every(route => offered(route.provider)))
@@ -41,8 +51,17 @@ export async function modelAvailability(tx: AgentTransaction) {
             revision: 0,
             lastDisabledRevision: 0,
           },
-      )
-  );
+      ),
+    ...[...new Set(planListed)].map(
+      familyId =>
+        rows.find(row => row.familyId === familyId) ?? {
+          familyId,
+          enabled: true,
+          revision: 0,
+          lastDisabledRevision: 0,
+        },
+    ),
+  ];
 }
 
 /**
@@ -103,7 +122,7 @@ export async function agentModelChoices(tx: AgentTransaction, catalog: ServedMod
 }
 
 export async function modelFamilyEnabled(tx: AgentTransaction, familyId: string) {
-  return (await modelAvailability(tx)).some(row => row.familyId === familyId && row.enabled);
+  return (await modelAvailability(tx, [familyId])).some(row => row.familyId === familyId && row.enabled);
 }
 
 /**
@@ -116,7 +135,7 @@ export async function stepFamilyAvailable(
   catalog: Pick<ServedModelCatalog, 'model'> = loadModelCatalog(),
 ) {
   const served = catalog.model(familyId);
-  // Plan steps do not run for a member, so a model on a member's plan cannot serve them.
+  // A specialist step calls deployment routes and carries no member's plan token, so it cannot run on a plan model.
   if (served && isPlanProvider(served.route.type)) return false;
   return Boolean(served && !served.paused) && (await modelFamilyEnabled(tx, familyId));
 }

@@ -283,6 +283,10 @@
       "types": "./dist/inference.d.ts",
       "default": "./dist/inference.js"
     },
+    "./member-plans": {
+      "types": "./dist/member-plans.d.ts",
+      "default": "./dist/member-plans.js"
+    },
     "./plan-sessions": {
       "types": "./dist/plan-sessions.d.ts",
       "default": "./dist/plan-sessions.js"

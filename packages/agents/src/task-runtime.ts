@@ -1199,7 +1199,10 @@ export function createTaskRuntime(
         if (Buffer.byteLength(JSON.stringify(input)) > Buffer.byteLength(JSON.stringify(claim.input)))
           return { request: Promise.resolve({ ...failed('unavailable'), dispatch: 'not-started' as const }) };
         request = model
-          .infer(claim.attempt.resolution, input, timeoutMs, controller.signal)
+          .infer(claim.attempt.resolution, input, timeoutMs, controller.signal, {
+            workspaceId,
+            membershipId: c.owner.membershipId,
+          })
           .catch(() => failed('provider-error'));
         return { request };
       });

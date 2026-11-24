@@ -1371,6 +1371,16 @@ export const settings: readonly Setting[] = [
       'Local development only: the web app signs in as the mock dev user (`dev@tulipfarm.test`) instead of showing the login page. `false` shows the login page. Never applies in production, with an email transport, or off loopback.',
   },
   {
+    name: 'TULIPFARM_DEV_ENV_FILE',
+    group: 'Sign-in',
+    services: ['api'],
+    requirement: 'optional',
+    secret: false,
+    default: '~/.tulipfarm/dev.env',
+    description:
+      "Local development only: the machine-wide file every worktree's API reads for `TULIPFARM_DEV_PLAN_CLAUDE_TOKEN` and `TULIPFARM_DEV_PLAN_COPILOT_TOKEN` (or `..._TOKEN_COMMAND`, a command that prints one). With a token, each member's own plan connects the first time their models load. Applies only where local sign-in does.",
+  },
+  {
     name: 'AUTH_METHODS',
     group: 'Sign-in',
     services: ['api'],

@@ -26,6 +26,7 @@ import { githubAccounts } from './github-composition.ts';
 import { registerGitHubAccounts } from './github-accounts.ts';
 import { chatGptPlan, registerChatGptPlan } from './chatgpt-plan.ts';
 import { registerTokenPlan, tokenPlan } from './token-plans.ts';
+import { createDevPlans } from './dev-plans.ts';
 import type { TokenPlan, TokenPlanProvider } from '@tulipfarm/integrations/token-plans';
 import { planModelFamilyId, planProviders, type PlanProvider } from '@tulipfarm/config';
 import { registerSubscriptions } from './subscriptions.ts';
@@ -121,7 +122,7 @@ export function buildApp(
         return getLastWorkspace({ pool: auth.pool, runtime: workspaceStorage }, userId);
       });
       registerUserVisits(v1, auth, authConfig().webOrigin);
-      const models = createModelConfiguration({ pool: auth.pool });
+      const models = createModelConfiguration({ pool: auth.pool, workspaces: () => workspaceStorage });
       if (options.agentModel === undefined) v1.addHook('onReady', models.registerModelBundle);
       registerAbuseProtection(v1, auth.auth);
       registerPublicGuide(v1, auth);
@@ -167,6 +168,7 @@ export function buildApp(
             ? (options.tokenPlans[provider] ?? null)
             : tokenPlan(provider, runtime, process.env, undefined, github?.memberAccessToken);
         const tokenPlans = { claude: planFor('claude'), copilot: planFor('copilot') };
+        const devPlans = createDevPlans(tokenPlans, business.log);
         const copilot = tokenPlans.copilot;
         registerGitHubAccounts(
           business,
@@ -216,6 +218,7 @@ export function buildApp(
             ...(subscriptions && (chatGpt || tokenPlans.claude || tokenPlans.copilot)
               ? {
                   planModels: async (workspaceId: string, userId: string, providers: readonly PlanProvider[]) => {
+                    await devPlans?.ensure(workspaceId, userId);
                     const on = providers.filter(provider => (provider === 'chatgpt' ? chatGpt : tokenPlans[provider]));
                     const models = on.length ? await subscriptions.modelsFor(workspaceId, userId, on) : new Map();
                     return new Map(

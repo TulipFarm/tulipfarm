@@ -1,3 +1,4 @@
+import { memberPlanAccess } from '@tulipfarm/agents/member-plans';
 import { runImageChoice } from '@tulipfarm/agents/image-generation';
 import {
   createTaskRuntime,
@@ -44,7 +45,7 @@ export function createTaskComposition(
 ) {
   const runtime = withKnowledgeSourceAuthorization(storage);
   const environment = modelEnvironment();
-  const model = environment?.continuity(createMemoryRouteHealth, bundles) ?? null;
+  const model = environment?.continuity(createMemoryRouteHealth, bundles, memberPlanAccess(runtime)) ?? null;
   const attachments = objects ? createAttachments(runtime, objects) : null;
   const files = objects ? createFiles(runtime, objects) : null;
   let google: ReturnType<typeof googleOperations> | undefined;

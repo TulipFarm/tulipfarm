@@ -3,10 +3,17 @@ import type { Pool } from 'pg';
 import { createModelRouteHealth, type ModelContinuity } from '@tulipfarm/agents/chat';
 import type { ModelFamilyEligibility } from '@tulipfarm/agents/model-policy';
 import { modelBundleStore } from '@tulipfarm/agents/model-bundles';
+import { memberPlanAccess, type MemberPlanAccess } from '@tulipfarm/agents/member-plans';
+import type { ConversationRuntime } from '@tulipfarm/conversations/runtime';
 import type { ModelCatalogSnapshot } from './model-catalog.ts';
 import { modelEnvironment } from './model-environment.ts';
 
-export function createModelConfiguration(input: { pool: Pool; env?: NodeJS.ProcessEnv }) {
+export function createModelConfiguration(input: {
+  pool: Pool;
+  env?: NodeJS.ProcessEnv;
+  /** Workspace storage, once registered, from which agent runs read their member's plans. */
+  workspaces?: () => ConversationRuntime | undefined;
+}) {
   const environment = modelEnvironment(input.env);
   const modelFamilyResolution: ModelCatalogSnapshot['modelFamilyResolution'] = request => {
     const resolution = environment.resolve(request.modelFamilyId);
@@ -51,13 +58,22 @@ export function createModelConfiguration(input: { pool: Pool; env?: NodeJS.Proce
       );
     },
   };
-  // Agents, policies and compaction run without a requesting member, so they can never use a member's ChatGPT plan.
+  // An agent runs on the plan of the member it works for. Policies, compaction and the rest run without a member, so
+  // they can never use a member's plan.
   const modelFamilyEligibility: ModelFamilyEligibility = async request =>
-    !isPlan(request.modelFamilyId) && snapshot.modelFamilyEligibility(request);
+    (request.purpose === 'agent-model' || !isPlan(request.modelFamilyId)) && snapshot.modelFamilyEligibility(request);
   const bundles = modelBundleStore(input.pool);
+  let access: MemberPlanAccess | undefined;
+  const plans: MemberPlanAccess = async request => {
+    const runtime = input.workspaces?.();
+    if (!runtime) throw new Error('Workspace storage is unavailable');
+    access ??= memberPlanAccess(runtime);
+    return access(request);
+  };
   const modelContinuity: ModelContinuity = environment.continuity(
     key => createModelRouteHealth(input.pool, key),
     bundles,
+    plans,
   );
   /** Records this server's bundle so runs admitted under it stay valid after a configuration change. */
   const registerModelBundle = async () => {
