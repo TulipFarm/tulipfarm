@@ -477,7 +477,7 @@ test(
       await query(`SELECT kind,source_id,summary FROM ${s}.tf_inbox_items WHERE row_id=$1 AND resolved_at IS NULL`, [
         row.id,
       ]),
-      [{ kind: 'waiting', source_id: taskId, summary: 'An agent needs you in its browser' }],
+      [{ kind: 'waiting', source_id: taskId, summary: 'An agent needs you to take over its browser' }],
     );
     const { items } = await createRowWork(runtime, commonCompatibility).inbox(workspace.id, workspace.userId);
     assert.equal(items.find(item => item.rowId === row.id)?.taskId, taskId, 'the item opens the run and its browser');

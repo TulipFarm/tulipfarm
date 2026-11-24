@@ -58,7 +58,7 @@ export function AgentBrowserSettingsSection({
   return (
     <FormSection
       title="Browser"
-      description="How this agent uses its browser in a run. Each run gets its own browser, which closes when the run ends."
+      description="Where this agent can browse and which logins it uses. Each run gets its own browser, which closes when the run ends."
     >
       <Field
         optional
@@ -79,11 +79,11 @@ export function AgentBrowserSettingsSection({
         <Skeleton shape="panel" />
       ) : read.state.kind !== 'ready' ? (
         <p role="alert" className="text-sm text-destructive">
-          Logins couldn’t load. You can still save the other settings.
+          Couldn’t show saved logins. You can still save the other settings.
         </p>
       ) : !available.length && !hidden.length ? (
         <p className="text-sm text-muted-foreground">
-          No saved logins to choose from. Save a login from a chat’s browser first.
+          No saved logins you can use yet. Sign in to a site in a chat’s browser, then choose Save login.
         </p>
       ) : (
         <ChoiceGroup
@@ -91,13 +91,13 @@ export function AgentBrowserSettingsSection({
           optional
           disabled={disabled}
           legend="Logins to load"
-          helper={`Signs the run’s browser in to these sites. A login loads only if the person who started the run may use it. Choose up to ${loginLimit}.`}
+          helper={`The run’s browser starts signed in to these sites. It skips any login the run’s owner can’t use. Choose up to ${loginLimit}.`}
           options={[
             ...available.map(login => ({ value: login.id, label: login.name, description: login.site })),
             ...hidden.map(id => ({
               value: id,
-              label: 'A login you can’t see',
-              description: 'Chosen by another manager.',
+              label: 'A login you can’t use',
+              description: 'You don’t have access to this login. If you clear it, you can’t choose it again.',
             })),
           ]}
           value={[...logins]}

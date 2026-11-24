@@ -222,11 +222,11 @@ export function LiveBrowserCanvas({
         <StatePanel
           kind="unavailable"
           heading="h3"
-          title="The browser has closed"
+          title={chatId ? 'The browser has closed' : 'The browser isn’t open'}
           description={
             chatId
               ? 'It closes after 10 minutes without use. Ask the agent to open it again.'
-              : 'It closes when the run ends, and opens the first time the agent uses it.'
+              : 'It opens when the agent first uses it and closes when the run ends.'
           }
         />
       </CanvasSection>
