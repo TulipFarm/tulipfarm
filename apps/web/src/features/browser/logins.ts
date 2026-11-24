@@ -1,14 +1,27 @@
 import { useMemo } from 'react';
 import { z } from 'zod';
 import { browserSessionStateSchema, browserSiteOf } from '@tulipfarm/browser/contracts';
-import { browserLoginSummarySchema, type BrowserLoginSummary } from '@tulipfarm/browser/login-contracts';
-import type { SecretGrant } from '@/features/secrets/contracts';
+import { grantSchema, type SecretGrant } from '@/features/secrets/contracts';
 import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson, responseError } from '@/lib/http';
 import { useFeatureChanges, useFeatureRead } from '@/lib/query';
 import { TableRequestError } from '@/features/tables/request-state';
 
-export type { BrowserLoginSummary };
+// The server's schema lives beside Node-only code, so the web app keeps its own copy, as it does for secrets.
+const browserLoginSummarySchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  site: z.string(),
+  ownerMembershipId: z.uuid(),
+  status: z.enum(['active', 'needs-sign-in', 'suspended']),
+  grants: z.array(grantSchema),
+  canManage: z.boolean(),
+  canUse: z.boolean(),
+  createdAt: z.string(),
+  savedAt: z.string(),
+  lastUsedAt: z.string().nullable(),
+});
+export type BrowserLoginSummary = z.infer<typeof browserLoginSummarySchema>;
 
 const messages: Record<string, string> = {
   'invalid-request': 'Check the name and site, then try again. The site must have signed-in data to save.',
