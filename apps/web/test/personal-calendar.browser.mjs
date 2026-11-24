@@ -318,15 +318,15 @@ test(
       );
       await close();
       await capture('week-desktop');
-      const sidebar = page.getByRole('complementary', { name: 'Workspace sidebar', exact: true });
+      const sidebar = page.getByRole('complementary', { name: 'Acme Studio', exact: true });
       assert.ok((await sidebar.boundingBox()).width < 80, 'calendar starts with compact navigation');
       await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
       await page.waitForFunction(
-        () => document.querySelector('aside[aria-label="Workspace sidebar"]')?.getBoundingClientRect().width > 200,
+        () => document.querySelector('aside[aria-label="Acme Studio"]')?.getBoundingClientRect().width > 200,
       );
       await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
       await page.waitForFunction(
-        () => document.querySelector('aside[aria-label="Workspace sidebar"]')?.getBoundingClientRect().width < 80,
+        () => document.querySelector('aside[aria-label="Acme Studio"]')?.getBoundingClientRect().width < 80,
       );
       assert.equal(
         (await context.cookies()).find(cookie => cookie.name === 'sidebar_state').value,
@@ -334,10 +334,9 @@ test(
         'calendar compact mode does not overwrite the shared preference',
       );
       // Calendar has no sidebar entry; leave through the sidebar and return through history.
-      await sidebar.getByRole('button', { name: 'More', exact: true }).click();
       await sidebar.getByRole('link', { name: 'Integrations', exact: true }).click();
       await page.waitForFunction(
-        () => document.querySelector('aside[aria-label="Workspace sidebar"]')?.getBoundingClientRect().width > 200,
+        () => document.querySelector('aside[aria-label="Acme Studio"]')?.getBoundingClientRect().width > 200,
       );
       await page.goBack();
       await button('Design review').waitFor();

@@ -16,8 +16,8 @@ import {
   ChartBarIcon,
   ChatIcon,
   CheckIcon,
+  ChevronDownIcon,
   ChevronLeftIcon,
-  ChevronRightIcon,
   ChevronUpIcon,
   ComposeIcon,
   CpuIcon,
@@ -82,6 +82,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
+  SidebarSeparator,
   SidebarTrigger,
   useSidebar,
 } from '@tulipfarm/sprout/sidebar';
@@ -133,7 +134,18 @@ export type WorkspacePath =
   | '/$workspaceSlug/tables'
   | '/$workspaceSlug/integrations'
   | '/$workspaceSlug/help';
-export type Page = { label: string; to: WorkspacePath; icon?: typeof AddIcon; recent?: RecentSection };
+export type Page = {
+  label: string;
+  to: WorkspacePath;
+  icon?: typeof AddIcon;
+  recent?: RecentSection;
+  detail?: string;
+  keywords?: string[];
+  shortcut?: string;
+};
+const isApplePlatform =
+  typeof navigator !== 'undefined' && /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent);
+const searchShortcutLabel = isApplePlatform ? '⌘K' : 'Ctrl K';
 const SidebarCredits = overrides.get('credits');
 const creditsShown = overrides.overriddenBy('credits') !== undefined;
 // Parts most visits never show load on their own, after the page.
@@ -155,40 +167,150 @@ const SidebarMockPage = import.meta.env.DEV
   ? lazy(() => import('@/features/navigation/sidebar-mock').then(module => ({ default: module.SidebarMockPage })))
   : null;
 
-const newChat: Page = { label: 'New chat', to: '/$workspaceSlug', icon: ComposeIcon };
-const chats: Page = { label: 'Chats', to: '/$workspaceSlug/chat', icon: ChatIcon, recent: 'chat' };
-const inbox: Page = { label: 'Inbox', to: '/$workspaceSlug/inbox', icon: InboxIcon };
-const tasks: Page = { label: 'Tasks', to: '/$workspaceSlug/tasks', icon: TasksIcon };
-const settings: Page = { label: 'Settings', to: '/$workspaceSlug/settings', icon: SettingsIcon };
-const account: Page = { label: 'Account', to: '/$workspaceSlug/settings/account', icon: UserCircleIcon };
-const secrets: Page = { label: 'Secrets', to: '/$workspaceSlug/settings/secrets', icon: LockIcon };
-const browserLogins: Page = { label: 'Browser logins', to: '/$workspaceSlug/settings/browser-logins', icon: GlobeIcon };
-const members: Page = { label: 'Members', to: '/$workspaceSlug/members', icon: UserIcon };
-const membersAndTeams: Page = { label: 'Members & teams', to: members.to, icon: UsersIcon };
-const teams: Page = { label: 'Teams', to: '/$workspaceSlug/teams', icon: UsersIcon };
-const agents: Page = { label: 'Agents', to: '/$workspaceSlug/agents', icon: AgentIcon, recent: 'agents' };
-const apps: Page = { label: 'Apps', to: '/$workspaceSlug/apps', icon: AppsIcon };
+const newChat: Page = {
+  label: 'New chat',
+  to: '/$workspaceSlug',
+  icon: ComposeIcon,
+  detail: 'Start a fresh conversation in this workspace',
+  keywords: ['home', 'ask', 'compose', 'prompt'],
+};
+const chats: Page = {
+  label: 'Chats',
+  to: '/$workspaceSlug/chat',
+  icon: ChatIcon,
+  recent: 'chat',
+  detail: 'Browse and continue workspace conversations',
+  keywords: ['conversations', 'history', 'messages'],
+};
+const inbox: Page = {
+  label: 'Inbox',
+  to: '/$workspaceSlug/inbox',
+  icon: InboxIcon,
+  detail: 'Tasks and approvals waiting on you',
+  keywords: ['notifications', 'approvals', 'waiting', 'reviews'],
+};
+const tasks: Page = {
+  label: 'Tasks',
+  to: '/$workspaceSlug/tasks',
+  icon: TasksIcon,
+  detail: 'Work assigned to people and agents',
+  keywords: ['todo', 'assignments', 'board'],
+};
+const agentTasks: Page = {
+  label: 'My agent tasks',
+  to: '/$workspaceSlug/agent-tasks',
+  icon: TasksIcon,
+  detail: 'History of background tasks run by your agents',
+  keywords: ['runs', 'jobs', 'background'],
+};
+const settings: Page = {
+  label: 'Settings',
+  to: '/$workspaceSlug/settings',
+  icon: SettingsIcon,
+  detail: 'Workspace name, defaults, and administration',
+  keywords: ['general', 'preferences', 'workspace', 'config'],
+  shortcut: 'G S',
+};
+const account: Page = {
+  label: 'Account',
+  to: '/$workspaceSlug/settings/account',
+  icon: UserCircleIcon,
+  detail: 'Personal profile, memory, and assistant preferences',
+  keywords: ['profile', 'me', 'memory', 'bud', 'theme'],
+};
+const secrets: Page = {
+  label: 'Secrets',
+  to: '/$workspaceSlug/settings/secrets',
+  icon: LockIcon,
+  detail: 'Encrypted API keys and credentials for agents and workflows',
+  keywords: ['api keys', 'tokens', 'credentials', 'env'],
+};
+const browserLogins: Page = {
+  label: 'Browser logins',
+  to: '/$workspaceSlug/settings/browser-logins',
+  icon: GlobeIcon,
+  detail: 'Saved website sessions for browser-capable agents',
+  keywords: ['browser', 'sessions', 'cookies', 'sign in'],
+};
+const members: Page = {
+  label: 'Members',
+  to: '/$workspaceSlug/members',
+  icon: UserIcon,
+  detail: 'Invite people and manage workspace roles',
+  keywords: ['invite', 'people', 'users', 'roles', 'permissions'],
+};
+const membersAndTeams: Page = {
+  label: 'Members & teams',
+  to: members.to,
+  icon: UsersIcon,
+  detail: 'Manage workspace members, invites, and teams',
+  keywords: ['invite', 'people', 'users', 'roles', 'teams', 'permissions'],
+};
+const teams: Page = {
+  label: 'Teams',
+  to: '/$workspaceSlug/teams',
+  icon: UsersIcon,
+  detail: 'Groups for organizing people and shared access',
+  keywords: ['groups', 'people', 'departments'],
+};
+const agents: Page = {
+  label: 'Agents',
+  to: '/$workspaceSlug/agents',
+  icon: AgentIcon,
+  recent: 'agents',
+  detail: 'Build, configure, and run autonomous agents',
+  keywords: ['bots', 'assistants', 'automations'],
+};
+const workflows: Page = {
+  label: 'Workflows',
+  to: '/$workspaceSlug/workflows',
+  icon: WorkflowIcon,
+  recent: 'workflows',
+  detail: 'Automate schedules, triggers, and multi-step runs',
+  keywords: ['automations', 'schedules', 'triggers', 'pipelines'],
+};
+const apps: Page = {
+  label: 'Apps',
+  to: '/$workspaceSlug/apps',
+  icon: AppsIcon,
+  detail: 'Internal and public web apps built from your data',
+  keywords: ['web apps', 'sites', 'dashboards', 'pages'],
+};
+const tables: Page = {
+  label: 'Tables',
+  to: '/$workspaceSlug/tables',
+  icon: DatabaseIcon,
+  recent: 'tables',
+  detail: 'Structured business records, views, and queries',
+  keywords: ['database', 'records', 'rows', 'data', 'crm'],
+};
+const files: Page = {
+  label: 'Files',
+  to: '/$workspaceSlug/files',
+  icon: FolderIcon,
+  recent: 'files',
+  detail: 'Shared documents, folders, and knowledge files',
+  keywords: ['documents', 'uploads', 'library', 'folders', 'drive'],
+};
+const integrations: Page = {
+  label: 'Integrations',
+  to: '/$workspaceSlug/integrations',
+  icon: PlugIcon,
+  detail: 'Connect Slack, Google, GitHub, and external tools',
+  keywords: ['slack', 'google', 'github', 'mcp', 'connect', 'apps'],
+};
+const help: Page = {
+  label: 'Help and support',
+  to: '/$workspaceSlug/help',
+  icon: HelpCircleIcon,
+  detail: 'Guides, documentation, and support options',
+  keywords: ['docs', 'support', 'contact', 'faq'],
+};
+const automatePages: Page[] = [agents, workflows, apps];
+const dataPages: Page[] = [tables, files, integrations];
 const workspaceGroups: { label: string; pages: Page[] }[] = [
-  {
-    label: 'Daily work',
-    pages: [],
-  },
-  {
-    label: 'Agents & workflows',
-    pages: [
-      agents,
-      { label: 'Workflows', to: '/$workspaceSlug/workflows', icon: WorkflowIcon, recent: 'workflows' },
-      apps,
-    ],
-  },
-  {
-    label: 'Data & integrations',
-    pages: [
-      { label: 'Tables', to: '/$workspaceSlug/tables', icon: DatabaseIcon, recent: 'tables' },
-      { label: 'Files', to: '/$workspaceSlug/files', icon: FolderIcon, recent: 'files' },
-      { label: 'Integrations', to: '/$workspaceSlug/integrations', icon: PlugIcon },
-    ],
-  },
+  { label: 'Automate', pages: automatePages },
+  { label: 'Data', pages: dataPages },
 ];
 const workspacePages = workspaceGroups.flatMap(group => group.pages);
 const preloadPageCode = (page: Page, slug: string) => preloadRouteCode(page.to.replace('$workspaceSlug', slug));
@@ -216,10 +338,34 @@ function usePreloadSidebarCode(slug: string) {
     };
   }, [slug]);
 }
-const models: Page = { label: 'Models', to: '/$workspaceSlug/settings/models', icon: CpuIcon };
-const usage: Page = { label: 'Usage', to: '/$workspaceSlug/settings/usage', icon: ChartBarIcon };
-const soul: Page = { label: 'Soul repository', to: '/$workspaceSlug/settings/soul', icon: FilesIcon };
-const tableAccess: Page = { label: 'Table access', to: '/$workspaceSlug/grants', icon: ShieldUserIcon };
+const models: Page = {
+  label: 'Models',
+  to: '/$workspaceSlug/settings/models',
+  icon: CpuIcon,
+  detail: 'Choose default AI models and routing for this workspace',
+  keywords: ['llm', 'claude', 'openai', 'gemini', 'grok', 'ai'],
+};
+const usage: Page = {
+  label: 'Usage',
+  to: '/$workspaceSlug/settings/usage',
+  icon: ChartBarIcon,
+  detail: 'Credits balance, spend history, and model usage',
+  keywords: ['billing', 'credits', 'spend', 'cost', 'plan'],
+};
+const soul: Page = {
+  label: 'Soul repository',
+  to: '/$workspaceSlug/settings/soul',
+  icon: FilesIcon,
+  detail: 'Versioned workspace configuration and agent definitions',
+  keywords: ['git', 'commits', 'history', 'repo'],
+};
+const tableAccess: Page = {
+  label: 'Table access',
+  to: '/$workspaceSlug/grants',
+  icon: ShieldUserIcon,
+  detail: 'Control which people and teams can read or edit tables',
+  keywords: ['grants', 'permissions', 'access control', 'security'],
+};
 const administrationPages: Page[] = [members, teams, tableAccess];
 const settingsPages: Page[] = [
   { label: 'General', to: settings.to, icon: SettingsIcon },
@@ -233,7 +379,7 @@ const settingsPages: Page[] = [
 const unlistedPages: Page[] = [
   { label: 'Calendar', to: '/$workspaceSlug/calendar' },
   { label: 'Projects', to: '/$workspaceSlug/projects' },
-  { label: 'My agent tasks', to: '/$workspaceSlug/agent-tasks' },
+  agentTasks,
   { label: 'Skills', to: '/$workspaceSlug/skills' },
   { label: 'Packages', to: '/$workspaceSlug/packages' },
   { label: 'Knowledge', to: '/$workspaceSlug/knowledge' },
@@ -250,20 +396,25 @@ const pages = [
   usage,
   soul,
   settings,
-  { label: 'Help and support', to: '/$workspaceSlug/help' } satisfies Page,
+  help,
   ...administrationPages,
   ...workspacePages,
   ...unlistedPages,
 ];
 export const searchPages = [
-  newChat,
   chats,
+  inbox,
+  tasks,
   ...workspacePages,
+  agentTasks,
   settings,
   ...administrationPages,
   models,
   usage,
   account,
+  secrets,
+  browserLogins,
+  help,
 ];
 
 function useCurrentPage(): Page {
@@ -305,7 +456,7 @@ function useGoToSettingsShortcut() {
 
 function NavItem({ page }: { page: Page }) {
   const { workspace } = workspaceRoute.useRouteContext();
-  if (SidebarMockNavItem && workspace.slug === 'sidebar-mock')
+  if (page.recent && SidebarMockNavItem && workspace.slug === 'sidebar-mock')
     return (
       <Suspense fallback={<StandardNavItem page={page} />}>
         <SidebarMockNavItem page={page} />
@@ -431,42 +582,92 @@ function WorkspaceSwitchItems() {
   );
 }
 
-function WorkspaceHeader({ onSearch }: { onSearch: () => void }) {
+function WorkspaceMenuLinks() {
+  const { workspace, membershipId } = workspaceRoute.useRouteContext();
+  const { setOpenMobile } = useSidebar();
+  const close = () => setOpenMobile(false);
+  return (
+    <DropdownMenuGroup>
+      <DropdownMenuItem render={<Link to={settings.to} params={{ workspaceSlug: workspace.slug }} />} onClick={close}>
+        <SettingsIcon size="sm" aria-hidden="true" />
+        Workspace settings
+      </DropdownMenuItem>
+      {membershipId && workspace.status === 'ready' ? (
+        <WorkspacePeopleMenuItem workspaceId={workspace.id} slug={workspace.slug} onSelect={close} />
+      ) : (
+        <DropdownMenuItem render={<Link to={teams.to} params={{ workspaceSlug: workspace.slug }} />} onClick={close}>
+          <UsersIcon size="sm" aria-hidden="true" />
+          Teams
+        </DropdownMenuItem>
+      )}
+    </DropdownMenuGroup>
+  );
+}
+
+function WorkspacePeopleMenuItem({
+  workspaceId,
+  slug,
+  onSelect,
+}: {
+  workspaceId: string;
+  slug: string;
+  onSelect: () => void;
+}) {
+  const membership = useOwnMembership(workspaceId);
+  const admin = membership.state.kind === 'ready' && membership.state.data.capabilities.manageGovernance;
+  const target = admin ? membersAndTeams : teams;
+  return (
+    <DropdownMenuItem render={<Link to={target.to} params={{ workspaceSlug: slug }} />} onClick={onSelect}>
+      <UsersIcon size="sm" aria-hidden="true" />
+      {target.label}
+    </DropdownMenuItem>
+  );
+}
+
+function WorkspaceHeader() {
   const { workspace } = workspaceRoute.useRouteContext();
   const { setOpenMobile } = useSidebar();
   return (
     <div className="flex items-center gap-1">
-      <SidebarMenuButton
-        tooltip={workspace.name}
-        nativeButton={false}
-        render={<Link to="/$workspaceSlug" params={{ workspaceSlug: workspace.slug }} />}
-        icon={<MenuAvatar seed={workspace.id} name={workspace.name} image={workspace.icon} size="sm" shape="square" />}
-        onClick={() => setOpenMobile(false)}
-      >
-        {workspace.name}
-      </SidebarMenuButton>
-      <div className="flex items-center gap-1 [[data-sprout-sidebar][data-state=collapsed]_&]:hidden">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Search"
-          aria-keyshortcuts="Meta+K Control+K"
-          onClick={() => {
-            setOpenMobile(false);
-            onSearch();
-          }}
-        >
-          <SearchIcon size="lg" aria-hidden="true" />
-        </Button>
+      <div className="min-w-0 flex-1">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            aria-label={`${workspace.name}, switch workspace`}
+            render={
+              <SidebarMenuButton
+                tooltip={`${workspace.name} · Switch workspace`}
+                icon={
+                  <MenuAvatar
+                    seed={workspace.id}
+                    name={workspace.name}
+                    image={workspace.icon}
+                    size="sm"
+                    shape="square"
+                  />
+                }
+                badge={<ChevronDownIcon size="xs" aria-hidden="true" />}
+              />
+            }
+          >
+            {workspace.name}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent size="menu" side="bottom" align="start">
+            <WorkspaceSwitchItems />
+            <WorkspaceMenuLinks />
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      <div className="flex shrink-0 items-center [[data-sprout-sidebar][data-state=collapsed]_&]:hidden">
         <Button
           variant="secondary"
-          size="icon"
+          size="icon-sm"
           aria-label="New chat"
+          title="New chat"
           nativeButton={false}
           render={<Link to="/$workspaceSlug" params={{ workspaceSlug: workspace.slug }} />}
           onClick={() => setOpenMobile(false)}
         >
-          <ComposeIcon size="lg" aria-hidden="true" />
+          <ComposeIcon size="md" aria-hidden="true" />
         </Button>
       </div>
     </div>
@@ -504,7 +705,6 @@ function ProfileMenu() {
         {name}
       </DropdownMenuTrigger>
       <DropdownMenuContent size="menu" side="top">
-        <WorkspaceSwitchItems />
         <DropdownMenuGroup>
           <DropdownMenuLabel>
             <span className="block truncate">{user.email}</span>
@@ -573,33 +773,40 @@ function useSettingsMode() {
   );
 }
 
-function SettingsNavigation() {
+function SettingsNavigation({ backHref }: { backHref: string }) {
   const { workspace } = workspaceRoute.useRouteContext();
+  const navigate = useNavigate();
   const soulEnabled = useFlag('soul-repository-explorer');
-  const settings = useWorkspaceSettings(workspace.id);
+  const workspaceSettings = useWorkspaceSettings(workspace.id);
   const soulVisible =
     soulEnabled &&
-    settings.state.kind === 'ready' &&
-    !settings.state.error &&
-    settings.state.data.settings.canManage &&
-    settings.state.data.membership.role === 'admin';
+    workspaceSettings.state.kind === 'ready' &&
+    !workspaceSettings.state.error &&
+    workspaceSettings.state.data.settings.canManage &&
+    workspaceSettings.state.data.membership.role === 'admin';
   const capabilities = useSecretsCapabilities(workspace.id);
   const secretsVisible = capabilities.state.kind === 'ready' && capabilities.state.data.enabled;
   const browserLoginsVisible = useFlag('browser-use');
   const { setOpenMobile } = useSidebar();
+  const backLabel = `Back to ${workspace.name}`;
   return (
     <>
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
-              icon={<ChevronLeftIcon size="md" aria-hidden="true" />}
-              tooltip="Back to app"
               nativeButton={false}
-              render={<Link to="/$workspaceSlug" params={{ workspaceSlug: workspace.slug }} />}
-              onClick={() => setOpenMobile(false)}
+              render={<a href={backHref} />}
+              icon={<ChevronLeftIcon size="md" aria-hidden="true" />}
+              tooltip={backLabel}
+              onClick={event => {
+                setOpenMobile(false);
+                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+                event.preventDefault();
+                void navigate({ href: backHref });
+              }}
             >
-              Back to app
+              {backLabel}
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -632,7 +839,7 @@ function SettingsNavigation() {
 
 function PeopleItems() {
   const { workspace, membershipId } = workspaceRoute.useRouteContext();
-  if (!membershipId || workspace.status !== 'ready') return <NavItem page={teams} />;
+  if (!membershipId || workspace.status !== 'ready') return <StandardNavItem page={teams} />;
   return <AdminPeopleItem key={workspace.id} />;
 }
 
@@ -640,7 +847,7 @@ function AdminPeopleItem() {
   const { workspace } = workspaceRoute.useRouteContext();
   const membership = useOwnMembership(workspace.id);
   const admin = membership.state.kind === 'ready' && membership.state.data.capabilities.manageGovernance;
-  return <NavItem page={admin ? membersAndTeams : teams} />;
+  return <StandardNavItem page={admin ? membersAndTeams : teams} />;
 }
 
 // A collapsed sidebar stays collapsed on the next visit.
@@ -656,30 +863,44 @@ function saveNavigationOpen(open: boolean) {
   document.cookie = `${navigationCookie}=${open}; path=/; max-age=${60 * 60 * 24 * 365}; SameSite=Lax`;
 }
 
-function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
+function WorkspaceNavigation({ onSearch, backHref }: { onSearch: () => void; backHref: string }) {
   const { workspace } = workspaceRoute.useRouteContext();
+  const { setOpenMobile } = useSidebar();
   const settingsMode = useSettingsMode();
   const appsEnabled = useFlag('app-hosting');
   usePreloadSidebarCode(workspace.slug);
-  const currentTo = useCurrentPage().to;
-  const morePages = workspacePages.filter(page => page !== agents && (page !== apps || appsEnabled));
-  const inMore = currentTo === members.to || currentTo === teams.to || morePages.some(page => page.to === currentTo);
-  const [more, setMore] = useState(inMore);
-  useEffect(() => {
-    if (inMore) setMore(true);
-  }, [inMore, currentTo]);
-  const moreOpen = more;
+  const visibleGroups = workspaceGroups
+    .map(group => ({
+      ...group,
+      pages: group.pages.filter(page => page !== apps || appsEnabled),
+    }))
+    .filter(group => group.pages.length > 0);
   return (
-    <Sidebar collapsible="icon" label="Workspace sidebar">
+    <Sidebar collapsible="icon" label={settingsMode ? 'Settings' : workspace.name}>
       <>
         {settingsMode ? (
-          <SettingsNavigation />
+          <SettingsNavigation backHref={backHref} />
         ) : (
           <>
             <SidebarHeader>
               <SidebarMenu>
                 <SidebarMenuItem>
-                  <WorkspaceHeader onSearch={onSearch} />
+                  <WorkspaceHeader />
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    icon={<SearchIcon size="lg" aria-hidden="true" />}
+                    tooltip={`Search ${searchShortcutLabel}`}
+                    // Leading space keeps "Search" and "Ctrl K" separate words for WCAG label-in-name checks.
+                    badge={` ${searchShortcutLabel}`}
+                    aria-keyshortcuts="Meta+K Control+K"
+                    onClick={() => {
+                      setOpenMobile(false);
+                      onSearch();
+                    }}
+                  >
+                    Search
+                  </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>
             </SidebarHeader>
@@ -690,38 +911,39 @@ function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
                     <StandardNavItem page={chats} />
                     {workspace.status === 'ready' && <InboxNavItem workspaceId={workspace.id} />}
                     {workspace.status === 'ready' && <TasksNavItem />}
-                    <StandardNavItem page={agents} />
-                    <SidebarMenuItem>
-                      <SidebarMenuButton
-                        icon={<ChevronRightIcon size="xs" aria-hidden="true" className={moreOpen ? 'rotate-90' : ''} />}
-                        aria-expanded={moreOpen}
-                        onClick={() => setMore(!moreOpen)}
-                      >
-                        More
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                    {moreOpen && morePages.map(page => <NavItem key={page.to} page={page} />)}
-                    {moreOpen && <PeopleItems />}
-                    {moreOpen && <NavItem page={settings} />}
                   </SidebarMenu>
                 </SidebarGroup>
+                {visibleGroups.map(group => (
+                  <SidebarGroup key={group.label}>
+                    <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+                    <SidebarMenu>
+                      {group.pages.map(page => (
+                        <NavItem key={page.to} page={page} />
+                      ))}
+                    </SidebarMenu>
+                  </SidebarGroup>
+                ))}
                 {workspace.status === 'ready' && (
-                  <>
-                    <SidebarRecents label="Recents" section="chat" workspaceId={workspace.id} slug={workspace.slug} />
-                    <SidebarRecents
-                      label="Recent agents"
-                      section="agents"
-                      workspaceId={workspace.id}
-                      slug={workspace.slug}
-                    />
-                  </>
+                  <SidebarRecents
+                    label="Recent chats"
+                    section="chat"
+                    workspaceId={workspace.id}
+                    slug={workspace.slug}
+                  />
                 )}
               </nav>
             </SidebarContent>
           </>
         )}
         <SidebarFooter>
+          {!settingsMode && <SidebarSeparator />}
           <SidebarMenu>
+            {!settingsMode && (
+              <>
+                <PeopleItems />
+                <StandardNavItem page={settings} />
+              </>
+            )}
             {creditsShown && workspace.status === 'ready' && (
               <SidebarMenuItem>
                 <SidebarCredits key={workspace.id} workspaceId={workspace.id} slug={workspace.slug} />
@@ -807,9 +1029,157 @@ export function WorkspaceShell() {
   );
 }
 
+function WorkspaceSearchWithSecrets({
+  open,
+  onOpenChange,
+  workspaceId,
+  workspaceSlug,
+  workspaceReady,
+  appsEnabled,
+  tasksEnabled,
+  browserLoginsEnabled,
+  onToggleSidebar,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  workspaceId: string;
+  workspaceSlug: string;
+  workspaceReady: boolean;
+  appsEnabled: boolean;
+  tasksEnabled: boolean;
+  browserLoginsEnabled: boolean;
+  onToggleSidebar: () => void;
+}) {
+  const capabilities = useSecretsCapabilities(workspaceId, workspaceReady);
+  const secretsEnabled = capabilities.state.kind === 'ready' && capabilities.state.data.enabled;
+  return (
+    <WorkspaceSearchMount
+      open={open}
+      onOpenChange={onOpenChange}
+      workspaceId={workspaceId}
+      workspaceSlug={workspaceSlug}
+      workspaceReady={workspaceReady}
+      appsEnabled={appsEnabled}
+      tasksEnabled={tasksEnabled}
+      browserLoginsEnabled={browserLoginsEnabled}
+      secretsEnabled={secretsEnabled}
+      onToggleSidebar={onToggleSidebar}
+    />
+  );
+}
+
+function WorkspaceSearchMount({
+  open,
+  onOpenChange,
+  workspaceId,
+  workspaceSlug,
+  workspaceReady,
+  appsEnabled,
+  tasksEnabled,
+  browserLoginsEnabled,
+  secretsEnabled,
+  onToggleSidebar,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  workspaceId: string;
+  workspaceSlug: string;
+  workspaceReady: boolean;
+  appsEnabled: boolean;
+  tasksEnabled: boolean;
+  browserLoginsEnabled: boolean;
+  secretsEnabled: boolean;
+  onToggleSidebar: () => void;
+}) {
+  const navigate = useNavigate();
+  const visibleSearchPages = useMemo(
+    () =>
+      searchPages.filter(page => {
+        if (page === apps && !appsEnabled) return false;
+        if ((page === inbox || page === tasks) && !tasksEnabled) return false;
+        if (page === secrets && !secretsEnabled) return false;
+        if (page === browserLogins && !browserLoginsEnabled) return false;
+        return true;
+      }),
+    [appsEnabled, browserLoginsEnabled, secretsEnabled, tasksEnabled],
+  );
+  return (
+    <Suspense fallback={null}>
+      <SearchPalette
+        open={open}
+        onOpenChange={onOpenChange}
+        workspaceId={workspaceId}
+        workspaceReady={workspaceReady}
+        appsEnabled={appsEnabled}
+        pages={visibleSearchPages}
+        onSelect={target => {
+          switch (target.kind) {
+            case 'page':
+              void navigate({ to: target.to, params: { workspaceSlug } });
+              break;
+            case 'create-workspace':
+              void navigate({ to: '/create-workspace' });
+              break;
+            case 'toggle-sidebar':
+              onToggleSidebar();
+              break;
+            case 'chat':
+              void navigate({
+                to: '/$workspaceSlug/chat/$chatId',
+                params: { workspaceSlug, chatId: target.chatId },
+              });
+              break;
+            case 'agent':
+              void navigate({
+                to: '/$workspaceSlug/agents/$agentId',
+                params: { workspaceSlug, agentId: target.agentId },
+              });
+              break;
+            case 'table':
+              void navigate({
+                to: '/$workspaceSlug/tables/$tableId',
+                params: { workspaceSlug, tableId: target.tableId },
+              });
+              break;
+            case 'workflow':
+              void navigate({
+                to: '/$workspaceSlug/workflows/$workflowId',
+                params: { workspaceSlug, workflowId: target.workflowId },
+              });
+              break;
+            case 'app':
+              void navigate({
+                to: '/$workspaceSlug/apps/$appSlug',
+                params: { workspaceSlug, appSlug: target.appSlug },
+              });
+              break;
+            case 'file':
+              void navigate({
+                to: '/$workspaceSlug/files/$fileId',
+                params: { workspaceSlug, fileId: target.fileId },
+              });
+              break;
+          }
+        }}
+      />
+    </Suspense>
+  );
+}
+
 function WorkspaceShellContent() {
   const { user, workspace, workspaceStale, membershipId } = workspaceRoute.useRouteContext();
   const appsEnabled = useFlag('app-hosting');
+  const tasksEnabled = useFlag('assignable-tasks');
+  const browserLoginsEnabled = useFlag('browser-use');
+  const locationHref = useLocation({ select: location => location.href });
+  const settingsMode = useSettingsMode();
+  const [lastWorkspaceHref, setLastWorkspaceHref] = useState(`/${workspace.slug}`);
+  useEffect(() => {
+    setLastWorkspaceHref(`/${workspace.slug}`);
+  }, [workspace.slug]);
+  useEffect(() => {
+    if (!settingsMode) setLastWorkspaceHref(locationHref);
+  }, [locationHref, settingsMode]);
   // Integration pages explain the stale state themselves and pause their controls.
   const onIntegrations = useLocation({
     select: location =>
@@ -835,7 +1205,6 @@ function WorkspaceShellContent() {
   useEffect(() => {
     if (onNewChat) document.title = 'New chat · TulipFarm';
   }, [onNewChat]);
-  const navigate = useNavigate();
   const [searchOpen, setSearchOpen] = useState(false);
   // The palette's code loads the first time it opens, then it stays mounted.
   const [searchUsed, setSearchUsed] = useState(false);
@@ -850,12 +1219,26 @@ function WorkspaceShellContent() {
     });
     return () => controller.abort();
   }, [user.id, workspace.id, workspace.slug]);
+  const toggleSidebar = useCallback(() => {
+    if (onCalendar) {
+      setCalendarNavigationOpen(open => !open);
+    } else {
+      setNavigationOpen(open => {
+        const next = !open;
+        saveNavigationOpen(next);
+        return next;
+      });
+    }
+  }, [onCalendar]);
   return (
     <TooltipProvider>
       {membershipId && workspace.status === 'ready' && (
         <RecordLinkPrefetch workspaceId={workspace.id} slug={workspace.slug} />
       )}
       <div className="workspace-viewport grid h-svh grid-rows-1 overflow-hidden">
+        <a href="#workspace-main-content" className="skip-to-content">
+          Skip to content
+        </a>
         <SidebarProvider
           open={onCalendar ? calendarNavigationOpen : navigationOpen}
           onOpenChange={
@@ -867,8 +1250,12 @@ function WorkspaceShellContent() {
                 }
           }
         >
-          <WorkspaceNavigation onSearch={() => setSearchOpen(true)} />
-          <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
+          <WorkspaceNavigation onSearch={() => setSearchOpen(true)} backHref={lastWorkspaceHref} />
+          <main
+            id="workspace-main-content"
+            tabIndex={-1}
+            className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-background focus:outline-none"
+          >
             {workspaceStale && <ReconnectBanner showMessage={!onIntegrations} />}
             {workspace.status === 'ready' && (
               <ReauthorizationBanner key={workspace.id} workspaceId={workspace.id} slug={workspace.slug} />
@@ -930,16 +1317,33 @@ function WorkspaceShellContent() {
               </ChatHeaderContext>
             </PageChromeContext>
           </main>
-          {searchUsed && (
-            <Suspense fallback={null}>
-              <SearchPalette
+          {searchUsed &&
+            (membershipId ? (
+              <WorkspaceSearchWithSecrets
                 open={searchOpen}
                 onOpenChange={setSearchOpen}
-                pages={searchPages.filter(page => appsEnabled || page !== apps)}
-                onOpen={to => void navigate({ to, params: { workspaceSlug: workspace.slug } })}
+                workspaceId={workspace.id}
+                workspaceSlug={workspace.slug}
+                workspaceReady={workspace.status === 'ready'}
+                appsEnabled={appsEnabled}
+                tasksEnabled={tasksEnabled}
+                browserLoginsEnabled={browserLoginsEnabled}
+                onToggleSidebar={toggleSidebar}
               />
-            </Suspense>
-          )}
+            ) : (
+              <WorkspaceSearchMount
+                open={searchOpen}
+                onOpenChange={setSearchOpen}
+                workspaceId={workspace.id}
+                workspaceSlug={workspace.slug}
+                workspaceReady={false}
+                appsEnabled={appsEnabled}
+                tasksEnabled={tasksEnabled}
+                browserLoginsEnabled={browserLoginsEnabled}
+                secretsEnabled={false}
+                onToggleSidebar={toggleSidebar}
+              />
+            ))}
         </SidebarProvider>
       </div>
       <Toaster />

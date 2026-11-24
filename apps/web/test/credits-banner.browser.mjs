@@ -63,6 +63,8 @@ test(
       });
       await banner().getByText('420 credits left. Add credits to keep work running.').waitFor();
       assert.equal(await addCredits().getAttribute('href'), `/${workspace.slug}/settings/usage`);
+      await banner().getByRole('button', { name: 'Dismiss credits notice', exact: true }).click();
+      await banner().waitFor({ state: 'hidden' });
       await page.close();
 
       page = await open(browser, app.origin, {

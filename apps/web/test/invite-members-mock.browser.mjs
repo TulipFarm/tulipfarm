@@ -147,10 +147,9 @@ test('a one-member workspace nudges inviting outside Members until dismissed', {
     assert.equal(await nudge.count(), 0, 'the Members page shows no nudge');
 
     await page.goto(`${origin}/invite-mock/?scenario=solo`);
-    const people = page.getByRole('navigation', { name: 'Workspace navigation', exact: true });
-    // Admins reach members and teams through one combined link under More.
-    await people.getByRole('button', { name: 'More', exact: true }).click();
-    await people.getByRole('link', { name: 'Members & teams', exact: true }).waitFor();
+    const sidebar = page.locator('[data-sprout-sidebar]');
+    // Admins reach members and teams through one combined link anchored in the sidebar footer.
+    await sidebar.getByRole('link', { name: 'Members & teams', exact: true }).waitFor();
     await nudge.getByRole('button', { name: 'Invite members', exact: true }).click();
     await page.waitForURL(url => url.pathname === '/invite-mock/members/invite');
     await page.getByRole('form', { name: 'Invite members' }).waitFor();

@@ -373,6 +373,10 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
             : 'Your separate private quick chat. Drag to move to another corner.'
         }
         disabled={busy || read.state.kind === 'loading'}
+        onMouseDown={event => {
+          // Stop Chromium from starting a native drag on a link behind the floating launcher as it moves away.
+          if (!docked && event.button === 0) event.preventDefault();
+        }}
         onPointerDown={event => {
           if (docked || event.button !== 0 || !event.isPrimary) return;
           suppressClick.current = false;

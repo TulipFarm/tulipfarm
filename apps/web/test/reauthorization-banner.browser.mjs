@@ -176,7 +176,7 @@ test(
       await visit();
       await banner.getByText('Approve the updated permissions to continue.', { exact: false }).waitFor();
       const bounds = await banner.boundingBox(),
-        sidebar = await page.getByRole('complementary', { name: 'Workspace sidebar' }).boundingBox();
+        sidebar = await page.getByRole('complementary', { name: 'Acme' }).boundingBox();
       assert.equal(bounds.y, 0);
       assert.ok(bounds.x >= sidebar.x + sidebar.width, 'banner sits beside the sidebar, not behind it');
       assert.equal(bounds.x + bounds.width, 1440);

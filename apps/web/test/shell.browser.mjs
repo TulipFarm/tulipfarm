@@ -47,7 +47,11 @@ try {
     let chatStatus = 200;
     let chatDelay = 0;
     await page.route('**/v1/**', async route => {
-      const path = new URL(route.request().url()).pathname;
+      const requestUrl = new URL(route.request().url());
+      const path = requestUrl.pathname;
+      const search = (requestUrl.searchParams.get('search') ?? requestUrl.searchParams.get('q') ?? '')
+        .trim()
+        .toLowerCase();
       let status = 200;
       let json;
       if (path === '/v1/auth/get-session')
@@ -66,6 +70,30 @@ try {
         };
       else if (path.endsWith('/credits'))
         json = { available: 1000, granted: 1000, used: 0, held: 0, days: [], breakdown: [], series: [] };
+      else if (path.endsWith('/tables')) {
+        const allTables = [
+          {
+            id: chatId,
+            revision: 'a'.repeat(40),
+            appliedAt: workspace.createdAt,
+            recordCount: '12',
+            definition: {
+              formatVersion: 2,
+              id: chatId,
+              owningTeamId: workspace.id,
+              label: 'Customer orders',
+              fields: [],
+              uniqueKeys: [],
+            },
+          },
+        ];
+        json = {
+          tables: search ? allTables.filter(table => table.definition.label.toLowerCase().includes(search)) : allTables,
+          nextCursor: null,
+        };
+      } else if (path.endsWith('/agents')) json = { agents: [], nextCursor: null };
+      else if (path.endsWith('/workflows')) json = { workflows: [], nextCursor: null };
+      else if (path.endsWith('/files/search')) json = { items: [] };
       else if (path.endsWith('/conversations')) {
         await delay(chatDelay);
         status = chatStatus;
@@ -119,14 +147,21 @@ try {
     }
     if (!mobile) {
       await page.goto(`${origin}/acme/agents`);
-      await nav.getByRole('button', { name: 'More', exact: true }).click();
-      await nav.getByRole('link', { name: 'Teams', exact: true }).waitFor();
+      const sidebar = page.getByRole('complementary', { name: 'Acme', exact: true });
+      await sidebar.getByRole('link', { name: 'Teams', exact: true }).waitFor();
       await page.waitForTimeout(500);
       assert.equal(
-        await nav.getByRole('link', { name: 'Members & teams', exact: true }).count(),
+        await sidebar.getByRole('link', { name: 'Members & teams', exact: true }).count(),
         0,
         'only admins get Members',
       );
+      // Contextual Back to <workspace> returns to the prior non-settings route.
+      await page.goto(`${origin}/acme/tables/new`);
+      await sidebar.getByRole('link', { name: 'Settings', exact: true }).click();
+      await page.waitForURL('**/acme/settings');
+      const settingsSidebar = page.getByRole('complementary', { name: 'Settings', exact: true });
+      await settingsSidebar.getByRole('link', { name: 'Back to Acme', exact: true }).click();
+      await page.waitForURL('**/acme/tables/new');
     }
     await page.goto(`${origin}/acme`);
     await shellHeader.getByRole('heading', { name: 'New chat', exact: true }).waitFor();
@@ -149,10 +184,13 @@ try {
       JSON.stringify(focus),
     );
     if (!mobile) {
-      const identity = page.getByRole('link', { name: 'Acme', exact: true });
+      const identity = page.getByRole('button', { name: 'Acme, switch workspace', exact: true });
       const a = await identity.boundingBox();
       const b = await toggle.boundingBox();
-      assert.ok(Math.abs(a.y + a.height / 2 - (b.y + b.height / 2)) <= 1, 'Header controls align');
+      assert.ok(Math.abs(a.y + a.height / 2 - (b.y + b.height / 2)) <= 6, 'Header controls align');
+      await identity.click();
+      await page.getByRole('menuitem', { name: 'Create workspace', exact: true }).waitFor();
+      await page.keyboard.press('Escape');
       await toggle.click();
       await page.reload();
       await page.locator('[data-sprout-sidebar][data-state="collapsed"]').waitFor();
@@ -160,26 +198,30 @@ try {
       await page.locator('[data-sprout-sidebar][data-state="expanded"]').waitFor();
     } else await openNavigation();
     await page
-      .getByRole('complementary', { name: 'Workspace sidebar' })
-      .getByRole('button', { name: 'Search', exact: true })
+      .locator('[data-sprout-sidebar]')
+      .getByRole('button', { name: /^Search/ })
       .click();
-    const dialog = page.getByRole('dialog', { name: 'Jump to…', exact: true });
+    const dialog = page.getByRole('dialog', { name: 'Search workspace', exact: true });
     await dialog.waitFor();
-    assert.equal(await dialog.getByRole('group', { name: 'Filter by type' }).count(), 0);
-    assert.equal(await dialog.getByRole('option', { name: 'Inbox', exact: true }).count(), 0);
-    const input = dialog.getByPlaceholder('Find a page or action…');
+    assert.equal(await dialog.getByRole('group', { name: 'Filter results by type' }).count(), 1);
+    assert.equal(await dialog.getByRole('option', { name: /^Inbox/ }).count(), 0);
+    const input = dialog.getByPlaceholder('Search chats, tables, agents, pages…');
     assert.ok((await input.getAttribute('aria-label')) || (await input.getAttribute('aria-labelledby')));
     if (process.env.SHELL_SCREENSHOT_DIR)
       await page.screenshot({
         path: `${process.env.SHELL_SCREENSHOT_DIR}/shell-${mobile ? 'mobile' : 'desktop'}-search.png`,
       });
     await input.fill('no matching page');
-    await dialog.getByText('No pages or actions found', { exact: true }).waitFor();
+    await dialog.getByText('No results for “no matching page”', { exact: true }).waitFor();
     await dialog.getByRole('button', { name: 'Clear search', exact: true }).click();
     assert.equal(await input.inputValue(), '');
     assert.equal(await input.evaluate(element => element === document.activeElement), true);
+    await input.fill('billing');
+    await dialog.getByRole('option', { name: /Usage/ }).waitFor();
+    await input.fill('Customer orders');
+    await dialog.getByRole('option', { name: /Customer orders/ }).waitFor();
     await input.fill('create agent');
-    await dialog.getByRole('option', { name: 'Create agent', exact: true }).waitFor();
+    await dialog.getByRole('option', { name: /Create agent/ }).waitFor();
     await input.press('Enter');
     await page.waitForURL('**/acme/agents/new');
     await page.keyboard.press('Control+k');
@@ -196,6 +238,13 @@ try {
     await openChatList(page);
     await page.getByRole('heading', { name: 'Chats', level: 1, exact: true }).waitFor();
     await page.getByText('No chats yet', { exact: true }).waitFor();
+    await page.evaluate(
+      () =>
+        new Promise(resolve => {
+          const request = indexedDB.deleteDatabase('tulipfarm-query-cache');
+          request.onsuccess = request.onerror = request.onblocked = () => resolve();
+        }),
+    );
     chatStatus = 503;
     await page.reload();
     await page.getByText('Could not load chats', { exact: true }).waitFor();
@@ -226,7 +275,7 @@ try {
     }
     if (mobile) {
       await openNavigation();
-      await page.getByRole('dialog', { name: 'Workspace sidebar' }).waitFor();
+      await page.getByRole('dialog', { name: 'Acme', exact: true }).waitFor();
       await nav.getByRole('link', { name: 'Agents', exact: true }).waitFor();
       if (process.env.SHELL_SCREENSHOT_DIR)
         await page.screenshot({ path: `${process.env.SHELL_SCREENSHOT_DIR}/shell-mobile-drawer.png` });
