@@ -17,7 +17,6 @@ import {
   calendarActionStatus,
   isCalendarAction,
 } from './calendar-action';
-import { useFlag } from '@/lib/feature-flags';
 import { RefreshIcon } from '@tulipfarm/icons';
 import { CalendarActionVisual } from './calendar-action-canvas';
 import {
@@ -168,13 +167,6 @@ export function GoogleProposalReview({
     )
       onSettled?.();
   }, [proposal?.receipt?.status, proposal?.decision, onSettled]);
-  const calendarEnabled = useFlag('google-calendar-canvas');
-  const calendarBlocked =
-    !!proposal &&
-    isCalendarAction(proposal.operation) &&
-    proposal.operation.kind !== 'calendar.events.delete' &&
-    !!proposal.operation.event.conferenceData &&
-    !calendarEnabled;
   const result = proposal?.receipt?.status === 'succeeded' ? proposal.receipt.result.data : null;
   const resultEventId =
     result && typeof result === 'object' && !Array.isArray(result) && typeof result.id === 'string' ? result.id : null;
@@ -198,7 +190,7 @@ export function GoogleProposalReview({
     }
   }, [proposal, focusOnLoad]);
   const refused = mutation.kind === 'refused';
-  const blocked = calendarBlocked || refused || !available || read.busy || !!read.error || mutation.kind !== 'idle';
+  const blocked = refused || !available || read.busy || !!read.error || mutation.kind !== 'idle';
   const rejectBlocked =
     !available || read.busy || !!read.error || mutation.kind === 'pending' || mutation.kind === 'uncertain';
   async function mutate(action: 'approve' | 'reject' | 'execute', exact: GoogleProposal) {
@@ -481,7 +473,7 @@ export function GoogleProposalReview({
         </header>
         {read.error && <GoogleReadFeedback busy={false} error={read.error} hasData title="Google action" />}
         {proposal.receipt?.status === 'succeeded' ? (
-          calendarEnabled && currentEventId && showCurrent ? (
+          currentEventId && showCurrent ? (
             <CalendarCurrentEvent
               key={currentEventId}
               workspaceId={workspaceId}
@@ -497,7 +489,7 @@ export function GoogleProposalReview({
             workspaceId={workspaceId}
             proposal={proposal}
             operation={visual}
-            compareEventId={calendarEnabled && !proposal.receipt ? currentEventId : null}
+            compareEventId={!proposal.receipt ? currentEventId : null}
           />
         )}
         {proposal.receipt?.status === 'succeeded' && (
@@ -505,7 +497,7 @@ export function GoogleProposalReview({
             Google confirmed this action succeeded.
           </p>
         )}
-        {proposal.receipt?.status === 'succeeded' && calendarEnabled && currentEventId && !showCurrent && (
+        {proposal.receipt?.status === 'succeeded' && currentEventId && !showCurrent && (
           <div>
             <Button variant="outline" size="sm" onClick={() => setShowCurrent(true)}>
               <RefreshIcon size="sm" />
@@ -530,14 +522,6 @@ export function GoogleProposalReview({
         {proposal.receipt?.status === 'failed' && (
           <Alert variant="destructive">
             <AlertDescription>Google rejected this request. It will not be retried.</AlertDescription>
-          </Alert>
-        )}
-        {calendarBlocked && (
-          <Alert>
-            <AlertDescription>
-              This calendar feature is not enabled for this workspace. You can review its saved status, but cannot
-              approve or execute it here.
-            </AlertDescription>
           </Alert>
         )}
         <Disclosure title="Details">{payload}</Disclosure>
@@ -653,21 +637,13 @@ export function GoogleProposalReview({
           ) : (
             <OperationSummary operation={proposal.operation} />
           )}
-          {calendarEnabled && currentEventId && !proposal.receipt && (
+          {currentEventId && !proposal.receipt && (
             <CalendarCurrentEvent
               key={currentEventId}
               workspaceId={workspaceId}
               proposal={proposal}
               eventId={currentEventId}
             />
-          )}
-          {calendarBlocked && (
-            <Alert>
-              <AlertDescription>
-                This calendar feature is not enabled for this workspace. You can review its saved status, but cannot
-                approve or execute it here.
-              </AlertDescription>
-            </Alert>
           )}
           <Disclosure title="Exact payload and approval reference">{payload}</Disclosure>
           {proposal.receipt ? (
@@ -702,7 +678,7 @@ export function GoogleProposalReview({
               {proposal.receipt.status === 'succeeded' && (
                 <>
                   <p role="status">Google confirmed this action succeeded.</p>
-                  {calendarEnabled && currentEventId && showCurrent ? (
+                  {currentEventId && showCurrent ? (
                     <CalendarCurrentEvent
                       key={currentEventId}
                       workspaceId={workspaceId}
@@ -712,7 +688,7 @@ export function GoogleProposalReview({
                   ) : (
                     <CalendarActionOutcome proposal={proposal} />
                   )}
-                  {calendarEnabled && currentEventId && !showCurrent && (
+                  {currentEventId && !showCurrent && (
                     <div>
                       <Button variant="outline" size="sm" onClick={() => setShowCurrent(true)}>
                         Check event and Meet link

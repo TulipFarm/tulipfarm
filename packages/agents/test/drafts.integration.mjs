@@ -223,33 +223,25 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       checks: [{ kind: 'status', status: 'completed' }],
     },
   ];
-  const storedCases = async flag => {
-    const previous = process.env.FEATURE_FLAG_AGENT_EVALS;
-    process.env.FEATURE_FLAG_AGENT_EVALS = flag;
-    try {
-      const { draftId } = await propose({
-        tool: 'agents.draft',
-        agent: 'new',
-        input: {
-          expectedSoulRevision: head,
-          owningTeamId: team,
-          definition: { name: `Tested helper ${flag}`, instructions: 'Inspect only.', tools: [] },
-          evalCases,
-        },
-      });
-      return (
-        await db.platform.query(
-          `SELECT proposal->'input'->'evalCases' AS cases FROM ${table('tf_chat_authoring_drafts')} WHERE id=$1`,
-          [draftId],
-        )
-      ).rows[0].cases;
-    } finally {
-      if (previous === undefined) delete process.env.FEATURE_FLAG_AGENT_EVALS;
-      else process.env.FEATURE_FLAG_AGENT_EVALS = previous;
-    }
-  };
-  assert.equal(await storedCases('false'), null, 'starter test cases are dropped while workspace Evals are off');
-  assert.deepEqual(await storedCases('true'), evalCases);
+  const { draftId } = await propose({
+    tool: 'agents.draft',
+    agent: 'new',
+    input: {
+      expectedSoulRevision: head,
+      owningTeamId: team,
+      definition: { name: 'Tested helper', instructions: 'Inspect only.', tools: [] },
+      evalCases,
+    },
+  });
+  assert.deepEqual(
+    (
+      await db.platform.query(
+        `SELECT proposal->'input'->'evalCases' AS cases FROM ${table('tf_chat_authoring_drafts')} WHERE id=$1`,
+        [draftId],
+      )
+    ).rows[0].cases,
+    evalCases,
+  );
   assert.equal(
     (await db.platform.query(`SELECT count(*)::int AS count FROM ${table('tf_agent_commands')}`)).rows[0].count,
     0,

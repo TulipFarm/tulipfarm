@@ -57,11 +57,6 @@ export const appPageToolDescriptions: Record<AppPageToolName, string> = {
     'Check the draft pages of the private app this chat edits, including that every table, field, file, workflow and agent they name still exists. Returns each issue with its JSON path, such as /pages/0/actions/1/pageId. Changes nothing.',
 };
 
-export type AppPageOptions = {
-  /** Whether the workspace has app hosting turned on. */
-  readonly enabled: (workspaceId: string) => Promise<boolean>;
-};
-
 type Failure = { readonly error: AppFailure['code']; readonly message: string; readonly retryable: boolean };
 const failure = ({ code, message, retryable }: AppFailure): Failure => ({ error: code, message, retryable });
 
@@ -75,16 +70,14 @@ const withPage = (pages: readonly DraftPage[], page: DraftPage) =>
   pages.some(({ id }) => id === page.id) ? pages.map(item => (item.id === page.id ? page : item)) : [...pages, page];
 
 /**
- * The page tools of a private app's own chat. Every call checks again that app hosting is on, that the chat edits a
- * private app and that the person still holds `edit` on it, so a revoked grant stops the next call.
+ * The page tools of a private app's own chat. Every call checks again that the chat edits a private app and that the
+ * person still holds `edit` on it, so a revoked grant stops the next call.
  */
-export function createAppPages(runtime: AgentStorage, options: AppPageOptions) {
+export function createAppPages(runtime: AgentStorage) {
   async function withApp<T>(
     chat: AppChat,
     action: (tx: AppTransaction, appId: AppId) => Promise<T>,
   ): Promise<T | Failure> {
-    if (!(await options.enabled(chat.workspaceId)))
-      return failure({ code: 'forbidden', message: 'App hosting is off in this workspace', retryable: false });
     return withHuman(runtime, chat.workspaceId, chat.actor, 'read', async (raw: AgentTransaction) => {
       const tx = { client: raw.client, schema: raw.schema };
       const appId = await chatApp(tx, chat.conversationId);

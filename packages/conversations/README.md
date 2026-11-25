@@ -64,7 +64,7 @@ part only when the model ran with that procedure.
 
 ### Reading attached and referenced files
 
-With the workspace's `images` flag on, the executor reads a turn's files through [`turn-files.ts`](src/turn-files.ts) instead of `file-references.ts`. It reads the current message's attachments, Files references and Google Drive references in attached order, then earlier messages' files newest first. Messages removed by compaction are skipped. Files and Google references are read only for the member who sent them, under that member's current access. A reference they can no longer open is `unavailable`, and its content is withheld.
+The executor reads a turn's files through [`turn-files.ts`](src/turn-files.ts). It reads the current message's attachments, Files references and Google Drive references in attached order, then earlier messages' files newest first. Messages removed by compaction are skipped. Files and Google references are read only for the member who sent them, under that member's current access. A reference they can no longer open is `unavailable`, and its content is withheld.
 
 `readFile` decides what a file is from its bytes, not from its declared type:
 

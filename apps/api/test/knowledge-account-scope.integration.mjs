@@ -50,7 +50,7 @@ test(
           atlassianCorpus: atlassian.provider(f.runtime),
         }),
       };
-      const defaults = createDefaultKnowledge({ runtime: f.runtime, engines, enabled: async () => true });
+      const defaults = createDefaultKnowledge({ runtime: f.runtime, engines });
       const cases = [
         ['google-drive', 'google', 'owner-account', { kind: 'drive-folder', folderId: 'root' }, 2, 1],
         [

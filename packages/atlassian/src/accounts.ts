@@ -383,10 +383,7 @@ export function createAtlassianAccounts(options: {
           prepared.row.ownership === 'personal' &&
           prepared.row.identity === null &&
           identity.identity.qualification === 'verified';
-        const automatic =
-          eligible && options.defaultKnowledge && (await options.defaultKnowledge.enabled(workspaceId, userId))
-            ? options.defaultKnowledge
-            : undefined;
+        const automatic = eligible ? options.defaultKnowledge : undefined;
         const intents: string[] = [];
         const completed = await authorized(workspaceId, prepared.actor, async (tx, actor) => {
           const row = await load(tx, prepared.row.id, true);

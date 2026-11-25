@@ -7,7 +7,6 @@ import {
   taskGoogleFilesReader,
 } from '@tulipfarm/agents/task-runtime';
 import { fetchPublicFile } from '@tulipfarm/agents/web-fetch';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import { googleOperations } from './google-composition.ts';
 import { taskFileRecognition } from './turn-files-composition.ts';
 import { createTaskProgress, type TaskProgress } from '@tulipfarm/agents/task-progress';
@@ -60,7 +59,6 @@ export function createTaskComposition(
   const browser: TaskBrowser | undefined = browserHost
     ? {
         client: createBrowserHostClient(browserHost),
-        enabled: workspaceId => isFeatureEnabled('browser-use', null, { id: workspaceId }),
         secrets: taskBrowserSecrets(secrets),
         meter: taskBrowserMeter(runtime),
         loadLogin: async ({ workspaceId, actor, sessionId, loginId }) => {
@@ -100,7 +98,6 @@ export function createTaskComposition(
     taskGoogleFilesReader(drive),
     objects ? createSkillExecutionFactory(objects, configuredSkillClient()) : undefined,
     {
-      enabled: workspaceId => isFeatureEnabled('images', null, { id: workspaceId }),
       attachments: attachments ?? undefined,
       files: files ?? undefined,
       google: drive,

@@ -5,7 +5,6 @@ import type { FastifyBaseLogger, FastifyError, FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import { z } from 'zod';
 import { AccessDenied, uuidSchema } from '@tulipfarm/access';
-import { planProviders } from '@tulipfarm/config';
 import { integrationCredentialKeyring } from '@tulipfarm/integrations';
 import {
   ChatGptPlanError,
@@ -18,7 +17,6 @@ import {
 import { authenticateRoutes } from './authenticated-routes.ts';
 import { authConfig, type registerAuth } from './auth.ts';
 import { routeValidation } from './route-validation.ts';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 
 const preferredPort = 1455;
 const callbackPath = '/auth/callback';
@@ -223,8 +221,7 @@ function schema(operationId: string, response: z.ZodType) {
 }
 
 /**
- * Routes for a member's own ChatGPT connection. Without a service, or while the workspace's `chatgpt-plan` feature flag
- * is off, they answer 404 `chatgpt-plan-disabled`.
+ * Routes for a member's own ChatGPT connection. Without a service, they answer 404 `chatgpt-plan-disabled`.
  */
 export function registerChatGptPlan(
   app: FastifyInstance,
@@ -255,13 +252,6 @@ export function registerChatGptPlan(
       );
       return;
     }
-    // Members can still disconnect, so turning the plan off never strands a stored token.
-    routes.addHook('preHandler', async (request, reply) => {
-      if (request.routeOptions.url?.endsWith('/disconnect')) return;
-      const { workspaceId } = request.params as { workspaceId: string };
-      if (!(await isFeatureEnabled(planProviders.chatgpt.flag, null, { id: workspaceId })))
-        return reply.code(404).send({ error: 'chatgpt-plan-disabled' });
-    });
     const loopback = loopbackListener(plan, pool, routes.log);
     routes.addHook('onClose', async () => loopback.close());
     routes.get(

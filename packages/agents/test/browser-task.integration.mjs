@@ -150,10 +150,8 @@ test('an agent run uses one browser, waits for a person, and resumes or fails', 
   };
   const host = fakeHost();
   const loaded = [];
-  let enabled = true;
   const browser = {
     client: host.client,
-    enabled: async () => enabled,
     loadLogin: async input => {
       loaded.push(input);
     },
@@ -312,14 +310,5 @@ test('an agent run uses one browser, waits for a person, and resumes or fails', 
     assert.equal(resumed.result.browser.status, 'handed-back');
     host.unreachable = false;
     assert.equal(await settle(task.id), 'completed');
-  });
-
-  await t.test('with browser use off the model is not offered the browser', async () => {
-    enabled = false;
-    offered.length = 0;
-    decisions = [{ kind: 'answer', text: 'No browser.' }];
-    const task = await start();
-    assert.equal(await settle(task.id), 'completed');
-    assert.deepEqual(offered, [false]);
   });
 });

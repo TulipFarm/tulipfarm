@@ -62,22 +62,14 @@ function memoryBytes() {
   };
 }
 
-async function setup(t, { answer, images = true } = {}) {
+async function setup(t, { answer } = {}) {
   const f = await conversationFixture();
-  const keys = [
-    'ANTHROPIC_API_KEY',
-    'MODEL_CATALOG',
-    'MODEL_CATALOG_FILE',
-    'FEATURE_FLAG_IMAGES',
-    'HUNTSMAN_ENDPOINT',
-    'SEARXNG_ENDPOINT',
-  ];
+  const keys = ['ANTHROPIC_API_KEY', 'MODEL_CATALOG', 'MODEL_CATALOG_FILE', 'HUNTSMAN_ENDPOINT', 'SEARXNG_ENDPOINT'];
   const saved = Object.fromEntries(keys.map(key => [key, process.env[key]]));
   process.env.ANTHROPIC_API_KEY = 'synthetic-test-key';
   process.env.MODEL_CATALOG = catalog;
   process.env.HUNTSMAN_ENDPOINT = huntsman;
   delete process.env.SEARXNG_ENDPOINT;
-  if (!images) process.env.FEATURE_FLAG_IMAGES = 'false';
   delete process.env.MODEL_CATALOG_FILE;
   t.after(async () => {
     for (const [key, value] of Object.entries(saved))
@@ -391,28 +383,6 @@ test('web.fetch on a large quote-heavy JSON file returns its start marked partia
   const firstRow = '"id": "row-0",\n    "note": "\\"quoted\\" 0"';
   assert.ok(result.includes(JSON.stringify(firstRow).slice(1, -1)), 'the first row reaches the model');
   assert.doesNotMatch(result, /row-3999/);
-});
-
-test('with the images flag off links are not fetched and web.fetch only uses Huntsman', async t => {
-  const chart = await png(8, 8);
-  const web = await localWeb(t, { 'files.example.com/chart.png': send(200, chart, { 'content-type': 'image/png' }) });
-  const f = await setup(t, {
-    images: false,
-    answer: (_body, requests) =>
-      requests.length === 1
-        ? anthropicTools([{ tool: 'web.fetch', url: 'https://files.example.com/chart.png' }])
-        : anthropicText('Done.'),
-  });
-  const chatId = await f.chat();
-  const requests = await f.say(chatId, 'Look at https://files.example.com/chart.png');
-  assert.deepEqual(web.requests, [], 'nothing is fetched outside Huntsman');
-  assert.deepEqual(f.scrapes, ['https://files.example.com/chart.png']);
-  for (const request of requests) {
-    assert.deepEqual(imageBlocks(request), []);
-    assert.doesNotMatch(requestText(request), /chat-links|source-url|fetched-file/);
-  }
-  assert.match(JSON.stringify(toolResults(requests[1])), /Markdown of https:\/\/files.example.com\/chart.png/);
-  assert.deepEqual(await f.linkReads(chatId), []);
 });
 
 test('a retried turn reads each kept link once and fetches nothing again', async t => {

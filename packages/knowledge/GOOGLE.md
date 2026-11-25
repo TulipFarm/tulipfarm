@@ -70,7 +70,7 @@ Google relations before version 70. Migration composition verifies the unique
 
 ## Automatic Knowledge
 
-With `default-connection-knowledge` on, a newly granted Drive or Gmail read scope also
+A newly granted Drive or Gmail read scope also
 creates owner-only sources automatically; see [automatic integration Knowledge](../../docs/knowledge-defaults-delivery.md). Drive uses the
 `drive-all` selection (every file the account can open, current version). Gmail uses
 the whole mailbox over a rolling 90-day window, excluding Spam and Trash.

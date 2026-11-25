@@ -1,6 +1,6 @@
 // Reads the signed-in workspace shell makes on every page: integration status for the banner and
 // composer, Bud, recommendations, the sidebar's pinned chats and recent items, last-used, the
-// session visit and build feature flags. Tests that do not exercise them
+// session visit, build feature flags, the Inbox count and settings. Tests that do not exercise them
 // answer with these neutral states rather than failing on an unexpected request.
 export function shellRead(method, path, workspace) {
   if (method === 'PUT' && path.endsWith('/last-used')) return { status: 204 };
@@ -8,6 +8,13 @@ export function shellRead(method, path, workspace) {
   if (method === 'POST' && path === '/v1/user/visit') return { json: { firstSession: false } };
   if (method !== 'GET') return undefined;
   if (path === '/v1/feature-flags') return { json: {} };
+  if (/^\/v1\/workspaces\/[^/]+\/inbox$/.test(path)) return { json: { items: [], open: 0 } };
+  if (/^\/v1\/workspaces\/[^/]+\/inbox\/slack$/.test(path))
+    return {
+      json: { connected: false, kinds: { assigned: true, waiting: true, finished: true, mention: true } },
+    };
+  if (/^\/v1\/workspaces\/[^/]+\/assignment-limits$/.test(path))
+    return { json: { workspace: 10, timeZone: 'UTC', dailyCredits: null, agents: [] } };
   if (path.endsWith('/conversations/pinned')) return { json: { chats: [] } };
   if (/\/(agents|tasks|workflows)\/recent$/.test(path)) return { json: [] };
   if (path === '/v1/google-workspace/availability') return { json: { configured: false } };

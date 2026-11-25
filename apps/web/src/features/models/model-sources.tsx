@@ -96,13 +96,11 @@ export function ModelSources({
   workspaceId,
   source,
   builtInCount,
-  images,
   children,
 }: {
   workspaceId: string;
   source: ModelSource;
   builtInCount: number | null;
-  images: boolean;
   children: ReactNode;
 }) {
   const chatGpt = useChatGptConnection(workspaceId);
@@ -210,15 +208,14 @@ export function ModelSources({
             'Compaction',
             'Summarize long chats',
           )}
-          {images &&
-            item(
-              'images',
-              <Tile>
-                <ImageIcon size="sm" aria-hidden="true" />
-              </Tile>,
-              'Images',
-              'Image models and limits',
-            )}
+          {item(
+            'images',
+            <Tile>
+              <ImageIcon size="sm" aria-hidden="true" />
+            </Tile>,
+            'Images',
+            'Image models and limits',
+          )}
         </RailGroup>
       </nav>
       <div className="min-w-0 flex-1 p-4 md:p-6">{children}</div>

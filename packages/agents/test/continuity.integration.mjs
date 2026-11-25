@@ -1331,8 +1331,6 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
             }),
           });
           const plan = servedModelBundle({ models: [served.model('chatgpt-luna')] }).bundle;
-          const previousFlag = process.env.FEATURE_FLAG_CHATGPT_PLAN;
-          process.env.FEATURE_FLAG_CHATGPT_PLAN = 'true';
           await owner.query(
             `UPDATE ${table('tf_agent_definitions')} SET definition=jsonb_set(definition,'{modelFamilyId}','"chatgpt-luna"') WHERE agent_id=$1`,
             [agentId],
@@ -1394,8 +1392,6 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
               },
             );
           } finally {
-            if (previousFlag === undefined) delete process.env.FEATURE_FLAG_CHATGPT_PLAN;
-            else process.env.FEATURE_FLAG_CHATGPT_PLAN = previousFlag;
             await owner.query(
               `UPDATE ${table('tf_agent_definitions')} SET definition=jsonb_set(definition,'{modelFamilyId}','"claude-opus"') WHERE agent_id=$1`,
               [agentId],

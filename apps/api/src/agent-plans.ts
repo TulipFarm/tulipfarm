@@ -4,7 +4,7 @@ import type { Pool } from 'pg';
 import { z } from 'zod';
 import { AccessDenied, SourceAuthorizationUnavailable, uuidSchema } from '@tulipfarm/access';
 import { createPlanDocumentStore, type PlanDocumentMode } from '@tulipfarm/agents/plan-document-store';
-import { createAgentPlans, planDocumentsEnabled } from '@tulipfarm/agents/plans';
+import { createAgentPlans } from '@tulipfarm/agents/plans';
 import { planDocumentContentSecurityPolicy, planDocumentObjectPath } from '@tulipfarm/plan-documents';
 import {
   AgentPlanError,
@@ -179,7 +179,6 @@ export function registerAgentPlans(
       },
       async (request, reply) => {
         const p = page.parse(request.params);
-        if (!(await planDocumentsEnabled(p.workspaceId))) throw new AccessDenied();
         const stored = await documents.page(p.workspaceId, user(request), p.planId, p.revision);
         const body = await renderer.objects.read(planDocumentObjectPath(p.workspaceId, stored.key), stored.size);
         if (createHash('sha256').update(body).digest('hex') !== stored.sha256)
@@ -215,7 +214,6 @@ export function registerAgentPlans(
         },
         async (request, reply) => {
           const p = plan.parse(request.params);
-          if (!(await planDocumentsEnabled(p.workspaceId))) throw new AccessDenied();
           const mode =
             action === 'retry'
               ? await documents.retry(p.workspaceId, user(request), p.planId)

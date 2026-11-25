@@ -140,7 +140,7 @@ test(
         }
         if (method === 'GET' && rest === '/runs') return route.fulfill({ json: [] });
       }
-      if (path === '/v1/feature-flags') return route.fulfill({ json: { 'agent-evals': true } });
+      if (path === '/v1/feature-flags') return route.fulfill({ json: {} });
       if (path.endsWith('/system-package-installations'))
         return route.fulfill({ json: { installations: [], nextCursor: null } });
       if (path.endsWith(`/drafts/${draftId}`))

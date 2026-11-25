@@ -22,7 +22,6 @@ function fixture(t, overrides = {}) {
     siteKey: 'public-key',
     appOrigin: 'http://localhost:5173',
     googleAvailable: false,
-    enabled: async () => true,
     access: {
       session: async () => {
         calls.session++;
@@ -129,7 +128,7 @@ test('CORS permits only guide routes from website/local origins, never credentia
   assert.notEqual(bad.headers['access-control-allow-origin'], 'https://evil.example');
 });
 
-test('session minting needs a hostname/action-bound challenge; off switch denies direct requests', async t => {
+test('session minting needs a hostname/action-bound challenge', async t => {
   const { app, post, calls } = fixture(t);
   assert.equal((await post('session', { challengeToken: 'valid' }, { origin })).statusCode, 200);
   assert.deepEqual(calls.verify[0], [origin, 'valid', 'public_guide']);
@@ -138,14 +137,6 @@ test('session minting needs a hostname/action-bound challenge; off switch denies
   assert.equal(options.json().enabled, true);
   assert.equal(options.headers['cache-control'], 'no-store');
   assert.ok(!options.body.includes('fixture-signing-secret'));
-  const off = fixture(t, { enabled: async () => false });
-  for (const path of ['session', 'messages']) {
-    assert.equal(
-      (await off.post(path, path === 'session' ? { challengeToken: 'valid' } : { message: 'Hi' })).statusCode,
-      404,
-    );
-  }
-  assert.equal(off.calls.session + off.calls.turn, 0);
 });
 
 test('guide response contracts preserve the exact JSON bodies returned by the handlers', async t => {

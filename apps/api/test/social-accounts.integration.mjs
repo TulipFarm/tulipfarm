@@ -73,7 +73,7 @@ after(async () => {
   await db?.close();
 });
 
-async function harness({ platformApps, flagged = () => true } = {}) {
+async function harness({ platformApps } = {}) {
   const ws = await db.create();
   const origin = authConfig().webOrigin;
   const admin = { cookie: 'session=admin', origin };
@@ -92,11 +92,7 @@ async function harness({ platformApps, flagged = () => true } = {}) {
   const channels = createSocialChannels({ runtime, accounts, adapters });
   const app = Fastify();
   await app.register(swagger, { openapi: { openapi: '3.0.3', info: { title: 'Social', version: '1' } } });
-  await app.register(
-    async routes =>
-      registerSocialAccounts(routes, auth, accounts, async (_user, workspace) => flagged(workspace), channels),
-    { prefix: '/v1' },
-  );
+  await app.register(async routes => registerSocialAccounts(routes, auth, accounts, channels), { prefix: '/v1' });
   await app.ready();
   const base = `/v1/workspaces/${ws.id}/social`;
   const request = async (options, status, expected) => {
@@ -111,8 +107,8 @@ async function harness({ platformApps, flagged = () => true } = {}) {
   return { ws, app, base, admin, origin, request };
 }
 
-test('PRODUCT 1-11 routes require the social-publishing flag, a session and the trusted origin', async () => {
-  const { app, base, admin, origin, request } = await harness({ flagged: () => false });
+test('PRODUCT 1-11 routes require a session and the trusted origin', async () => {
+  const { app, base, admin, origin, request } = await harness();
   try {
     const item = `${base}/accounts/${randomUUID()}`;
     const reads = [
@@ -138,13 +134,10 @@ test('PRODUCT 1-11 routes require the social-publishing flag, a session and the 
       { url: `${item}/grants`, payload: {} },
       { url: `${base}/channels/${randomUUID()}/grants`, payload: {} },
     ];
-    // Server-enforced: the flag hides every route, including the OAuth callback.
-    for (const url of reads) await request({ url }, 404, { error: 'not-found' });
     const all = [
       ...writes.map(route => ({ method: 'POST', ...route })),
       ...replacements.map(route => ({ method: 'PUT', ...route })),
     ];
-    for (const route of all) await request(route, 404, { error: 'not-found' });
     for (const route of all) {
       await request({ ...route, headers: { cookie: admin.cookie } }, 403, {
         error: 'untrusted-origin',
@@ -165,7 +158,7 @@ test('PRODUCT 1-11 routes fail closed without a configured service', async () =>
   const ws = await db.create();
   const app = Fastify();
   const auth = { api: { getSession: async () => ({ user: { id: ws.userId }, session: { id: 's' } }) } };
-  registerSocialAccounts(app, auth, null, async () => true);
+  registerSocialAccounts(app, auth, null);
   try {
     for (const url of [`/workspaces/${ws.id}/social/accounts`, `/workspaces/${ws.id}/social/channels`]) {
       const response = await app.inject({ url });

@@ -9,7 +9,6 @@ import {
   SourceAuthorizationUnavailable,
 } from '@tulipfarm/access';
 import { requireAgentPermission } from '@tulipfarm/agents/saved-service';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import { qualified, StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { pipelinedAll } from '@tulipfarm/workspace-storage/transaction-reads';
 import { commonCompatibility, type WorkspaceStore } from '@tulipfarm/workspaces/storage';
@@ -41,8 +40,6 @@ const workspaceSchema = z.object({
   id: z.uuid(),
   created_by: z.uuid(),
   created_at: z.date(),
-  name: z.string(),
-  email: z.string(),
   soul_commit: soulRevisionSchema.nullable(),
   soul_bucket: z.string().nullable(),
   soul_key: z.string().nullable(),
@@ -55,10 +52,9 @@ const projectionSchema = z.object({
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   tableNames: tableNamesSchema.optional(),
 });
-type Eligibility = (workspace: z.infer<typeof workspaceSchema>, userId: string) => Promise<boolean>;
 type Store = { pool: Pick<Pool, 'query'>; runtime: WorkspaceStore['runtime'] };
 
-export function createSoulExplorerService(store: Store, storage: () => SoulStorage, enabled: Eligibility) {
+export function createSoulExplorerService(store: Store, storage: () => SoulStorage) {
   async function snapshot(workspaceId: string, userId: string): Promise<SoulExplorerSnapshot> {
     return store.runtime.transaction(workspaceId, commonCompatibility, async tx => {
       const actor = await lockAndResolveHuman(tx, userId);
@@ -68,10 +64,9 @@ export function createSoulExplorerService(store: Store, storage: () => SoulStora
         async () =>
           (
             await store.pool.query(
-              `SELECT w.id,w.created_by,w.created_at,w.name,w.soul_commit,w.soul_bucket,w.soul_key,u.email
-        FROM app.workspaces w JOIN app.workspace_storage s ON s.workspace_id=w.id AND s.stage='ready'
-        JOIN app.users u ON u.id=$2 WHERE w.id=$1`,
-              [workspaceId, userId],
+              `SELECT w.id,w.created_by,w.created_at,w.soul_commit,w.soul_bucket,w.soul_key
+        FROM app.workspaces w JOIN app.workspace_storage s ON s.workspace_id=w.id AND s.stage='ready' WHERE w.id=$1`,
+              [workspaceId],
             )
           ).rows[0],
         async () =>
@@ -132,7 +127,6 @@ export function createSoulExplorerService(store: Store, storage: () => SoulStora
       ]);
       if (!raw) throw new AccessDenied();
       const workspace = workspaceSchema.parse(raw);
-      if (!(await enabled(workspace, userId))) throw new AccessDenied();
       const head = current.revision;
       if (!head || !workspace.soul_bucket || !workspace.soul_key || !workspace.soul_commit)
         throw new SoulExplorerError('soul-not-ready', 503);
@@ -225,21 +219,10 @@ export function registerSoulExplorer(
   dependencies: Store & {
     auth: Pick<ReturnType<typeof registerAuth>['auth'], 'api'>;
     storage?: SoulStorage;
-    enabled?: Eligibility;
   },
 ) {
   let storage = dependencies.storage;
-  const service = createSoulExplorerService(
-    dependencies,
-    () => (storage ??= soulStorageConfig('read')),
-    dependencies.enabled ??
-      ((workspace, userId) =>
-        isFeatureEnabled(
-          'soul-repository-explorer',
-          { id: userId, email: workspace.email },
-          { id: workspace.id, name: workspace.name },
-        )),
-  );
+  const service = createSoulExplorerService(dependencies, () => (storage ??= soulStorageConfig('read')));
   app.addHook('onClose', async () => {
     storage?.client.destroy();
   });

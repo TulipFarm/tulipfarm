@@ -68,11 +68,9 @@ test('an app chat edits its app in a draft that only a finished turn saves', { t
   const helperChat = await chat(helper, appId);
   const plainChat = await chat(owner, null);
 
-  let hosting = true;
   const builds = [];
   const apps = createAppEditing(runtime, {
     repositories: appRepositories({ root: join(root, 'cache'), storage: objects.storage }),
-    enabled: async () => hosting,
     async requestBuild({ appId: id, commit, requestedBy }) {
       builds.push(commit);
       const queued = await requestBuild(platform, {
@@ -100,21 +98,13 @@ test('an app chat edits its app in a draft that only a finished turn saves', { t
     (await db.platform.query(`SELECT lease_id FROM ${table('tf_app_drafts')} WHERE app_id = $1`, [appId])).rows[0]
       .lease_id;
 
-  await t.test('the tools refuse a chat that is not an app chat, or a workspace without app hosting', async () => {
+  await t.test('the tools refuse a chat that is not an app chat', async () => {
     assert.equal(await apps.admitted(plainChat), false);
     assert.deepEqual(await write(plainChat, 'index.html', 'x'), {
       error: 'forbidden',
       message: 'This chat cannot edit an app',
       retryable: false,
     });
-    hosting = false;
-    assert.equal(await apps.admitted(ownerChat), false);
-    assert.deepEqual(await list(ownerChat), {
-      error: 'forbidden',
-      message: 'App hosting is off in this workspace',
-      retryable: false,
-    });
-    hosting = true;
     assert.equal(await apps.admitted(ownerChat), true);
   });
 

@@ -97,7 +97,7 @@ import { useOwnMembership } from '@/features/governance/queries';
 import { BudProvider } from '@/features/chat/bud-provider';
 import { WorkspaceQueryProvider } from '@/lib/query';
 import { setAnalyticsWorkspace } from '@/lib/analytics';
-import { setFlagWorkspace, useFlag } from '@/lib/feature-flags';
+import { setFlagWorkspace } from '@/lib/feature-flags';
 import { useWorkspaceSettings } from '@/features/settings/queries';
 import { useSecretsCapabilities } from '@/features/secrets/queries';
 import type { RecentSection } from '@/features/navigation/recent-queries';
@@ -510,12 +510,11 @@ function StandardNavItem({ page }: { page: Page }) {
   );
 }
 
-/** Inbox shows in the sidebar, with its open count, only while assignable tasks are on. */
+/** Inbox shows in the sidebar with its open count. */
 function InboxNavItem({ workspaceId }: { workspaceId: string }) {
   const { workspace } = workspaceRoute.useRouteContext();
   const { setOpenMobile } = useSidebar();
   const active = useCurrentPage() === inbox;
-  if (!useFlag('assignable-tasks')) return null;
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
@@ -532,12 +531,6 @@ function InboxNavItem({ workspaceId }: { workspaceId: string }) {
       </SidebarMenuButton>
     </SidebarMenuItem>
   );
-}
-
-/** Tasks, the built-in table people and agents are assigned work in, shows only while assignable tasks are on. */
-function TasksNavItem() {
-  if (!useFlag('assignable-tasks')) return null;
-  return <StandardNavItem page={tasks} />;
 }
 
 function MenuAvatar({ seed, name, image, size = 'md', shape = 'circle' }: ComponentProps<typeof EntityAvatar>) {
@@ -776,17 +769,14 @@ function useSettingsMode() {
 function SettingsNavigation({ backHref }: { backHref: string }) {
   const { workspace } = workspaceRoute.useRouteContext();
   const navigate = useNavigate();
-  const soulEnabled = useFlag('soul-repository-explorer');
   const workspaceSettings = useWorkspaceSettings(workspace.id);
   const soulVisible =
-    soulEnabled &&
     workspaceSettings.state.kind === 'ready' &&
     !workspaceSettings.state.error &&
     workspaceSettings.state.data.settings.canManage &&
     workspaceSettings.state.data.membership.role === 'admin';
   const capabilities = useSecretsCapabilities(workspace.id);
   const secretsVisible = capabilities.state.kind === 'ready' && capabilities.state.data.enabled;
-  const browserLoginsVisible = useFlag('browser-use');
   const { setOpenMobile } = useSidebar();
   const backLabel = `Back to ${workspace.name}`;
   return (
@@ -818,7 +808,7 @@ function SettingsNavigation({ backHref }: { backHref: string }) {
             <SidebarMenu>
               <NavItem page={account} />
               {secretsVisible && <NavItem page={secrets} />}
-              {browserLoginsVisible && <NavItem page={browserLogins} />}
+              <NavItem page={browserLogins} />
             </SidebarMenu>
           </SidebarGroup>
           <SidebarGroup>
@@ -867,14 +857,7 @@ function WorkspaceNavigation({ onSearch, backHref }: { onSearch: () => void; bac
   const { workspace } = workspaceRoute.useRouteContext();
   const { setOpenMobile } = useSidebar();
   const settingsMode = useSettingsMode();
-  const appsEnabled = useFlag('app-hosting');
   usePreloadSidebarCode(workspace.slug);
-  const visibleGroups = workspaceGroups
-    .map(group => ({
-      ...group,
-      pages: group.pages.filter(page => page !== apps || appsEnabled),
-    }))
-    .filter(group => group.pages.length > 0);
   return (
     <Sidebar collapsible="icon" label={settingsMode ? 'Settings' : workspace.name}>
       <>
@@ -910,10 +893,10 @@ function WorkspaceNavigation({ onSearch, backHref }: { onSearch: () => void; bac
                   <SidebarMenu>
                     <StandardNavItem page={chats} />
                     {workspace.status === 'ready' && <InboxNavItem workspaceId={workspace.id} />}
-                    {workspace.status === 'ready' && <TasksNavItem />}
+                    {workspace.status === 'ready' && <StandardNavItem page={tasks} />}
                   </SidebarMenu>
                 </SidebarGroup>
-                {visibleGroups.map(group => (
+                {workspaceGroups.map(group => (
                   <SidebarGroup key={group.label}>
                     <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
                     <SidebarMenu>
@@ -1035,9 +1018,6 @@ function WorkspaceSearchWithSecrets({
   workspaceId,
   workspaceSlug,
   workspaceReady,
-  appsEnabled,
-  tasksEnabled,
-  browserLoginsEnabled,
   onToggleSidebar,
 }: {
   open: boolean;
@@ -1045,9 +1025,6 @@ function WorkspaceSearchWithSecrets({
   workspaceId: string;
   workspaceSlug: string;
   workspaceReady: boolean;
-  appsEnabled: boolean;
-  tasksEnabled: boolean;
-  browserLoginsEnabled: boolean;
   onToggleSidebar: () => void;
 }) {
   const capabilities = useSecretsCapabilities(workspaceId, workspaceReady);
@@ -1059,9 +1036,6 @@ function WorkspaceSearchWithSecrets({
       workspaceId={workspaceId}
       workspaceSlug={workspaceSlug}
       workspaceReady={workspaceReady}
-      appsEnabled={appsEnabled}
-      tasksEnabled={tasksEnabled}
-      browserLoginsEnabled={browserLoginsEnabled}
       secretsEnabled={secretsEnabled}
       onToggleSidebar={onToggleSidebar}
     />
@@ -1074,9 +1048,6 @@ function WorkspaceSearchMount({
   workspaceId,
   workspaceSlug,
   workspaceReady,
-  appsEnabled,
-  tasksEnabled,
-  browserLoginsEnabled,
   secretsEnabled,
   onToggleSidebar,
 }: {
@@ -1085,23 +1056,13 @@ function WorkspaceSearchMount({
   workspaceId: string;
   workspaceSlug: string;
   workspaceReady: boolean;
-  appsEnabled: boolean;
-  tasksEnabled: boolean;
-  browserLoginsEnabled: boolean;
   secretsEnabled: boolean;
   onToggleSidebar: () => void;
 }) {
   const navigate = useNavigate();
   const visibleSearchPages = useMemo(
-    () =>
-      searchPages.filter(page => {
-        if (page === apps && !appsEnabled) return false;
-        if ((page === inbox || page === tasks) && !tasksEnabled) return false;
-        if (page === secrets && !secretsEnabled) return false;
-        if (page === browserLogins && !browserLoginsEnabled) return false;
-        return true;
-      }),
-    [appsEnabled, browserLoginsEnabled, secretsEnabled, tasksEnabled],
+    () => searchPages.filter(page => page !== secrets || secretsEnabled),
+    [secretsEnabled],
   );
   return (
     <Suspense fallback={null}>
@@ -1110,7 +1071,6 @@ function WorkspaceSearchMount({
         onOpenChange={onOpenChange}
         workspaceId={workspaceId}
         workspaceReady={workspaceReady}
-        appsEnabled={appsEnabled}
         pages={visibleSearchPages}
         onSelect={target => {
           switch (target.kind) {
@@ -1168,9 +1128,6 @@ function WorkspaceSearchMount({
 
 function WorkspaceShellContent() {
   const { user, workspace, workspaceStale, membershipId } = workspaceRoute.useRouteContext();
-  const appsEnabled = useFlag('app-hosting');
-  const tasksEnabled = useFlag('assignable-tasks');
-  const browserLoginsEnabled = useFlag('browser-use');
   const locationHref = useLocation({ select: location => location.href });
   const settingsMode = useSettingsMode();
   const [lastWorkspaceHref, setLastWorkspaceHref] = useState(`/${workspace.slug}`);
@@ -1325,9 +1282,6 @@ function WorkspaceShellContent() {
                 workspaceId={workspace.id}
                 workspaceSlug={workspace.slug}
                 workspaceReady={workspace.status === 'ready'}
-                appsEnabled={appsEnabled}
-                tasksEnabled={tasksEnabled}
-                browserLoginsEnabled={browserLoginsEnabled}
                 onToggleSidebar={toggleSidebar}
               />
             ) : (
@@ -1337,9 +1291,6 @@ function WorkspaceShellContent() {
                 workspaceId={workspace.id}
                 workspaceSlug={workspace.slug}
                 workspaceReady={false}
-                appsEnabled={appsEnabled}
-                tasksEnabled={tasksEnabled}
-                browserLoginsEnabled={browserLoginsEnabled}
                 secretsEnabled={false}
                 onToggleSidebar={toggleSidebar}
               />
@@ -1351,12 +1302,11 @@ function WorkspaceShellContent() {
   );
 }
 
-/** Without assignable tasks there is no Inbox, so a direct link explains that and points to where waiting work lives today. */
+/** Inbox lists this person's waiting work; until the workspace is ready, a direct link points to where waiting work lives. */
 export function InboxPage() {
   const { workspace } = workspaceRoute.useRouteContext();
   const params = { workspaceSlug: workspace.slug };
-  const assignable = useFlag('assignable-tasks');
-  if (assignable && workspace.status === 'ready')
+  if (workspace.status === 'ready')
     return (
       <Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Loading Inbox…</p>}>
         <InboxList workspaceId={workspace.id} workspaceSlug={workspace.slug} />

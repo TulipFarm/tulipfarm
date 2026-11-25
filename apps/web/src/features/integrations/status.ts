@@ -10,7 +10,6 @@ import { googleAppScopes } from '@tulipfarm/google-workspace/public-contracts';
 import type { Integration } from './catalog';
 import { accountConnectionState, slackConnectionState } from './connection-state';
 import { useChatGptConnection, useTokenConnection } from '@/features/models/plan-connections';
-import { useFlag } from '@/lib/feature-flags';
 
 export type Status =
   | { kind: 'loading' }
@@ -22,8 +21,6 @@ export type Status =
   | { kind: 'error'; detail: string; accessLost: boolean };
 /** The provider has no app credentials on this server, so nobody in any workspace can connect it. */
 export const notSetUp = 'Not set up on this server';
-/** A provider that is still rolling out and isn't on for this member yet. */
-export const notYet = 'Not available to you yet';
 export type Statuses = Record<
   'google' | 'slack' | 'github' | 'github-personal' | 'atlassian' | 'trello' | 'chatgpt' | 'claude',
   Status
@@ -51,13 +48,10 @@ export function useIntegrationStatus(workspaceId: string, provider?: keyof Statu
   const github = useManagedIntegrations(workspaceId, !provider || provider === 'github');
   const personal = useGitHubAccounts(workspaceId, !provider || provider === 'github-personal');
   const atlassian = useAtlassianAccounts(workspaceId, !provider || provider === 'atlassian' || provider === 'trello');
-  const chatgptOn = useFlag('chatgpt-plan');
-  const claudeOn = useFlag('claude-plan');
-  const readChatgpt = chatgptOn && (provider ? provider === 'chatgpt' : plans);
-  const readClaude = claudeOn && (provider ? provider === 'claude' : plans);
+  const readChatgpt = provider ? provider === 'chatgpt' : plans;
+  const readClaude = provider ? provider === 'claude' : plans;
   const chatgpt = useChatGptConnection(workspaceId, readChatgpt);
   const claude = useTokenConnection(workspaceId, 'claude', readClaude);
-  const off: Status = { kind: 'unavailable', detail: notYet };
   // A plan app is connected while any of the member's accounts is, and needs attention when only stale ones are left.
   const plan = (connections: readonly { state: string }[] | undefined): Status => {
     if (!connections) return { kind: 'unavailable', detail: notSetUp };
@@ -132,8 +126,8 @@ export function useIntegrationStatus(workspaceId: string, provider?: keyof Statu
     }),
     atlassian: pickAtlassian(false),
     trello: pickAtlassian(true),
-    chatgpt: chatgptOn ? status(chatgpt.state, data => plan(data?.connections)) : off,
-    claude: claudeOn ? status(claude.state, data => plan(data?.connections)) : off,
+    chatgpt: status(chatgpt.state, data => plan(data?.connections)),
+    claude: status(claude.state, data => plan(data?.connections)),
   };
   const byProvider = {
     google,

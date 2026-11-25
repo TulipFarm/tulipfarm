@@ -218,7 +218,7 @@ test('a finished task saves its owner’s business facts to their Knowledge', { 
   const requests = [];
   const learning = createAgentLessonLearning({
     runtime: f.runtime,
-    learned: createLearnedKnowledge({ runtime: f.runtime, files, enabled: async () => true }),
+    learned: createLearnedKnowledge({ runtime: f.runtime, files }),
     model: async request => {
       requests.push(request);
       if (request.system !== learnedKnowledgePrompt) return JSON.stringify({ lessons: [], suggestions: [] });

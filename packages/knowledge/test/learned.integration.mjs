@@ -46,7 +46,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const files = createFiles(runtime, { read: unavailable, putIfAbsent: unavailable, remove: unavailable });
     const api = createLocalKnowledge({ runtime, files });
     const indexed = keepBackedSearch({ runtime });
-    const learned = createLearnedKnowledge({ runtime, files, enabled: async () => true });
+    const learned = createLearnedKnowledge({ runtime, files });
     const chat = { kind: 'chat', id: randomUUID(), runId: null };
     const task = { kind: 'task', id: randomUUID(), runId: randomUUID() };
     const pricing = {

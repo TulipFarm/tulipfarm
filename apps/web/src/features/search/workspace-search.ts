@@ -109,13 +109,11 @@ function mapAppResult(app: AppSummary): WorkspaceSearchResult {
 export function useWorkspaceContentSearch({
   workspaceId,
   enabled,
-  appsEnabled,
   query,
   category,
 }: {
   workspaceId: string;
   enabled: boolean;
-  appsEnabled: boolean;
   query: string;
   category: SearchCategory;
 }): WorkspaceSearchState {
@@ -182,7 +180,7 @@ export function useWorkspaceContentSearch({
     const shouldSearchAgents = include('agents');
     const shouldSearchTables = include('tables');
     const shouldSearchWorkflows = include('workflows');
-    const shouldSearchApps = appsEnabled && include('apps');
+    const shouldSearchApps = include('apps');
     const shouldSearchFiles = include('files') && trimmed.length > 0;
 
     const controller = new AbortController();
@@ -334,7 +332,7 @@ export function useWorkspaceContentSearch({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [appsEnabled, category, chatsReader, enabled, query, workspaceId]);
+  }, [category, chatsReader, enabled, query, workspaceId]);
 
   return state;
 }

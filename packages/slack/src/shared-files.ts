@@ -13,9 +13,8 @@ import type { SlackRuntime } from './installations.ts';
 import { currentSlackMessage } from './message-source.ts';
 import type { SlackSharedFile } from './message-content.ts';
 
-/** How a Slack direct message reads the files shared in it while the `images` flag is on. */
+/** How a Slack direct message reads the files shared in it. */
 export type SlackFileReading = {
-  enabled: (workspaceId: string) => Promise<boolean>;
   bytes: AttachmentBytes;
 };
 

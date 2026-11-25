@@ -220,7 +220,7 @@ export interface KnowledgeRecognitionOptions {
   /** `throw` (the default) fails the parse so it is retried; `count` keeps the item's fallback and counts it. */
   failedRecognition?: 'throw' | 'count';
   /**
-   * The workspace `images` flag's rules: a file recognises at most `recognitionsPerFile` units, an unavailable
+   * The image rules: a file recognises at most `recognitionsPerFile` units, an unavailable
    * recognition (such as a refused credit reservation) gaps only its own unit, recognised media is labelled
    * `[Recognised image]`, and a standalone image file is read as one unit.
    */

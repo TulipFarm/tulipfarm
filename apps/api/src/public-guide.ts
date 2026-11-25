@@ -5,7 +5,6 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { Pool } from 'pg';
 import { databasePools } from '@tulipfarm/config/database-connections';
 import { z } from 'zod';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import { canonicalEmail } from '@tulipfarm/workspaces/canonical-email';
 import { onboardingDetailsSchema, onboardingTokenSchema } from '@tulipfarm/workspaces/onboarding-contracts';
 import { saveOnboarding, OnboardingConflict, OnboardingUnavailable } from '@tulipfarm/workspaces/onboarding';
@@ -45,7 +44,6 @@ export type PublicGuideDependencies = {
   tokens: ReturnType<typeof guideTokens>;
   access: ReturnType<typeof guideAccess>;
   model: ReturnType<typeof publicGuideModel>;
-  enabled(): Promise<boolean>;
   siteKey: string | null;
   appOrigin: string;
   googleAvailable: boolean;
@@ -91,11 +89,7 @@ export function registerPublicGuideRoutes(app: FastifyInstance, deps: PublicGuid
       request.log.error({ err: error }, 'Public guide unavailable');
       return reply.code(503).header('Retry-After', 5).send({ error: 'guide-unavailable' });
     });
-    const enabled = async () => {
-      if (!(await deps.enabled())) throw new GuideUnavailable(404, 'guide-disabled');
-    };
     const visitor = async (request: FastifyRequest) => {
-      await enabled();
       const authorization = request.headers.authorization;
       return deps.tokens.readVisitor(
         authorization?.startsWith('Bearer ') ? authorization.slice(7) : undefined,
@@ -123,8 +117,8 @@ export function registerPublicGuideRoutes(app: FastifyInstance, deps: PublicGuid
           },
         },
       },
-      async () => ({
-        enabled: await deps.enabled(),
+      () => ({
+        enabled: true,
         modelAvailable: deps.model !== null,
         turnstileSiteKey: deps.siteKey,
         appOrigin: deps.appOrigin,
@@ -146,7 +140,6 @@ export function registerPublicGuideRoutes(app: FastifyInstance, deps: PublicGuid
         },
       },
       async request => {
-        await enabled();
         await deps.access.session(normalizeIP(request.ip));
         const { challengeToken } = sessionSchema.parse(request.body);
         const origin = request.headers.origin ?? '';
@@ -288,7 +281,6 @@ export function registerPublicGuideRoutes(app: FastifyInstance, deps: PublicGuid
         },
       },
       async (request, reply) => {
-        await enabled();
         await deps.access.google(normalizeIP(request.ip));
         const { token } = z.object({ token: z.string() }).parse(request.query);
         const response = await deps.google(deps.tokens.readGoogle(token));
@@ -331,7 +323,6 @@ export function registerPublicGuide(app: FastifyInstance, { auth, pool: authPool
     tokens,
     access: guideAccess(pool, config.secret),
     model: publicGuideModel(),
-    enabled: () => isFeatureEnabled('public-tulipfarm-guide', { id: 'public-tulipfarm-guide' }),
     siteKey: turnstile?.siteKey ?? null,
     appOrigin: config.webOrigin,
     googleAvailable: Boolean(config.google),

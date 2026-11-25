@@ -329,7 +329,6 @@ test(
       undefined,
       undefined,
       {
-        enabled: async () => true,
         files,
         recognition: async scope => {
           scopes.push(scope);

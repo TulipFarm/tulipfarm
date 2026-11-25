@@ -66,7 +66,7 @@ test(
     const controls = [];
     const shell = new Map([
       ...workspaceShellReads(fixture.workspace.id),
-      ['/v1/feature-flags', { 'browser-use': true }],
+      ['/v1/feature-flags', {}],
       ['/v1/google-workspace/availability', { configured: false }],
       [`${base}/google-workspace`, { status: 'disconnected' }],
       [

@@ -7,12 +7,10 @@ type Options = Parameters<typeof createDefaultKnowledge>[0];
 export function createDefaultKnowledgeParts(dependencies: {
   runtime: Options['runtime'];
   engines: Options['engines'];
-  enabled?: Options['enabled'];
 }) {
   const service = createDefaultKnowledge({
     runtime: dependencies.runtime,
     engines: dependencies.engines,
-    ...(dependencies.enabled ? { enabled: dependencies.enabled } : {}),
   });
   return { service, activities: createDefaultKnowledgeActivities(service) };
 }

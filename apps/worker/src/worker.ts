@@ -59,7 +59,7 @@ import { createAtlassianKnowledgeParts } from './knowledge-atlassian-composition
 import { createDefaultKnowledgeParts } from './knowledge-defaults-composition.ts';
 import { createKnowledgeWorker } from './knowledge-worker.ts';
 import { workflowSource } from './workflow-source.ts';
-import { createDefaultKnowledgeGate, withKnowledgeSourceAuthorization } from '@tulipfarm/knowledge';
+import { withKnowledgeSourceAuthorization } from '@tulipfarm/knowledge';
 import { createWorkflowAgentTasks } from './workflow-agent-tasks.ts';
 import { createSkillActivities } from './skill-activities.ts';
 import { createEvalActivities } from './eval-activities.ts';
@@ -531,14 +531,10 @@ async function run() {
         })
       : undefined;
     const knowledgeParts = (runtime: NonNullable<typeof knowledgeResources>['runtime']) => {
-      const google = createGoogleKnowledgeParts({
-        runtime,
-        gate: createDefaultKnowledgeGate({ runtime }),
-        ...knowledgeMediaRecognition(runtime),
-      });
-      const slack = createSlackKnowledgeParts({ runtime, gate: createDefaultKnowledgeGate({ runtime }) });
-      const github = createGitHubKnowledgeParts({ runtime, gate: createDefaultKnowledgeGate({ runtime }) });
-      const atlassian = createAtlassianKnowledgeParts({ runtime, gate: createDefaultKnowledgeGate({ runtime }) });
+      const google = createGoogleKnowledgeParts({ runtime, ...knowledgeMediaRecognition(runtime) });
+      const slack = createSlackKnowledgeParts({ runtime });
+      const github = createGitHubKnowledgeParts({ runtime });
+      const atlassian = createAtlassianKnowledgeParts({ runtime });
       const defaults = createDefaultKnowledgeParts({
         runtime,
         engines: {

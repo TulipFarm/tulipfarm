@@ -9,7 +9,6 @@ import { Spinner } from '@tulipfarm/sprout/spinner';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Status } from '@tulipfarm/sprout/status';
 import { consentUrl } from '@/features/atlassian/accounts';
-import { useFlag } from '@/lib/feature-flags';
 import { atlassianApi, atlassianError } from '@/lib/atlassian';
 import { githubApi, githubConsent } from '@/lib/github';
 import { useFeatureChanges, useFeatureRead } from '@/lib/query';
@@ -303,17 +302,15 @@ function IntentMark({ intent, issue }: { intent: DefaultKnowledgeIntent; issue: 
 
 /** Automatic Knowledge for one product, polled while anything is still indexing. */
 export function useDefaultKnowledge(workspaceId: string) {
-  const enabled = useFlag('default-connection-knowledge');
   const api = useMemo(() => defaultKnowledgeApi(workspaceId), [workspaceId]);
   const read = useFeatureRead({
     key: [...defaultKnowledgeKeys, 'list'],
-    enabled,
     load: api.list,
     staleTime: 0,
     pollWhile: data => data.items.some(indexing),
     maxChecks: 20,
   });
-  return { enabled: enabled && !(read.state.kind === 'ready' && !read.state.data.enabled), read };
+  return { read };
 }
 
 function Checking() {
@@ -815,8 +812,7 @@ export function DefaultKnowledge({
   product: DefaultKnowledgeProduct;
   connected: boolean;
 }) {
-  const { enabled, read } = useDefaultKnowledge(workspaceId);
-  if (!enabled) return null;
+  const { read } = useDefaultKnowledge(workspaceId);
   const disclosure = disclosures[product];
   const items = read.state.kind === 'ready' ? read.state.data.items.filter(intent => intent.product === product) : [];
   const atlassian = product === 'jira' || product === 'confluence' ? product : null;

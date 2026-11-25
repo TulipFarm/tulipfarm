@@ -4,7 +4,6 @@ import type { DraftEvalCase } from '@tulipfarm/evals/contracts';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@tulipfarm/sprout/collapsible';
-import { useFlag } from '@/lib/feature-flags';
 import { TableRequestError } from '@/features/tables/request-state';
 import { describeCheck } from './eval-labels';
 import { useEvalSet, useEvalsApi } from './evals-api';
@@ -27,8 +26,7 @@ export function DraftEvalCases({
   /** The agent's definition is saved, so its Evals exist. */
   saved: boolean;
 }) {
-  const on = useFlag('agent-evals');
-  if (!on || !cases?.length) return null;
+  if (!cases?.length) return null;
   return (
     <section aria-label="Test cases" className="grid gap-2 rounded-lg border border-border p-3">
       <div className="grid gap-0.5">

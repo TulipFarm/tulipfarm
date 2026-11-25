@@ -4,7 +4,7 @@ import type { AppId } from '@tulipfarm/apps';
 import { s3AppStorage, selectAppPublisher } from '@tulipfarm/apps/sites';
 import { appRepositories, readSourceBundles, type AppTransaction } from '@tulipfarm/apps/store';
 import { appBuilder, appHost, creditGate } from '@tulipfarm/extensions';
-import { errorAttributes, isFeatureEnabled, log } from '@tulipfarm/observability';
+import { errorAttributes, log } from '@tulipfarm/observability';
 import { objectStorageClient } from '@tulipfarm/workspaces/object-storage';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { Pool } from 'pg';
@@ -65,7 +65,6 @@ export function createAppComposition(options: {
       }
       yield* seen;
     },
-    enabled: workspaceId => isFeatureEnabled('app-hosting', null, { id: workspaceId }),
   };
   const { reconcileApps, meterAppTraffic, meterAppUsage: _meterWindow, ...activities } = createAppActivities(work);
   const { reconcileAppServers, sweepServerArtifacts, ...serverActivities } = createAppServerActivities(work);

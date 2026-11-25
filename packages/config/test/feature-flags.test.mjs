@@ -31,25 +31,25 @@ test('override values are true or false only', () => {
 });
 
 test('configured flags resolve env override, then FEATURE_FLAGS_OFF, then default', () => {
-  assert.equal(configuredFeatureFlag('images', {}), true);
-  assert.equal(configuredFeatureFlag('images', { NODE_ENV: 'production' }), false);
+  assert.equal(configuredFeatureFlag('openai-models', {}), true);
+  assert.equal(configuredFeatureFlag('openai-models', { NODE_ENV: 'production' }), false);
   assert.equal(
-    configuredFeatureFlag('images', {
+    configuredFeatureFlag('openai-models', {
       NODE_ENV: 'production',
-      FEATURE_FLAG_IMAGES: 'true',
+      FEATURE_FLAG_OPENAI_MODELS: 'true',
     }),
     true,
   );
   assert.equal(
-    configuredFeatureFlag('images', {
-      FEATURE_FLAGS_OFF: 'other, images',
+    configuredFeatureFlag('openai-models', {
+      FEATURE_FLAGS_OFF: 'other, openai-models',
     }),
     false,
   );
   assert.equal(
-    configuredFeatureFlag('images', {
-      FEATURE_FLAGS_OFF: 'images',
-      FEATURE_FLAG_IMAGES: 'true',
+    configuredFeatureFlag('openai-models', {
+      FEATURE_FLAGS_OFF: 'openai-models',
+      FEATURE_FLAG_OPENAI_MODELS: 'true',
     }),
     true,
   );

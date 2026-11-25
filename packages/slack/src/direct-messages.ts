@@ -56,7 +56,7 @@ export function createSlackDirectMessages(options: {
   cipher: ReturnType<typeof slackCredentialCipher>;
   fetcher?: typeof fetch;
   modelFamilyId?: string;
-  /** Reads shared files as attachments while the `images` flag is on; without it files are named, not read. */
+  /** Reads shared files as attachments; without it files are named, not read. */
   files?: SlackFileReading;
 }) {
   const { runtime, cipher, files: reading } = options;
@@ -263,7 +263,7 @@ export function createSlackDirectMessages(options: {
     });
   }
   /**
-   * Admits held messages without downloading anything. A message that shares files while reading them is on is
+   * Admits held messages without downloading anything. A message that shares files, where files are read, is
    * returned instead, for `admitFiles` to download and admit in its own activity; later messages in its thread wait
    * for it. One message's failure is reported without holding up messages in other threads.
    */
@@ -287,7 +287,7 @@ export function createSlackDirectMessages(options: {
         ).rows,
       ),
     );
-    const reads = Boolean(reading && (await reading.enabled(workspaceId)));
+    const reads = Boolean(reading);
     const files: SlackPromptWork[] = [];
     const failures: unknown[] = [];
     const waiting = new Set<string>();
@@ -310,17 +310,16 @@ export function createSlackDirectMessages(options: {
    */
   async function admitFiles(value: unknown) {
     const work = slackPromptWorkSchema.parse(value);
-    const share =
-      reading && shared && (await reading.enabled(work.workspaceId))
-        ? await stageSlackFiles({
-            runtime,
-            cipher,
-            attachments: shared,
-            fetcher: options.fetcher ?? fetch,
-            workspaceId: work.workspaceId,
-            eventId: work.eventId,
-          })
-        : null;
+    const share = shared
+      ? await stageSlackFiles({
+          runtime,
+          cipher,
+          attachments: shared,
+          fetcher: options.fetcher ?? fetch,
+          workspaceId: work.workspaceId,
+          eventId: work.eventId,
+        })
+      : null;
     const adopted = new Set<string>();
     try {
       return (await admit(work.workspaceId, work.eventId, share, adopted)) === true;

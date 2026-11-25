@@ -18,15 +18,11 @@ import {
 
 /** A workspace with a public app on a live release, a Posts table holding one row owned by ada, and members of each role. */
 export async function appDataFixture(t) {
-  const flag = process.env.FEATURE_FLAG_APP_HOSTING;
-  process.env.FEATURE_FLAG_APP_HOSTING = 'true';
   const db = await fixture(),
     cleanup = [];
   t.after(async () => {
     for (const close of cleanup.reverse()) await close();
     await db.close();
-    if (flag === undefined) delete process.env.FEATURE_FLAG_APP_HOSTING;
-    else process.env.FEATURE_FLAG_APP_HOSTING = flag;
   });
   await loadPlatformBaseline(db.platform);
   for (const migration of ['0011_app_hostnames.sql', '0013_app_server_routes.sql', '0016_app_live_requests.sql'])

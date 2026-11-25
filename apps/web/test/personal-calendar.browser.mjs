@@ -128,7 +128,7 @@ test(
           url = new URL(request.url()),
           path = url.pathname;
         let json;
-        if (path === '/v1/feature-flags') return route.fulfill({ json: { 'bud-quick-chat': true } });
+        if (path === '/v1/feature-flags') return route.fulfill({ json: {} });
         if (path === '/v1/auth/get-session') json = session;
         else if (path === '/v1/workspaces') json = [workspace];
         else if (path === `/v1/workspaces/${workspace.slug}`) json = workspace;

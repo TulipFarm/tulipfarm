@@ -155,7 +155,7 @@ test(
     assert.equal(await runState(first.id), 'queued');
     assert.deepEqual(await assignment(first.id), { run_state: 'queued', reason: null, current_task_id: null });
 
-    await engine.step(workspace.id, true);
+    await engine.step(workspace.id);
     assert.equal(started.length, 1, 'The agent limit of 1 admits one row');
     assert.equal(started[0].agentId, agentId);
     assert.equal(started[0].userId, workspace.userId, 'The run acts for the person who assigned it');
@@ -164,7 +164,7 @@ test(
     assert.equal(await runState(first.id), 'working');
     assert.match((await assignment(second.id)).reason, /Ops Helper is working on 1 rows/);
 
-    await engine.step(workspace.id, true);
+    await engine.step(workspace.id);
     assert.equal(started.length, 1, 'A step never starts a second run for a working row');
 
     const current = await tables.read(workspace.id, workspace.userId, { ...base, recordId: first.id });
@@ -176,7 +176,7 @@ test(
       values: { [taskFields.assignee]: { kind: 'actor', actor: { type: 'member', id: workspace.membershipId } } },
     });
     refuse(true);
-    await engine.step(workspace.id, true);
+    await engine.step(workspace.id);
     assert.equal((await assignment(first.id)).current_task_id, null, 'Reassigning stops the run');
     assert.equal(await runState(first.id), null);
     assert.deepEqual(
@@ -222,7 +222,7 @@ test(
       );
 
     const earlier = await create('Earlier row');
-    await engine.step(ws.id, true);
+    await engine.step(ws.id);
     assert.equal(started[0].limits.credits, 100, 'Without a cap reached, a run gets the usual 100-credit budget');
     const { current_task_id: earlierTask } = await assignment(earlier.id);
     const [{ flow }] = await query(`SELECT flow_id::text AS flow FROM ${s}.tf_agent_tasks WHERE id=$1`, [earlierTask]);
@@ -239,12 +239,12 @@ test(
     const spentToday = 40 + (localLater ? 0 : 30);
 
     const first = await create('First capped row');
-    await engine.step(ws.id, true);
+    await engine.step(ws.id);
     const firstCredits = Math.min(100, 150 - spentToday);
     assert.equal(started[1].limits.credits, firstCredits);
     const second = await create('Second capped row');
     const third = await create('Third capped row');
-    await engine.step(ws.id, true);
+    await engine.step(ws.id);
     const left = 150 - spentToday - firstCredits;
     const held = left >= 1 ? third : second;
     if (left >= 1) assert.equal(started[2].limits.credits, left, 'A working run counts its whole budget');
@@ -256,7 +256,7 @@ test(
 
     await query(`UPDATE ${s}.tf_agent_assignment_limits SET daily_credits=1 WHERE agent_id=$1`, [agentId]);
     await query(`UPDATE ${s}.tf_workspace_assignment_limits SET daily_credits=NULL`);
-    await engine.step(ws.id, true);
+    await engine.step(ws.id);
     assert.equal((await assignment(held.id)).reason, 'Waiting: Ops Helper reached its daily credit limit');
   },
 );
@@ -267,7 +267,7 @@ test(
   async t => {
     const { workspace: ws, s, query, tableId, create, assignment, started, engine, transaction } = await harness(t);
     const row = await create('Ship the samples');
-    await engine.step(ws.id, true);
+    await engine.step(ws.id);
     const { current_task_id: taskId } = await assignment(row.id);
     await query(
       `INSERT INTO ${s}.tf_agent_task_messages(task_id,sequence,generation,role,text,sources) VALUES($1,0,0,'owner','brief','[]')`,
@@ -285,10 +285,10 @@ test(
     assert.match(message.text, /Use the blue pallets/);
 
     await query(`UPDATE ${s}.tf_agent_tasks SET status='completed' WHERE id=$1`, [taskId]);
-    await engine.step(ws.id, true);
+    await engine.step(ws.id);
     assert.equal(started.length, 1);
     assert.equal((await assignment(row.id)).run_state, 'done');
-    await engine.step(ws.id, true);
+    await engine.step(ws.id);
     assert.equal(started.length, 2, 'The comment arrived after the last model call, so the agent runs again');
 
     const { current_task_id: secondTask } = await assignment(row.id);
@@ -298,8 +298,8 @@ test(
       [randomUUID(), flow],
     );
     await query(`UPDATE ${s}.tf_agent_tasks SET status='completed' WHERE id=$1`, [secondTask]);
-    await engine.step(ws.id, true);
-    await engine.step(ws.id, true);
+    await engine.step(ws.id);
+    await engine.step(ws.id);
     assert.equal(started.length, 2, 'Without an unseen comment the row stays done');
   },
 );
@@ -357,25 +357,25 @@ test('Inbox items go to Slack once, only for kinds the member keeps on', { timeo
 test('a working run stops when its agent is turned off or its sponsor leaves', { timeout: 60000 }, async t => {
   const { workspace: ws, s, query, agentId, create, assignment, paused, started, engine } = await harness(t);
   const row = await create('Reconcile the invoices');
-  await engine.step(ws.id, true);
+  await engine.step(ws.id);
   const { current_task_id: taskId } = await assignment(row.id);
   await query(`UPDATE ${s}.tf_agents SET enabled=false WHERE id=$1`, [agentId]);
-  await engine.step(ws.id, true);
+  await engine.step(ws.id);
   assert.deepEqual(paused, [taskId]);
   assert.deepEqual(await assignment(row.id), {
     run_state: 'waiting',
     reason: 'Agent unavailable',
     current_task_id: null,
   });
-  await engine.step(ws.id, true);
+  await engine.step(ws.id);
   assert.equal(started.length, 1, 'No new run starts by itself');
 
   await query(`UPDATE ${s}.tf_agents SET enabled=true WHERE id=$1`, [agentId]);
   const other = await create('Chase the late payment');
-  await engine.step(ws.id, true);
+  await engine.step(ws.id);
   assert.equal((await assignment(other.id)).run_state, 'working');
   await query(`UPDATE ${s}.tf_memberships SET removed_at=clock_timestamp() WHERE id=$1`, [ws.membershipId]);
-  await engine.step(ws.id, true);
+  await engine.step(ws.id);
   assert.deepEqual(await assignment(other.id), {
     run_state: 'waiting',
     reason: 'Needs reassignment',
@@ -402,7 +402,7 @@ test('the Tasks page reads live activity and marks tasks done or reopens them', 
 
   const running = await create('Reconcile the invoices');
   const waiting = await create('Chase the late payment');
-  await engine.step(ws.id, true);
+  await engine.step(ws.id);
   const activity = await work.taskActivity(ws.id, ws.userId);
   assert.equal(activity.tableId, tableId);
   assert.equal(activity.me, ws.membershipId);
@@ -454,7 +454,7 @@ test(
     const { workspace, runtime, s, query, agentId, activationId, definitionRevision, create, assignment, engine } =
       await harness(t);
     const row = await create('Download the latest invoice');
-    await engine.step(workspace.id, true);
+    await engine.step(workspace.id);
     const taskId = (await assignment(row.id)).current_task_id;
     const runId = randomUUID();
     await query(
@@ -472,7 +472,7 @@ test(
       ],
     );
     await query(`UPDATE ${s}.tf_agent_tasks SET status='waiting-approval' WHERE id=$1`, [taskId]);
-    await engine.step(workspace.id, true);
+    await engine.step(workspace.id);
     assert.deepEqual(
       await query(`SELECT kind,source_id,summary FROM ${s}.tf_inbox_items WHERE row_id=$1 AND resolved_at IS NULL`, [
         row.id,

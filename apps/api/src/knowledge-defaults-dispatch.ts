@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import { WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
-import { defaultKnowledgeFlagEnabled, recordDefaultKnowledgeIntent, type DefaultKnowledge } from '@tulipfarm/knowledge';
+import { recordDefaultKnowledgeIntent, type DefaultKnowledge } from '@tulipfarm/knowledge';
 import { defaultKnowledgeWorkSchema, type DefaultKnowledgeWork } from '@tulipfarm/knowledge/default-contracts';
 import type { DefaultKnowledgeHook } from '@tulipfarm/integrations/authorization';
 import { workspaceSchemaPending } from '@tulipfarm/workspace-storage/runtime';
@@ -40,7 +40,6 @@ export function defaultKnowledgeStarter(app: FastifyInstance, temporal?: ReturnT
     for (const work of await service.due(workspaceId)) await startDefaultKnowledgeWorkflow(temporal, work);
   }
   const hook: DefaultKnowledgeHook = {
-    enabled: defaultKnowledgeFlagEnabled,
     record: recordDefaultKnowledgeIntent,
     started: workspaceId => {
       void start(workspaceId).catch(() => app.log.warn({ workspaceId }, 'Default Knowledge start will retry'));

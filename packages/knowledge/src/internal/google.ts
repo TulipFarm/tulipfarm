@@ -113,7 +113,6 @@ export function createGoogleKnowledge({
   provider,
   clock = systemClock,
   now = () => clock.now(),
-  gate,
   recognition,
   recognitionAvailable,
 }: {
@@ -617,7 +616,6 @@ export function createGoogleKnowledge({
     return { refreshed, unavailable, bounded: true };
   }
   async function due(workspaceId: string): Promise<GoogleKnowledgeWork[]> {
-    const held = gate ? await gate(workspaceId) : [];
     return transaction(workspaceId, 'write', async tx => {
       await tx.client.query(
         `UPDATE ${table(tx, 'google_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL WHERE lease_until<=clock_timestamp()`,
@@ -627,8 +625,7 @@ export function createGoogleKnowledge({
         .parse(
           (
             await tx.client.query(
-              `SELECT g.source_id,g.generation FROM ${table(tx, 'google_sources')} g JOIN ${table(tx, 'sources')} s ON s.id=g.source_id WHERE s.state='active' AND g.lease_token IS NULL AND g.next_attempt_at<=clock_timestamp() AND NOT g.source_id=ANY($1::uuid[]) ORDER BY g.next_attempt_at,g.source_id LIMIT 20`,
-              [held],
+              `SELECT g.source_id,g.generation FROM ${table(tx, 'google_sources')} g JOIN ${table(tx, 'sources')} s ON s.id=g.source_id WHERE s.state='active' AND g.lease_token IS NULL AND g.next_attempt_at<=clock_timestamp() ORDER BY g.next_attempt_at,g.source_id LIMIT 20`,
             )
           ).rows,
         );
@@ -991,7 +988,6 @@ export function createGoogleKnowledge({
     denyMcpEgress();
     const work = googleKnowledgeWorkSchema.parse(value);
     const token = randomUUID();
-    if (gate && (await gate(work.workspaceId)).includes(work.sourceId)) return { disposition: 'stale' };
     const claim = await transaction(work.workspaceId, 'write', async tx => {
       const s = await source(tx, work.sourceId);
       if (s.generation !== work.generation || s.state !== 'active') return 'stale';

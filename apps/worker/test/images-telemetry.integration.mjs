@@ -101,20 +101,12 @@ test(
     const linkPath = `/chart.png?token=${sentinels.query}`;
     await localWeb(t, { [`files.example.com${linkPath}`]: send(200, chart, { 'content-type': 'image/png' }) });
     const f = await conversationFixture();
-    const keys = [
-      'ANTHROPIC_API_KEY',
-      'OPENAI_API_KEY',
-      'MODEL_CATALOG',
-      'MODEL_CATALOG_FILE',
-      'FEATURE_FLAG_IMAGES',
-      'HUNTSMAN_ENDPOINT',
-    ];
+    const keys = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'MODEL_CATALOG', 'MODEL_CATALOG_FILE', 'HUNTSMAN_ENDPOINT'];
     const saved = Object.fromEntries(keys.map(key => [key, process.env[key]]));
     Object.assign(process.env, {
       ANTHROPIC_API_KEY: 'synthetic-test-key',
       OPENAI_API_KEY: 'openai-test-key',
       MODEL_CATALOG: catalog,
-      FEATURE_FLAG_IMAGES: 'true',
       // Huntsman turns link reads on; links are fetched directly, not through it.
       HUNTSMAN_ENDPOINT: 'https://huntsman.example.com',
     });
@@ -317,16 +309,15 @@ test(
       [expected(`attachment:${attachmentId}`, board), expected(linked.source, chart)],
     );
 
-    // Under the images flag the credits summary names image work as its own activities; without it, as before.
-    const summary = images =>
-      f.runtime.transaction(w.id, commonCompatibility, tx => creditSummary(tx, { kind: 'workspace', images }));
+    // The credits summary names image work as its own activities.
+    const summary = () =>
+      f.runtime.transaction(w.id, commonCompatibility, tx => creditSummary(tx, { kind: 'workspace' }));
     const activities = breakdown =>
       Object.fromEntries(
         breakdown
           .filter(entry => entry.activity.startsWith('image-') || entry.activity === 'knowledge-ingestion')
           .map(entry => [entry.activity, entry.calls]),
       );
-    assert.deepEqual(activities((await summary(true)).breakdown), { 'image-generation': 2, 'image-recognition': 2 });
-    assert.deepEqual(activities((await summary(false)).breakdown), { 'knowledge-ingestion': 2 });
+    assert.deepEqual(activities((await summary()).breakdown), { 'image-generation': 2, 'image-recognition': 2 });
   },
 );

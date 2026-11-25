@@ -166,25 +166,3 @@ test(
     }
   },
 );
-
-test('disabled Soul flag hides the explorer and settings navigation', { timeout: 60000 }, async () => {
-  const server = await createServer({
-    root: new URL('..', import.meta.url).pathname,
-    server: { host: '127.0.0.1', port: 0 },
-    logLevel: 'error',
-  });
-  await server.listen();
-  const browser = await chromium.launch({ headless: true });
-  try {
-    const page = await browser.newPage();
-    // Flags come from the API; the mock workspace leaves this read to the network.
-    await page.route('**/v1/feature-flags*', route => route.fulfill({ json: { 'soul-repository-explorer': false } }));
-    await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/soul-explorer-mock/settings/soul`);
-    await page.getByRole('heading', { name: 'Soul is unavailable', exact: true }).waitFor();
-    assert.equal(await page.getByRole('tree').count(), 0);
-    assert.equal(await page.getByRole('link', { name: 'Soul repository', exact: true }).count(), 0);
-  } finally {
-    await browser.close();
-    await server.close();
-  }
-});

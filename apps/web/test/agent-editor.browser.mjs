@@ -222,7 +222,7 @@ test('a manager limits an agent’s browser to listed sites and preselects login
           session: { id: 'session', userId: 'editor' },
           user: { id: 'editor', name: 'Editor', email: 'editor@example.com' },
         };
-      else if (path === '/v1/feature-flags') json = { 'browser-use': true };
+      else if (path === '/v1/feature-flags') json = {};
       else if (path === '/v1/workspaces') json = [workspace];
       else if (path === '/v1/workspaces/editor-proof') json = workspace;
       else if (path.endsWith('/governance/me'))

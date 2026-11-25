@@ -80,7 +80,6 @@ import { ChatKeywords, RichMessage } from './rich-message';
 import { useIntegrationKeywords } from '@/features/integrations/keywords';
 import { ChatModelStatus, useChatModelFor, useChatModels } from './chat-models';
 import { usePlanAccount } from './plan-account';
-import { useFlag } from '@/lib/feature-flags';
 import { BrowserActivityCard, useLiveBrowserOpening, usedBrowser } from '@/features/browser/browser-card';
 import { StartingTasks } from './starting-tasks';
 import { ChatPlans } from './plans';
@@ -488,7 +487,6 @@ function ConversationDetail({
     for (const [messageId, calls] of stream.layoutCalls ?? []) queueRendererCalls(messageId, calls);
   }, [stream.layoutCalls]);
   const modelFamilies = workspaceModels.state.kind === 'ready' ? workspaceModels.state.data.families : noModelFamilies;
-  const imagesReader = useFlag('images');
   const read = useConversationHistory(api, chatId, pages, stream);
   const savedData = read.state.kind === 'ready' ? read.state.data : null;
   const models = useChatModelFor(workspaceModels, draft ? null : (savedData?.chat.model ?? null), chatId);
@@ -534,8 +532,7 @@ function ConversationDetail({
   const text = validContent ? chatDocumentText(validContent) : '';
   const composerInput = useRef<RichTextEditorHandle>(null);
   const canvas = useCanvas();
-  const browserUse = useFlag('browser-use');
-  useLiveBrowserOpening(workspace.id, chatId, activityTools, browserUse && privateChat && !compact);
+  useLiveBrowserOpening(workspace.id, chatId, activityTools, privateChat && !compact);
   const { setOpen: setNavigationOpen } = useSidebar();
   const canvasWasOpen = useRef(canvas.open);
   const navigationCollapsedFor = useRef<string | null>(null);
@@ -1870,14 +1867,9 @@ function ConversationDetail({
                       <StagedAttachments
                         uploads={uploads}
                         disabled={write.locked}
-                        reading={
-                          imagesReader
-                            ? {
-                                imageInput:
-                                  modelFamilies.find(family => family.id === models.model?.id)?.imageInput ?? null,
-                              }
-                            : undefined
-                        }
+                        reading={{
+                          imageInput: modelFamilies.find(family => family.id === models.model?.id)?.imageInput ?? null,
+                        }}
                         references={{ items: mentions.references, notice: mentions.notice }}
                         blocked={
                           googleBlocked && (
@@ -2329,8 +2321,6 @@ function ConversationTools({
   const { workspace, user, membershipId } = workspaceRoute.useRouteContext();
   const slack = useMemo(() => agentApi(workspace.id), [workspace.id]);
   const recordChanges = useMemo(() => recordChangesForTools(message.id, message.tools), [message.id, message.tools]);
-  const codingRuns = useFlag('coding-runs');
-  const browserUse = useFlag('browser-use');
   return (
     <section aria-label={`Activity for message ${message.sequence}`} className="space-y-3">
       {message.tools
@@ -2474,18 +2464,17 @@ function ConversationTools({
         .map(tool => (
           <McpCallReviewCard key={`mcp:${tool.id}`} workspaceId={workspace.id} actionId={tool.id} onSettled={changed} />
         ))}
-      {codingRuns &&
-        message.tools
-          .filter(tool => tool.tool === 'coding.run' && tool.codingRun)
-          .map(tool => (
-            <CodingRunReviewCard
-              key={`coding:${tool.id}`}
-              workspaceId={workspace.id}
-              runId={tool.id}
-              onSettled={changed}
-            />
-          ))}
-      {browserUse && usedBrowser(message.tools) && <BrowserActivityCard workspaceId={workspace.id} chatId={chatId} />}
+      {message.tools
+        .filter(tool => tool.tool === 'coding.run' && tool.codingRun)
+        .map(tool => (
+          <CodingRunReviewCard
+            key={`coding:${tool.id}`}
+            workspaceId={workspace.id}
+            runId={tool.id}
+            onSettled={changed}
+          />
+        ))}
+      {usedBrowser(message.tools) && <BrowserActivityCard workspaceId={workspace.id} chatId={chatId} />}
       {message.tools
         .filter(tool => tool.images?.length)
         .map(tool => (

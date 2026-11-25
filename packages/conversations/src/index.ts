@@ -316,7 +316,7 @@ const compactionParts = (
 const skillReference = `jsonb_build_object('kind', p.kind, 'skillId', to_jsonb(p)->>'skill_id', 'revision', to_jsonb(p)->>'skill_revision', 'name', to_jsonb(p)->>'skill_name')`;
 
 export type ConversationAdmission = {
-  /** Pins the turn's image models when the workspace reads images; null leaves the turn unpinned. */
+  /** Pins the turn's image models; null leaves the turn unpinned. */
   pinTurn?: (tx: AuthorizationTransaction, workspaceId: string, familyId: string) => Promise<TurnImageModels | null>;
   /** Runs in the retry's transaction, after the failed turn is queued again, so work the turn owns can continue. */
   retryTurn?: (

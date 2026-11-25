@@ -28,13 +28,12 @@ export type KnowledgeRecognitionScope = {
   signal?: AbortSignal;
 };
 /**
- * Host port that supplies the workspace's recognizer, charged to the scope's workspace, and whether the workspace
- * `images` flag's parse rules apply. Returns no recognizer when no model reads images for the workspace. Knowledge
- * applies the workspace switch and supplies the cache.
+ * Host port that supplies the workspace's recognizer, charged to the scope's workspace. Returns no recognizer when no
+ * model reads images for the workspace. Knowledge applies the workspace switch and supplies the cache.
  */
 export type KnowledgeRecognitionPort = (
   scope: KnowledgeRecognitionScope,
-) => Promise<{ recognizer?: MediaRecognizer; images?: boolean } | undefined>;
+) => Promise<{ recognizer?: MediaRecognizer } | undefined>;
 /** Host port: whether recognition could run for this workspace now, used to re-parse revisions with gaps. */
 export type KnowledgeRecognitionAvailability = (workspaceId: string) => Promise<boolean>;
 
@@ -133,8 +132,8 @@ export function createRecognitionCache(runtime: Runtime, workspaceId: string): M
 
 /**
  * Recognition options for one revision's parse: no recognizer while the workspace switch is off or none is available.
- * The `images` rules follow the host either way, so a standalone image without a recognizer still reads as unread
- * media rather than an unsupported file.
+ * With a host port the `images` rules apply either way, so a standalone image without a recognizer still reads as
+ * unread media rather than an unsupported file.
  */
 export async function recognitionOptions(
   runtime: Runtime,
@@ -145,7 +144,7 @@ export async function recognitionOptions(
   if (!port) return signal;
   const enabled = await runtime.transaction(scope.workspaceId, commonCompatibility, tx => mediaRecognitionEnabled(tx));
   const offered = await port(scope);
-  const base = { ...signal, ...(offered?.images ? { images: true } : {}) };
+  const base = { ...signal, images: true };
   if (!enabled || !offered?.recognizer) return base;
   return { ...base, recognizer: offered.recognizer, cache: createRecognitionCache(runtime, scope.workspaceId) };
 }

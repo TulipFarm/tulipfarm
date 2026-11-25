@@ -40,7 +40,7 @@ type Options = {
   oauth?: ReturnType<typeof createWorkspaceMcpOAuth>;
   admissionEnabled: boolean;
   dispatchEnabled: boolean;
-  /** Whether this workspace may set up hosted packages: a host is registered and the workspace's flag is on. */
+  /** Whether this workspace may set up hosted packages: a host is registered. */
   hostedEnabled?: (workspaceId: string) => Promise<boolean>;
   permissions: Pick<ReturnType<typeof workspaceMcpPermissions>, 'permissions' | 'setPermissions' | 'permissionChoices'>;
   authorizeSelection: NonNullable<WorkspaceMcpOptions['authorizeSelection']>;

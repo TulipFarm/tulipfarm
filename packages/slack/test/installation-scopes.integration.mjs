@@ -7,15 +7,8 @@ import { createWorkspaceRuntime, qualified } from '@tulipfarm/workspace-storage/
 import { workspaceTableMigrations } from '../../workspaces/src/table-migrations.ts';
 import { createSlackInstallations, createSlackInbox, slackCredentialCipher } from '../src/index.ts';
 
-/** Runs a test with the `images` flag set for every workspace. */
-function withImages(t, on) {
-  const previous = process.env.FEATURE_FLAG_IMAGES;
-  process.env.FEATURE_FLAG_IMAGES = String(on);
-  t.after(() => {
-    if (previous === undefined) delete process.env.FEATURE_FLAG_IMAGES;
-    else process.env.FEATURE_FLAG_IMAGES = previous;
-  });
-}
+/** Bot scopes every installation asks for beyond the configured ones. */
+const extraScopes = ['files:read', 'files:write', 'canvases:write', 'assistant:write', 'reactions:read', 'emoji:read'];
 
 async function installationFixture() {
   const db = await fixture();
@@ -40,8 +33,7 @@ async function installationFixture() {
   };
 }
 
-test('external Slack revocation needs repair while deliberate disconnect remains neutral with saved scopes', async t => {
-  withImages(t, false);
+test('external Slack revocation needs repair while deliberate disconnect remains neutral with saved scopes', async () => {
   const f = await installationFixture();
   try {
     const installations = createSlackInstallations({
@@ -101,8 +93,7 @@ test('external Slack revocation needs repair while deliberate disconnect remains
   }
 });
 
-test('with images on, an installation without files:read or files:write asks for them and keeps working until they are granted', async t => {
-  withImages(t, true);
+test('an installation without the extra scopes asks for them and keeps working until they are granted', async () => {
   const f = await installationFixture();
   try {
     const config = {
@@ -132,74 +123,35 @@ test('with images on, an installation without files:read or files:write asks for
     });
     const start = async () => {
       const url = new URL((await installations.begin(f.w.id, f.w.userId, 'scope-session')).url);
-      assert.equal(url.searchParams.get('scope'), 'chat:write,files:read,files:write');
+      assert.equal(url.searchParams.get('scope'), ['chat:write', ...extraScopes].join(','));
       return url.searchParams.get('state');
     };
     // Slack granting only the configured scopes still activates it: shared files go unread, nothing else stops.
     assert.equal((await installations.complete('code', await start(), 'scope-session', f.w.userId)).state, 'active');
     const attention = await installations.status(f.w.id, f.w.userId);
     assert.equal(attention.state, 'permissions-required');
-    assert.deepEqual(attention.missingScopes, ['files:read', 'files:write']);
-    // An installation that has files:read from step 7 still asks for files:write, which image delivery needs.
+    assert.deepEqual(attention.missingScopes, extraScopes);
+    // An installation that has files:read still asks for the rest, such as files:write for image delivery.
     granted = { ...token, scope: 'chat:write,files:read' };
     assert.equal((await installations.complete('code', await start(), 'scope-session', f.w.userId)).state, 'active');
     const partial = await installations.status(f.w.id, f.w.userId);
     assert.equal(partial.state, 'permissions-required');
-    assert.deepEqual(partial.missingScopes, ['files:write']);
-    granted = { ...token, scope: 'chat:write,files:read,files:write' };
+    assert.deepEqual(partial.missingScopes, extraScopes.slice(1));
+    granted = { ...token, scope: ['chat:write', ...extraScopes].join(',') };
     assert.equal((await installations.complete('code', await start(), 'scope-session', f.w.userId)).state, 'active');
     const updated = await installations.status(f.w.id, f.w.userId);
     assert.equal(updated.state, 'active');
     assert.equal(updated.missingScopes, undefined);
     assert.deepEqual(
       (await f.db.platform.query(`SELECT scopes FROM ${f.table('tf_slack_installations')}`)).rows[0].scopes,
-      ['chat:write', 'files:read', 'files:write'],
+      ['chat:write', ...extraScopes],
     );
   } finally {
     await f.close();
   }
 });
 
-test('with images off, files:read and files:write are not asked for', async t => {
-  withImages(t, false);
-  const f = await installationFixture();
-  try {
-    const installations = createSlackInstallations({
-      pool: f.db.platform,
-      runtime: f.runtime,
-      cipher: slackCredentialCipher({ activeKeyId: 'test', keys: { test: 'ab'.repeat(32) } }),
-      fetcher: async () =>
-        Response.json({
-          ok: true,
-          app_id: 'ATEST',
-          team: { id: 'TONE' },
-          token_type: 'bot',
-          bot_user_id: 'UBOT',
-          access_token: 'xoxb-synthetic',
-          scope: 'chat:write',
-        }),
-      config: {
-        appId: 'ATEST',
-        clientId: 'client',
-        clientSecret: 'synthetic',
-        signingSecret: 'synthetic-signing-secret',
-        redirectUri: 'https://api.example.test/oauth',
-        scopeApproval: { reference: 'fixture-approved-scopes', botScopes: ['chat:write'] },
-      },
-    });
-    const url = new URL((await installations.begin(f.w.id, f.w.userId, 'scope-session')).url);
-    assert.equal(url.searchParams.get('scope'), 'chat:write');
-    await installations.complete('code', url.searchParams.get('state'), 'scope-session', f.w.userId);
-    const status = await installations.status(f.w.id, f.w.userId);
-    assert.equal(status.state, 'active');
-    assert.equal(status.missingScopes, undefined);
-  } finally {
-    await f.close();
-  }
-});
-
-test('approved Slack scope upgrades preserve identity and require current manager, session and actual consent', async t => {
-  withImages(t, false);
+test('approved Slack scope upgrades preserve identity and require current manager, session and actual consent', async () => {
   const db = await fixture();
   let runtime;
   try {
@@ -235,7 +187,7 @@ test('approved Slack scope upgrades preserve identity and require current manage
       token_type: 'bot',
       bot_user_id: 'UBOT',
       access_token: 'xoxb-synthetic',
-      scope: 'chat:write',
+      scope: ['chat:write', ...extraScopes].join(','),
     };
     let granted = token;
     const options = { pool: db.platform, runtime, cipher, fetcher: async () => Response.json(granted) };
@@ -261,7 +213,7 @@ test('approved Slack scope upgrades preserve identity and require current manage
     await assert.rejects(upgraded.begin(w.id, member, 'scope-session'));
     const start = async () => {
       const url = new URL((await upgraded.begin(w.id, w.userId, 'scope-session')).url);
-      assert.equal(url.searchParams.get('scope'), 'chat:write,chat:write.customize');
+      assert.equal(url.searchParams.get('scope'), ['chat:write', 'chat:write.customize', ...extraScopes].join(','));
       return url.searchParams.get('state');
     };
     const abandoned = await start(),
@@ -275,7 +227,11 @@ test('approved Slack scope upgrades preserve identity and require current manage
     await assert.rejects(upgraded.complete('code', state, 'other-session', w.userId));
     assert.equal((await upgraded.complete('code', state, 'scope-session', w.userId)).state, 'scope-missing');
     assert.equal((await upgraded.status(w.id, w.userId)).state, 'scope-missing');
-    granted = { ...token, scope: 'chat:write,chat:write.customize', bot_user_id: 'UOTHER' };
+    granted = {
+      ...token,
+      scope: ['chat:write', 'chat:write.customize', ...extraScopes].join(','),
+      bot_user_id: 'UOTHER',
+    };
     await assert.rejects(upgraded.complete('code', await start(), 'scope-session', w.userId));
     granted = { ...granted, bot_user_id: 'UBOT', team: { id: 'TOTHER' } };
     await assert.rejects(upgraded.complete('code', await start(), 'scope-session', w.userId));
@@ -287,7 +243,7 @@ test('approved Slack scope upgrades preserve identity and require current manage
     assert.equal(after.id, before.id);
     assert.equal(after.generation, before.generation);
     assert.equal(after.accepts_events_after, before.accepts_events_after);
-    assert.deepEqual(after.scopes, ['chat:write', 'chat:write.customize']);
+    assert.deepEqual(after.scopes, ['chat:write', 'chat:write.customize', ...extraScopes]);
     assert.equal((await upgraded.status(w.id, w.userId)).missingScopes, undefined);
     await assert.rejects(upgraded.begin(w.id, w.userId, 'scope-session'), /slack-installation-conflict/);
   } finally {
@@ -296,8 +252,7 @@ test('approved Slack scope upgrades preserve identity and require current manage
   }
 });
 
-test('a new installation is open to every member and managed by every admin until a manager narrows it', async t => {
-  withImages(t, false);
+test('a new installation is open to every member and managed by every admin until a manager narrows it', async () => {
   const f = await installationFixture();
   try {
     const members = { member: randomUUID(), admin: randomUUID(), reader: randomUUID() };
@@ -331,7 +286,7 @@ test('a new installation is open to every member and managed by every admin unti
           token_type: 'bot',
           bot_user_id: 'UBOT',
           access_token: 'xoxb-synthetic',
-          scope: 'chat:write',
+          scope: ['chat:write', ...extraScopes].join(','),
         }),
     });
     const url = new URL((await installations.begin(f.w.id, members.member, 'member-session')).url);
@@ -366,8 +321,7 @@ test('a new installation is open to every member and managed by every admin unti
   }
 });
 
-test('the default-sharing migration opens installations made before it', async t => {
-  withImages(t, false);
+test('the default-sharing migration opens installations made before it', async () => {
   const f = await installationFixture();
   try {
     const installationId = randomUUID();

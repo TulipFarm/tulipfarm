@@ -464,7 +464,6 @@ export function createAppServerActivities(work: AppWork) {
         signal.throwIfAborted();
         if (repairs >= SERVER_RECONCILE_BATCH && removals >= SERVER_RECONCILE_BATCH) break;
         try {
-          if (!(await work.enabled(workspaceId))) continue;
           const servers = await transact(workspaceId, async tx => {
             await expireDraftHostStarts(tx, failure('host-unavailable', lostStart, true));
             return readServers(tx, [...listed.keys()]);

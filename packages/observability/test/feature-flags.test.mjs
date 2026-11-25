@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { registerExtension, resetExtensions } from '@tulipfarm/extensions';
 import { featureFlags } from '@tulipfarm/config/feature-flags';
+import { flagSubject, resolveFlagContext } from '../src/flag-subjects.ts';
 import {
   featureFlagAnswer,
   featureFlagSnapshot,
@@ -11,7 +12,8 @@ import {
 } from '../src/index.ts';
 
 const user = { id: 'u1', email: 'a@example.com' };
-const flag = 'google-calendar-canvas';
+const workspace = { id: 'w1', name: 'Acme' };
+const flag = 'openai-models';
 const env = featureFlags[flag].env;
 
 async function withProvider(t, isEnabled, extra = {}) {
@@ -37,37 +39,34 @@ async function withProvider(t, isEnabled, extra = {}) {
 }
 
 test('without a provider, flags use their declared default: on in development, off in production', async () => {
-  assert.equal(await isFeatureEnabled(flag, user, undefined, { NODE_ENV: 'development' }), true);
-  assert.equal(await isFeatureEnabled(flag, user, undefined, {}), true);
-  assert.equal(await isFeatureEnabled(flag, user, undefined, { NODE_ENV: 'production' }), false);
+  assert.equal(await isFeatureEnabled(flag, user, workspace, { NODE_ENV: 'development' }), true);
+  assert.equal(await isFeatureEnabled(flag, user, workspace, {}), true);
+  assert.equal(await isFeatureEnabled(flag, user, workspace, { NODE_ENV: 'production' }), false);
   assert.equal(await isFeatureEnabled('not-a-flag', user, undefined, { NODE_ENV: 'development' }), false);
 });
 
 test('a provider boolean wins over the env override and the default', async t => {
   const calls = await withProvider(t, name => name === flag);
+  assert.equal(await isFeatureEnabled(flag, user, workspace, { NODE_ENV: 'production', [env]: 'false' }), true);
   assert.equal(
-    await isFeatureEnabled(flag, user, { id: 'w1', name: 'Acme' }, { NODE_ENV: 'production', [env]: 'false' }),
-    true,
-  );
-  assert.equal(
-    await isFeatureEnabled('soul-repository-explorer', user, undefined, {
+    await isFeatureEnabled('anthropic-models', user, workspace, {
       NODE_ENV: 'development',
-      FEATURE_FLAG_SOUL_REPOSITORY_EXPLORER: 'true',
+      FEATURE_FLAG_ANTHROPIC_MODELS: 'true',
     }),
     false,
   );
-  const subjectUser = { id: 'u1', email: 'a@example.com', emailDomain: 'example.com' };
+  const subject = { scope: 'workspace', distinctId: 'workspace:w1', workspace };
   assert.deepEqual(calls, [
-    [flag, { scope: 'user', distinctId: 'u1', user: subjectUser, workspace: { id: 'w1', name: 'Acme' } }],
-    ['soul-repository-explorer', { scope: 'user', distinctId: 'u1', user: subjectUser }],
+    [flag, subject],
+    ['anthropic-models', subject],
   ]);
 });
 
 test('a provider answering undefined falls back to the env override, then the default', async t => {
   await withProvider(t, () => undefined);
-  assert.equal(await isFeatureEnabled(flag, user, undefined, { NODE_ENV: 'production', [env]: 'true' }), true);
-  assert.equal(await isFeatureEnabled(flag, user, undefined, { NODE_ENV: 'production' }), false);
-  assert.equal(await isFeatureEnabled(flag, user, undefined, { NODE_ENV: 'development' }), true);
+  assert.equal(await isFeatureEnabled(flag, user, workspace, { NODE_ENV: 'production', [env]: 'true' }), true);
+  assert.equal(await isFeatureEnabled(flag, user, workspace, { NODE_ENV: 'production' }), false);
+  assert.equal(await isFeatureEnabled(flag, user, workspace, { NODE_ENV: 'development' }), true);
 });
 
 test('a provider failure is logged and falls back', async t => {
@@ -80,8 +79,8 @@ test('a provider failure is logged and falls back', async t => {
     return true;
   });
   const results = [
-    await isFeatureEnabled(flag, user, undefined, { NODE_ENV: 'production' }),
-    await isFeatureEnabled(flag, user, undefined, { NODE_ENV: 'production', [env]: 'true' }),
+    await isFeatureEnabled(flag, user, workspace, { NODE_ENV: 'production' }),
+    await isFeatureEnabled(flag, user, workspace, { NODE_ENV: 'production', [env]: 'true' }),
   ];
   write.mock.restore();
   assert.deepEqual(results, [false, true]);
@@ -103,16 +102,15 @@ test('a provider failure is logged and falls back', async t => {
 
 test('a snapshot evaluates every registered flag for one subject', async t => {
   assert.deepEqual(
-    await featureFlagSnapshot(user, undefined, { NODE_ENV: 'production', [env]: 'true' }),
+    await featureFlagSnapshot(user, workspace, { NODE_ENV: 'production', [env]: 'true' }),
     Object.fromEntries(
       Object.keys(featureFlags).map(name => [name, name === flag || featureFlags[name].default === true]),
     ),
   );
-  await withProvider(t, name => (name === 'soul-repository-explorer' ? true : undefined));
+  await withProvider(t, name => (name === 'anthropic-models' ? true : undefined));
   const snapshot = await featureFlagSnapshot(user, { id: 'w1' }, { NODE_ENV: 'production' });
-  assert.equal(snapshot['soul-repository-explorer'], true);
+  assert.equal(snapshot['anthropic-models'], true);
   assert.equal(snapshot[flag], false);
-  assert.equal(snapshot['default-connection-knowledge'], true);
   assert.deepEqual(JSON.parse(JSON.stringify(snapshot)), snapshot);
 });
 
@@ -122,15 +120,14 @@ const userId = '22222222-2222-4222-8222-222222222222';
 test('every flag declares a scope, and background-evaluated flags are workspace or global', () => {
   for (const definition of Object.values(featureFlags))
     assert.ok(['user', 'workspace', 'global'].includes(definition.scope));
-  for (const name of ['social-publishing', 'default-connection-knowledge'])
+  for (const name of ['openai-models', 'anthropic-models', 'openai-image-models'])
     assert.equal(featureFlags[name].scope, 'workspace', `${name} runs in background work`);
-  assert.equal(featureFlags['public-tulipfarm-guide'].scope, 'global');
 });
 
 test('a workspace flag ignores the user, so API and background callers send the same subject', async t => {
   const calls = await withProvider(t, () => true);
-  await isFeatureEnabled('social-publishing', { id: userId, email: 'a@example.com' }, { id: workspaceId });
-  await isFeatureEnabled('social-publishing', { id: 'social-publisher' }, { id: workspaceId });
+  await isFeatureEnabled(flag, { id: userId, email: 'a@example.com' }, { id: workspaceId });
+  await isFeatureEnabled(flag, { id: 'social-publisher' }, { id: workspaceId });
   assert.deepEqual(calls[0], calls[1]);
   assert.deepEqual(calls[0][1], {
     scope: 'workspace',
@@ -138,21 +135,16 @@ test('a workspace flag ignores the user, so API and background callers send the 
     workspace: { id: workspaceId },
   });
   calls.length = 0;
-  assert.equal(
-    await isFeatureEnabled('social-publishing', { id: userId }, undefined, { NODE_ENV: 'production' }),
-    false,
-  );
+  assert.equal(await isFeatureEnabled(flag, { id: userId }, undefined, { NODE_ENV: 'production' }), false);
   assert.equal(calls.length, 0, 'a workspace flag without a workspace falls back without asking the provider');
 });
 
-test('a global flag uses one fixed subject', async t => {
-  const calls = await withProvider(t, () => true);
-  await isFeatureEnabled('public-tulipfarm-guide', { id: 'public-tulipfarm-guide' });
-  await isFeatureEnabled('public-tulipfarm-guide', null);
-  assert.deepEqual(
-    calls.map(([, subject]) => subject),
-    Array(2).fill({ scope: 'global', distinctId: 'global' }),
-  );
+test('a global subject is fixed, and a user subject needs a user and keeps the workspace', () => {
+  const context = { user: { id: userId }, workspace: { id: workspaceId } };
+  assert.deepEqual(flagSubject('global', context), { scope: 'global', distinctId: 'global' });
+  assert.deepEqual(flagSubject('global', {}), { scope: 'global', distinctId: 'global' });
+  assert.deepEqual(flagSubject('user', context), { scope: 'user', distinctId: userId, ...context });
+  assert.equal(flagSubject('user', { workspace: { id: workspaceId } }), undefined);
 });
 
 test('the resolver fills missing attributes, caller values win, and lookups are cached and shared', async t => {
@@ -166,25 +158,23 @@ test('the resolver fills missing attributes, caller values win, and lookups are 
       workspace: { slug: 'acme', name: 'Acme', createdAt: '2026-01-01T00:00:00.000Z' },
     };
   });
-  await Promise.all([
-    isFeatureEnabled('soul-repository-explorer', { id: userId }, { id: workspaceId }),
-    isFeatureEnabled('soul-repository-explorer', { id: userId }, { id: workspaceId, name: 'Renamed' }),
+  const fail = error => assert.fail(error);
+  const [plain, renamed] = await Promise.all([
+    resolveFlagContext({ id: userId }, { id: workspaceId }, fail),
+    resolveFlagContext({ id: userId }, { id: workspaceId, name: 'Renamed' }, fail),
   ]);
   assert.equal(lookups.length, 1, 'concurrent cold lookups share one request');
   assert.deepEqual(lookups[0], { userId, workspaceId });
-  const plain = calls.find(call => call[1].workspace.name !== 'Renamed');
-  const renamed = calls.find(call => call[1].workspace.name === 'Renamed');
-  assert.deepEqual(plain[1], {
-    scope: 'user',
-    distinctId: userId,
+  assert.deepEqual(plain, {
     user: { id: userId, email: 'Person@Example.COM', emailDomain: 'example.com' },
     workspace: { id: workspaceId, slug: 'acme', name: 'Acme', createdAt: '2026-01-01T00:00:00.000Z' },
   });
-  assert.equal(renamed[1].workspace.name, 'Renamed');
-  await isFeatureEnabled('social-publishing', { id: userId }, { id: workspaceId });
+  assert.equal(renamed.workspace.name, 'Renamed');
+  await isFeatureEnabled(flag, { id: userId }, { id: workspaceId });
   assert.deepEqual(lookups[1], { workspaceId }, 'a workspace flag never looks up the user');
-  await isFeatureEnabled('soul-repository-explorer', { id: 'social-publisher' }, { id: workspaceId });
-  await isFeatureEnabled('soul-repository-explorer', { id: userId }, { id: workspaceId });
+  assert.equal(calls[0][1].workspace.slug, 'acme');
+  await resolveFlagContext({ id: 'social-publisher' }, { id: workspaceId }, fail);
+  await resolveFlagContext({ id: userId }, { id: workspaceId }, fail);
   assert.equal(lookups.length, 2, 'synthetic user IDs are never looked up, and repeats come from the cache');
 });
 
@@ -202,13 +192,13 @@ test('a failing resolver is logged, not cached, and evaluation continues with ca
     lines.push(String(line));
     return true;
   });
-  assert.equal(await isFeatureEnabled('social-publishing', null, { id: workspaceId }), true);
+  assert.equal(await isFeatureEnabled(flag, null, { id: workspaceId }), true);
   write.mock.restore();
   assert.deepEqual(calls[0][1].workspace, { id: workspaceId });
   const logged = lines.filter(line => line.startsWith('{')).map(line => JSON.parse(line));
   assert.ok(logged.some(entry => entry.operation === 'feature-flag.subject'));
   fail = false;
-  await isFeatureEnabled('social-publishing', null, { id: workspaceId });
+  await isFeatureEnabled(flag, null, { id: workspaceId });
   assert.equal(count, 2);
   assert.equal(calls[1][1].workspace.slug, 'acme');
 });
@@ -225,7 +215,7 @@ test('an answer comes from the provider only when the provider and the subject l
     return {};
   });
   t.mock.method(process.stdout, 'write', () => true);
-  const answer = () => featureFlagAnswer('app-hosting', null, { id: workspaceId }, { NODE_ENV: 'production' });
+  const answer = () => featureFlagAnswer('openai-models', null, { id: workspaceId }, { NODE_ENV: 'production' });
   const answers = [await answer()];
   resolver = 'up';
   answers.push(await answer());
@@ -245,14 +235,15 @@ test('without a provider the resolver is never called', async t => {
     count++;
     return {};
   });
-  await isFeatureEnabled('soul-repository-explorer', { id: userId }, { id: workspaceId });
+  await isFeatureEnabled(flag, { id: userId }, { id: workspaceId });
   await featureFlagSnapshot({ id: userId }, { id: workspaceId });
   assert.equal(count, 0);
 });
 
-test('a snapshot uses evaluateMany once per scope; false decides and missing falls back', async t => {
+test('a snapshot uses evaluateMany once per scope; false decides, missing and failed batches fall back', async t => {
   const batches = [];
   const singles = [];
+  let down = false;
   await withProvider(
     t,
     name => {
@@ -262,21 +253,23 @@ test('a snapshot uses evaluateMany once per scope; false decides and missing fal
     {
       evaluateMany: async (flags, subject) => {
         batches.push([flags, subject.scope]);
-        if (subject.scope === 'user') return { 'soul-repository-explorer': false, 'google-calendar-canvas': true };
-        if (subject.scope === 'global') throw new Error('down');
-        return { 'social-publishing': true };
+        if (down) throw new Error('down');
+        return { 'openai-models': false, 'anthropic-models': true };
       },
     },
   );
   const write = t.mock.method(process.stdout, 'write', () => true);
-  const snapshot = await featureFlagSnapshot({ id: userId }, { id: workspaceId }, { NODE_ENV: 'production' });
+  const env = { NODE_ENV: 'production', FEATURE_FLAG_OPENAI_IMAGE_MODELS: 'true' };
+  const snapshot = await featureFlagSnapshot({ id: userId }, { id: workspaceId }, env);
+  down = true;
+  const failed = await featureFlagSnapshot({ id: userId }, { id: workspaceId }, env);
   write.mock.restore();
   assert.equal(singles.length, 0);
-  assert.deepEqual(batches.map(([, scope]) => scope).sort(), ['global', 'user', 'workspace']);
+  assert.deepEqual(
+    batches.map(([, scope]) => scope),
+    ['workspace', 'workspace'],
+  );
   for (const [flags, scope] of batches) for (const name of flags) assert.equal(featureFlags[name].scope, scope);
-  assert.equal(snapshot['soul-repository-explorer'], false);
-  assert.equal(snapshot['google-calendar-canvas'], true);
-  assert.equal(snapshot['default-connection-knowledge'], true, 'a missing answer falls back to the default');
-  assert.equal(snapshot['social-publishing'], true);
-  assert.equal(snapshot['public-tulipfarm-guide'], false, 'a failed batch falls back');
+  assert.deepEqual(snapshot, { 'openai-models': false, 'anthropic-models': true, 'openai-image-models': true });
+  assert.deepEqual(failed, { 'openai-models': false, 'anthropic-models': false, 'openai-image-models': true });
 });

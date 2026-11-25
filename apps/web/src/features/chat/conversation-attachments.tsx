@@ -125,7 +125,7 @@ export function StagedAttachments({
   disabled: boolean;
   blocked?: ReactNode;
   references?: { items: readonly FileReference[]; notice: string | null };
-  /** Absent while the `images` flag is off, when the assistant cannot read uploaded files. */
+  /** Absent where the assistant cannot read uploaded files. */
   reading?: AttachmentReading | undefined;
 }) {
   const referenced = references?.items ?? [];

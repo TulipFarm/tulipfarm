@@ -59,7 +59,7 @@ export type LessonModel = (request: {
 }) => Promise<string | null>;
 
 /** Saves the business facts a task's owner stated into their Knowledge as Learned entries. */
-export type LessonKnowledge = Pick<LearnedKnowledge, 'enabled' | 'entries' | 'apply'>;
+export type LessonKnowledge = Pick<LearnedKnowledge, 'entries' | 'apply'>;
 const factOutputTokens = 2048;
 
 type Evidence = { key: string; kind: 'rejection' | 'approval' | 'tool-failure' | 'follow-up'; detail: object };
@@ -305,7 +305,7 @@ export function createAgentLessonLearning(options: {
   ): Promise<{ keys: string[]; complete: boolean }> {
     const { learned } = options;
     const messages = gathered.facts.filter(message => !seen.has(`fact:${message.id}`));
-    if (!learned || !messages.length || !(await learned.enabled(workspaceId))) return { keys: [], complete: true };
+    if (!learned || !messages.length) return { keys: [], complete: true };
     const owner = gathered.ownerUserId;
     const source = { kind: 'task' as const, id: job.task_id, runId: gathered.runId };
     const keys: string[] = [];

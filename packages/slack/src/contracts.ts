@@ -58,22 +58,20 @@ export const slackCanvasScope = 'canvases:write';
 export const slackAssistantScope = 'assistant:write';
 
 /**
- * The bot scopes an installation needs. While the `images` flag is on, reading shared files adds `files:read` and
- * delivering generated images adds `files:write`. While the `generative-ui` flag is on, canvases add `canvases:write`
- * and agent features add `assistant:write`. While the `slack-reactions` flag is on, reaction rules add `reactions:read`
- * and the emoji picker adds `emoji:read`. An installation without them shows the notice to update Slack permissions.
+ * The bot scopes an installation needs: the configured scopes, plus `files:read` to read shared files, `files:write` to
+ * deliver generated images, `canvases:write` for canvases, `assistant:write` for agent features, `reactions:read` for
+ * reaction rules and `emoji:read` for the emoji picker. An installation without them shows the notice to update Slack
+ * permissions.
  */
-export function requiredBotScopes(
-  config: Pick<SlackConfiguration, 'scopeApproval'>,
-  images: boolean,
-  generativeUi = false,
-  reactions = false,
-) {
+export function requiredBotScopes(config: Pick<SlackConfiguration, 'scopeApproval'>) {
   const scopes = config.scopeApproval.botScopes;
   const extra = [
-    ...(images ? [slackFileScope, slackFileUploadScope] : []),
-    ...(generativeUi ? [slackCanvasScope, slackAssistantScope] : []),
-    ...(reactions ? ['reactions:read', 'emoji:read'] : []),
+    slackFileScope,
+    slackFileUploadScope,
+    slackCanvasScope,
+    slackAssistantScope,
+    'reactions:read',
+    'emoji:read',
   ];
   return [...scopes, ...extra.filter(scope => !scopes.includes(scope))];
 }

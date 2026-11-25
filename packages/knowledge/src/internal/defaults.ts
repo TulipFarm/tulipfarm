@@ -10,8 +10,8 @@ import {
   lockAuthorization,
   uuidSchema,
 } from '@tulipfarm/access';
-import type { Clock, FeatureFlags } from '@tulipfarm/memory-core/ports/runtime';
-import { knowledgeFeatureFlags, systemClock } from '../host-ports.ts';
+import type { Clock } from '@tulipfarm/memory-core/ports/runtime';
+import { systemClock } from '../host-ports.ts';
 import { qualified, type createWorkspaceRuntime, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import {
   atlassianTargetKey,
@@ -101,64 +101,6 @@ async function githubUsers(tx: Tx & { commonVersion?: number }) {
         )
       ).rows[0],
     ).present;
-}
-
-export const defaultKnowledgeFlagEnabled = (workspaceId: string, userId: string) =>
-  knowledgeFeatureFlags.enabled('default-connection-knowledge', userId, workspaceId);
-
-async function disabledOwners(
-  tx: Tx,
-  workspaceId: string,
-  enabled: (workspaceId: string, userId: string) => Promise<boolean>,
-) {
-  if (!(await installed(tx))) return [];
-  const owners = z
-    .array(z.object({ user_id: z.string() }))
-    .parse(
-      (
-        await tx.client.query(
-          `SELECT DISTINCT m.user_id FROM ${table(tx, 'default_intents')} i JOIN ${qualified(tx.schema, 'tf_memberships')} m ON m.id=i.membership_id`,
-        )
-      ).rows,
-    );
-  const disabled: string[] = [];
-  for (const owner of owners) if (!(await enabled(workspaceId, owner.user_id))) disabled.push(owner.user_id);
-  return disabled;
-}
-
-/** Products whose automatic sources ignore the feature flag. Empty: every product follows `default-connection-knowledge`. */
-export const ungatedDefaultKnowledgeProducts: readonly DefaultKnowledgeProduct[] = [];
-
-/**
- * Lists automatic sources whose owner cannot use the feature now. Engines exclude them before their dispatch limit and recheck at claim time.
- * Manual sources and ungated products are never held, and older storage versions have no automatic sources.
- */
-export function createDefaultKnowledgeGate({
-  runtime,
-  featureFlags = knowledgeFeatureFlags,
-  enabled = (workspaceId, userId) => featureFlags.enabled('default-connection-knowledge', userId, workspaceId),
-}: {
-  runtime: Runtime;
-  featureFlags?: FeatureFlags<'default-connection-knowledge'>;
-  enabled?: (workspaceId: string, userId: string) => Promise<boolean>;
-}) {
-  return (workspaceId: string) =>
-    runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async tx => {
-      const disabled = await disabledOwners(tx, workspaceId, enabled);
-      if (!disabled.length) return [];
-      return z
-        .array(z.object({ source_id: uuidSchema }))
-        .parse(
-          (
-            await tx.client.query(
-              `SELECT d.source_id FROM ${table(tx, 'default_sources')} d JOIN ${table(tx, 'default_intents')} i ON i.id=d.intent_id
-      JOIN ${qualified(tx.schema, 'tf_memberships')} m ON m.id=i.membership_id WHERE m.user_id=ANY($1::text[]) AND NOT i.product=ANY($2::text[])`,
-              [disabled, ungatedDefaultKnowledgeProducts],
-            )
-          ).rows,
-        )
-        .map(row => row.source_id);
-    });
 }
 
 export type DefaultScope = { key: string; group: string; title: string };
@@ -252,16 +194,12 @@ function isoDay(at: Date, offsetDays = 0) {
 export function createDefaultKnowledge({
   runtime,
   engines,
-  featureFlags = knowledgeFeatureFlags,
-  enabled = (workspaceId, userId) => featureFlags.enabled('default-connection-knowledge', userId, workspaceId),
   clock = systemClock,
   now = () => new Date(clock.now()),
 }: {
   runtime: Runtime;
   engines: Engines;
-  featureFlags?: FeatureFlags<'default-connection-knowledge'>;
   clock?: Clock;
-  enabled?: (workspaceId: string, userId: string) => Promise<boolean>;
   now?: () => Date;
 }) {
   async function transaction<T>(workspaceId: string, mode: 'read' | 'write', operation: (tx: Tx) => Promise<T>) {
@@ -508,13 +446,9 @@ export function createDefaultKnowledge({
     };
   }
 
-  const held = createDefaultKnowledgeGate({ runtime, enabled });
-
   async function due(workspaceId: string): Promise<DefaultKnowledgeWork[]> {
-    // Disabled owners are filtered before the limit, so their intents never starve others.
     return transaction(workspaceId, 'write', async tx => {
       if (!(await installed(tx))) return [];
-      const disabled = await disabledOwners(tx, workspaceId, enabled);
       await tx.client.query(
         `UPDATE ${table(tx, 'default_intents')} SET generation=generation+1,lease_token=NULL,lease_until=NULL WHERE lease_until<=clock_timestamp()`,
       );
@@ -524,8 +458,8 @@ export function createDefaultKnowledge({
           (
             await tx.client.query(
               `SELECT i.id,i.generation FROM ${table(tx, 'default_intents')} i JOIN ${qualified(tx.schema, 'tf_memberships')} m ON m.id=i.membership_id AND m.removed_at IS NULL
-        WHERE i.state='active' AND i.lease_token IS NULL AND i.next_attempt_at<=$1 AND (i.product=ANY($3::text[]) OR NOT m.user_id=ANY($2::text[])) ORDER BY i.next_attempt_at,i.id LIMIT 20`,
-              [now(), disabled, ungatedDefaultKnowledgeProducts],
+        WHERE i.state='active' AND i.lease_token IS NULL AND i.next_attempt_at<=$1 ORDER BY i.next_attempt_at,i.id LIMIT 20`,
+              [now()],
             )
           ).rows,
         )
@@ -693,8 +627,6 @@ export function createDefaultKnowledge({
       return i;
     });
     if (typeof claim === 'string') return { disposition: claim };
-    if (!ungatedDefaultKnowledgeProducts.includes(claim.product) && !(await enabled(work.workspaceId, claim.user_id)))
-      return { disposition: 'stale' };
     const leased = await transaction(
       work.workspaceId,
       'write',
@@ -1112,6 +1044,6 @@ export function createDefaultKnowledge({
       }
     return memberRead(workspaceId, userId, async (tx, actor) => dto(tx, await owned(tx, actor)));
   }
-  return { due, process, held, list, manage, record: recordDefaultKnowledgeIntent };
+  return { due, process, list, manage, record: recordDefaultKnowledgeIntent };
 }
 export type DefaultKnowledge = ReturnType<typeof createDefaultKnowledge>;

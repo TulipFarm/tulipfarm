@@ -40,12 +40,6 @@ test('plan routes tell a source that cannot be checked now apart from a plan the
 });
 
 test('a plan document page is sandboxed HTML for readers who may open it, and only the starter retries it', async t => {
-  const previous = process.env.FEATURE_FLAG_PLAN_DOCUMENTS;
-  process.env.FEATURE_FLAG_PLAN_DOCUMENTS = 'true';
-  t.after(() => {
-    if (previous === undefined) delete process.env.FEATURE_FLAG_PLAN_DOCUMENTS;
-    else process.env.FEATURE_FLAG_PLAN_DOCUMENTS = previous;
-  });
   const html = Buffer.from('<!doctype html><title>Plan</title><p>Plan</p>');
   const stored = { key: randomUUID(), size: html.length, sha256: createHash('sha256').update(html).digest('hex') };
   let outcome;
@@ -128,8 +122,4 @@ test('a plan document page is sandboxed HTML for readers who may open it, and on
   response = await retry();
   assert.equal(response.statusCode, 202, response.body);
   assert.deepEqual(starts, [[workspaceId, planId, 'retry']]);
-
-  process.env.FEATURE_FLAG_PLAN_DOCUMENTS = 'false';
-  response = await page();
-  assert.equal(response.statusCode, 404, 'with the flag off there is no document');
 });

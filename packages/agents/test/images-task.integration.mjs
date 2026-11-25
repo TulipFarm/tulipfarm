@@ -8,7 +8,6 @@ import { png } from '../../memory-core/test/fixtures/parser-media.mjs';
 process.env.ANTHROPIC_API_KEY = 'test-key';
 process.env.OPENAI_API_KEY ||= 'test-key';
 delete process.env.MODEL_CATALOG_FILE;
-delete process.env.FEATURE_FLAG_IMAGES;
 process.env.MODEL_CATALOG = JSON.stringify({
   version: 1,
   models: [
@@ -79,7 +78,6 @@ async function setup(t, { choose = runImageChoice } = {}) {
   const db = await fixture();
   let runtime;
   t.after(async () => {
-    delete process.env.FEATURE_FLAG_IMAGES;
     await runtime?.close();
     await db.close();
   });
@@ -242,7 +240,7 @@ test(
     const finished = await run(task.id);
     assert.equal(finished.status, 'completed');
     assert.equal(inputs.length, 3, 'the task carries on after each images.generate result');
-    assert.equal(inputs[0].images, true, 'the flag is on and the agent lists images.generate');
+    assert.equal(inputs[0].images, true, 'the agent lists images.generate');
     assert.ok(modelNativeTools(inputs[0]).tools.some(tool => tool.name === 'images_generate'));
 
     const runId = (
@@ -323,19 +321,6 @@ test(
     assert.equal(credits[0].provider_pico_usd, '40000000000', '0.04 USD for one standard square image');
     assert.notEqual(credits[0].charged, null);
     assert.equal((await tasks.history(w.id, user, task.id)).messages.at(-1).text, 'The poster is in Posters.');
-
-    // 3. With the flag off, the task model is not offered images.generate.
-    process.env.FEATURE_FLAG_IMAGES = 'false';
-    const before = inputs.length;
-    const off = await start('Make another poster.');
-    assert.equal((await run(off.id)).status, 'completed');
-    assert.equal(inputs.length, before + 1);
-    const offInput = inputs.at(-1);
-    assert.equal(offInput.images, undefined);
-    assert.ok(offInput.definition.tools.includes('images.generate'), 'the agent still lists the tool');
-    assert.ok(!modelNativeTools(offInput).tools.some(tool => tool.name === 'images_generate'));
-    assert.equal(providerCalls.length, 1);
-    assert.equal((await imageCredits()).length, 1);
   },
 );
 

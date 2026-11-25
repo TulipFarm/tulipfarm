@@ -16,13 +16,12 @@ import { requestBoundaryError } from './security.ts';
 const workspaceParams = z.strictObject({ workspaceId: z.uuid() });
 const intentParams = workspaceParams.extend({ intentId: z.uuid() });
 
-/** Automatic owner-only Knowledge status and recovery. Every route is gated by `default-connection-knowledge`. */
+/** Automatic owner-only Knowledge status and recovery. */
 export function registerDefaultKnowledge(
   app: FastifyInstance,
   dependencies: {
     auth: Parameters<typeof authenticateRoutes>[1];
     service: Pick<DefaultKnowledge, 'list' | 'manage'>;
-    enabled: (workspaceId: string, userId: string) => Promise<boolean>;
     started?: (workspaceId: string, intentIds: string[]) => void;
   },
 ) {
@@ -73,10 +72,7 @@ export function registerDefaultKnowledge(
       { logLevel: 'silent', schema: schema('listDefaultKnowledgeV1', workspaceParams, defaultKnowledgeListSchema) },
       async request => {
         const { workspaceId } = workspaceParams.parse(request.params);
-        const userId = user(request);
-        // Flag off hides automatic status without touching retained data or manual sources.
-        if (!(await dependencies.enabled(workspaceId, userId))) return { enabled: false, items: [] };
-        return { enabled: true, items: (await dependencies.service.list(workspaceId, userId)).items };
+        return { enabled: true, items: (await dependencies.service.list(workspaceId, user(request))).items };
       },
     );
     routes.post(
@@ -92,7 +88,6 @@ export function registerDefaultKnowledge(
       async request => {
         const { workspaceId, intentId } = intentParams.parse(request.params);
         const userId = user(request);
-        if (!(await dependencies.enabled(workspaceId, userId))) throw new AccessDenied();
         const result = await dependencies.service.manage(
           workspaceId,
           userId,

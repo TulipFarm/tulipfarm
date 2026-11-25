@@ -4,16 +4,6 @@ import { test } from 'node:test';
 import { png } from '../../memory-core/test/fixtures/parser-media.mjs';
 import { outboundFixture } from './slack-actions-fixture.mjs';
 
-/** Runs a test with the `images` flag set for every workspace. */
-function withImages(t, on) {
-  const previous = process.env.FEATURE_FLAG_IMAGES;
-  process.env.FEATURE_FLAG_IMAGES = String(on);
-  t.after(() => {
-    if (previous === undefined) delete process.env.FEATURE_FLAG_IMAGES;
-    else process.env.FEATURE_FLAG_IMAGES = previous;
-  });
-}
-
 /**
  * Alice's delegated run on the HR agent, which saved one generated image per entry of `shares` in Files before it asked
  * to post to #hr. Each image is alice's file; `shares[i]` says whether bob may read image i, `names[i]` names it.
@@ -73,8 +63,7 @@ const bot = 'Bearer xoxb-fixture';
 const completeCall = (f, callId) =>
   f.db.platform.query(`UPDATE ${f.table('tf_agent_tool_calls')} SET status='completed' WHERE id=$1`, [callId]);
 
-test('a run that saved two images delivers both as files in the thread of its message', async t => {
-  withImages(t, true);
+test('a run that saved two images delivers both as files in the thread of its message', async () => {
   const f = await outboundFixture({ images: true });
   try {
     f.setAudience(['UALICE', 'UBOB', 'UBOT']);
@@ -123,7 +112,6 @@ test('a run that saved two images delivers both as files in the thread of its me
 });
 
 test('an image someone in the destination cannot read in Files is withheld and only counted in the thread', async t => {
-  withImages(t, true);
   const f = await outboundFixture({ images: true });
   try {
     f.setAudience(['UALICE', 'UBOB', 'UBOT']);
@@ -166,8 +154,7 @@ test('an image someone in the destination cannot read in Files is withheld and o
   }
 });
 
-test('a guest or another app in the destination withholds every image', async t => {
-  withImages(t, true);
+test('a guest or another app in the destination withholds every image', async () => {
   const f = await outboundFixture({ images: true });
   try {
     f.setAudience(['UALICE', 'UBOB', 'UGUEST', 'BOTHERBOT', 'UBOT']);
@@ -183,8 +170,7 @@ test('a guest or another app in the destination withholds every image', async t 
   }
 });
 
-test('without files:write the message is delivered, nothing is uploaded and the thread names the images', async t => {
-  withImages(t, true);
+test('without files:write the message is delivered, nothing is uploaded and the thread names the images', async () => {
   const f = await outboundFixture({ images: true });
   try {
     f.setAudience(['UALICE', 'UBOB', 'UBOT']);
@@ -208,8 +194,7 @@ test('without files:write the message is delivered, nothing is uploaded and the 
   }
 });
 
-test('a delivery retried after Slack throttled it uploads each image once', async t => {
-  withImages(t, true);
+test('a delivery retried after Slack throttled it uploads each image once', async () => {
   const f = await outboundFixture({ images: true });
   try {
     f.setAudience(['UALICE', 'UBOB', 'UBOT']);
@@ -236,8 +221,7 @@ test('a delivery retried after Slack throttled it uploads each image once', asyn
   }
 });
 
-test('a rejected draft leaves the images to the next message the run sends', async t => {
-  withImages(t, true);
+test('a rejected draft leaves the images to the next message the run sends', async () => {
   const f = await outboundFixture({ images: true });
   try {
     f.setAudience(['UALICE', 'UBOB', 'UBOT']);
@@ -274,8 +258,7 @@ test('a rejected draft leaves the images to the next message the run sends', asy
   }
 });
 
-test('two messages of one run sent at once never share the same image', async t => {
-  withImages(t, true);
+test('two messages of one run sent at once never share the same image', async () => {
   const f = await outboundFixture({ images: true });
   try {
     f.setAudience(['UALICE', 'UBOB', 'UBOT']);
@@ -306,8 +289,7 @@ test('two messages of one run sent at once never share the same image', async t 
   }
 });
 
-test('a message carries at most eight images and counts the rest in the thread', async t => {
-  withImages(t, true);
+test('a message carries at most eight images and counts the rest in the thread', async () => {
   const f = await outboundFixture({ images: true });
   try {
     f.setAudience(['UALICE', 'UBOB', 'UBOT']);
@@ -340,8 +322,7 @@ test('a message carries at most eight images and counts the rest in the thread',
   }
 });
 
-test('a second message of the same run does not share the images again', async t => {
-  withImages(t, true);
+test('a second message of the same run does not share the images again', async () => {
   const f = await outboundFixture({ images: true });
   try {
     f.setAudience(['UALICE', 'UBOB', 'UBOT']);
@@ -361,23 +342,6 @@ test('a second message of the same run does not share the images again', async t
     assert.equal(await f.executor.execute(next), 'completed');
     assert.equal(f.effects.length, 2);
     assert.equal(f.uploads.length, 1);
-  } finally {
-    await f.close();
-  }
-});
-
-test('with images off, delivery is unchanged', async t => {
-  withImages(t, false);
-  const f = await outboundFixture({ images: true });
-  try {
-    f.setAudience(['UALICE', 'UBOB', 'UBOT']);
-    const { ids } = await imageRun(f, { shares: [true, true] });
-    assert.equal(await f.executor.execute(ids), 'completed');
-    assert.deepEqual(f.effects, [
-      { token: 'Bearer xoxp-alice', name: 'send', channel: 'CHR', text: 'Approved HR update' },
-    ]);
-    assert.deepEqual(f.files, []);
-    assert.deepEqual(f.uploads, []);
   } finally {
     await f.close();
   }

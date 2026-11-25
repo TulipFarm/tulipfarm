@@ -9,7 +9,6 @@ import { GoogleCorpusError } from '@tulipfarm/google-workspace/corpus';
 import { workspaceTableMigrations } from '../../workspaces/dist/table-migrations.js';
 import {
   createDefaultKnowledge,
-  createDefaultKnowledgeGate,
   createGoogleKnowledge,
   createGitHubKnowledge,
   createSlackKnowledge,
@@ -200,126 +199,17 @@ test(
       );
       const world = await slackWorld(env);
       await world.link(owner, 'UOWNER');
-      for (const flag of [true, false]) {
-        const enabled = async () => flag;
-        const gate = createDefaultKnowledgeGate({ runtime, enabled });
-        assert.deepEqual(await gate(ws.id), []);
-        const defaults = createDefaultKnowledge({ runtime, engines: {}, enabled });
-        assert.deepEqual(await defaults.due(ws.id), []);
-        assert.deepEqual(await defaults.held(ws.id), []);
-        assert.deepEqual((await defaults.list(ws.id, owner.userId)).items, []);
-        await assert.rejects(
-          defaults.manage(ws.id, owner.userId, randomUUID(), { action: 'retry' }),
-          error => error instanceof AccessDenied,
-        );
-        const slack = createSlackKnowledge({ runtime, provider: world.provider, gate });
-        const source = await slack.configure(ws.id, owner.userId, channels(flag ? 'CON' : 'COFF'));
-        await sync(slack, env, 'slack_sources', source.sourceId);
-        assert.equal(
-          await env.live(source.sourceId),
-          1,
-          `manual Slack still syncs with the flag ${flag ? 'on' : 'off'}`,
-        );
-      }
-    } finally {
-      await env.close();
-    }
-  },
-);
-
-test(
-  'held automatic work is filtered before the dispatch limit, so manual and enabled work is never starved',
-  { timeout: 300000 },
-  async t => {
-    const env = await setup();
-    const { ws, runtime, member, record, db, table, owner } = env;
-    try {
-      const disabled = await member();
-      const enabled = async (_w, userId) => userId !== disabled.userId;
-      const world = await slackWorld(env);
-      await world.link(owner, 'UOWNER');
-      await world.link(disabled, 'UOTHER');
-      const plain = createSlackKnowledge({ runtime, provider: world.provider });
-      const held = [];
-      for (let i = 0; i < 21; i++)
-        held.push(
-          (await plain.configure(ws.id, disabled.userId, channels(`CH${String(i).padStart(2, '0')}`))).sourceId,
-        );
-      const disabledManual = (await plain.configure(ws.id, disabled.userId, channels('CMANUALB'))).sourceId;
-      const ownerManual = (await plain.configure(ws.id, owner.userId, channels('CMANUALA'))).sourceId;
-      const intentId = await automatic(env, disabled, 'slack', 'TTEAM', held);
-      await db.platform.query(
-        `UPDATE ${table('slack_sources')} SET next_attempt_at=clock_timestamp()-interval '1 hour' WHERE source_id=ANY($1::uuid[])`,
-        [held],
+      const defaults = createDefaultKnowledge({ runtime, engines: {} });
+      assert.deepEqual(await defaults.due(ws.id), []);
+      assert.deepEqual((await defaults.list(ws.id, owner.userId)).items, []);
+      await assert.rejects(
+        defaults.manage(ws.id, owner.userId, randomUUID(), { action: 'retry' }),
+        error => error instanceof AccessDenied,
       );
-      await db.platform.query(
-        `UPDATE ${table('slack_sources')} SET next_attempt_at=clock_timestamp()-interval '1 minute' WHERE source_id=ANY($1::uuid[])`,
-        [[disabledManual, ownerManual]],
-      );
-      const gate = createDefaultKnowledgeGate({ runtime, enabled });
-      const slack = createSlackKnowledge({ runtime, provider: world.provider, gate });
-
-      await t.test('the provider engine skips held sources before LIMIT 20', async () => {
-        const ungated = (await plain.due(ws.id)).map(w => w.sourceId);
-        assert.equal(ungated.length, 20);
-        assert.ok(
-          ungated.every(id => held.includes(id)),
-          'without the gate, held work fills the whole batch',
-        );
-        const due = (await slack.due(ws.id)).map(w => w.sourceId).sort();
-        assert.deepEqual(
-          due,
-          [disabledManual, ownerManual].sort(),
-          'manual sources of every owner still dispatch; held automatic sources do not',
-        );
-        assert.deepEqual((await gate(ws.id)).sort(), held.slice().sort());
-      });
-
-      await t.test('held work claimed earlier is refused without provider calls', async () => {
-        const [work] = (await plain.due(ws.id)).filter(w => held.includes(w.sourceId));
-        const calls = world.calls.length;
-        assert.equal((await slack.process(work)).disposition, 'stale');
-        assert.equal(world.calls.length, calls);
-        await sync(slack, env, 'slack_sources', ownerManual);
-        await sync(slack, env, 'slack_sources', disabledManual);
-        assert.equal(await env.live(ownerManual), 1);
-        assert.equal(await env.live(disabledManual), 1, 'a disabled owner keeps their manual Knowledge');
-      });
-
-      await t.test('the defaults service filters disabled owners before its own limit', async () => {
-        for (let i = 0; i < 21; i++)
-          await record({
-            product: 'slack',
-            membershipId: disabled.membershipId,
-            accountKey: `T${i}:UOTHER`,
-            accountLabel: `account ${i}`,
-          });
-        await db.platform.query(
-          `UPDATE ${table('default_intents')} SET next_attempt_at=clock_timestamp()-interval '1 hour' WHERE membership_id=$1`,
-          [disabled.membershipId],
-        );
-        const { intentId: ownerIntent } = await record({
-          product: 'slack',
-          membershipId: owner.membershipId,
-          accountKey: 'TOWNER:UOWNER',
-          accountLabel: 'owner',
-        });
-        // GitHub is never gated, so a disabled owner's GitHub intent still dispatches.
-        const { intentId: githubIntent } = await record({
-          product: 'github',
-          membershipId: disabled.membershipId,
-          accountKey: randomUUID(),
-          accountLabel: 'disabled github',
-        });
-        const defaults = createDefaultKnowledge({ runtime, engines: {}, enabled });
-        assert.deepEqual((await defaults.due(ws.id)).map(w => w.intentId).sort(), [ownerIntent, githubIntent].sort());
-        assert.equal(
-          (await createDefaultKnowledge({ runtime, engines: {}, enabled: async () => true }).due(ws.id)).length,
-          20,
-        );
-        assert.equal((await defaults.held(ws.id)).length, 21);
-        assert.ok(intentId);
-      });
+      const slack = createSlackKnowledge({ runtime, provider: world.provider });
+      const source = await slack.configure(ws.id, owner.userId, channels('CON'));
+      await sync(slack, env, 'slack_sources', source.sourceId);
+      assert.equal(await env.live(source.sourceId), 1, 'manual Slack still syncs');
     } finally {
       await env.close();
     }
@@ -398,7 +288,7 @@ test(
         },
       };
       const google = createGoogleKnowledge({ runtime, provider });
-      const defaults = createDefaultKnowledge({ runtime, engines: { google }, enabled: async () => true });
+      const defaults = createDefaultKnowledge({ runtime, engines: { google } });
       const sources = async kind =>
         (
           await db.platform.query(
@@ -549,7 +439,7 @@ test(
         },
       };
       let clock = new Date(Date.now() + 1000);
-      const defaults = createDefaultKnowledge({ runtime, engines, enabled: async () => true, now: () => clock });
+      const defaults = createDefaultKnowledge({ runtime, engines, now: () => clock });
       await record({
         product: 'github',
         membershipId: owner.membershipId,
@@ -610,7 +500,7 @@ test(
         },
       };
       let clock = new Date(Date.now() + 1000);
-      const defaults = createDefaultKnowledge({ runtime, engines, enabled: async () => true, now: () => clock });
+      const defaults = createDefaultKnowledge({ runtime, engines, now: () => clock });
       const first = await record({
         product: 'jira',
         membershipId: owner.membershipId,
@@ -666,7 +556,6 @@ test(
       const defaults = createDefaultKnowledge({
         runtime,
         engines: { slack },
-        enabled: async () => true,
         now: () => clock,
       });
       const sources = async () =>
@@ -763,7 +652,7 @@ test(
         },
       };
       let clock = new Date(Date.now() + 1000);
-      const defaults = createDefaultKnowledge({ runtime, engines, enabled: async () => true, now: () => clock });
+      const defaults = createDefaultKnowledge({ runtime, engines, now: () => clock });
       await record({ product: 'jira', membershipId: owner.membershipId, accountKey: 'acct-1', accountLabel: 'acct-1' });
       await drain(defaults, env);
       let [intent] = (await defaults.list(ws.id, owner.userId)).items;
@@ -810,7 +699,6 @@ test(
       const defaults = createDefaultKnowledge({
         runtime,
         engines: { slack },
-        enabled: async () => true,
         now: () => new Date(Date.now() + 1000),
       });
       await record({
@@ -926,7 +814,7 @@ test(
           return slack.manage(w, u, sourceId, value);
         },
       };
-      const defaults = createDefaultKnowledge({ runtime, engines: { slack: engine }, enabled: async () => true });
+      const defaults = createDefaultKnowledge({ runtime, engines: { slack: engine } });
       const status = await defaults.manage(ws.id, owner.userId, intentId, { action: 'retry' });
       assert.deepEqual(
         retried,

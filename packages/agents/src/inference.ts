@@ -1497,7 +1497,7 @@ export type ToolModelMeter = (attempt: {
 }) => Promise<(usage: InferenceUsage, outcome?: { rejected: boolean }) => Promise<void>>;
 export type ToolInferenceContext = {
   /**
-   * The model answers with a layout (the generative-ui flag): `reply_render` A2UI for the web, or `slack_render` Block
+   * The model answers with a layout: `reply_render` A2UI for the web, or `slack_render` Block
    * Kit for a Slack reply. `interactive` allows follow-up buttons, choices and forms, which only the default agent handles.
    */
   layout?: boolean | { slack: { interactive: boolean } };

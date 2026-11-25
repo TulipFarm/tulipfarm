@@ -267,10 +267,7 @@ export function createGoogleWorkspaceService(options: {
         if (!googleIdentityScopes.every(scope => grantedScopes.includes(scope)))
           throw new GoogleWorkspaceError('insufficient-scope');
         const account = await oauth.account(result.access_token);
-        const automatic =
-          options.defaultKnowledge && (await options.defaultKnowledge.enabled(workspaceId, principal.userId))
-            ? options.defaultKnowledge
-            : undefined;
+        const automatic = options.defaultKnowledge;
         const intents: string[] = [];
         const status = await authorized(workspaceId, prepared.actor, async (tx, actor) => {
           const row = await load(tx, actor);

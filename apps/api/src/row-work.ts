@@ -15,14 +15,13 @@ import {
   taskActivitySchema,
   tasksTableSchema,
 } from '@tulipfarm/agents/row-work';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import { commonCompatibility, StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { authConfig, type registerAuth } from './auth.ts';
 import { authenticateRoutes } from './authenticated-routes.ts';
 import { requestBoundaryError, sourceCheckUnavailable } from './security.ts';
 import { routeValidation } from './route-validation.ts';
 
-/** Row threads, Run now, the Inbox and assignment limits. Behind the assignable-tasks flag. */
+/** Row threads, Run now, the Inbox and assignment limits. */
 export function registerRowWork(
   app: FastifyInstance,
   dependencies: {
@@ -42,9 +41,6 @@ export function registerRowWork(
   const errors = Object.fromEntries(
     [400, 401, 404, 503].map(status => [status, validation.json(z.object({ error: z.string() }))]),
   );
-  const enabled = async (workspaceId: string) => {
-    if (!(await isFeatureEnabled('assignable-tasks', null, { id: workspaceId }))) throw new AccessDenied();
-  };
 
   app.register(async routes => {
     validation.install(routes, true);
@@ -66,9 +62,8 @@ export function registerRowWork(
     routes.get(
       `${base}/thread`,
       { logLevel: 'silent', schema: { operationId: 'rowThread', params: validation.json(row), response: thread } },
-      async request => {
+      request => {
         const p = row.parse(request.params);
-        await enabled(p.workspaceId);
         return service.thread(p.workspaceId, user(request), p.tableId, p.rowId);
       },
     );
@@ -82,9 +77,8 @@ export function registerRowWork(
           response: thread,
         },
       },
-      async request => {
+      request => {
         const p = row.parse(request.params);
-        await enabled(p.workspaceId);
         return service.comment(p.workspaceId, user(request), p.tableId, p.rowId, request.body);
       },
     );
@@ -98,54 +92,48 @@ export function registerRowWork(
           response: thread,
         },
       },
-      async request => {
+      request => {
         const p = comment.parse(request.params);
-        await enabled(p.workspaceId);
         return service.editComment(p.workspaceId, user(request), p.tableId, p.rowId, p.itemId, request.body);
       },
     );
     routes.delete(
       `${base}/thread/comments/:itemId`,
       { schema: { operationId: 'rowThreadCommentDelete', params: validation.json(comment), response: thread } },
-      async request => {
+      request => {
         const p = comment.parse(request.params);
-        await enabled(p.workspaceId);
         return service.deleteComment(p.workspaceId, user(request), p.tableId, p.rowId, p.itemId);
       },
     );
     routes.post(
       `${base}/run-now`,
       { schema: { operationId: 'rowRunNow', params: validation.json(row), response: thread } },
-      async request => {
+      request => {
         const p = row.parse(request.params);
-        await enabled(p.workspaceId);
         return service.runNow(p.workspaceId, user(request), p.tableId, p.rowId);
       },
     );
     routes.post(
       `${base}/done`,
       { schema: { operationId: 'rowMarkDone', params: validation.json(row), response: thread } },
-      async request => {
+      request => {
         const p = row.parse(request.params);
-        await enabled(p.workspaceId);
         return service.completeTask(p.workspaceId, user(request), p.tableId, p.rowId);
       },
     );
     routes.delete(
       `${base}/done`,
       { schema: { operationId: 'rowReopen', params: validation.json(row), response: thread } },
-      async request => {
+      request => {
         const p = row.parse(request.params);
-        await enabled(p.workspaceId);
         return service.reopenTask(p.workspaceId, user(request), p.tableId, p.rowId);
       },
     );
     routes.delete(
       `${base}/wake`,
       { schema: { operationId: 'rowClearWake', params: validation.json(row), response: thread } },
-      async request => {
+      request => {
         const p = row.parse(request.params);
-        await enabled(p.workspaceId);
         return service.clearWake(p.workspaceId, user(request), p.tableId, p.rowId);
       },
     );
@@ -159,9 +147,8 @@ export function registerRowWork(
           response: { 200: validation.json(tasksTableSchema), ...errors },
         },
       },
-      async request => {
+      request => {
         const p = workspace.parse(request.params);
-        await enabled(p.workspaceId);
         return service.tasksTable(p.workspaceId, user(request));
       },
     );
@@ -175,9 +162,8 @@ export function registerRowWork(
           response: { 200: validation.json(taskActivitySchema), ...errors },
         },
       },
-      async request => {
+      request => {
         const p = workspace.parse(request.params);
-        await enabled(p.workspaceId);
         return service.taskActivity(p.workspaceId, user(request));
       },
     );
@@ -191,9 +177,8 @@ export function registerRowWork(
           response: { 200: validation.json(inboxSchema), ...errors },
         },
       },
-      async request => {
+      request => {
         const p = workspace.parse(request.params);
-        await enabled(p.workspaceId);
         return service.inbox(p.workspaceId, user(request));
       },
     );
@@ -208,7 +193,6 @@ export function registerRowWork(
       },
       async request => {
         const p = inboxItem.parse(request.params);
-        await enabled(p.workspaceId);
         await service.markDone(p.workspaceId, user(request), p.itemId);
         return { ok: true as const };
       },
@@ -217,9 +201,8 @@ export function registerRowWork(
     routes.get(
       '/workspaces/:workspaceId/inbox/slack',
       { schema: { operationId: 'inboxSlack', params: validation.json(workspace), response: slack } },
-      async request => {
+      request => {
         const p = workspace.parse(request.params);
-        await enabled(p.workspaceId);
         return service.slackPreferences(p.workspaceId, user(request));
       },
     );
@@ -233,9 +216,8 @@ export function registerRowWork(
           response: slack,
         },
       },
-      async request => {
+      request => {
         const p = workspace.parse(request.params);
-        await enabled(p.workspaceId);
         return service.setSlackPreferences(p.workspaceId, user(request), request.body);
       },
     );
@@ -243,9 +225,8 @@ export function registerRowWork(
     routes.get(
       '/workspaces/:workspaceId/assignment-limits',
       { schema: { operationId: 'assignmentLimits', params: validation.json(workspace), response: limits } },
-      async request => {
+      request => {
         const p = workspace.parse(request.params);
-        await enabled(p.workspaceId);
         return service.limits(p.workspaceId, user(request));
       },
     );
@@ -259,9 +240,8 @@ export function registerRowWork(
           response: limits,
         },
       },
-      async request => {
+      request => {
         const p = workspace.parse(request.params);
-        await enabled(p.workspaceId);
         return service.setLimits(p.workspaceId, user(request), request.body);
       },
     );

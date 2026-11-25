@@ -48,7 +48,7 @@ test('feature flags evaluate the provider with the user and only a workspace the
         slots.flagProvider({
           isEnabled: async (flag, subject) => {
             subjects.push([flag, subject]);
-            return flag === 'images' && subject.workspace?.id === 'w1';
+            return flag === 'openai-models' && subject.workspace?.id === 'w1';
           },
         });
       },
@@ -76,19 +76,15 @@ test('feature flags evaluate the provider with the user and only a workspace the
     return response.json();
   };
   const subjectFor = flag => subjects.findLast(([name]) => name === flag)?.[1];
-  const user = { id: 'user-1', email: 'ada@example.test', emailDomain: 'example.test' };
   const workspace = { id: 'w1', name: 'Acme', slug: 'acme', createdAt: '2026-01-01T00:00:00.000Z' };
-  assert.equal((await read('acme'))['images'], true);
-  assert.deepEqual(subjectFor('soul-repository-explorer'), { scope: 'user', distinctId: 'user-1', user, workspace });
-  assert.deepEqual(subjectFor('images'), { scope: 'workspace', distinctId: 'workspace:w1', workspace });
-  assert.deepEqual(subjectFor('public-tulipfarm-guide'), { scope: 'global', distinctId: 'global' });
+  assert.equal((await read('acme'))['openai-models'], true);
+  assert.deepEqual(subjectFor('openai-models'), { scope: 'workspace', distinctId: 'workspace:w1', workspace });
   subjects.length = 0;
   await read('other');
-  assert.deepEqual(subjectFor('soul-repository-explorer'), { scope: 'user', distinctId: 'user-1', user });
-  assert.equal(subjectFor('images'), undefined, 'a workspace flag without a workspace is not evaluated');
+  assert.equal(subjectFor('openai-models'), undefined, 'a workspace flag without a workspace is not evaluated');
   subjects.length = 0;
   await read();
-  assert.equal(subjectFor('images'), undefined, 'a workspace the user cannot read is ignored');
+  assert.equal(subjectFor('openai-models'), undefined, 'a workspace the user cannot read is ignored');
   assert.deepEqual(lookups, [
     ['user-1', 'acme'],
     ['user-1', 'other'],

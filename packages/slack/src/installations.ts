@@ -12,7 +12,6 @@ import {
 import { qualified, type createWorkspaceRuntime, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { teamLabel } from '@tulipfarm/workspace-storage/team-labels';
 import { requiredBotScopes, slackConfigurationSchema, slackId, type SlackConfiguration } from './contracts.ts';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import { slackCredentialCipher, encryptSlackToken, storedCredentialSchema } from './credentials.ts';
 import { exchangeCode } from './provider.ts';
 import { canAccessSlackInstallation } from './installation-access.ts';
@@ -109,17 +108,9 @@ export function createSlackInstallations(options: {
       return actor;
     });
   }
-  // Optional scopes follow the `images`, `generative-ui` and `slack-reactions` flags; without them an installation asks to update.
-  const botScopes = async (workspaceId: string) =>
-    requiredBotScopes(
-      config,
-      await isFeatureEnabled('images', null, { id: workspaceId }),
-      await isFeatureEnabled('generative-ui', null, { id: workspaceId }),
-      await isFeatureEnabled('slack-reactions', null, { id: workspaceId }),
-    );
+  const required = requiredBotScopes(config);
   async function status(workspaceId: string, userId: string) {
     const evidence = await installer(workspaceId);
-    const required = await botScopes(workspaceId);
     const access = await runtime.transaction(workspaceId, managementCompatibility, async tx => {
       const actor = await lockAndResolveHuman(tx, userId);
       const member = await currentMember(tx, actor);
@@ -230,7 +221,6 @@ export function createSlackInstallations(options: {
   }
   async function begin(workspaceId: string, userId: string, sessionId: string) {
     const actor = await manager(workspaceId, userId);
-    const required = await botScopes(workspaceId);
     const recovery = await runtime.transaction(workspaceId, managementCompatibility, async tx => {
       await lockAuthorization(tx, 'write');
       await requireManager(tx, actor, true);
@@ -322,7 +312,6 @@ export function createSlackInstallations(options: {
       const scopes = [...new Set(oauth.scope.split(',').filter(Boolean))];
       // Only the configured scopes decide whether Slack works; a missing `files:read` leaves shared files unread.
       const missing = config.scopeApproval.botScopes.some(scope => !scopes.includes(scope));
-      const required = await botScopes(link.workspace_id);
       const reserved = await pool.query(
         `UPDATE app.slack_workspace_links SET team_id=$2 WHERE workspace_id=$1 AND installation_id=$3 AND generation=$4 AND state='authorizing' AND (team_id IS NULL OR team_id=$2) RETURNING workspace_id`,
         [link.workspace_id, oauth.team.id, link.installation_id, link.generation],

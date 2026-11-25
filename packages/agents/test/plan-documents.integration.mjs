@@ -7,8 +7,6 @@ import { fixture, loadPlatformBaseline } from '../../workspace-storage/test/inte
 import { createAgentPlans } from '../src/plans.ts';
 import { createPlanDocumentStore } from '../src/plan-document-store.ts';
 
-process.env.FEATURE_FLAG_PLAN_DOCUMENTS = 'true';
-
 test(
   'an approved plan pauses for a starter change, keeps running through its own changes, and documents what changed since approval',
   { timeout: 60000 },

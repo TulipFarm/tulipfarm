@@ -128,7 +128,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       `INSERT INTO ${table('default_sources')} (source_id,intent_id,ordinal,selection,state) VALUES ($1,$2,1,'{}','created')`,
       [source.sourceId, intentId],
     );
-    const defaults = createDefaultKnowledge({ runtime, engines: {}, enabled: async () => true });
+    const defaults = createDefaultKnowledge({ runtime, engines: {} });
     const status = async () => (await defaults.list(ws.id, ws.userId)).items.find(i => i.intentId === intentId);
     const texts = async () =>
       (

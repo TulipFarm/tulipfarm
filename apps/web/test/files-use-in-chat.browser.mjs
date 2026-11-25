@@ -344,6 +344,7 @@ test(
             if (method === 'GET') return route.fulfill({ json: [] });
           }
           if (method === 'GET' && path === '/v1/feature-flags') return route.fulfill({ json: {} });
+          if (method === 'GET' && path.endsWith('/inbox')) return route.fulfill({ json: { items: [], open: 0 } });
           if (method === 'GET' && path.endsWith('/agents/recent')) return route.fulfill({ json: [] });
           if (method === 'GET' && path.endsWith('/governance')) return route.fulfill({ json: governance });
           if (method === 'GET' && /\/github\/chats\/[\w-]+\/selection$/.test(path))

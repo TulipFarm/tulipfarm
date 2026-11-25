@@ -30,7 +30,6 @@ import { fileKeys, useFilesApi, useFilesChanges, type FileSummary, type ViewerSe
 import { DetailsDialog } from '@/features/files/details';
 import { VersionsDialog } from '@/features/files/versions';
 import { GenerationDetails } from '@/features/files/generation';
-import { useFlag } from '@/lib/feature-flags';
 import { copyLink, SharingDialog } from '@/features/files/sharing';
 import { UseInChatDialog } from '@/features/files/use-in-chat';
 import { AddToKnowledgeDialog } from '@/features/files/add-to-knowledge';
@@ -85,7 +84,6 @@ function Viewer({
   );
   const [copied, setCopied] = useState<Awaited<ReturnType<typeof copyLink>>>(null);
   const narrow = useIsMobile();
-  const images = useFlag('images');
   const file = read.state.kind === 'ready' && !denied ? read.state.data : null;
   const deny = () => {
     saving.current?.abort();
@@ -394,7 +392,7 @@ function Viewer({
           />
         )}
       </section>
-      {images && <GenerationDetails api={api} fileId={item.id} workspaceSlug={workspaceSlug} />}
+      <GenerationDetails api={api} fileId={item.id} workspaceSlug={workspaceSlug} />
     </Page>
   );
 }

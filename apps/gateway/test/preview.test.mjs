@@ -27,7 +27,6 @@ function fakes() {
         return { token: 'token-1' };
       },
       session: async (previewKey, token) => (previewKey === key && token === 'token-1' ? session : null),
-      enabled: async () => true,
       async target() {
         state.builds += 1;
         if (state.role !== 'edit')

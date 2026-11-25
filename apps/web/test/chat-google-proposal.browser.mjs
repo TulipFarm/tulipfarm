@@ -121,8 +121,7 @@ async function withChat(operation, prompt, check, options = {}) {
       const request = route.request();
       const path = new URL(request.url()).pathname;
       if (path === '/v1/user/visit') return route.fulfill({ json: { firstSession: false } });
-      if (path === '/v1/feature-flags')
-        return route.fulfill({ json: options.disabled ? { 'google-calendar-canvas': false } : {} });
+      if (path === '/v1/feature-flags') return route.fulfill({ json: {} });
       if (path.endsWith('/last-used')) return route.fulfill({ json: {} });
       if (!['GET', 'OPTIONS'].includes(request.method()) && !path.endsWith('/operations/read'))
         writes.push({ path, body: request.postDataJSON() });
@@ -389,37 +388,6 @@ for (const unavailable of [false, true])
       );
     },
   );
-
-test(
-  'flag-off retains inline review and prevents Meet approval without blocking rejection',
-  { timeout: 120000 },
-  async () => {
-    await withChat(
-      operation,
-      'Create an event with Meet',
-      async (page, writes) => {
-        const card = page.getByRole('region', { name: 'Exact Google action review', exact: true });
-        await card
-          .getByText(
-            'This calendar feature is not enabled for this workspace. You can review its saved status, but cannot approve or execute it here.',
-          )
-          .waitFor();
-        assert.equal(await page.getByRole('button', { name: 'Open calendar action', exact: true }).count(), 0);
-        assert.equal(
-          await card.getByRole('button', { name: 'Approve exact Google action', exact: true }).isDisabled(),
-          true,
-        );
-        await card.getByRole('button', { name: 'Reject Google action', exact: true }).click();
-        await card.getByText('Rejected. This action cannot run.', { exact: true }).waitFor();
-        assert.deepEqual(
-          writes.map(write => write.path.split('/').at(-1)),
-          ['decision'],
-        );
-      },
-      { disabled: true },
-    );
-  },
-);
 
 test(
   'a document upload review shows the file size and downloads the exact file instead of base64',

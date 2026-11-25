@@ -120,11 +120,10 @@ export async function setIntegrationManagers(
 
 export type DefaultKnowledgeProduct = 'google-drive' | 'gmail' | 'slack' | 'github' | 'jira' | 'confluence';
 /**
- * Records durable automatic-Knowledge intent for a new eligible enablement. `enabled` runs before the credential
- * transaction; `record` runs inside it so a crash after credential persistence cannot lose the intent.
+ * Records durable automatic-Knowledge intent for a new eligible enablement. `record` runs inside the credential
+ * transaction so a crash after credential persistence cannot lose the intent.
  */
 export type DefaultKnowledgeHook = {
-  enabled(workspaceId: string, userId: string): Promise<boolean>;
   record(
     tx: AuthorizationTransaction,
     input: {

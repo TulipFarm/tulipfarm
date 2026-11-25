@@ -71,7 +71,7 @@ through an undici `Agent` whose `connect.lookup` returns only those addresses,
 follows at most 5 redirects, sends no credentials, and streams under 10 MiB within
 25 seconds. HTML is a `page`; anything else is a `file` typed from its bytes.
 `publicNetwork` is the only test seam (DNS resolution and the dispatcher); no
-setting can reach private addresses. In chat with the `images` flag on,
+setting can reach private addresses. In chat,
 `web.fetch` probes with `fetchPublicFile` first: a file is read like an attached
 file under the 20,000-token tool budget and not stored, and its images follow the
 tool results for families that read images. A page falls through to Huntsman
@@ -257,7 +257,7 @@ The web chat lists a chat's plans after its messages and opens one in the Canvas
 on the starter's plan card in chat, never in the outline. A budget pause offers one resume that doubles the budget,
 up to the task maximum.
 
-Plan approval (`0035_plan_approval.sql`, workspace flag `plan-documents`) separates a plan's reviewable content from its
+Plan approval (`0035_plan_approval.sql`) separates a plan's reviewable content from its
 progress. `version` moves with every change; `content_revision` moves only when the content changes: title, brief,
 planning, tasks and their owners, specialists' names and roles, budget, and the document (`summary`, `approach`,
 `risks`, up to four Mermaid `diagrams`), which `plans.create` and `plans.update` accept. Each revision stores an

@@ -18,7 +18,6 @@ import { canonicalJson } from '@tulipfarm/tables/canonical';
 import { bindHostedMcpSecrets, bindMcpSecrets, createSecrets } from '@tulipfarm/secrets';
 import { hostedMcpSecretSends, mcpSecretSends } from '@tulipfarm/secrets/send';
 import { mcpHost } from '@tulipfarm/extensions';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import { apiCallPrivateHosts } from '@tulipfarm/api-calls';
 
 export function createMcpExecution(
@@ -258,7 +257,7 @@ function mcpOptionsFromEnvironment(env: NodeJS.ProcessEnv): McpServiceOptions | 
 function hostedOptions(): Pick<McpServiceOptions, 'host' | 'hostedEnabled'> {
   const host = mcpHost();
   if (!host) return {};
-  return { host, hostedEnabled: workspaceId => isFeatureEnabled('hosted-mcp', null, { id: workspaceId }) };
+  return { host, hostedEnabled: () => true };
 }
 
 /** Removes sandboxes whose integration was deleted, disabled, replaced or lost a secret's permission. */

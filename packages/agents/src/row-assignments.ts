@@ -662,12 +662,10 @@ export function createRowAssignments(options: {
     });
   }
 
-  /** Settles and stops runs; starts new ones only when `startAllowed`, so turning the feature off lets working runs finish. */
-  async function step(workspaceId: string, startAllowed: boolean) {
+  async function step(workspaceId: string) {
     const settled = await settle(workspaceId);
     if (!settled.installed) return;
     for (const stop of settled.stops) await options.pause(workspaceId, stop.userId, stop.taskId).catch(() => undefined);
-    if (!startAllowed) return;
     for (const claimed of await claim(workspaceId)) {
       let task: { id: string };
       try {

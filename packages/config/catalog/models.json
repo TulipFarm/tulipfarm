@@ -401,9 +401,7 @@
         "maxOutputTokens": 64000
       },
       "pricing": "unmetered",
-      "notes": [
-        "Runs on the requesting member's own Claude plan through the Claude Agent SDK; offered only while the workspace's claude-plan feature flag is on. Model claude-sonnet-5."
-      ]
+      "notes": ["Runs on the requesting member's own Claude plan through the Claude Agent SDK. Model claude-sonnet-5."]
     },
     {
       "id": "claude-plan-opus",
@@ -422,9 +420,7 @@
         "maxOutputTokens": 64000
       },
       "pricing": "unmetered",
-      "notes": [
-        "Runs on the requesting member's own Claude plan through the Claude Agent SDK; offered only while the workspace's claude-plan feature flag is on. Model claude-opus-5-5."
-      ]
+      "notes": ["Runs on the requesting member's own Claude plan through the Claude Agent SDK. Model claude-opus-5-5."]
     },
     {
       "id": "claude-plan-haiku",
@@ -443,9 +439,7 @@
         "maxOutputTokens": 64000
       },
       "pricing": "unmetered",
-      "notes": [
-        "Runs on the requesting member's own Claude plan through the Claude Agent SDK; offered only while the workspace's claude-plan feature flag is on. Model claude-haiku-4-5."
-      ]
+      "notes": ["Runs on the requesting member's own Claude plan through the Claude Agent SDK. Model claude-haiku-4-5."]
     },
     {
       "id": "copilot-claude-sonnet",

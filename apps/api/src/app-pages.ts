@@ -32,7 +32,7 @@ import {
   layoutActionLabelsLimit,
   layoutVersion,
 } from '@tulipfarm/conversations/layout-contracts';
-import { errorAttributes, isFeatureEnabled } from '@tulipfarm/observability';
+import { errorAttributes } from '@tulipfarm/observability';
 import type { createTableService } from '@tulipfarm/tables/service';
 import { commonCompatibility, qualified, type createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import type { registerAuth } from './auth.ts';
@@ -354,8 +354,7 @@ export function registerAppPages(app: FastifyInstance, dependencies: AppPageDepe
       const session = await requestSession(request, dependencies.auth);
       if (!session) return reply.code(401).send({ error: 'sign-in-required' });
       const workspace = z.uuid().safeParse((request.params as { workspaceId?: string }).workspaceId);
-      if (!workspace.success || !(await isFeatureEnabled('app-hosting', null, { id: workspace.data })))
-        return reply.code(404).send({ error: 'not-found' });
+      if (!workspace.success) return reply.code(404).send({ error: 'not-found' });
       users.set(request, session.user.id);
     });
 

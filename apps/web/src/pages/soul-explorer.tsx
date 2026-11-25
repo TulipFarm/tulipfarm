@@ -1,7 +1,6 @@
 import { useCallback, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { workspaceRoute } from '@/router';
-import { useFlag } from '@/lib/feature-flags';
 import { Button } from '@tulipfarm/sprout/button';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
@@ -20,7 +19,6 @@ export function SoulExplorerPage() {
 }
 
 function WorkspaceSoul({ workspaceId, slug }: { workspaceId: string; slug: string }) {
-  const enabled = useFlag('soul-repository-explorer');
   const settings = useWorkspaceSettings(workspaceId);
   const [denied, setDenied] = useState(false);
   const accessLost = useCallback(() => {
@@ -28,7 +26,6 @@ function WorkspaceSoul({ workspaceId, slug }: { workspaceId: string; slug: strin
     void settings.refresh();
   }, [settings.refresh]);
   const allowed =
-    enabled &&
     !denied &&
     settings.state.kind === 'ready' &&
     !settings.state.error &&
@@ -52,7 +49,7 @@ function WorkspaceSoul({ workspaceId, slug }: { workspaceId: string; slug: strin
         <StatePanel
           kind="unavailable"
           title="Soul is unavailable"
-          description="This screen requires workspace admin access and an enabled feature."
+          description="This screen requires workspace admin access."
         />
       )}
     </div>

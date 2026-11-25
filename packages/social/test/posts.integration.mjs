@@ -256,12 +256,6 @@ const tiktok = (channel, media) => ({
   content: { platform: 'tiktok', caption: 'Launch clip', media },
   publishAt: null,
 });
-const instagram = (channel, media) => ({
-  channelId: channel.id,
-  expectedChannelVersion: channel.version,
-  content: { platform: 'instagram', caption: 'Spring', media, format: 'feed' },
-  publishAt: null,
-});
 const prepare = (conversationId, variants, commandId = randomUUID()) => ({
   commandId,
   origin: { kind: 'conversation', conversationId, messageId: randomUUID() },
@@ -927,31 +921,6 @@ test('Images 49-50: a generated image attaches like any Files image, and each pl
       [{ path: ['content', 'media', 0], code: 'image-too-large' }],
     ],
   );
-});
-
-test('the platform image rules apply only with the images flag on', async () => {
-  const { posts, personal } = service();
-  const feed = await personal('instagram');
-  const conversationId = await chat();
-  const photo = await file(admin(), 'image/png');
-  const errorsWith = async flag => {
-    const previous = process.env.FEATURE_FLAG_IMAGES;
-    process.env.FEATURE_FLAG_IMAGES = flag;
-    try {
-      const { variants } = await posts.prepare(
-        ws.id,
-        admin().userId,
-        prepare(conversationId, [instagram(feed, [photo])]),
-        sourcesOf(conversationId),
-      );
-      return variants[0].errors;
-    } finally {
-      if (previous === undefined) delete process.env.FEATURE_FLAG_IMAGES;
-      else process.env.FEATURE_FLAG_IMAGES = previous;
-    }
-  };
-  assert.deepEqual(await errorsWith('false'), []);
-  assert.deepEqual(await errorsWith('true'), [{ path: ['content', 'media', 0], code: 'image-type' }]);
 });
 
 test('PRODUCT 20: a post is approved only by a person who can read every source', async () => {

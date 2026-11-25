@@ -82,10 +82,7 @@ function memoryBytes() {
 async function setup(t, { answer, recognition } = {}) {
   const f = await conversationFixture();
   const saved = Object.fromEntries(
-    ['ANTHROPIC_API_KEY', 'MODEL_CATALOG', 'MODEL_CATALOG_FILE', 'FEATURE_FLAG_IMAGES'].map(key => [
-      key,
-      process.env[key],
-    ]),
+    ['ANTHROPIC_API_KEY', 'MODEL_CATALOG', 'MODEL_CATALOG_FILE'].map(key => [key, process.env[key]]),
   );
   process.env.ANTHROPIC_API_KEY = 'synthetic-test-key';
   process.env.MODEL_CATALOG = catalog;
@@ -277,7 +274,6 @@ test('the workspace recognition model reads images for chat, Knowledge and tasks
     revisionId: randomUUID(),
     membershipId: membership,
   });
-  assert.equal(offered.images, true);
   assert.equal(offered.recognizer.modelId, 'claude-opus');
   const bytes = await png(40, 30, '#123');
   await offered.recognizer.recognize({ kind: 'image', mediaType: 'image/png', bytes, width: 40, height: 30, alt: '' });
@@ -595,33 +591,6 @@ test('an image files.read returns reaches a family that reads images after the t
     2,
     'the turn context image and the tool result image both reach the model',
   );
-});
-
-test('with the images flag off a turn with an attachment sends exactly what a text-only turn sends', async t => {
-  const f = await setup(t);
-  process.env.FEATURE_FLAG_IMAGES = 'false';
-  const withFile = await f.chat();
-  const id = await f.attach(withFile, 'screenshot.png', 'image/png', await png());
-  const [attached] = await f.turn(
-    withFile,
-    [
-      { kind: 'attachment', attachmentId: id },
-      { kind: 'text', text: 'What is this?' },
-    ],
-    'claude-sonnet',
-  );
-  const plain = await f.chat();
-  const [textOnly] = await f.turn(plain, [{ kind: 'text', text: 'What is this?' }], 'claude-sonnet');
-  const withoutClock = body => JSON.parse(JSON.stringify(body).replace(/\\"currentTime\\":\\"[^\\]+\\"/g, ''));
-  assert.deepEqual(withoutClock(attached), withoutClock(textOnly));
-  assert.ok(!attached.tools.some(tool => tool.name === 'files_read'));
-  assert.equal(f.recognitions.length, 0);
-  const pinned = (
-    await f.db.platform.query(`SELECT image_models FROM ${f.table('tf_conversation_turns')} WHERE conversation_id=$1`, [
-      withFile,
-    ])
-  ).rows[0].image_models;
-  assert.equal(pinned, null);
 });
 
 test('an attachment of a message compaction cleaned is named with a files.read pointer, not dropped', async t => {

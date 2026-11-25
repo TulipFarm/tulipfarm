@@ -42,7 +42,7 @@ import { standaloneTurn, turnRequester } from '@tulipfarm/conversations/turn-req
 import { canAccessSlackInstallation, SlackChannelAccessError, slackResolveSchema } from '@tulipfarm/slack';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { createWorkflows } from '@tulipfarm/workflows';
-import { errorType, isFeatureEnabled, log } from '@tulipfarm/observability';
+import { errorType, log } from '@tulipfarm/observability';
 import { claimRunImages, deliverRunImages, type DeliveredMessage, type SlackImageFiles } from './slack-images.ts';
 
 type Transaction = AgentTransaction & { commonVersion: number };
@@ -640,7 +640,7 @@ export function createSlackActions(options: Options) {
       return { kind: 'claimed' as const };
     });
     if (claimed.kind === 'view') return claimed.value;
-    const images = !!options.images && (await isFeatureEnabled('images', null, { id: workspaceId }).catch(() => false));
+    const images = !!options.images;
     let delivered = null as DeliveredMessage | null;
     await transaction(workspaceId, async tx => {
       delivered = null;

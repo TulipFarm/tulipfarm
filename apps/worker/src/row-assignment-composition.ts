@@ -1,7 +1,7 @@
 import { Runtime } from '@temporalio/worker';
 import { createRowAssignments } from '@tulipfarm/agents/row-assignments';
 import type { createAgentTasks } from '@tulipfarm/agents/tasks';
-import { createBackgroundJob, isFeatureEnabled } from '@tulipfarm/observability';
+import { createBackgroundJob } from '@tulipfarm/observability';
 import { workspaceSchemaPending } from '@tulipfarm/workspace-storage/runtime';
 
 /** Polls each workspace's row assignments so an assigned agent starts within a few seconds. */
@@ -31,7 +31,7 @@ export function createRowAssignmentComposition(options: {
       const workspaces = await options.discover(after);
       for (const workspaceId of workspaces) {
         try {
-          await engine.step(workspaceId, await isFeatureEnabled('assignable-tasks', null, { id: workspaceId }));
+          await engine.step(workspaceId);
         } catch (error) {
           if (!workspaceSchemaPending(error)) failures.push(error);
         }

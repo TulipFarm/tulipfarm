@@ -19,13 +19,15 @@ test('form answers follow block order and name empty inputs', () => {
   assert.equal(slackFormAnswers(values, blocks), 'Second: (left empty)\nFirst: one');
 });
 
-test('generative UI asks for canvas and assistant scopes once', () => {
+test('installations ask for file, canvas, assistant, reaction and emoji scopes once', () => {
   const config = { scopeApproval: { botScopes: ['chat:write', 'canvases:write'] } };
-  assert.deepEqual(requiredBotScopes(config, false, true), ['chat:write', 'canvases:write', 'assistant:write']);
-  assert.deepEqual(requiredBotScopes(config, false), ['chat:write', 'canvases:write']);
-});
-
-test('reaction rules ask for reaction and emoji read scopes', () => {
-  const config = { scopeApproval: { botScopes: ['chat:write'] } };
-  assert.deepEqual(requiredBotScopes(config, false, false, true), ['chat:write', 'reactions:read', 'emoji:read']);
+  assert.deepEqual(requiredBotScopes(config), [
+    'chat:write',
+    'canvases:write',
+    'files:read',
+    'files:write',
+    'assistant:write',
+    'reactions:read',
+    'emoji:read',
+  ]);
 });

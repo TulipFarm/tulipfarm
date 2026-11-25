@@ -63,7 +63,6 @@ function fakeServices(overrides = {}) {
   return {
     proposals,
     services: {
-      enabled: async () => true,
       hasPlan: async () => true,
       plan: async () => ({ connectionId: randomUUID(), ownerMembershipId: actor.membershipId, token: planToken }),
       github: async () => ({ token: githubToken, login: 'octocat' }),
@@ -200,14 +199,10 @@ test('A member without a GitHub account on for coding is asked to turn one on be
   assert.equal(calls.length, 0);
 });
 
-test('The tool is offered only with the flag on, agent templates and a plan', async () => {
+test('The tool is offered only with agent templates and a plan', async () => {
   const runs = (backend, overrides) => createCodingRuns(backend, configuration, fakeServices(overrides).services);
   const workspaceId = randomUUID();
   assert.equal(await runs(fakeBackend().backend).offered(workspaceId, actor.membershipId), true);
-  assert.equal(
-    await runs(fakeBackend().backend, { enabled: async () => false }).offered(workspaceId, actor.membershipId),
-    false,
-  );
   assert.equal(
     await runs(fakeBackend().backend, { hasPlan: async () => false }).offered(workspaceId, actor.membershipId),
     false,
@@ -225,10 +220,6 @@ test('The tool is offered only with the flag on, agent templates and a plan', as
   assert.equal(offered, false);
   assert.deepEqual(asked, ['chatgpt']);
   await assert.rejects(runs(onlyCodex).run(context(), call), /coding-run-unavailable/);
-  await assert.rejects(
-    runs(fakeBackend().backend, { enabled: async () => false }).run(context(), call),
-    /coding-run-unavailable/,
-  );
 });
 
 test('Chat lists coding.run only when the reply offers it', () => {

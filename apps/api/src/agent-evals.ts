@@ -17,7 +17,6 @@ import {
   workspaceEvalSetSchema,
   type WorkspaceEvals,
 } from '@tulipfarm/evals/workspace';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import { authConfig, type registerAuth } from './auth.ts';
 import { authenticateRoutes } from './authenticated-routes.ts';
@@ -45,7 +44,7 @@ function startRun(temporal: Temporal, workspaceId: string, runId: string) {
   );
 }
 
-/** Workspace Evals on saved agents, behind the `agent-evals` workspace flag. */
+/** Workspace Evals on saved agents. */
 export function registerAgentEvals(
   app: FastifyInstance,
   dependencies: {
@@ -79,11 +78,6 @@ export function registerAgentEvals(
   app.register(async routes => {
     const user = authenticateRoutes(routes, dependencies.auth, { origin: authConfig().webOrigin });
     validation.install(routes);
-    routes.addHook('preHandler', async (request, reply) => {
-      const { workspaceId } = agent.pick({ workspaceId: true }).parse(request.params);
-      if (!(await isFeatureEnabled('agent-evals', { id: user(request) }, { id: workspaceId })))
-        return reply.code(404).send({ error: 'not-found' });
-    });
     routes.setErrorHandler((error, _request, reply) => {
       if (error instanceof WorkspaceEvalError) return reply.code(error.status).send({ error: error.code });
       if (error instanceof SourceAuthorizationUnavailable)

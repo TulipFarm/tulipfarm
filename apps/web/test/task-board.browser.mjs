@@ -89,7 +89,7 @@ async function routeApi(page) {
         session: { id: 'fixture-session', userId: 'ada' },
         user: { id: 'ada', name: 'Ada', email: 'ada@example.com', lastModelFamilyId: null },
       });
-    if (path === '/v1/feature-flags') return json({ 'assignable-tasks': true });
+    if (path === '/v1/feature-flags') return json({});
     if (path === '/v1/workspaces') return json([workspace]);
     if (path === '/v1/workspaces/acme') return json(workspace);
     if (path === `${base}/governance/me`) return json(membership);

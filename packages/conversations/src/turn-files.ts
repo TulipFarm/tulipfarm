@@ -108,9 +108,8 @@ export type AttachmentReader = {
   ): Promise<{ filename: string; mediaType: string; size: number; bytes: Uint8Array }>;
 };
 
-/** Everything the images reader needs from outside this package. Absent, or with `enabled` false, chat reads files as text. */
+/** Everything the images reader needs from outside this package. Absent, chat reads files as text. */
 export type TurnFiles = {
-  enabled(workspaceId: string): Promise<boolean>;
   family(familyId: string): ReadingFamily;
   /**
    * The turn's recognizer on its pinned recognition model, undefined when it is not served. Every recognizer of one

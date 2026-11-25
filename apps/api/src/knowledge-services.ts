@@ -5,7 +5,6 @@ import {
   createAtlassianKnowledge,
   createConversationKnowledge,
   createDefaultKnowledge,
-  createDefaultKnowledgeGate,
   createGitHubKnowledge,
   createGoogleKnowledge,
   createKnowledgeKeepFeed,
@@ -56,7 +55,6 @@ export type KnowledgeServices = ReturnType<typeof createKnowledgeServices>;
 
 /** The Knowledge services that both the routes and the background sweeps use. */
 export function createKnowledgeServices(dependencies: KnowledgeServiceDependencies) {
-  const gate = createDefaultKnowledgeGate({ runtime: dependencies.runtime });
   const unavailable = async (): Promise<never> => {
     throw new KnowledgeError('adapter-required');
   };
@@ -80,7 +78,6 @@ export function createKnowledgeServices(dependencies: KnowledgeServiceDependenci
         }),
       ...(dependencies.providerFetch ? { providerFetch: dependencies.providerFetch } : {}),
     }),
-    gate,
   });
   const slack = createSlackKnowledge({
     runtime: dependencies.runtime,
@@ -90,7 +87,6 @@ export function createKnowledgeServices(dependencies: KnowledgeServiceDependenci
         runtime: dependencies.runtime,
         ...(dependencies.env ? { env: dependencies.env } : {}),
       }),
-    gate,
   });
   const github = createGitHubKnowledge({
     runtime: dependencies.runtime,
@@ -100,7 +96,6 @@ export function createKnowledgeServices(dependencies: KnowledgeServiceDependenci
         runtime: dependencies.runtime,
         ...(dependencies.env ? { env: dependencies.env } : {}),
       }),
-    gate,
   });
   const atlassian = createAtlassianKnowledge({
     runtime: dependencies.runtime,
@@ -110,7 +105,6 @@ export function createKnowledgeServices(dependencies: KnowledgeServiceDependenci
         runtime: dependencies.runtime,
         ...(dependencies.env ? { env: dependencies.env } : {}),
       }),
-    gate,
   });
   const defaults: DefaultKnowledge = createDefaultKnowledge({
     runtime: dependencies.runtime,
@@ -129,7 +123,6 @@ export function createKnowledgeServices(dependencies: KnowledgeServiceDependenci
   const githubEvents = githubKnowledgeEventsFromEnvironment(dependencies.pool, dependencies.env ?? process.env);
   const keep = createKnowledgeKeepFeed({ runtime: dependencies.runtime, ...keepClient });
   return {
-    gate,
     service,
     conversations,
     google,

@@ -11,13 +11,7 @@ import {
   slackCredentialCipher,
   type SlackRuntime,
 } from '@tulipfarm/slack';
-import {
-  createBackgroundJob,
-  errorAttributes,
-  isFeatureEnabled,
-  log,
-  transientFailure,
-} from '@tulipfarm/observability';
+import { createBackgroundJob, errorAttributes, log, transientFailure } from '@tulipfarm/observability';
 import type { AttachmentBytes } from '@tulipfarm/conversations/attachments';
 import { createSlackDirectMessages } from '@tulipfarm/slack';
 import { createConversationExecutor } from '@tulipfarm/conversations/runtime';
@@ -80,15 +74,8 @@ export async function createSlackPromptComposition(
         ...settings,
         appId: settings.config.appId,
         ...(modelFamilyId ? { modelFamilyId } : {}),
-        // Files shared in a direct message become its attachments while the `images` flag is on.
-        ...(attachments
-          ? {
-              files: {
-                enabled: (workspaceId: string) => isFeatureEnabled('images', null, { id: workspaceId }),
-                bytes: attachments,
-              },
-            }
-          : {}),
+        // Files shared in a direct message become its attachments.
+        ...(attachments ? { files: { bytes: attachments } } : {}),
       })
     : undefined;
   const channelOptions = {
@@ -181,10 +168,8 @@ export async function createSlackPromptComposition(
       try {
         if (!(await installations.installed(workspaceId))) continue;
         await recovery.refresh(workspaceId);
-        // Inbox items reach members as Slack direct messages while assignable tasks are on.
         try {
-          if (await isFeatureEnabled('assignable-tasks', null, { id: workspaceId }))
-            await inboxSlack.notify(workspaceId);
+          await inboxSlack.notify(workspaceId);
         } catch (error) {
           report(error, 'inbox-slack');
         }

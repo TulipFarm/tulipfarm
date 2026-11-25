@@ -161,26 +161,9 @@
               {
                 "type": "string",
                 "enum": [
-                  "app-hosting",
-                  "app-key-required",
-                  "assignable-tasks",
-                  "hosted-mcp",
-                  "images",
-                  "default-connection-knowledge",
-                  "social-publishing",
-                  "plan-documents",
                   "openai-models",
                   "anthropic-models",
-                  "openai-image-models",
-                  "generative-ui",
-                  "slack-reactions",
-                  "chatgpt-plan",
-                  "claude-plan",
-                  "copilot-plan",
-                  "coding-runs",
-                  "browser-use",
-                  "agent-evals",
-                  "learned-knowledge"
+                  "openai-image-models"
                 ]
               },
               {
@@ -526,26 +509,9 @@
               {
                 "type": "string",
                 "enum": [
-                  "app-hosting",
-                  "app-key-required",
-                  "assignable-tasks",
-                  "hosted-mcp",
-                  "images",
-                  "default-connection-knowledge",
-                  "social-publishing",
-                  "plan-documents",
                   "openai-models",
                   "anthropic-models",
-                  "openai-image-models",
-                  "generative-ui",
-                  "slack-reactions",
-                  "chatgpt-plan",
-                  "claude-plan",
-                  "copilot-plan",
-                  "coding-runs",
-                  "browser-use",
-                  "agent-evals",
-                  "learned-knowledge"
+                  "openai-image-models"
                 ]
               },
               {

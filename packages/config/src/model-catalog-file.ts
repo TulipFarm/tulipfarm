@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { modelApiSupported, modelCapabilitiesSchema, modelProviderSchema } from './model-capabilities.ts';
-import { featureFlagNames, featureFlags, type FeatureFlag } from './feature-flags.ts';
+import { featureFlagNames, featureFlags } from './feature-flags.ts';
 import { modelFamilyIdSchema, modelIdentifierSchema } from './model-identifier.ts';
 
 // The model catalog file: every model a deployment serves, how each is reached, what it costs, and which one is the
@@ -41,19 +41,19 @@ const builtInProviders = Object.keys(modelProviderDefaults) as BuiltInProvider[]
 
 /**
  * The built-in route provider for a member's own ChatGPT plan. It has no key: each request uses the credential of the
- * member who connected ChatGPT, and the workspace's `chatgpt-plan` feature flag decides whether its models are offered.
+ * member who connected ChatGPT.
  */
 export const chatGptProvider = 'chatgpt';
 
 /**
  * Built-in route providers that run on a member's own plan. Each has no key: each request uses the credential of a member
- * who connected that plan, and the workspace's feature flag for the plan decides whether its models are offered.
+ * who connected that plan.
  */
 export const planProviders = Object.freeze({
-  chatgpt: { flag: 'chatgpt-plan', label: 'ChatGPT' },
-  claude: { flag: 'claude-plan', label: 'Claude' },
-  copilot: { flag: 'copilot-plan', label: 'GitHub Copilot' },
-} as const satisfies Record<string, { flag: FeatureFlag; label: string }>);
+  chatgpt: { label: 'ChatGPT' },
+  claude: { label: 'Claude' },
+  copilot: { label: 'GitHub Copilot' },
+} as const satisfies Record<string, { label: string }>);
 export type PlanProvider = keyof typeof planProviders;
 export const planProviderNames = Object.keys(planProviders) as PlanProvider[];
 export const isPlanProvider = (provider: string): provider is PlanProvider => Object.hasOwn(planProviders, provider);

@@ -35,7 +35,6 @@ import type { TaskTreeTask } from '@tulipfarm/sprout/task-tree';
 import { lazyCard } from '@/components/lazy-card';
 import { TableRequestError } from '@/features/tables/request-state';
 import { apiOrigin } from '@/lib/auth';
-import { useFlag } from '@/lib/feature-flags';
 import { jsonResponse, readJson } from '@/lib/http';
 import { useFeatureChanges, useFeatureRead } from '@/lib/query';
 import { workspaceRoute } from '@/router';
@@ -392,7 +391,6 @@ export function planProgress(counts: PlanView['counts']) {
 }
 
 function PlanNotice({ view }: { view: PlanView }) {
-  const approval = useFlag('plan-documents');
   const waiting = view.tasks.filter(task => task.waitingTaskId).length;
   const notice =
     view.lifecycle === 'paused'
@@ -428,7 +426,7 @@ function PlanNotice({ view }: { view: PlanView }) {
       : view.lifecycle === 'draft'
         ? {
             title: 'Plan only',
-            body: `Research and the plan are saved. No setup work has started. ${approval ? 'Approve and start' : 'Start'} this plan when you want to act; each business action still needs its own permission or review.`,
+            body: `Research and the plan are saved. No setup work has started. Approve and start this plan when you want to act; each business action still needs its own permission or review.`,
           }
         : view.lifecycle === 'stopped'
           ? { title: 'Stopped', body: 'Unfinished tasks were cancelled. Finished work is kept.' }
@@ -464,7 +462,6 @@ export function PlanCanvas({
   const { workspaceSlug } = workspaceRoute.useParams();
   const api = useMemo(() => planApi(workspaceId), [workspaceId]);
   const read = usePlan(api, chatId, planId);
-  const documents = useFlag('plan-documents');
   const state = read.state;
   if (state.kind === 'loading')
     return (
@@ -598,24 +595,20 @@ export function PlanCanvas({
           </div>
         </Alert>
       )}
-      {documents ? (
-        <Tabs defaultValue="outline">
-          <TabsList variant="line" aria-label="Plan views">
-            <TabsTrigger value="outline">Outline</TabsTrigger>
-            <TabsTrigger value="document">Document</TabsTrigger>
-          </TabsList>
-          <TabsContent value="outline">
-            <div className="flex flex-col gap-4 pt-4">{outline}</div>
-          </TabsContent>
-          <TabsContent value="document">
-            <div className="pt-4">
-              <PlanDocument api={api} workspaceSlug={workspaceSlug} chatId={chatId} view={view} />
-            </div>
-          </TabsContent>
-        </Tabs>
-      ) : (
-        outline
-      )}
+      <Tabs defaultValue="outline">
+        <TabsList variant="line" aria-label="Plan views">
+          <TabsTrigger value="outline">Outline</TabsTrigger>
+          <TabsTrigger value="document">Document</TabsTrigger>
+        </TabsList>
+        <TabsContent value="outline">
+          <div className="flex flex-col gap-4 pt-4">{outline}</div>
+        </TabsContent>
+        <TabsContent value="document">
+          <div className="pt-4">
+            <PlanDocument api={api} workspaceSlug={workspaceSlug} chatId={chatId} view={view} />
+          </div>
+        </TabsContent>
+      </Tabs>
     </CanvasSection>
   );
 }
@@ -807,7 +800,6 @@ function PlanControls({
     >;
 }) {
   const { change } = useFeatureChanges();
-  const approval = useFlag('plan-documents');
   const revision = view.contentRevision;
   const awaiting = view.lifecycle === 'paused' && view.awaitingApproval === true;
   const approvedAt = view.approval ? formatApproval(view.approval) : null;
@@ -859,7 +851,7 @@ function PlanControls({
             : `Resuming raises the budget to ${budget.credits.toLocaleString()} credits.`}
         </p>
       )}
-      {approval && view.approval && (
+      {view.approval && (
         <p className="text-xs text-muted-foreground">
           You approved revision {view.approval.revision}
           {approvedAt && ` · ${approvedAt}`}
@@ -879,7 +871,7 @@ function PlanControls({
         </div>
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
-        {(approval && view.lifecycle === 'draft') || awaiting ? (
+        {view.lifecycle === 'draft' || awaiting ? (
           <>
             <Button size="sm" disabled={!!busy || !revision} aria-busy={busy === 'approve'} onClick={approve}>
               <PlayIcon size="sm" aria-hidden="true" />
@@ -893,16 +885,6 @@ function PlanControls({
               {revision ? `Revision ${revision}` : 'Loading revision…'}
             </span>
           </>
-        ) : view.lifecycle === 'draft' ? (
-          <Button
-            size="sm"
-            disabled={!!busy}
-            aria-busy={busy === 'start'}
-            onClick={() => void run({ action: 'start' })}
-          >
-            <PlayIcon size="sm" aria-hidden="true" />
-            {busy === 'start' ? 'Starting…' : 'Start plan'}
-          </Button>
         ) : paused ? (
           <Button
             size="sm"

@@ -1,4 +1,3 @@
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import { z } from 'zod';
@@ -503,10 +502,9 @@ export function registerTableChanges(
           ),
         },
       },
-      async request => {
+      request => {
         const p = workspaceParams.parse(request.params),
           query = tablePage.parse(request.query);
-        const tasks = await isFeatureEnabled('assignable-tasks', null, { id: p.workspaceId });
         return records
           .definitions(p.workspaceId, user(request), {
             limit: query.limit,
@@ -518,9 +516,7 @@ export function registerTableChanges(
           })
           .then(result => ({
             ...result,
-            tables: result.tables
-              .filter(item => tasks || item.systemKind !== 'tasks')
-              .map(item => ({ ...item, appliedAt: item.appliedAt?.toISOString() ?? null })),
+            tables: result.tables.map(item => ({ ...item, appliedAt: item.appliedAt?.toISOString() ?? null })),
           }));
       },
     );

@@ -122,6 +122,11 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 36
       }
       if (request.method === 'GET') {
         if (path === '/v1/feature-flags') return send({});
+        if (path === `${base}/inbox`) return send({ items: [], open: 0 });
+        if (path === `${base}/inbox/slack`)
+          return send({ connected: false, kinds: { assigned: true, waiting: true, finished: true, mention: true } });
+        if (path === `${base}/assignment-limits`)
+          return send({ workspace: 10, timeZone: 'UTC', dailyCredits: null, agents: [] });
         if (path === '/v1/auth/options') return send({ turnstileSiteKey: null, google: true, magicLink: true });
         // The workspace shell's background reads, answered as cloud's own mock does (cloud 866ec800 #1080, features/tables/workspace-members-mock-api.ts:267-273).
         if (path === '/v1/google-workspace/availability') return send({ configured: false });
@@ -544,7 +549,7 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 36
       f.readGate = gate();
       await page.goto(`${origin}/acme/settings`);
       await page.getByRole('status', { name: 'Loading workspace settings', exact: true }).waitFor();
-      assert.equal(await nav(page).getByRole('link').count(), 6);
+      assert.equal(await nav(page).getByRole('link').count(), 7);
       f.readGate.release();
       await page.getByLabel('Workspace name', { exact: true }).waitFor();
       assert.equal(
@@ -699,7 +704,7 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 36
       await page.getByRole('heading', { name: 'workspace settings unavailable', exact: true }).waitFor();
       assert.equal(await page.getByLabel('Workspace name', { exact: true }).count(), 0);
       assert.equal(await page.getByLabel('Workspace ID', { exact: true }).count(), 0);
-      assert.equal(await nav(page).getByRole('link').count(), 6);
+      assert.equal(await nav(page).getByRole('link').count(), 7);
       f.settingsStatus = 200;
       await page.getByRole('button', { name: 'Reload workspace settings' }).click();
       await page.getByLabel('Workspace name', { exact: true }).waitFor();

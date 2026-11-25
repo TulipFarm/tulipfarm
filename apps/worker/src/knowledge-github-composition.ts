@@ -1,5 +1,4 @@
 import { createGitHubKnowledge, type GitHubCorpusProvider } from '@tulipfarm/knowledge';
-import type { KnowledgeSourceGate } from '@tulipfarm/knowledge';
 import { githubCorpusFromEnvironment } from '@tulipfarm/github/corpus';
 import { createGitHubKnowledgeActivities } from './knowledge-github-activities.ts';
 
@@ -15,7 +14,6 @@ function githubRecheckMs(value: string | undefined) {
 
 export function createWorkerGitHubKnowledge(dependencies: {
   runtime: Parameters<typeof createGitHubKnowledge>[0]['runtime'];
-  gate?: KnowledgeSourceGate;
   githubCorpus?: GitHubCorpusProvider;
   env?: NodeJS.ProcessEnv;
 }) {
@@ -27,7 +25,6 @@ export function createWorkerGitHubKnowledge(dependencies: {
         runtime: dependencies.runtime,
         ...(dependencies.env ? { env: dependencies.env } : {}),
       }),
-    ...(dependencies.gate ? { gate: dependencies.gate } : {}),
     sync: { idleRecheckMs: githubRecheckMs((dependencies.env ?? process.env).GITHUB_KNOWLEDGE_RECHECK_MINUTES) },
   });
 }

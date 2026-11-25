@@ -98,15 +98,15 @@ function memoryBytes() {
  * A Slack workspace whose installation has `scopes`, with one linked DM sender, Slack serving `files` at their private
  * URLs to the bot token only, and the Anthropic API faked so each chat request body is kept.
  */
-async function setup(t, { scopes = ['chat:write', 'files:read'], images = true, family = 'claude-sonnet' } = {}) {
+async function setup(t, { scopes = ['chat:write', 'files:read'], family = 'claude-sonnet' } = {}) {
   const saved = Object.fromEntries(
-    ['ANTHROPIC_API_KEY', 'MODEL_CATALOG', 'MODEL_CATALOG_FILE', 'FEATURE_FLAG_IMAGES', 'HUNTSMAN_ENDPOINT'].map(
-      key => [key, process.env[key]],
-    ),
+    ['ANTHROPIC_API_KEY', 'MODEL_CATALOG', 'MODEL_CATALOG_FILE', 'HUNTSMAN_ENDPOINT'].map(key => [
+      key,
+      process.env[key],
+    ]),
   );
   process.env.ANTHROPIC_API_KEY = 'synthetic-test-key';
   process.env.MODEL_CATALOG = catalog;
-  process.env.FEATURE_FLAG_IMAGES = String(images);
   process.env.HUNTSMAN_ENDPOINT = 'https://huntsman.example.com';
   delete process.env.MODEL_CATALOG_FILE;
   const f = await promptFixture();
@@ -156,7 +156,7 @@ async function setup(t, { scopes = ['chat:write', 'files:read'], images = true, 
     ...f.options,
     fetcher,
     modelFamilyId: family,
-    files: { enabled: async () => images, bytes },
+    files: { bytes },
   });
   const activities = createConversationActivities(
     f.runtime,
@@ -306,27 +306,6 @@ test('a link in a Slack DM is read as a file by the chat link path', async t => 
   assert.deepEqual(imageBlocks(requests[0]), [
     { type: 'image', source: { type: 'base64', media_type: 'image/png', data: Buffer.from(chart).toString('base64') } },
   ]);
-});
-
-test('with images off a file share is unchanged: named by its metadata, nothing downloaded', async t => {
-  const f = await setup(t, { images: false });
-  f.served.set(fileUrl, await png(32, 24));
-  const { requests, parts } = await f.receive(fileShare([whiteboard], 'Look'));
-  assert.deepEqual(f.downloads, []);
-  assert.deepEqual(
-    parts.map(part => part.kind),
-    ['text'],
-  );
-  assert.match(parts[0].text, /^Look\n\[File: metadata only; contents not read\]\nWhiteboard\nimage\/png$/);
-  assert.deepEqual(imageBlocks(requests[0]), []);
-  const eventId = await f.event('UPERSON', 'DONE', fileShare([whiteboard]));
-  const dm = createSlackDirectMessages(f.options);
-  await dm.admitPending(f.workspace.id);
-  assert.equal(
-    (await f.db.platform.query(`SELECT 1 FROM ${f.table('tf_slack_dm_events')} WHERE event_id=$1`, [eventId])).rowCount,
-    1,
-    'a metadata line is text, so the legacy path admits it as before',
-  );
 });
 
 test('a file DM held because credits ran out is not downloaded again on later passes', async t => {

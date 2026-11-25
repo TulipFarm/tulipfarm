@@ -97,7 +97,6 @@ export type AppWork = {
   readonly credits: CreditGate;
   /** Every workspace id, so cleanup can tell an unreferenced release from one it has not looked at. */
   readonly workspaces: () => AsyncIterable<string>;
-  readonly enabled: (workspaceId: string) => Promise<boolean>;
 };
 
 const table = (tx: AppTransaction, name: string) => `${escapeIdentifier(tx.schema)}.${escapeIdentifier(name)}`;
@@ -448,8 +447,8 @@ export function createAppActivities(work: AppWork) {
   }
 
   /**
-   * The apps traffic billing charges for a window, whatever the workspace's app-hosting flag, since billing follows
-   * serving: each app with traffic on any of its names, and each app served now, so the next run knows where to resume.
+   * The apps traffic billing charges for a window: each app with traffic on any of its names, and each app served now,
+   * so the next run knows where to resume.
    */
   async function trafficByApp(traffic: Map<string, Traffic>) {
     const { rows: owners } = await platform.query(
@@ -729,11 +728,6 @@ export function createAppActivities(work: AppWork) {
           )
         ).rows as NameRow[];
       const failures: unknown[] = [];
-      const enabled = new Map<string, boolean>();
-      const isEnabled = async (workspaceId: string) => {
-        if (!enabled.has(workspaceId)) enabled.set(workspaceId, await work.enabled(workspaceId));
-        return enabled.get(workspaceId)!;
-      };
 
       // A deleted workspace's storage never comes back, so its names are retired and their routes removed below.
       const { rowCount: orphaned } = await platform.query(
@@ -750,7 +744,7 @@ export function createAppActivities(work: AppWork) {
       const byName = new Map(names.map(row => [row.name, row]));
       if (publisher) {
         for (const row of names) {
-          if (row.state !== 'current' || row.status === null || !(await isEnabled(row.workspace_id))) continue;
+          if (row.state !== 'current' || row.status === null) continue;
           const version = Number(row.edge_version);
           if ((held.get(row.name)?.version ?? -1) >= version) continue;
           await publisher.apply(appRouteFromRow(row)!, signal);
@@ -780,7 +774,6 @@ export function createAppActivities(work: AppWork) {
               now,
               signal,
             );
-          if (!(await isEnabled(workspaceId))) continue;
           const apps = await transact(workspaceId, async tx => {
             const { rows: found } = await tx.client.query(
               `SELECT id, public_name, edge_version FROM ${table(tx, 'tf_apps')} WHERE id = ANY($1::uuid[])`,

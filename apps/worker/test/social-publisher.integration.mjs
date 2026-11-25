@@ -148,12 +148,12 @@ function linkedinFake() {
     .fallback('mutate', { kind: 'published', platformPostId: 'urn:li:share:1', permalink: null });
 }
 
-async function publisherFor(ws, fake, flag) {
+async function publisherFor(ws, fake) {
   const composition = createSocialPublisherComposition({
     runtime,
     discover: async cursor => (cursor ? [] : [ws.id]),
     adapters: { linkedin: fake },
-    env: { ...env, FEATURE_FLAG_SOCIAL_PUBLISHING: flag },
+    env,
     intervalMs: 3_600_000,
   });
   assert.ok(composition);
@@ -168,26 +168,15 @@ const variantState = async (ws, id) =>
     )
   ).rows[0];
 
-test('exit check, PRODUCT 22: the worker refreshes tokens and publishes due variants where social publishing is on', async () => {
+test('exit check, PRODUCT 22: the worker refreshes tokens and publishes due variants', async () => {
   const fake = linkedinFake();
   const { ws, variantId, calls } = await approvedPost(fake);
-  await publisherFor(ws, fake, 'true');
+  await publisherFor(ws, fake);
   const worker = fake.calls.slice(calls);
   assert.deepEqual(await variantState(ws, variantId), { state: 'published', platform_post_id: 'urn:li:share:1' });
   assert.equal(worker.filter(call => call.method === 'refresh').length, 1);
   const [sent] = worker.filter(call => call.method === 'mutate');
   assert.equal(sent.args[1].token.accessToken, 'linkedin-access-2');
-});
-
-test('PRODUCT 22: the worker leaves workspaces alone while social publishing is off', async () => {
-  const fake = linkedinFake();
-  const { ws, variantId, calls } = await approvedPost(fake);
-  await publisherFor(ws, fake, 'false');
-  assert.equal((await variantState(ws, variantId)).state, 'scheduled');
-  assert.deepEqual(
-    fake.calls.slice(calls).filter(call => ['refresh', 'mutate', 'targetRules'].includes(call.method)),
-    [],
-  );
 });
 
 test('PRODUCT 22: the worker has no publisher without a credential keyring', () => {

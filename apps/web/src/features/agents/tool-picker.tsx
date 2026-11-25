@@ -17,7 +17,6 @@ import { ChoiceGroup } from '@tulipfarm/sprout/field';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@tulipfarm/sprout/collapsible';
 import { BrandIcon } from '@tulipfarm/sprout/brand-icon';
 import { SearchField } from '@tulipfarm/sprout/search-field';
-import { useFlag } from '@/lib/feature-flags';
 import { toolLabels } from './labels';
 
 export type ToolName = ReturnType<typeof toolNameSchema.parse>;
@@ -143,11 +142,7 @@ export function AgentToolPicker({
     setPresetError(false);
     onChange(selection, preset ? next : next.filter(tool => !value.includes(tool)));
   };
-  const images = useFlag('images');
-  const browser = useFlag('browser-use');
   const matches = (tool: ToolName, app: string) =>
-    (images || tool !== 'images.generate' || value.includes(tool)) &&
-    (browser || tool !== 'browser.act' || value.includes(tool)) &&
     `${app} ${toolLabels[tool]} ${agentToolRuntimeDescription(tool)}`
       .toLowerCase()
       .includes(search.trim().toLowerCase());

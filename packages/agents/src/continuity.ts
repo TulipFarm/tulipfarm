@@ -26,7 +26,6 @@ import { modelAvailability } from './model-availability.ts';
 import { pinRunImageModels } from './image-generation.ts';
 import {
   fallbackEligibleClasses,
-  isFeatureEnabled,
   modelFailureClasses,
   recordModelFallback,
   retryRateLimitedModel,
@@ -259,8 +258,7 @@ export async function admitGeneration(
       amount.parse(await config.budgetPicoUsd(workspaceId)),
     ],
   );
-  if (config.imageCatalog && (await isFeatureEnabled('images', null, { id: workspaceId })))
-    await pinRunImageModels(tx, runId, primary.familyId, config.imageCatalog);
+  if (config.imageCatalog) await pinRunImageModels(tx, runId, primary.familyId, config.imageCatalog);
 }
 
 export async function latestGeneration(tx: AgentTransaction, runId: string) {

@@ -552,6 +552,8 @@ export function createMemberTablesMock(
     }
     if (suffix === '/schema-history') return Response.json({ entries: [], nextCursor: null });
     if (suffix === '/deleted-rows') return Response.json({ records: [], nextCursor: null });
+    if (method === 'GET' && /^\/rows\/[^/]+\/thread$/.test(suffix ?? ''))
+      return Response.json({ items: [], assignment: null, runs: [] });
     if (suffix?.endsWith('/reverse-fields')) return Response.json({ fields: [], nextCursor: null });
     const rowPath = /^\/rows\/([^/]+)(\/history)?$/.exec(suffix ?? '');
     if (rowPath && method === 'GET') {
@@ -632,6 +634,14 @@ export function createWorkspaceMembersMock(scenario?: string) {
       if (path === `${root}/workspace-mcp/capabilities`) return Response.json({ enabled: false });
       if (path === `${root}/agents/recent`) return Response.json([]);
       if (path === `${root}/conversations/pinned`) return Response.json({ chats: [] });
+      if (path === `${root}/inbox`) return Response.json({ items: [], open: 0 });
+      if (path === `${root}/inbox/slack`)
+        return Response.json({
+          connected: false,
+          kinds: { assigned: true, waiting: true, finished: true, mention: true },
+        });
+      if (path === `${root}/assignment-limits`)
+        return Response.json({ workspace: 10, timeZone: 'UTC', dailyCredits: null, agents: [] });
       if (path === `${root}/conversations`) return Response.json({ chats: [], nextCursor: null });
       if (path === '/v1/auth/options')
         return Response.json({ turnstileSiteKey: null, emailPassword: false, google: true, magicLink: true });

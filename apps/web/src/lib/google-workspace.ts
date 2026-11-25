@@ -36,12 +36,7 @@ export class GoogleRequestError extends Error {
 export function googleActionRefused(error: unknown) {
   return (
     error instanceof GoogleRequestError &&
-    [
-      'operation-revision-required',
-      'operation-target-stale',
-      'operation-unguarded-update',
-      'calendar-feature-disabled',
-    ].includes(error.code)
+    ['operation-revision-required', 'operation-target-stale', 'operation-unguarded-update'].includes(error.code)
   );
 }
 export function googleAccessLost(error: unknown) {
@@ -62,8 +57,6 @@ export function googleError(error: unknown): string {
       return 'Reconnect Google, then reload the saved settings before continuing.';
     if (error.code === 'operation-expired')
       return 'This proposal expired. Check its status before asking for a new proposal.';
-    if (error.code === 'calendar-feature-disabled')
-      return 'Google Meet creation is not enabled for this workspace. No Calendar write was sent.';
     if (error.code === 'operation-revision-required')
       return 'This action cannot run because it was saved without a required Google revision. Ask for a new proposal before approving or executing it.';
     if (error.code === 'operation-target-stale')

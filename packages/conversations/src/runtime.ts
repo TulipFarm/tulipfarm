@@ -353,7 +353,7 @@ export type ReplySettlement = (tx: ReplyTransaction) => Promise<void>;
 export type ReplyTransaction = RuntimeTransaction;
 export type ConversationReply = (input: {
   model: string;
-  /** User messages carry images as content only when the `images` flag is on and the turn's family reads images. */
+  /** User messages carry images as content only when the turn's family reads images. */
   messages: ({ role: 'user' | 'assistant'; text: string } | { role: 'user'; content: ReplyContent })[];
   sourceMessages?: { role: 'user' | 'assistant'; text: string; rowReviews?: { table: string; input: unknown }[] }[];
   fence: ReplyFence;
@@ -1601,8 +1601,6 @@ export function createConversationExecutor(
     const fence = fenceSchema.parse(value);
     const previousFailure = previousFailures.get(attempt(fence));
     previousFailures.delete(attempt(fence));
-    // With the images flag off, files are read as text exactly as before the images reader.
-    const images = turnFiles && (await turnFiles.enabled(fence.workspaceId)) ? turnFiles : undefined;
     const source = await staged('context', () =>
       observeChatDetail('history', () =>
         transaction(fence.workspaceId, async tx => {
@@ -1773,7 +1771,7 @@ export function createConversationExecutor(
           );
           const cleaned = new Set(compaction?.cleaned ?? []);
           const loadedReferences = fileReferences.filter(reference => !cleaned.has(reference.messageId));
-          const fileParts = images
+          const fileParts = turnFiles
             ? await readableFileParts(
                 tx,
                 fence.conversationId,
@@ -1783,12 +1781,12 @@ export function createConversationExecutor(
             : fileReferences;
           // Files of messages compaction cleaned are named, not read; attachments are parts only with the images reader.
           const unloadedFiles = fileParts.filter(part => cleaned.has(part.messageId));
-          const turnFileParts = images ? fileParts.filter(part => !cleaned.has(part.messageId)) : [];
+          const turnFileParts = turnFiles ? fileParts.filter(part => !cleaned.has(part.messageId)) : [];
           const turnModel = turn.responder === 'reverse-text-v1' ? loadModelCatalog().defaultModel.id : turn.responder;
-          const imageModels = images ? await pinnedImageModels(tx, fence.turnId, turnModel, images) : null;
+          const imageModels = turnFiles ? await pinnedImageModels(tx, fence.turnId, turnModel, turnFiles) : null;
           // Links in the current message are read once, as files; their kept outcomes answer every later attempt.
           const links =
-            images?.links && (await linkReadsInstalled(tx))
+            turnFiles?.links && (await linkReadsInstalled(tx))
               ? {
                   ...messageLinks(currentMessage.text),
                   kept: await messageLinkReads(tx, fence.conversationId, currentMessage.id),
@@ -2182,9 +2180,9 @@ export function createConversationExecutor(
             [fence.turnId],
           );
         });
-      if (images && source.imageModels) {
+      if (turnFiles && source.imageModels) {
         const pinned = source.imageModels;
-        const recognition = turnRecognition(images, pinned.recognitionFamilyId, {
+        const recognition = turnRecognition(turnFiles, pinned.recognitionFamilyId, {
           workspaceId: fence.workspaceId,
           conversationId: fence.conversationId,
           turnId: fence.turnId,
@@ -2196,14 +2194,14 @@ export function createConversationExecutor(
           whileLeased(fence, async signal => {
             // Each link fetch has its own deadline, so link reading needs no share of the files deadline.
             const linked =
-              links && images.links && links.read.length
+              links && turnFiles.links && links.read.length
                 ? await readMessageLinks({
                     workspaceId: fence.workspaceId,
                     conversationId: fence.conversationId,
                     messageId: currentId,
                     links: links.read,
                     kept: links.kept,
-                    reader: images.links,
+                    reader: turnFiles.links,
                     signal,
                   })
                 : { reads: [], webOff: false };
@@ -2235,8 +2233,8 @@ export function createConversationExecutor(
               ],
               files,
               google,
-              attachments: images.attachments,
-              family: images.family(pinned.familyId),
+              attachments: turnFiles.attachments,
+              family: turnFiles.family(pinned.familyId),
               recognition,
               authorize,
             });
@@ -3019,7 +3017,7 @@ export function createConversationExecutor(
           .map(({ role, text, rowReviews }) => ({ role, text, ...(rowReviews?.length && { rowReviews }) }));
         const cleanedNote = (id: string, cleanedNow: boolean) => {
           const parts = [...source.unloadedFiles, ...(cleanedNow ? source.turnFileParts : [])];
-          if (images) {
+          if (turnFiles) {
             const blocks = unloadedFileBlocks(id, parts);
             return blocks ? [cleanedFileNote(id, blocks)] : [];
           }
@@ -3210,7 +3208,7 @@ export function createConversationExecutor(
               return reference ? [reference] : [];
             }),
             earlierMessages: refersToEarlierMessages(prepared),
-            ...(images ? { chatFiles: true } : {}),
+            ...(turnFiles ? { chatFiles: true } : {}),
             ...(coding ? { codingRuns: true } : {}),
             builtinSkills: [source.invoked, source.planningSkill, source.packageSkill].flatMap(skill =>
               skill?.origin === 'built-in' ? [skill.skillId] : [],

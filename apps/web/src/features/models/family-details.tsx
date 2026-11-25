@@ -1,6 +1,5 @@
 import type { ModelCatalogFamily, ModelCatalogImageModel } from '@tulipfarm/config/model-catalog';
 import { Disclosure } from '@/components/disclosure';
-import { useFlag } from '@/lib/feature-flags';
 
 export function FamilyDetails({
   family,
@@ -11,7 +10,6 @@ export function FamilyDetails({
   imageModels?: ModelCatalogImageModel[];
   expanded?: boolean;
 }) {
-  const images = useFlag('images');
   const paired = imageModels.find(image => image.id === family.imageModelId);
   const rates = (
     <>
@@ -32,22 +30,18 @@ export function FamilyDetails({
           <dt className="text-muted-foreground">Output credits per million tokens</dt>
           <dd>{family.outputCreditsPerMillionTokens?.toLocaleString() ?? 'Not priced'}</dd>
         </div>
-        {images && (
-          <>
-            <div>
-              <dt className="text-muted-foreground">Reads images</dt>
-              <dd>{family.imageInput ? 'Yes' : 'No, the workspace image reader describes them'}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">Creates images with</dt>
-              <dd>
-                {family.imageModelId
-                  ? `${paired?.displayName ?? family.imageModelId}${paired && !paired.available ? ' (unavailable)' : ''}`
-                  : 'The workspace default image model'}
-              </dd>
-            </div>
-          </>
-        )}
+        <div>
+          <dt className="text-muted-foreground">Reads images</dt>
+          <dd>{family.imageInput ? 'Yes' : 'No, the workspace image reader describes them'}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Creates images with</dt>
+          <dd>
+            {family.imageModelId
+              ? `${paired?.displayName ?? family.imageModelId}${paired && !paired.available ? ' (unavailable)' : ''}`
+              : 'The workspace default image model'}
+          </dd>
+        </div>
       </dl>
       <p className="text-sm text-muted-foreground">
         Credits depend on input and generated output. These are base-context rates; longer contexts may have different

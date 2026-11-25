@@ -53,13 +53,12 @@ function memoryBytes() {
   };
 }
 
-async function setup(t, { reader = 'claude-sonnet', images = true } = {}) {
+async function setup(t, { reader = 'claude-sonnet' } = {}) {
   const f = await conversationFixture();
-  const keys = ['ANTHROPIC_API_KEY', 'MODEL_CATALOG', 'MODEL_CATALOG_FILE', 'FEATURE_FLAG_IMAGES', 'HUNTSMAN_ENDPOINT'];
+  const keys = ['ANTHROPIC_API_KEY', 'MODEL_CATALOG', 'MODEL_CATALOG_FILE', 'HUNTSMAN_ENDPOINT'];
   const saved = Object.fromEntries(keys.map(key => [key, process.env[key]]));
   process.env.ANTHROPIC_API_KEY = 'synthetic-test-key';
   process.env.MODEL_CATALOG = catalog(reader);
-  process.env.FEATURE_FLAG_IMAGES = String(images);
   // The public web is on; no test here scrapes a page.
   process.env.HUNTSMAN_ENDPOINT = 'https://huntsman.invalid';
   delete process.env.MODEL_CATALOG_FILE;
@@ -228,30 +227,6 @@ test('a link in the task instructions is read like a chat message link', async t
   const parts = filesTurn(f.requests[0]);
   assert.equal(parts.filter(part => part.type === 'image').length, 1, 'the linked image reaches the model as an image');
   assert.match(text(parts), /url="https:\/\/charts.example\/q3.png"/);
-});
-
-test('with the images flag off a task keeps the legacy text reader', async t => {
-  const f = await setup(t, { images: false });
-  const web = await localWeb(t, {});
-  const terms = await f.upload('terms.txt', 'text/plain', 'Suppliers are paid within 30 days.');
-  const read = await f.run('When are suppliers paid? https://charts.example/q3.png', [{ kind: 'file', fileId: terms }]);
-  assert.equal(read.status, 'completed');
-  const body = f.requests[0];
-  const prompt = JSON.parse(body.messages.at(-1).content);
-  assert.equal(prompt.files.length, 1, 'the file text rides in the prompt as before');
-  assert.equal(prompt.files[0].text, 'Suppliers are paid within 30 days.');
-  assert.doesNotMatch(JSON.stringify(body), /"type":"image"/);
-  assert.deepEqual(web.requests, [], 'instruction links are not fetched');
-
-  const slip = await f.upload('slip.png', 'image/png', await png(32, 24));
-  const refused = await f.run('What is the total?', [{ kind: 'file', fileId: slip }]);
-  assert.equal(refused.status, 'paused');
-  assert.equal(refused.pause_reason, 'file');
-  assert.equal(
-    refused.history.messages.at(-1).text,
-    'An attached file exceeds the supported text format or size, or file storage is not configured.',
-  );
-  assert.equal(f.requests.length, 1);
 });
 
 test('a linked file that gets no room in the reading budget is named as not included', async t => {

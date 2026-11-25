@@ -192,7 +192,7 @@ test('app builds, publishes, reconciles and meters converge however often they r
   });
   const objects = memoryObjects();
   const publisher = edgePublisher();
-  const options = enabled => ({
+  const options = () => ({
     transact: (workspaceId, action) => {
       assert.equal(workspaceId, workspace.id);
       return transact(action);
@@ -207,9 +207,8 @@ test('app builds, publishes, reconciles and meters converge however often they r
     async *workspaces() {
       yield workspace.id;
     },
-    enabled: async () => enabled,
   });
-  const work = createAppActivities(options(true));
+  const work = createAppActivities(options());
   const signal = () => new AbortController().signal;
   const input = { workspaceId: workspace.id };
 
@@ -376,7 +375,7 @@ test('app builds, publishes, reconciles and meters converge however often they r
     const renamed = { name: 'acme-shop', workspaceId: workspace.id, appId: app.id };
     let rename;
     const hosted = createAppActivities({
-      ...options(true),
+      ...options(),
       publisher: {
         ...builtIn,
         async *list(signal) {
@@ -475,7 +474,7 @@ test('app builds, publishes, reconciles and meters converge however often they r
 
     let late;
     const racing = createAppActivities({
-      ...options(true),
+      ...options(),
       async *workspaces() {
         yield workspace.id;
         late = await transact(tx => rollbackTo(tx, first));
@@ -536,12 +535,11 @@ test('app builds, publishes, reconciles and meters converge however often they r
     assert.deepEqual(await work.switchAppRelease(operation), { appId: app.id, status: 'switched', switched: true });
   });
 
-  await t.test('metering charges a served app whose workspace has the app-hosting flag off', async () => {
-    const off = createAppActivities(options(false));
+  await t.test('metering an hour twice charges a served app once', async () => {
     publisher.traffic = [{ name: 'acme-shop', requests: 10, bytes: 512, units: 5n }];
     const window = { start: '2026-11-13T18:00:00.000Z', end: '2026-11-13T19:00:00.000Z' };
-    await off.meterAppUsage(window, new AbortController().signal);
-    await off.meterAppUsage(window, new AbortController().signal);
+    await work.meterAppUsage(window, new AbortController().signal);
+    await work.meterAppUsage(window, new AbortController().signal);
 
     const { rows } = await db.platform.query(
       `SELECT id, units::text FROM "${schema}".test_credit_entries WHERE id LIKE '%T18:%'`,
@@ -812,7 +810,7 @@ test('app builds, publishes, reconciles and meters converge however often they r
     const window = { start: '2026-11-15T05:00:00.000Z', end: '2026-11-15T06:00:00.000Z' };
     const unnamed = randomUUID();
     const metered = createAppActivities({
-      ...options(true),
+      ...options(),
       host: {
         ...unavailableAppHost,
         async *usage() {
@@ -865,7 +863,7 @@ test('app builds, publishes, reconciles and meters converge however often they r
       const draft = await named('draft', false);
       let hostDown = true;
       const metered = createAppActivities({
-        ...options(true),
+        ...options(),
         host: {
           ...unavailableAppHost,
           async *usage() {
@@ -958,7 +956,7 @@ test('app builds, publishes, reconciles and meters converge however often they r
       ).app;
       let hostDown = true;
       const metered = createAppActivities({
-        ...options(true),
+        ...options(),
         transact: (workspaceId, action) => (workspaceId === other.id ? transactOther(action) : transact(action)),
         credits: {
           async available() {
@@ -1053,7 +1051,7 @@ test('app builds, publishes, reconciles and meters converge however often they r
   };
   const meterAcross = (host = unavailableAppHost) =>
     createAppActivities({
-      ...options(true),
+      ...options(),
       transact: (workspaceId, action) =>
         opened.has(workspaceId) ? opened.get(workspaceId).transact(action) : transact(action),
       credits: {
@@ -1228,7 +1226,7 @@ test('app builds, publishes, reconciles and meters converge however often they r
     const open = await openWorkspace();
     const deleted = await openWorkspace();
     const reconciled = createAppActivities({
-      ...options(true),
+      ...options(),
       transact: (workspaceId, action) =>
         opened.has(workspaceId) ? opened.get(workspaceId).transact(action) : transact(action),
       async *workspaces() {

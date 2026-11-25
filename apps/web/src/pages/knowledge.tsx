@@ -330,7 +330,7 @@ function KnowledgePanel({
 
 export default function KnowledgePage() {
   const { workspace } = workspaceRoute.useRouteContext();
-  const { enabled, read } = useDefaultKnowledge(workspace.id);
+  const { read } = useDefaultKnowledge(workspace.id);
   const api = useMemo(() => knowledgeApi(workspace.id), [workspace.id]);
   const entries = useFeatureRead(personalKnowledgeRead(api));
   const [learnedOnly, setLearnedOnly] = useState(false);
@@ -351,40 +351,32 @@ export default function KnowledgePage() {
           />
         )}
       </ReadResult>
-      {!enabled ? (
-        <StatePanel
-          kind="empty"
-          title="Automatic Knowledge is off"
-          description="Connect sources from each integration's Knowledge tab."
-        />
-      ) : (
-        <ReadFeedback
-          state={read.state}
-          loading={
-            <div role="status" aria-label="Loading Knowledge" className="space-y-4 py-2">
-              <Skeleton />
-              <Skeleton />
-              <Skeleton />
-              <span className="sr-only">Loading Knowledge…</span>
-            </div>
-          }
-          unavailable={() => (
-            <StatePanel kind="error" title="Knowledge is unavailable" description="You can't view Knowledge here.">
-              {null}
-            </StatePanel>
-          )}
-          errorTitle="Could not load Knowledge"
-          retry={
-            <Button variant="outline" onClick={() => void read.refresh()}>
-              Try again
-            </Button>
-          }
-          refreshError={message => <ReadError message={message} />}
-          refreshing="Refreshing Knowledge…"
-        >
-          {data => <KnowledgePanel workspaceId={workspace.id} slug={workspace.slug} items={data.items} />}
-        </ReadFeedback>
-      )}
+      <ReadFeedback
+        state={read.state}
+        loading={
+          <div role="status" aria-label="Loading Knowledge" className="space-y-4 py-2">
+            <Skeleton />
+            <Skeleton />
+            <Skeleton />
+            <span className="sr-only">Loading Knowledge…</span>
+          </div>
+        }
+        unavailable={() => (
+          <StatePanel kind="error" title="Knowledge is unavailable" description="You can't view Knowledge here.">
+            {null}
+          </StatePanel>
+        )}
+        errorTitle="Could not load Knowledge"
+        retry={
+          <Button variant="outline" onClick={() => void read.refresh()}>
+            Try again
+          </Button>
+        }
+        refreshError={message => <ReadError message={message} />}
+        refreshing="Refreshing Knowledge…"
+      >
+        {data => <KnowledgePanel workspaceId={workspace.id} slug={workspace.slug} items={data.items} />}
+      </ReadFeedback>
     </PageContent>
   );
 }

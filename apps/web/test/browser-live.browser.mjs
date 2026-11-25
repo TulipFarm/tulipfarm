@@ -105,7 +105,7 @@ async function openChat(
   const base = `/v1/workspaces/${workspace.id}/conversations/${chatId}/browser`;
   const shell = new Map([
     ...workspaceShellReads(workspace.id),
-    ['/v1/feature-flags', { 'browser-use': true }],
+    ['/v1/feature-flags', {}],
     ['/v1/auth/get-session', session],
     ['/v1/user/visit', { firstSession: false }],
     ['/v1/workspaces', [workspace]],

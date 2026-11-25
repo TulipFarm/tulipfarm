@@ -13,7 +13,6 @@ import { sourceDependencySchema } from '@tulipfarm/access/source-dependencies';
 import { authorizeChat, type ChatAccessRule } from '@tulipfarm/conversations/chat-access';
 import { notifyConversationChange } from '@tulipfarm/conversations/event-publisher';
 import { createConversations } from '@tulipfarm/conversations';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import { boundRuntime } from './task-approval-gate.ts';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
@@ -66,9 +65,6 @@ export const planApprovalVersion = 33;
 /** Rendered plan documents and their PDF in Files need `*_plan_documents.sql`. */
 export const planDocumentsVersion = 34;
 export type PlanTransaction = AgentTransaction & { commonVersion: number };
-/** Whether plans carry documents and need the starter's approval of an exact revision in this workspace. */
-export const planDocumentsEnabled = (workspaceId: string) =>
-  isFeatureEnabled('plan-documents', null, { id: workspaceId }).catch(() => false);
 
 const planRowSchema = z.object({
   id: uuidSchema,
@@ -769,7 +765,6 @@ export function createAgentPlans(
       sourceTurnId: string | null = null,
     ) {
       const command = createPlanSchema.parse(input);
-      const documents = command.document !== undefined && (await planDocumentsEnabled(workspaceId));
       return transaction(workspaceId, user, async (tx, actor) => {
         await requireChat(tx, actor, chatId, 'turn');
         const revisions = tx.commonVersion >= planApprovalVersion;
@@ -812,7 +807,7 @@ export function createAgentPlans(
           ).rowCount
         )
           throw new AgentPlanError('plan-open');
-        if (command.document && !(documents && revisions)) throw new AgentPlanError('document-unavailable');
+        if (command.document && !revisions) throw new AgentPlanError('document-unavailable');
         const built = buildInitialPlan(command);
         if (
           sourceTurnId &&
@@ -881,7 +876,6 @@ export function createAgentPlans(
       planActor: PlanActor = { kind: 'coordinator' },
     ) {
       const command = updatePlanSchema.parse(input);
-      const documents = await planDocumentsEnabled(workspaceId);
       return transaction(workspaceId, user, async (tx, actor) => {
         const plan = await loadPlan(tx, actor, planId, true);
         requireStarter(plan, actor);
@@ -907,7 +901,7 @@ export function createAgentPlans(
         if (plan.version !== command.expectedVersion) throw new AgentPlanError('version-conflict');
         if (planActor.kind === 'worker' && (command.specialists.length > 0 || command.planning || command.document))
           throw new PlanGraphError('outside-scope');
-        if (command.document && !(documents && revisions)) throw new AgentPlanError('document-unavailable');
+        if (command.document && !revisions) throw new AgentPlanError('document-unavailable');
         let document = plan.document;
         if (command.document) {
           const merged = plan.document
@@ -980,7 +974,6 @@ export function createAgentPlans(
           if (
             revision !== null &&
             kind === 'starter' &&
-            documents &&
             (plan.lifecycle === 'active' || plan.lifecycle === 'paused') &&
             (
               await tx.client.query(
@@ -1020,7 +1013,6 @@ export function createAgentPlans(
      */
     async control(workspaceId: string, user: string, planId: string, input: unknown, sourceTurnId?: string) {
       const { requestId, ...command } = planControlSchema.parse(input);
-      const documents = command.action === 'start' && (await planDocumentsEnabled(workspaceId));
       return transaction(workspaceId, user, async (tx, actor) => {
         const plan = await loadPlan(tx, actor, planId, true);
         requireStarter(plan, actor);
@@ -1058,7 +1050,7 @@ export function createAgentPlans(
           if (!revisions) throw new PlanGraphError('invalid-transition');
           if (command.contentRevision !== plan.contentRevision) throw new AgentPlanError('revision-conflict');
         } else if (
-          (command.action === 'start' && documents && revisions) ||
+          (command.action === 'start' && revisions) ||
           (command.action === 'resume' && pause === 'awaiting-approval')
         )
           throw new AgentPlanError('approval-required');

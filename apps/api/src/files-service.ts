@@ -4,7 +4,6 @@ import { createFiles, type FileBytes } from '@tulipfarm/files';
 import type { chatObjectStore } from '@tulipfarm/workspaces/chat-objects';
 import { attachmentLimit } from '@tulipfarm/conversations/attachments';
 import { imageGenerationDetails } from '@tulipfarm/conversations/image-outputs';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 
 const uuid = '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}';
 const ownedKey = z.string().regex(new RegExp(`^${uuid}/files/${uuid}$`));
@@ -43,10 +42,7 @@ export function createFilesService(
 ) {
   return createFiles(dependencies.runtime, filesObjectAdapter(dependencies.objects), {
     log,
-    generation: async (tx, actor, workspaceId, fileId) =>
-      (await isFeatureEnabled('images', null, { id: workspaceId }))
-        ? imageGenerationDetails(tx, actor, fileId)
-        : undefined,
+    generation: (tx, actor, _workspaceId, fileId) => imageGenerationDetails(tx, actor, fileId),
     ...(dependencies.quotaBytes === undefined ? {} : { quotaBytes: dependencies.quotaBytes }),
   });
 }

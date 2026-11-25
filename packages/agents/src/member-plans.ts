@@ -1,5 +1,5 @@
 import type { ConversationRuntime } from '@tulipfarm/conversations/runtime';
-import { planProviders, type PlanProvider } from '@tulipfarm/config';
+import type { PlanProvider } from '@tulipfarm/config';
 import { createGitHubAccounts, githubConfiguration } from '@tulipfarm/github';
 import { integrationCredentialKeyring } from '@tulipfarm/integrations';
 import { ChatGptPlanError, createChatGptPlan } from '@tulipfarm/integrations/chatgpt';
@@ -9,7 +9,7 @@ import {
   type SubscriptionCandidate,
   type Subscriptions,
 } from '@tulipfarm/integrations/subscriptions';
-import { isFeatureEnabled, log } from '@tulipfarm/observability';
+import { log } from '@tulipfarm/observability';
 import type { PlanFailure } from './inference.ts';
 
 /** What a reply needs from a plan connection: a current token, and a way to ask its owner to reconnect. */
@@ -75,10 +75,7 @@ export async function memberPlans(input: {
   preferredConnectionId?: string | null;
 }) {
   const { credentials, subscriptions, workspaceId } = input;
-  // While the workspace's flag for the plan is off, no plan answers and the workspace's fallback model does.
-  const offered =
-    credentials && (await isFeatureEnabled(planProviders[input.provider].flag, null, { id: workspaceId }));
-  const candidates: SubscriptionCandidate[] = offered
+  const candidates: SubscriptionCandidate[] = credentials
     ? (
         await subscriptions.eligible(
           workspaceId,

@@ -89,8 +89,6 @@ export type CodingRunServices = {
   ): Promise<{ token: string; login: string } | null>;
   /** Records the exact run for the member's decision; proposing the same run again changes nothing. */
   propose(workspaceId: string, run: CodingRunRecord): Promise<void>;
-  /** Whether the workspace's `coding-runs` flag is on. */
-  enabled(workspaceId: string): Promise<boolean>;
 };
 
 export type CodingRunContext = {
@@ -278,9 +276,8 @@ export function createCodingRuns(
 
   return {
     agents,
-    /** Whether chat offers `coding.run` to the member: flag on, and a plan for an agent the backend can start. */
+    /** Whether chat offers `coding.run` to the member: a plan for an agent the backend can start. */
     async offered(workspaceId: string, membershipId: string) {
-      if (!agents.length || !(await services.enabled(workspaceId))) return false;
       for (const agent of agents)
         if (await services.hasPlan(workspaceId, membershipId, codingAgentProviders[agent])) return true;
       return false;
@@ -291,8 +288,7 @@ export function createCodingRuns(
       call: CodingRunCall,
     ): Promise<CodingRunWaiting | Extract<CodingRunResult, { status: 'plan-required' | 'github-account-required' }>> {
       const { workspaceId, actor, conversationId, turnId } = context;
-      if (!agents.includes(call.agent) || !(await services.enabled(workspaceId)))
-        throw new Error('coding-run-unavailable');
+      if (!agents.includes(call.agent)) throw new Error('coding-run-unavailable');
       const provider = codingAgentProviders[call.agent];
       const plan = await services.plan(workspaceId, actor.membershipId, provider);
       if (!plan) return { status: 'plan-required', message: planRequiredMessage(call.agent) };
@@ -323,8 +319,7 @@ export function createCodingRuns(
         agent: run.agent,
         ...(run.branch === null ? {} : { branch: run.branch }),
       });
-      if (!agents.includes(call.agent) || !(await services.enabled(workspaceId)))
-        throw new Error('coding-run-unavailable');
+      if (!agents.includes(call.agent)) throw new Error('coding-run-unavailable');
       const plan = await services.plan(workspaceId, run.actor.membershipId, codingAgentProviders[call.agent]);
       if (!plan) return { status: 'plan-required', message: planRequiredMessage(call.agent) };
       if (codingRunDigest(call, plan.ownerMembershipId) !== run.digest)

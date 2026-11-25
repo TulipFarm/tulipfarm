@@ -12,7 +12,6 @@ export const creditActivitySchema = z.enum([
   'app-hosting',
   'storage',
   'compute',
-  // Only under the workspace `images` flag; otherwise they are counted as the activity that charged them.
   'image-generation',
   'image-recognition',
 ]);

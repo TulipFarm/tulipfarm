@@ -15,7 +15,7 @@ const auth = {
   },
 };
 
-function setup(t, client, readable = () => true, enabled = () => true, usage = undefined) {
+function setup(t, client, readable = () => true, usage = undefined) {
   const app = Fastify();
   t.after(() => app.close());
   const workspaceId = randomUUID();
@@ -30,7 +30,6 @@ function setup(t, client, readable = () => true, enabled = () => true, usage = u
       },
     },
     client,
-    enabled: async () => enabled(),
     usage,
   });
   const base = `/workspaces/${workspaceId}/conversations/${chatId}/browser`;
@@ -137,7 +136,6 @@ test('whoever can see a run watches and takes over its browser, and handing it b
   registerBrowserLive(app, {
     auth,
     chats: { read: async () => assert.fail('a run is not a chat') },
-    enabled: async () => true,
     tasks: {
       read: async (workspace, user, task) => {
         if (workspace !== workspaceId || task !== taskId || user !== 'reader') throw new AccessDenied();
@@ -185,7 +183,6 @@ test('a hand back that neither records nor wakes the run is an error, while eith
   registerBrowserLive(app, {
     auth,
     chats: { read: async () => assert.fail('a run is not a chat') },
-    enabled: async () => true,
     tasks: { read: async () => ({}), handBack: (...a) => record(...a), wake: (...a) => wake(...a) },
     client: { control: async (id, control) => ({ ...state(id), controller: control.controller }) },
   });
@@ -230,7 +227,6 @@ test('the run wake Temporal refuses fails a hand back that could not be recorded
   registerBrowserLive(app, {
     auth,
     chats: { read: async () => assert.fail('a run is not a chat') },
-    enabled: async () => true,
     tasks: {
       read: async () => ({}),
       handBack: async () => {
@@ -254,57 +250,13 @@ test('the run wake Temporal refuses fails a hand back that could not be recorded
   assert.deepEqual(signalled, [['agentTaskStep', `agent-task-v1-${workspaceId}-${taskId}`, 'wakeAgentTask']]);
 });
 
-test('with browser use off no browser is reachable, and a live view ends once it is turned off', async t => {
-  let on = false;
-  const calls = [];
-  const client = {
-    state: async id => (calls.push('state'), state(id)),
-    control: async () => calls.push('control'),
-    input: async () => calls.push('input'),
-    frames: async () =>
-      new Response(
-        new ReadableStream({ start: c => c.enqueue(new TextEncoder().encode('event: state\ndata: {}\n\n')) }),
-        {
-          headers: { 'content-type': 'text/event-stream' },
-        },
-      ),
-  };
-  const { as } = setup(
-    t,
-    client,
-    () => true,
-    () => on,
-  );
-  assert.deepEqual((await as('GET', '')).json(), { browser: null });
-  for (const [method, url, payload] of [
-    ['POST', '/control', { controller: 'person' }],
-    ['POST', '/control', { controller: 'agent' }],
-    ['POST', '/input', { type: 'text', text: 'hi' }],
-    ['GET', '/live'],
-  ]) {
-    const refused = await as(method, url, payload);
-    assert.deepEqual([refused.statusCode, refused.json()], [404, { error: 'browser-not-found' }], url);
-  }
-  assert.deepEqual(calls, [], 'nothing reaches the host');
-
-  on = true;
-  t.mock.timers.enable({ apis: ['setTimeout'] });
-  const live = as('GET', '/live');
-  await new Promise(resolve => setImmediate(resolve));
-  on = false;
-  t.mock.timers.tick(30_000);
-  const ended = await live;
-  assert.equal(ended.statusCode, 200);
-  assert.match(ended.body, /event: state/);
-});
-
 test("a person's use of the browser is recorded for its charge", async t => {
   const recorded = [];
   const client = {
     state: async id => state(id),
     control: async (id, control) => ({ ...state(id), controller: control.controller }),
   };
-  const { as, sessionId, workspaceId } = setup(t, client, undefined, undefined, async (...use) => {
+  const { as, sessionId, workspaceId } = setup(t, client, undefined, async (...use) => {
     recorded.push(use);
   });
   await as('GET', '');

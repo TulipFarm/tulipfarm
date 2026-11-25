@@ -241,6 +241,9 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
       const body = raw ? JSON.parse(raw) : undefined;
       if (request.method === 'POST' && path === '/v1/user/visit') return send({ firstSession: false });
       if (request.method === 'GET' && path === '/v1/feature-flags') return send({});
+      if (request.method === 'GET' && path === `${base}/inbox`) return send({ items: [], open: 0 });
+      if (request.method === 'GET' && path === `${base}/assignment-limits`)
+        return send({ workspace: 10, timeZone: 'UTC', dailyCredits: null, agents: [] });
       if (request.method === 'PUT' && path === '/v1/workspaces/acme/last-used') {
         response.writeHead(204);
         response.end();
@@ -1944,6 +1947,7 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
         await modelPreference(page).click();
         const plans = page.getByRole('group', { name: 'Your plans', exact: true });
         const credits = page.getByRole('group', { name: 'Workspace credits', exact: true });
+        await plans.getByRole('option', { name: /^GPT-6 Luna/ }).waitFor();
         assert.deepEqual(await plans.getByRole('option').allInnerTexts(), [
           'GPT-6 Luna\nChatGPT plan, no workspace credits',
         ]);

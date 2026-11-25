@@ -130,8 +130,6 @@ export type AppTurnOutcome = 'completed' | 'cancelled' | 'failed';
 
 export type AppEditingOptions = {
   readonly repositories: AppRepositories;
-  /** Whether the workspace has app hosting turned on. */
-  readonly enabled: (workspaceId: string) => Promise<boolean>;
   /** Records a build of a saved draft commit and starts it, returning the build to wait for. */
   readonly requestBuild: (input: {
     readonly workspaceId: string;
@@ -164,8 +162,8 @@ function text(bytes: Uint8Array) {
 }
 
 /**
- * The file tools of an app's own chat. Every call checks again that app hosting is on, that the chat edits a public
- * app and that the person still holds `edit` on it, so a revoked grant stops the next call.
+ * The file tools of an app's own chat. Every call checks again that the chat edits a public app and that the person
+ * still holds `edit` on it, so a revoked grant stops the next call.
  */
 export function createAppEditing(runtime: AgentStorage, options: AppEditingOptions) {
   const { repositories } = options;
@@ -186,8 +184,6 @@ export function createAppEditing(runtime: AgentStorage, options: AppEditingOptio
     chat: AppChat,
     action: (tx: AppTransaction, appId: AppId, raw: AgentTransaction & { commonVersion: number }) => Promise<T>,
   ): Promise<T | Failure> {
-    if (!(await options.enabled(chat.workspaceId)))
-      return failure({ code: 'forbidden', message: 'App hosting is off in this workspace', retryable: false });
     return withHuman(runtime, chat.workspaceId, chat.actor, 'read', async raw => {
       const tx = appTx(raw);
       const appId = await editedApp(tx, chat);

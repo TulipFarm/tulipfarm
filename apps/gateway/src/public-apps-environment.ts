@@ -12,7 +12,6 @@ import {
   type RequestHandleKey,
 } from '@tulipfarm/apps/store';
 import { appHost } from '@tulipfarm/extensions';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import { dataViewRelease } from '@tulipfarm/tables/data-view-store';
 import { objectStorageClient } from '@tulipfarm/workspaces/object-storage';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
@@ -36,7 +35,6 @@ export function publicAppsFromEnvironment(
   return {
     domain,
     route: name => readCurrentAppRoute(platform, name),
-    enabled: workspaceId => isFeatureEnabled('app-hosting', null, { id: workspaceId }),
     // The registered host is read per call so the gateway can be built before extensions finish starting.
     host: { connect: (input, signal) => appHost().connect(input, signal) },
     // Static releases live in the apps bucket only when the built-in publisher stages them; otherwise this finds none.

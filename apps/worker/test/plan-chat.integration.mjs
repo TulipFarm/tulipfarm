@@ -30,7 +30,6 @@ test(
   async t => {
     t.after(
       useEnv({
-        FEATURE_FLAG_CLAUDE_PLAN: 'true',
         ANTHROPIC_API_KEY: 'synthetic-only',
         INTEGRATION_CREDENTIAL_KEY: randomBytes(32).toString('hex'),
         INTEGRATION_CREDENTIAL_KEY_ID: 'plan-chat',
@@ -173,7 +172,6 @@ test(
   async t => {
     t.after(
       useEnv({
-        FEATURE_FLAG_CLAUDE_PLAN: 'true',
         ANTHROPIC_API_KEY: 'synthetic-only',
         INTEGRATION_CREDENTIAL_KEY: randomBytes(32).toString('hex'),
         INTEGRATION_CREDENTIAL_KEY_ID: 'plan-chat',

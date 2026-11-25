@@ -168,7 +168,6 @@ export function SearchPalette({
   onOpenChange,
   workspaceId,
   workspaceReady,
-  appsEnabled,
   pages,
   onSelect,
 }: {
@@ -176,7 +175,6 @@ export function SearchPalette({
   onOpenChange: (open: boolean) => void;
   workspaceId: string;
   workspaceReady: boolean;
-  appsEnabled: boolean;
   pages: NavPage[];
   onSelect: (target: SearchTarget) => void;
 }) {
@@ -222,7 +220,6 @@ export function SearchPalette({
   const content = useWorkspaceContentSearch({
     workspaceId,
     enabled: open && workspaceReady,
-    appsEnabled,
     query,
     category,
   });
@@ -248,10 +245,9 @@ export function SearchPalette({
     return recents.filter(entry => {
       if (entry.category === 'pages') return allowedPageIds.has(entry.id);
       if (entry.category === 'actions') return allowedActionIds.has(entry.id);
-      if (entry.category === 'apps' && !appsEnabled) return false;
       return true;
     });
-  }, [appsEnabled, isZeroState, pageEntries, recents]);
+  }, [isZeroState, pageEntries, recents]);
 
   const recentChats = useMemo(() => {
     if (!isZeroState) return [];
@@ -270,12 +266,12 @@ export function SearchPalette({
         { id: 'agents', label: 'Agents', icon: AgentIcon },
         { id: 'tables', label: 'Tables', icon: DatabaseIcon },
         { id: 'workflows', label: 'Workflows', icon: WorkflowIcon },
+        { id: 'apps', label: 'Apps', icon: AppsIcon },
+        { id: 'files', label: 'Files', icon: FolderIcon },
       );
-      if (appsEnabled) items.push({ id: 'apps', label: 'Apps', icon: AppsIcon });
-      items.push({ id: 'files', label: 'Files', icon: FolderIcon });
     }
     return items;
-  }, [appsEnabled, workspaceReady]);
+  }, [workspaceReady]);
 
   const close = (next: boolean) => {
     onOpenChange(next);
@@ -319,7 +315,7 @@ export function SearchPalette({
     { heading: 'Agents', category: 'agents' as const, items: content.agents },
     { heading: 'Tables', category: 'tables' as const, items: content.tables },
     { heading: 'Workflows', category: 'workflows' as const, items: content.workflows },
-    { heading: 'Apps', category: 'apps' as const, items: appsEnabled ? content.apps : [] },
+    { heading: 'Apps', category: 'apps' as const, items: content.apps },
     { heading: 'Files', category: 'files' as const, items: content.files },
   ].filter(group => group.items.length > 0);
 

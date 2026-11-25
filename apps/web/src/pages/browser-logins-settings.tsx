@@ -27,7 +27,6 @@ import { RecordList } from '@tulipfarm/sprout/record-list';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { workspaceRoute } from '@/router';
 import { useFeatureScope } from '@/lib/query';
-import { useFlag } from '@/lib/feature-flags';
 import { useOwnMembership } from '@/features/governance/queries';
 import { describedBy, Labelled } from '@/features/secrets/fields';
 import { GrantsEditor, type People } from '@/features/secrets/grants-editor';
@@ -45,7 +44,6 @@ type Action = { kind: 'rename' | 'sharing' | 'delete'; login: BrowserLoginSummar
 
 export function BrowserLoginsSettingsPage() {
   const { workspace } = workspaceRoute.useRouteContext();
-  const enabled = useFlag('browser-use');
   return (
     <PageContent>
       <PageHeader
@@ -54,16 +52,7 @@ export function BrowserLoginsSettingsPage() {
         title="Browser logins"
         description="Saved sign-ins for websites. When an agent asks you to sign in, pick one instead. They’re encrypted and never shown."
       />
-      {enabled ? (
-        <Logins workspaceId={workspace.id} />
-      ) : (
-        <StatePanel
-          kind="unavailable"
-          heading="h2"
-          title="Browser logins are turned off"
-          description="This workspace can’t use the browser yet."
-        />
-      )}
+      <Logins workspaceId={workspace.id} />
     </PageContent>
   );
 }

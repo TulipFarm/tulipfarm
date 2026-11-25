@@ -24,7 +24,6 @@ export type PublicAppsDependencies = {
   readonly domain: string;
   /** The app that holds a public name now and its route. */
   readonly route: (name: string) => Promise<CurrentAppRoute | null>;
-  readonly enabled: (workspaceId: string) => Promise<boolean>;
   readonly host: Pick<AppHost, 'connect'>;
   /**
    * Reads a static app's released file; `path` is still percent-encoded. Without it static apps are left to the edge
@@ -100,7 +99,7 @@ export function buildPublicAppsGateway(dependencies: PublicAppsDependencies, ser
   const findApp = async (name: string): Promise<PublicApp> => {
     const found = await dependencies.route(name);
     const served = found?.route?.kind === 'server' || (found?.route?.kind === 'static' && dependencies.files);
-    if (!found?.route || !served || !(await dependencies.enabled(found.workspaceId))) return { kind: 'missing' };
+    if (!found?.route || !served) return { kind: 'missing' };
     if (found.route.status !== 'active') return { kind: 'unavailable' };
     if (found.route.kind === 'static')
       return found.route.releaseId ? { kind: 'static', releaseId: found.route.releaseId } : { kind: 'unavailable' };

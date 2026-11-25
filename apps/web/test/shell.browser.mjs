@@ -134,7 +134,7 @@ try {
       assert.equal(await nav.locator('[aria-current="page"]').count(), active ? 1 : 0);
       if (active)
         assert.equal(await nav.getByRole('link', { name: active, exact: true }).getAttribute('aria-current'), 'page');
-      assert.equal(await nav.getByRole('link', { name: 'Inbox', exact: true }).count(), 0);
+      assert.equal(await nav.getByRole('link', { name: 'Inbox', exact: true }).count(), active ? 1 : 0);
       if (mobile) {
         for (const link of await nav.getByRole('link').all()) assert.ok((await link.boundingBox()).height >= 44);
         await page.getByRole('button', { name: 'Close', exact: true }).click();
@@ -204,7 +204,7 @@ try {
     const dialog = page.getByRole('dialog', { name: 'Search workspace', exact: true });
     await dialog.waitFor();
     assert.equal(await dialog.getByRole('group', { name: 'Filter results by type' }).count(), 1);
-    assert.equal(await dialog.getByRole('option', { name: /^Inbox/ }).count(), 0);
+    assert.equal(await dialog.getByRole('option', { name: /^Inbox/ }).count(), 1);
     const input = dialog.getByPlaceholder('Search chats, tables, agents, pages…');
     assert.ok((await input.getAttribute('aria-label')) || (await input.getAttribute('aria-labelledby')));
     if (process.env.SHELL_SCREENSHOT_DIR)
