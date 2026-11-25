@@ -247,8 +247,10 @@ function TaskLoaded({
           <CodeSessionTaskSection
             workspaceId={workspace.id}
             workspaceSlug={workspace.slug}
+            tableId={task.tableId}
             rowId={task.rowId}
-            taskTitle={card.title}
+            title={card.title}
+            description={card.description}
           />
           <section aria-label="Activity" className="space-y-2 border-t pt-4">
             <h2 className="text-sm font-medium">Activity</h2>
