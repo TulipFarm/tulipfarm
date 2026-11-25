@@ -4,11 +4,11 @@ import { jsonResponse, readJson, responseError } from '@/lib/http';
 import { TableRequestError } from '@/features/tables/request-state';
 
 export const accessTokenScopes = [
-  { id: 'tables:read', label: 'Read tables', description: 'List tables and read rows.' },
-  { id: 'tables:write', label: 'Write rows', description: 'Create, change and delete rows.' },
-  { id: 'files:read', label: 'Read files', description: 'List and download files.' },
-  { id: 'files:write', label: 'Upload files', description: 'Add new files.' },
-  { id: 'agents:run', label: 'Run agents', description: 'Start agent tasks and read their replies. Uses credits.' },
+  { id: 'tables:read', label: 'Read tables' },
+  { id: 'tables:write', label: 'Write rows' },
+  { id: 'files:read', label: 'Read files' },
+  { id: 'files:write', label: 'Upload files' },
+  { id: 'agents:run', label: 'Run agents' },
 ] as const;
 export type AccessTokenScope = (typeof accessTokenScopes)[number]['id'];
 export const expiryOptions = [

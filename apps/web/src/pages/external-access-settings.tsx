@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
@@ -26,6 +26,7 @@ import {
   type AccessTokenScope,
   type Expiry,
 } from '@/features/external-access/api';
+import { useTokenFormAnalytics } from '@/features/external-access/form-analytics';
 
 const keys = { all: ['external-access'] as const };
 const scopeLabel = new Map<string, string>(accessTokenScopes.map(scope => [scope.id, scope.label]));
@@ -287,9 +288,18 @@ function CreateToken({
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<string | null>(null);
   const [copied, setCopied] = useState<'yes' | 'failed' | null>(null);
+  const track = useTokenFormAnalytics(() => ({ name, scopes, expiry }));
+  const reportedName = useRef('');
   const valid = name.trim().length > 0 && scopes.size > 0;
   return (
-    <Dialog open onOpenChange={open => !open && !pending && onClose()}>
+    <Dialog
+      open
+      onOpenChange={open => {
+        if (open || pending) return;
+        track.abandoned('dismissed');
+        onClose();
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{created ? 'Copy your token' : 'Create token'}</DialogTitle>
@@ -307,8 +317,14 @@ function CreateToken({
                 variant="outline"
                 onClick={() =>
                   void navigator.clipboard.writeText(created).then(
-                    () => setCopied('yes'),
-                    () => setCopied('failed'),
+                    () => {
+                      setCopied('yes');
+                      track.copied('copied');
+                    },
+                    () => {
+                      setCopied('failed');
+                      track.copied('failed');
+                    },
                   )
                 }
               >
@@ -327,13 +343,18 @@ function CreateToken({
               if (!valid || pending) return;
               setPending(true);
               setError(null);
+              track.submitted();
               void api
                 .create({ name: name.trim(), scopes: [...scopes], expiry })
                 .then(async result => {
+                  track.created();
                   setCreated(result.token);
                   await onCreated();
                 })
-                .catch(caught => setError(requestMessage(caught)))
+                .catch(caught => {
+                  track.failed((caught as { code?: string } | null)?.code);
+                  setError(requestMessage(caught));
+                })
                 .finally(() => setPending(false));
             }}
           >
@@ -345,6 +366,11 @@ function CreateToken({
                 maxLength={80}
                 placeholder="For example, Laptop sync or Claude Code"
                 onChange={event => setName(event.target.value)}
+                onBlur={() => {
+                  if (name.trim() === reportedName.current) return;
+                  reportedName.current = name.trim();
+                  track.changed('name');
+                }}
               />
             </div>
             <fieldset className="space-y-2">
@@ -354,22 +380,28 @@ function CreateToken({
                   key={scope.id}
                   variant="neutral"
                   label={scope.label}
-                  helper={scope.description}
                   checked={scopes.has(scope.id)}
                   onCheckedChange={checked => {
                     const next = new Set(scopes);
                     if (checked) next.add(scope.id);
                     else next.delete(scope.id);
                     setScopes(next);
+                    track.changed('scope', { scopes: next }, { scope: scope.id, checked });
                   }}
                 />
               ))}
             </fieldset>
             <div className="space-y-2">
               <Label htmlFor={expiryId}>Expires after</Label>
-              <Select value={expiry} onValueChange={value => setExpiry(value as Expiry)}>
+              <Select
+                value={expiry}
+                onValueChange={value => {
+                  setExpiry(value as Expiry);
+                  track.changed('expiry', { expiry: value as Expiry });
+                }}
+              >
                 <SelectTrigger id={expiryId}>
-                  <SelectValue />
+                  <SelectValue>{expiryOptions.find(option => option.id === expiry)?.label}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {expiryOptions.map(option => (
@@ -386,7 +418,15 @@ function CreateToken({
               </Alert>
             )}
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" disabled={pending} onClick={onClose}>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={pending}
+                onClick={() => {
+                  track.abandoned('cancel');
+                  onClose();
+                }}
+              >
                 Cancel
               </Button>
               <Button type="submit" disabled={!valid || pending}>
