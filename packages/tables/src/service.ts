@@ -704,10 +704,13 @@ export function createTableService(
       limit?: number;
       sort?: (typeof tableSorts)[number];
       direction?: 'asc' | 'desc';
+      /** Leaves out the built-in Tasks table, which has its own page. */
+      excludeTasks?: boolean;
     } = {},
   ) {
     const query = z
       .object({
+        excludeTasks: z.boolean().default(false),
         after: z.string().max(40).optional(),
         search: z.string().trim().min(1).max(255).optional(),
         archived: z.boolean().default(false),
@@ -752,20 +755,23 @@ export function createTableService(
       ]);
       const memberTableId = memberTable?.coreDefinition.id;
       const tasksTableId = tasks?.coreDefinition.id;
+      const shown = (row: { table_id: string }) => !(query.excludeTasks && row.table_id === tasksTableId);
       if (!query.sort) {
         const rows = listed.rows.map(entry);
         const tables = (
           await pipelinedAll(
             tx.client,
-            rows.map(
-              row => async () =>
-                (await canAccessTable(tx, actor, row.table_id, 'table.row.read')) ? publish(row) : null,
-            ),
+            rows
+              .filter(shown)
+              .map(
+                row => async () =>
+                  (await canAccessTable(tx, actor, row.table_id, 'table.row.read')) ? publish(row) : null,
+              ),
           )
         ).filter(published => published !== null);
         return { tables, nextCursor: rows.length === query.limit ? (rows.at(-1)?.table_id ?? null) : null };
       }
-      const candidates = listed.rows.map(entry);
+      const candidates = listed.rows.map(entry).filter(shown);
       const readable = await pipelinedAll(
         tx.client,
         candidates.map(row => () => canAccessTable(tx, actor, row.table_id, 'table.row.read')),

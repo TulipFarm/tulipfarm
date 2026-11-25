@@ -357,6 +357,7 @@ export function registerTableChanges(
         archived: z.coerce.boolean().default(false),
         sort: z.enum(['name', 'records', 'changed']).optional(),
         direction: z.enum(['asc', 'desc']).optional(),
+        excludeSystem: z.enum(['tasks']).optional(),
       });
     const recordQueryPage = page.extend({
       revision: z.string().regex(/^[a-f0-9]{40}$/),
@@ -513,6 +514,7 @@ export function registerTableChanges(
             ...(query.search ? { search: query.search } : {}),
             ...(query.sort ? { sort: query.sort } : {}),
             ...(query.direction ? { direction: query.direction } : {}),
+            ...(query.excludeSystem === 'tasks' ? { excludeTasks: true } : {}),
           })
           .then(result => ({
             ...result,

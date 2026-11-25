@@ -26,6 +26,7 @@ import {
 } from './definition.ts';
 import type { ProposalData } from './proposal-data.ts';
 import { finishTaskWrite, prepareTaskWrite, tasksTable } from './task-mutations.ts';
+import { taskKeysReady, welcomeTaskNumber } from './task-keys.ts';
 import { requireTasksDefinition, runStateOptions, taskFields, type RunState } from './tasks-table.ts';
 import { recordTableRecommendationChange } from './recommendations.ts';
 import { nonTableAssetIds } from './identities.ts';
@@ -845,6 +846,70 @@ export async function writeRunState(
     operation: 'update',
     writtenFieldIds: [taskFields.runState],
   });
+}
+
+/** The welcome task's placeholder text, shown as TUL-000. */
+export const welcomeTask = Object.freeze({
+  title: 'Welcome to Tasks',
+  description: [
+    'Tasks is where your team tracks work for people and agents.',
+    '',
+    '- Create a task and assign it to a teammate or an agent.',
+    '- Comment on a task to discuss it. Mention someone with @ to bring them in.',
+    '- Set a reminder to nudge someone until they act.',
+  ].join('\n'),
+});
+
+/**
+ * Creates the workspace's welcome task, TUL-000, once. Does nothing before task keys are installed or after the
+ * welcome task was created, even if someone deleted it since. Returns the new row's ID, or null.
+ */
+export async function ensureWelcomeTask(tx: GenerationTransaction) {
+  if (!(await taskKeysReady(tx))) return null;
+  const registration = await tasksTable(tx);
+  if (!registration) return null;
+  const tableId = registration.coreDefinition.id;
+  const pending = async (lock: boolean) =>
+    (
+      await tx.client.query(
+        `SELECT welcome_pending FROM ${table(tx, 'tf_task_key_counters')} WHERE table_id=$1${lock ? ' FOR UPDATE' : ''}`,
+        [tableId],
+      )
+    ).rows[0]?.welcome_pending !== false;
+  if (!(await pending(false)) || !(await pending(true))) return null;
+  await lockCatalogs(tx, [tableId]);
+  const recordId = randomUUID();
+  await lockIdentities(tx, [{ tableId, recordId }]);
+  const generation = await activeGeneration(tx, tableId);
+  await tx.client.query(
+    `INSERT INTO ${table(tx, 'tf_task_key_counters')}(table_id,next_number,welcome_pending) VALUES($1,1,false)
+     ON CONFLICT(table_id) DO UPDATE SET welcome_pending=false`,
+    [tableId],
+  );
+  const taken = await tx.client.query(`SELECT 1 FROM ${table(tx, 'tf_task_keys')} WHERE table_id=$1 AND number=$2`, [
+    tableId,
+    welcomeTaskNumber,
+  ]);
+  // A field someone added and made required has no value to give, so such a workspace goes without the welcome task.
+  if (taken.rowCount || generation.definition.fields.some(field => field.required && field.id !== taskFields.title))
+    return null;
+  await persistMutationUnchecked(tx, {
+    generation,
+    recordId,
+    before: null,
+    values: {
+      [taskFields.title]: { kind: 'text', value: welcomeTask.title },
+      [taskFields.description]: { kind: 'text', value: welcomeTask.description },
+    },
+    actor: { kind: 'system', operation: 'welcome-task' },
+    operation: 'create',
+  });
+  await tx.client.query(`INSERT INTO ${table(tx, 'tf_task_keys')}(table_id,row_id,number) VALUES($1,$2,$3)`, [
+    tableId,
+    recordId,
+    welcomeTaskNumber,
+  ]);
+  return recordId;
 }
 
 async function persistMutationUnchecked(tx: GenerationTransaction, input: MutationInput) {
