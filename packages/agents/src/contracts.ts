@@ -34,7 +34,7 @@ import { mcpCallSchema, mcpExecutionResultSchema } from './mcp-contracts.ts';
 import { githubTaskCallSchema, githubTaskResultSchema } from './github-task-contracts.ts';
 import { knowledgeToolCallSchema, knowledgeToolResultSchema } from './knowledge-tool-contracts.ts';
 import { toolNameSchema } from './tool-capabilities.ts';
-import { browserCallSchemas } from './browser-call-contracts.ts';
+import { browserCallSchemas, browserUploadCallSchema } from './browser-call-contracts.ts';
 import { browserAllowedSitesSchema } from '@tulipfarm/browser/contracts';
 import {
   skillExecutionCallSchema,
@@ -207,6 +207,7 @@ export const toolCallSchema = z.discriminatedUnion('tool', [
   }),
   generateImagesCallSchema,
   ...browserCallSchemas,
+  browserUploadCallSchema,
   skillExecutionCallSchema,
   skillFileCallSchema,
   ...githubTaskCallSchema.options,

@@ -22,7 +22,15 @@ import { conversationApi } from '@/features/chat/conversation-api';
 import { taskApi, type TaskCommand, type TaskSources, type TaskSummary } from './api';
 import { defaultTaskLimits, limitDraft, limitRange, parseLimits, taskLimitFields } from './limits';
 import { McpPrivateContext, type McpSelectionState } from '@/features/workspace-mcp/selection';
-import { readDraftFiles, referenceKey, writeDraftFiles, type FileReference } from '@/features/chat/draft-files';
+import {
+  readDraftFiles,
+  referenceKey,
+  referenceLimit,
+  writeDraftFiles,
+  type FileReference,
+} from '@/features/chat/draft-files';
+import { FilePicker } from '@/features/files/knowledge-library';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@tulipfarm/sprout/dialog';
 import { useFeatureRead, useFeatureScope } from '@/lib/query';
 
 export function TaskStart({
@@ -102,7 +110,8 @@ export function TaskComposer({
   const [mcp, setMcp] = useState<McpSelectionState>({ kind: 'none' });
   const [text, setText] = useState('');
   const [sources, setSources] = useState<ContextSource[]>([]);
-  const files = useTaskDraftFiles(mode.kind === 'reply' ? mode.task.id : null);
+  const files = useTaskDraftFiles(mode.kind === 'reply' ? `task:${mode.task.id}` : `agent-start:${mode.detail.id}`);
+  const [picking, setPicking] = useState(false);
   const [activationId, setActivationId] = useState('latest');
   const activations = mode.kind === 'start' ? mode.detail.activations : [];
   const tables = useMemo(() => tableApi(workspaceId), [workspaceId]);
@@ -327,7 +336,58 @@ export function TaskComposer({
         >
           <Textarea value={text} onChange={event => setText(event.target.value)} maxLength={8000} />
         </Field>
-        {files.items.length > 0 && <TaskFiles files={files.items} disabled={!enabled || busy} remove={files.remove} />}
+        {files.items.length > 0 && (
+          <TaskFiles
+            files={files.items}
+            disabled={!enabled || busy}
+            remove={files.remove}
+            uploads={mode.kind === 'start' && mode.detail.definition.tools.includes('browser.act')}
+          />
+        )}
+        {mode.kind === 'start' && (
+          <div className="flex flex-col items-start gap-1.5">
+            <Button
+              variant="outline"
+              disabled={
+                !enabled || busy || files.items.length >= referenceLimit || sources.length + files.items.length >= 20
+              }
+              aria-describedby="task-files-help"
+              onClick={() => setPicking(true)}
+            >
+              Add from Files
+            </Button>
+            <p id="task-files-help" className="text-sm text-muted-foreground">
+              {files.items.length >= referenceLimit
+                ? `Add up to ${referenceLimit} files per message. Remove one to add another.`
+                : files.items.length
+                  ? `${referenceLimit - files.items.length} of ${referenceLimit} files left.`
+                  : `Attach up to ${referenceLimit} files you can read from Files.`}
+            </p>
+          </div>
+        )}
+        {picking && (
+          <Dialog open onOpenChange={setPicking}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Add a file from Files</DialogTitle>
+                <DialogDescription>Choose a file you can read to add to this task.</DialogDescription>
+              </DialogHeader>
+              <FilePicker
+                workspaceId={workspaceId}
+                onSelect={file => {
+                  setPicking(false);
+                  files.add({
+                    source: 'tulipfarm',
+                    id: file.id,
+                    name: file.name,
+                    mediaType: file.mediaType ?? '',
+                    size: file.size,
+                  });
+                }}
+              />
+            </DialogContent>
+          </Dialog>
+        )}
         <TaskContext
           workspaceId={workspaceId}
           api={api}
@@ -416,14 +476,15 @@ const changedValue = (previous: readonly string[], next: readonly string[]) =>
   next.find(id => !previous.includes(id)) ?? previous.find(id => !next.includes(id));
 
 /**
- * Files placed by Use in chat wait in this tab's draft storage under `task:<id>` until the message that carries them is sent,
- * so leaving the task page keeps them. A Google Drive file sends only its id: the server binds it to your current Google integration.
+ * Files placed by Use in chat, or chosen from Files when starting a task, wait in this tab's draft storage under `task:<id>`
+ * or `agent-start:<agent id>` until the message that carries them is sent, so leaving the page keeps them. A Google Drive
+ * file sends only its id: the server binds it to your current Google integration.
  */
-function useTaskDraftFiles(taskId: string | null) {
+function useTaskDraftFiles(target: string) {
   const scope = useFeatureScope();
   const draft =
-    scope.kind === 'workspace' && taskId
-      ? { owner: { workspaceId: scope.workspaceId, membershipId: scope.membershipId }, target: `task:${taskId}` }
+    scope.kind === 'workspace'
+      ? { owner: { workspaceId: scope.workspaceId, membershipId: scope.membershipId }, target }
       : null;
   const [items, setItems] = useState<FileReference[]>(() => (draft ? readDraftFiles(draft.owner, draft.target) : []));
   const save = (next: FileReference[]) => {
@@ -433,6 +494,10 @@ function useTaskDraftFiles(taskId: string | null) {
   return {
     items,
     remove: (file: FileReference) => save(items.filter(item => referenceKey(item) !== referenceKey(file))),
+    add: (file: FileReference) => {
+      if (items.length < referenceLimit && !items.some(item => referenceKey(item) === referenceKey(file)))
+        save([...items, file]);
+    },
     clear: () => save([]),
   };
 }
@@ -441,15 +506,18 @@ function TaskFiles({
   files,
   disabled,
   remove,
+  uploads,
 }: {
   files: readonly FileReference[];
   disabled: boolean;
   remove: (file: FileReference) => void;
+  /** The agent can upload these files to websites with the browser. */
+  uploads: boolean;
 }) {
   return (
     <section aria-labelledby="task-files-heading" className="space-y-2">
       <h3 id="task-files-heading" className="text-sm font-medium">
-        Files to read
+        Attached files
       </h3>
       <ul className="space-y-1">
         {files.map(file => (
@@ -472,8 +540,9 @@ function TaskFiles({
         ))}
       </ul>
       <p className="text-sm text-muted-foreground">
-        The agent reads each file’s current content with your access when it works on this message, and again on later
-        steps. Text and documents up to 16,000 characters are readable; other files pause the task.
+        {uploads
+          ? 'The agent reads these files with your access and can upload them to websites. Text and documents up to 16,000 characters are readable; it can still upload other files, such as videos.'
+          : 'The agent reads each file’s current content with your access when it works on this message, and again on later steps. Text and documents up to 16,000 characters are readable; other files pause the task.'}
         {files.some(file => file.source === 'google') &&
           ' Google Drive files are read through your current Google account. If you disconnect or switch accounts, the task pauses until you add the file again.'}
       </p>

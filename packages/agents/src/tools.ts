@@ -217,8 +217,8 @@ import { appToolCallSchemas, appToolDescriptions, type AppEditing } from './app-
 import {
   browserTaskToolDescriptions,
   browserToolDescriptions,
-  browserUploadCallSchema,
   invokeBrowser,
+  saveBrowserDownload,
   type BrowserFiles,
   type ChatBrowser,
 } from './browser-tools.ts';
@@ -255,7 +255,6 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
   budPreferenceAskSchema,
   budPreferenceProposeSchema,
   ...toolCallSchema.options,
-  browserUploadCallSchema,
   createRecordBatchSchema,
   updateRecordBatchSchema,
   ...atlassianCallSchema.options,
@@ -3269,10 +3268,11 @@ export function createChatTools(
           attachments: chatFiles.turnFiles.attachments,
         }),
       save: (download, folderId) =>
-        createProgramOutput(
+        saveBrowserDownload(
           outputs.files,
           { workspaceId, actor, autonomous: outputs.autonomous, origin, callId: context.callId, inputs: [] },
-          { path: `browser/${download.id}/${download.name}`, bytes: download.bytes, folderId },
+          download,
+          folderId,
         ),
     };
   }

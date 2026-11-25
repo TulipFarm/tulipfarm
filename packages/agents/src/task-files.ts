@@ -339,6 +339,8 @@ export async function readTaskFiles(input: {
   family: TaskReadingFamily;
   sources: readonly FileSource[];
   instructions: readonly TaskInstruction[];
+  /** Ids of the Files the owner attached to a run that can upload them with the browser: if one cannot be read, it is named instead of stopping the step. */
+  uploadable?: readonly string[] | undefined;
   /** False once the step's file-reading time is spent; the remaining sources are not read. */
   withinAllowance: () => boolean;
 }): Promise<{ stop: TaskFileStop } | { content: TaskFileContent | null; receipts: TaskSource[] }> {
@@ -351,12 +353,19 @@ export async function readTaskFiles(input: {
   };
   const reads: TaskFileRead[] = [];
   const receipts: TaskSource[] = [];
+  let uploadOnly = false;
   for (const source of input.sources) {
     if (!input.withinAllowance()) break;
     const result = await readSource(reading, scope, source, options);
     if ('kind' in result) return { stop: result };
-    if (result.read.reading.kind === 'unreadable')
-      return { stop: { kind: 'unreadable', name: result.read.name, reason: result.read.reading.reason } };
+    if (result.read.reading.kind === 'unreadable') {
+      if (!(source.kind === 'file' && input.uploadable?.includes(source.fileId) && result.read.origin === 'tulipfarm'))
+        return { stop: { kind: 'unreadable', name: result.read.name, reason: result.read.reading.reason } };
+      // Its contents were not read, so it carries no read receipt.
+      uploadOnly = true;
+      reads.push(result.read);
+      continue;
+    }
     reads.push(result.read);
     if (result.receipt) receipts.push(result.receipt);
   }
@@ -365,11 +374,18 @@ export async function readTaskFiles(input: {
       ? await readLinks(reading.links, scope, input.instructions, options, input.withinAllowance)
       : { files: [], notice: '' };
   if (!reads.length && !links.files.length && !links.notice) return { content: null, receipts };
-  const { content, omitted } = taskFileContent([...reads, ...links.files], family, links.notice);
+  const notice = [uploadOnly ? uploadOnlyNotice : '', links.notice].filter(Boolean).join('\n\n');
+  const { content, omitted } = taskFileContent([...reads, ...links.files], family, notice);
   const named = omitted.find(file => file.origin !== 'web');
   if (named) return { stop: { kind: 'omitted', name: named.name } };
   return { content: [...content], receipts };
 }
+
+/** Why a run that can upload Files keeps an attached file it could not read, in the legacy text files. */
+export const uploadOnlyFile =
+  'Its contents could not be read, so do not describe or guess them. It is attached to this run: upload it into a website with browser.upload and its fileId.';
+const uploadOnlyNotice =
+  'An unreadable file with a file-id is still attached to this run: you cannot read its contents, but you can upload it into a website with browser.upload and that file id.';
 
 /** What the owner reads when a step stops on a file it names. */
 export function taskFileStopMessage(stop: Extract<TaskFileStop, { name: string }>): string {

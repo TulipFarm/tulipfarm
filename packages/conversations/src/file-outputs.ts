@@ -330,7 +330,12 @@ export type ProgramOutputResult =
  */
 export async function createProgramOutput(
   files: FileOutputStore,
-  context: FileOutputContext & { callId: string; inputs: readonly FileSource[] },
+  context: Omit<FileOutputContext, 'origin'> & {
+    /** The chat files the turn referenced; a run has none. */
+    origin?: Pick<FileOutputContext['origin'], 'files'> | undefined;
+    callId: string;
+    inputs: readonly FileSource[];
+  },
   output: { path: string; bytes: Uint8Array; folderId?: string | undefined },
 ): Promise<ProgramOutputResult> {
   if (context.autonomous && !output.folderId)
@@ -347,7 +352,7 @@ export async function createProgramOutput(
     };
   if (output.bytes.byteLength > maximumBytes) return { error: 'size', instruction: publishFailures.size };
   const mediaType = programOutputType(name);
-  const sources = [...(context.origin.files ?? []), ...context.inputs];
+  const sources = [...(context.origin?.files ?? []), ...context.inputs];
   try {
     const file = await files.createDerived(
       context.workspaceId,

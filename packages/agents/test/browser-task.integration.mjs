@@ -8,7 +8,8 @@ import { createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { fixture } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createAgentTasks } from '../src/tasks.ts';
-import { createTaskRuntime } from '../src/task-runtime.ts';
+import { createTaskRuntime, taskFilesReader } from '../src/task-runtime.ts';
+import { createFiles } from '../../files/src/index.ts';
 import { createBrowserHandBack, createTaskProgress } from '../src/task-progress.ts';
 import { createModelRouteHealth } from '../src/model-health.ts';
 import { createAgentExecutor } from '../src/executor.ts';
@@ -43,6 +44,7 @@ const bundle = modelBundleSchema.parse({
 function fakeHost() {
   const sessions = new Map();
   const calls = [];
+  const held = new Map();
   const state = sessionId => sessions.get(sessionId) ?? null;
   const host = {
     unreachable: false,
@@ -72,7 +74,28 @@ function fakeHost() {
         calls.push(['act', sessionId, action]);
         const s = state(sessionId);
         if (action.action === 'navigate') Object.assign(s, { url: action.url, title: 'Invoices' });
-        return { state: s, snapshot: '- heading "Invoices"', truncated: false };
+        // A click on the invoice link downloads a fresh copy of it.
+        const downloads = [];
+        if (action.action === 'click') {
+          const download = { id: randomUUID(), name: 'invoice.csv', size: 9 };
+          held.set(download.id, Buffer.from('paid,12\n\n'));
+          downloads.push(download);
+        }
+        return {
+          state: s,
+          snapshot: '- heading "Invoices"',
+          truncated: false,
+          ...(downloads.length ? { downloads } : {}),
+        };
+      },
+      download: async (_sessionId, id) => {
+        const bytes = held.get(id);
+        held.delete(id);
+        return { name: 'invoice.csv', bytes };
+      },
+      upload: async (sessionId, input, bytes) => {
+        calls.push(['upload', sessionId, { ...input, text: Buffer.from(bytes).toString() }]);
+        return { state: state(sessionId), snapshot: '- button "Choose file" [ref=e2]', truncated: false };
       },
       needsPerson: async (sessionId, input) => {
         calls.push(['needsPerson', sessionId, input]);
@@ -139,9 +162,10 @@ test('an agent run uses one browser, waits for a person, and resumes or fails', 
     health: createModelRouteHealth(db.platform, () => 'browser-task'),
     infer: async (_resolution, input) => {
       offered.push(input.browser === true);
+      const next = decisions.shift();
       return {
         kind: 'success',
-        decision: decisions.shift() ?? { kind: 'answer', text: 'Done.' },
+        decision: (typeof next === 'function' ? await next() : next) ?? { kind: 'answer', text: 'Done.' },
         actualModel: route.modelId,
         requestId: randomUUID(),
         usage: { kind: 'known', input: 10, output: 2, cacheRead: 0, cacheWrite: 0, cacheWrite5m: 0, cacheWrite1h: 0 },
@@ -159,12 +183,27 @@ test('an agent run uses one browser, waits for a person, and resumes or fails', 
   const tasks = createAgentTasks(runtime);
   const progress = createTaskProgress(runtime);
   const handBack = createBrowserHandBack(runtime);
-  const engine = createTaskRuntime(runtime, model, ...Array(11).fill(undefined), browser);
-  const start = () =>
+  const objects = new Map();
+  const files = createFiles(runtime, {
+    putIfAbsent: async (key, body) => void objects.set(key, Buffer.from(body)),
+    read: async key => Buffer.from(objects.get(key)),
+    remove: async key => void objects.delete(key),
+  });
+  const reader = taskFilesReader(files);
+  const engine = createTaskRuntime(
+    runtime,
+    model,
+    ...Array(5).fill(undefined),
+    reader,
+    ...Array(5).fill(undefined),
+    browser,
+  );
+  const start = (sources = []) =>
     tasks.start(w.id, owner.userId, {
       requestId: randomUUID(),
       agentId: agent.agentId,
       scope: [],
+      sources,
       text: 'Download the latest invoice.',
       limits: { toolCalls: 10, credits: 100, activeMilliseconds: 120000 },
     });
@@ -311,4 +350,130 @@ test('an agent run uses one browser, waits for a person, and resumes or fails', 
     host.unreachable = false;
     assert.equal(await settle(task.id), 'completed');
   });
+
+  await t.test(
+    'a run saves downloads to the folder it names and uploads only files attached to it or saved by it',
+    async t => {
+      t.after(() => delete browser.files);
+      browser.files = files;
+      const folder = await files.createFolder(w.id, owner.userId, randomUUID(), { name: 'Invoices', parentId: null });
+      const upload = (name, mediaType, text) =>
+        files.upload(w.id, owner.userId, randomUUID(), { name, parentId: null, mediaType }, Buffer.from(text));
+      const attached = await upload('Form.csv', 'text/csv', 'name,Ada\n');
+      const unrelated = await upload('Salary.csv', 'text/csv', 'secret,1\n');
+      const click = folderId => ({
+        kind: 'tool',
+        text: 'Downloading the invoice.',
+        call: { tool: 'browser.act', action: { action: 'click', ref: 'e4' }, ...(folderId ? { folderId } : {}) },
+      });
+      const send = file => ({ kind: 'tool', text: 'Uploading.', call: { tool: 'browser.upload', file, ref: 'e2' } });
+      let saved;
+      decisions = [
+        click(folder.id),
+        async () => {
+          saved = (await toolCall(task.id, 'browser.act')).result.browser.files[0];
+          return send(saved.id);
+        },
+        click(),
+        send(unrelated.id),
+        send(attached.id),
+        { kind: 'answer', text: 'Uploaded.' },
+      ];
+      const uploadsBefore = host.calls.filter(c => c[0] === 'upload').length;
+      const task = await start([{ kind: 'file', fileId: attached.id }]);
+      for (let n = 0; n < 12 && (await tasks.read(w.id, owner.userId, task.id)).status === 'pending'; n++) {
+        await engine.process(w.id, task.id);
+      }
+      assert.equal((await tasks.read(w.id, owner.userId, task.id)).status, 'completed');
+      const [downloaded, uploadedSaved, notSaved, refused, uploadedAttached] = (
+        await db.platform.query(
+          `SELECT c.result FROM ${table('tf_agent_tool_calls')} c JOIN ${table('tf_agent_task_runs')} b ON b.run_id=c.run_id
+         WHERE b.task_id=$1 AND c.call->>'tool' LIKE 'browser.%' ORDER BY b.generation, c.sequence`,
+          [task.id],
+        )
+      ).rows.map(row => row.result.browser);
+
+      assert.equal(downloaded.files.length, 1, 'a download goes to the folder the run named');
+      const [row] = (
+        await db.platform.query(`SELECT name,parent_id AS "parentId" FROM ${table('tf_files')} WHERE id=$1`, [saved.id])
+      ).rows;
+      assert.deepEqual(row, { name: 'invoice.csv', parentId: folder.id });
+      assert.equal(
+        Buffer.from((await files.download(w.id, owner.userId, saved.id)).bytes).toString(),
+        'paid,12\n\n',
+        "the download is the run's owner's file",
+      );
+
+      assert.equal(uploadedSaved.uploaded, 'invoice.csv', 'the run uploads a file it saved');
+      assert.equal(notSaved.files, undefined);
+      assert.deepEqual(
+        notSaved.downloadsNotSaved.map(entry => entry.error),
+        ['destination-required'],
+        'without a folder nothing is saved',
+      );
+      assert.equal(refused.error, 'file-not-allowed', 'a readable file unrelated to the run is refused');
+      assert.match(refused.instruction, /^Runs upload only the files attached to the run or saved by it\./);
+      assert.equal(uploadedAttached.uploaded, 'Form.csv', 'the run uploads a file attached to it');
+      assert.deepEqual(
+        host.calls
+          .filter(c => c[0] === 'upload')
+          .slice(uploadsBefore)
+          .map(c => [c[2].name, c[2].text]),
+        [
+          ['invoice.csv', 'paid,12\n\n'],
+          ['Form.csv', 'name,Ada\n'],
+        ],
+        'the unrelated file never reaches the browser',
+      );
+    },
+  );
+
+  await t.test(
+    'a run that can upload keeps an attached file it cannot read; one that cannot upload pauses',
+    async t => {
+      t.after(() => delete browser.files);
+      browser.files = files;
+      const clip = await files.upload(
+        w.id,
+        owner.userId,
+        randomUUID(),
+        { name: 'clip.mp4', parentId: null, mediaType: 'video/mp4' },
+        Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]),
+      );
+      const sources = [{ kind: 'file', fileId: clip.id }];
+      decisions = [
+        {
+          kind: 'tool',
+          text: 'Opening the form.',
+          call: { tool: 'browser.act', action: { action: 'navigate', url: 'https://forms.example/upload' } },
+        },
+        { kind: 'tool', text: 'Uploading.', call: { tool: 'browser.upload', file: clip.id, ref: 'e2' } },
+        { kind: 'answer', text: 'Uploaded.' },
+      ];
+      const uploadsBefore = host.calls.filter(c => c[0] === 'upload').length;
+      const task = await start(sources);
+      assert.equal(await settle(task.id), 'completed');
+      assert.equal((await toolCall(task.id, 'browser.upload')).result.browser.uploaded, 'clip.mp4');
+      assert.deepEqual(
+        host.calls
+          .filter(c => c[0] === 'upload')
+          .slice(uploadsBefore)
+          .map(c => c[2].name),
+        ['clip.mp4'],
+      );
+
+      delete browser.files;
+      decisions = [{ kind: 'answer', text: 'No uploads.' }];
+      const unread = await start(sources);
+      assert.equal(await settle(unread.id), 'paused', 'a run that cannot upload stops on a file it cannot read');
+
+      browser.files = files;
+      const referencing = await start([{ kind: 'task', taskId: unread.id, throughSequence: 0 }]);
+      assert.equal(
+        await settle(referencing.id),
+        'paused',
+        'a file another task references is not attached to this run, so it still stops the step',
+      );
+    },
+  );
 });

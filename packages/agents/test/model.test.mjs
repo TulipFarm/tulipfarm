@@ -161,8 +161,13 @@ test('a task is offered the browser only when its agent has it and browser use i
       .tools.map(tool => tool.name)
       .filter(name => name.startsWith('browser'));
   assert.deepEqual(offered({}), []);
-  assert.deepEqual(offered({ browser: true }), ['browser_act', 'browser_handoff']);
-  assert.deepEqual(offered({ browser: true, taskSecrets: true }), ['browser_act', 'browser_handoff', 'browser_signIn']);
+  assert.deepEqual(offered({ browser: true }), ['browser_act', 'browser_handoff', 'browser_upload']);
+  assert.deepEqual(offered({ browser: true, taskSecrets: true }), [
+    'browser_act',
+    'browser_handoff',
+    'browser_signIn',
+    'browser_upload',
+  ]);
   assert.throws(() =>
     agentModelInputSchema.parse({
       prompt: 'Chat.',

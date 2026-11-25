@@ -80,7 +80,13 @@ import { readPersonalMemoryContext } from '@tulipfarm/conversations/personal-mem
 import { readAgentLessonsContext } from './agent-lessons.ts';
 import { messageLinks } from '@tulipfarm/conversations/links';
 import { defaultImageInputLimits, type ResolvedModel } from '@tulipfarm/config';
-import { readTaskFiles, taskFileStopMessage, type TaskFileReading, type TaskReadingFamily } from './task-files.ts';
+import {
+  readTaskFiles,
+  taskFileStopMessage,
+  uploadOnlyFile,
+  type TaskFileReading,
+  type TaskReadingFamily,
+} from './task-files.ts';
 import type { TaskFileContent } from './model.ts';
 import { modelCallTimeoutMs } from '@tulipfarm/config/timeouts';
 
@@ -100,7 +106,10 @@ const taskReadAdmitted = (definition: z.infer<typeof agentDefinitionSchema>, cal
   call.tool === 'files.read' ||
   call.tool === 'secrets.request' ||
   call.tool === 'secrets.list' ||
-  ((taskReadTools.has(call.tool) || call.tool === 'browser.handoff' || call.tool === 'browser.signIn') &&
+  ((taskReadTools.has(call.tool) ||
+    call.tool === 'browser.handoff' ||
+    call.tool === 'browser.signIn' ||
+    call.tool === 'browser.upload') &&
     (isMcpCall(call)
       ? Boolean(definition.mcp?.length)
       : withBrowserGrant(withKnowledgeRetrieveGrant(definition.tools)).includes(call.tool) ||
@@ -173,15 +182,18 @@ class TaskDecisionRejected extends Error {
   }
 }
 export class TaskFileUnsupported extends Error {
-  constructor() {
+  /** The file's name, when it was found but its text could not be used. */
+  readonly filename: string | undefined;
+  constructor(filename?: string) {
     super('task-file-unsupported');
+    this.filename = filename;
   }
 }
 /** Task input reads Files as text; text beyond the task's per-file budget is unsupported rather than cut. */
 export function taskFilesReader(files: FileContent): TaskFilesReader {
   return async ({ fileId, ...scope }) => {
     const file = await readFileText(files, scope.workspaceId, scope.userId, fileId);
-    if (file.kind === 'unreadable' || file.text.length > 16000) throw new TaskFileUnsupported();
+    if (file.kind === 'unreadable' || file.text.length > 16000) throw new TaskFileUnsupported(file.name);
     return { filename: file.name, text: file.text, read: file.read };
   };
 }
@@ -227,7 +239,8 @@ const fileStops = {
 type Materialized = {
   work: TaskWork;
   history: string;
-  files: { source: FileSource; filename: string; text: string }[];
+  /** `notRead` replaces `text` for a Files file the step could not read but may upload with the browser. */
+  files: { source: FileSource; filename: string; text: string; notRead?: string }[];
   reads: TaskSource[];
   stop: keyof typeof fileStops | null;
   /** The step's files and links as the model reads them, and the stop naming a file. */
@@ -836,6 +849,16 @@ export function createTaskRuntime(
         reading !== undefined &&
         (sources.length > 0 || ownerTexts.some(message => messageLinks(message.text).read.length > 0));
       if (!materializing && (sources.length || images)) {
+        // A Files file the owner attached to this task, which the step cannot read, still serves a run that can upload
+        // it with the browser. Files from referenced tasks or other messages still stop the step.
+        const attached = c.history
+          .filter(message => message.role === 'owner')
+          .flatMap(message => message.sources)
+          .flatMap(source => (source.kind === 'file' ? [source.fileId] : []));
+        const uploadable =
+          attached.length > 0 && browser?.files !== undefined && c.definition.tools.includes('browser.act')
+            ? [...new Set(attached)]
+            : [];
         const activity = await reserveTaskWork(tx, taskId, 'files');
         return activity
           ? {
@@ -845,6 +868,7 @@ export function createTaskRuntime(
               userId: owner.userId,
               membershipId: owner.membershipId,
               history: JSON.stringify(c.history),
+              uploadable,
               images: images ? { family: readingFamily(model, generation.binding), ownerTexts } : null,
             }
           : null;
@@ -1054,6 +1078,7 @@ export function createTaskRuntime(
                 family: preparation.images.family,
                 sources: preparation.sources,
                 instructions: preparation.images.ownerTexts,
+                uploadable: preparation.uploadable,
                 withinAllowance: () => work.withinAllowance(),
               });
               if ('stop' in read) {
@@ -1114,6 +1139,15 @@ export function createTaskRuntime(
                   break;
                 }
                 if (!(error instanceof TaskFileUnsupported) && !(error instanceof z.ZodError)) throw error;
+                if (
+                  source.kind === 'file' &&
+                  preparation.uploadable.includes(source.fileId) &&
+                  error instanceof TaskFileUnsupported &&
+                  error.filename
+                ) {
+                  materializing.files.push({ source, filename: error.filename, text: '', notRead: uploadOnlyFile });
+                  continue;
+                }
                 materializing.stop = 'unsupported';
                 break;
               }

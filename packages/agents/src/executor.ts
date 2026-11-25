@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { errorType, log, observeTool, type ToolRuntime } from '@tulipfarm/observability';
 import { denyMcpEgress, requireAgentRunHistory } from '@tulipfarm/access';
@@ -93,7 +94,15 @@ import { readOnlyCall, toolObservation, type KnowledgeToolsFactory } from './too
 import { invokeBoundedKnowledge, withKnowledgeRetrieveGrant } from './knowledge-retrieval.ts';
 import { withBrowserGrant } from './tool-capabilities.ts';
 import { browserSessionId, type BrowserHostClient } from '@tulipfarm/browser';
-import { runBrowserCall, type BrowserMeter, type BrowserSecrets } from './browser-tools.ts';
+import {
+  runBrowserCall,
+  saveBrowserDownload,
+  type BrowserFiles,
+  type BrowserMeter,
+  type BrowserSecrets,
+} from './browser-tools.ts';
+import type { FileOutputStore } from '@tulipfarm/conversations/file-outputs';
+import { FileError } from '@tulipfarm/files';
 import { browserToolResultSchema, type AgentBrowserSettings } from './contracts.ts';
 import { knowledgeTaskSpend } from '@tulipfarm/workspace-storage/knowledge-credits';
 import { createAgentTasks } from './tasks.ts';
@@ -109,6 +118,28 @@ import {
 } from '@tulipfarm/conversations/image-outputs';
 
 export { createAgentStore } from './store.ts';
+
+/**
+ * Whether a run may upload this file: the owner attached it to the task, or one of the task's own completed calls, in
+ * any generation, saved it as a browser download or a generated image. Files has no provenance, so the task's recorded
+ * results are the record.
+ */
+async function taskFileAllowed(tx: Transaction, taskId: string, fileId: string): Promise<boolean> {
+  const found = await tx.client.query(
+    `SELECT 1 FROM ${relation(tx, 'tf_agent_task_messages')} m CROSS JOIN LATERAL jsonb_array_elements(m.sources) s
+       WHERE m.task_id=$1 AND m.role='owner' AND s->>'kind'='file' AND s->>'fileId'=$2
+     UNION ALL
+     SELECT 1 FROM ${relation(tx, 'tf_agent_task_runs')} b JOIN ${relation(tx, 'tf_agent_tool_calls')} c ON c.run_id=b.run_id
+       WHERE b.task_id=$1 AND c.status='completed' AND (
+         (c.call->>'tool' IN ('browser.act','browser.signIn','browser.upload')
+           AND jsonb_path_exists(c.result, '$.browser.files[*] ? (@.id == $id)', jsonb_build_object('id', $2::text)))
+         OR (c.call->>'tool'='images.generate'
+           AND jsonb_path_exists(c.result, '$.images[*].file ? (@.id == $id)', jsonb_build_object('id', $2::text))))
+     LIMIT 1`,
+    [taskId, fileId],
+  );
+  return found.rows.length > 0;
+}
 export { toolCallSchema, executionIdsSchema } from './contracts.ts';
 
 type Runtime = AgentStorage;
@@ -145,6 +176,11 @@ export type TaskBrowser = {
     | undefined;
   /** Meters the run's browser time; absent when resources are not metered. */
   meter?: ((run: { workspaceId: string; taskId: string; sessionId: string }) => BrowserMeter | undefined) | undefined;
+  /**
+   * Files, where downloads are saved to the folder a call names and from which `browser.upload` reads the files
+   * attached to the run or saved by it, as the run's owner. Without it, runs neither save downloads nor upload.
+   */
+  files?: FileOutputStore | undefined;
   /** Loads a browser login into a session; throws when the run's owner may not use it. */
   loadLogin?:
     | ((input: { workspaceId: string; actor: HumanActor; sessionId: string; loginId: string }) => Promise<void>)
@@ -333,6 +369,7 @@ export function createAgentExecutor(options: Options) {
       return 'waiting';
     }
     const holder = browser.secrets;
+    const files = browser.files;
     const step = await runBrowserCall(
       {
         client: browser.client,
@@ -341,6 +378,7 @@ export function createAgentExecutor(options: Options) {
         meter,
         mode: 'task',
         imageInput: false,
+        files: files ? taskBrowserFiles(files, ids, actor, task.taskId) : undefined,
         allowedSites: task.settings?.sites,
         secrets: holder
           ? () =>
@@ -365,6 +403,61 @@ export function createAgentExecutor(options: Options) {
     return handedOff
       ? settle('waiting', step.result, new Date(Date.now() + browserHandoffWaitMs).toISOString())
       : settle('completed', step.result);
+  }
+
+  /**
+   * A run's Files for the browser: downloads go to the folder the call names, as the owner's files; uploads read, as
+   * the owner, only a file attached to the task or saved by one of its own calls.
+   */
+  function taskBrowserFiles(
+    files: FileOutputStore,
+    ids: ExecutionIds,
+    actor: HumanActor,
+    taskId: string,
+  ): BrowserFiles {
+    const { workspaceId } = ids;
+    return {
+      read: async source => {
+        const fileId = z.uuid().safeParse(source);
+        if (!fileId.success) return { error: 'file-not-found' };
+        const allowed = await runtime.transaction(workspaceId, agentCompatibility, tx =>
+          taskFileAllowed(tx, taskId, fileId.data),
+        );
+        if (!allowed) return { error: 'file-not-allowed' };
+        try {
+          const file = await files.download(workspaceId, actor.userId, fileId.data);
+          return {
+            name: file.name,
+            mediaType: file.mediaType ?? 'application/octet-stream',
+            bytes: file.bytes,
+            sources: [
+              {
+                kind: 'library-file',
+                fileId: fileId.data,
+                membershipId: actor.membershipId,
+                read: {
+                  readAt: new Date().toISOString(),
+                  sha256: createHash('sha256').update(file.bytes).digest('hex'),
+                  representation: 'extracted',
+                },
+              },
+            ],
+          };
+        } catch (error) {
+          if (error instanceof AccessDenied || (error instanceof FileError && error.code === 'integrity'))
+            return { error: 'file-not-found' };
+          if (error instanceof FileError && error.code === 'busy') return { error: 'file-busy' };
+          throw error;
+        }
+      },
+      save: (download, folderId) =>
+        saveBrowserDownload(
+          files,
+          { workspaceId, actor, autonomous: true, callId: ids.callId, inputs: [] },
+          download,
+          folderId,
+        ),
+    };
   }
 
   async function execute(input: ExecutionIds, batch?: { work: TaskWork }): Promise<ExecutionStatus> {
@@ -978,7 +1071,8 @@ export function createAgentExecutor(options: Options) {
                 if (
                   row.call.tool === 'browser.act' ||
                   row.call.tool === 'browser.handoff' ||
-                  row.call.tool === 'browser.signIn'
+                  row.call.tool === 'browser.signIn' ||
+                  row.call.tool === 'browser.upload'
                 ) {
                   if (!binding || !run.user_id || !run.membership_id) throw new AccessDenied();
                   if (row.status === 'completed' || row.status === 'blocked' || row.status === 'failed')
@@ -1469,7 +1563,8 @@ export function createAgentExecutor(options: Options) {
           if (
             outcome.call.tool === 'browser.act' ||
             outcome.call.tool === 'browser.handoff' ||
-            outcome.call.tool === 'browser.signIn'
+            outcome.call.tool === 'browser.signIn' ||
+            outcome.call.tool === 'browser.upload'
           ) {
             if (!('browserTask' in outcome) || outcome.actor.kind !== 'human') throw new AccessDenied();
             return runTaskBrowser(ids, outcome.call, outcome.actor, outcome.browserTask);
@@ -2099,7 +2194,8 @@ export function createAgentExecutor(options: Options) {
         row.call.tool === 'secrets.list' ||
         row.call.tool === 'browser.act' ||
         row.call.tool === 'browser.handoff' ||
-        row.call.tool === 'browser.signIn'
+        row.call.tool === 'browser.signIn' ||
+        row.call.tool === 'browser.upload'
       ) {
         const owner = z
           .object({ membership_id: z.uuid().nullable() })
