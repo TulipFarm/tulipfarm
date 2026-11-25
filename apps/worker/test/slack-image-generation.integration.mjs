@@ -111,13 +111,12 @@ test(
   'a Slack DM generates an image as chat does: saved in Files, held then charged, returned to the model',
   { timeout: 120000 },
   async t => {
-    const keys = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'MODEL_CATALOG', 'MODEL_CATALOG_FILE', 'FEATURE_FLAG_IMAGES'];
+    const keys = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'MODEL_CATALOG', 'MODEL_CATALOG_FILE'];
     const saved = Object.fromEntries(keys.map(key => [key, process.env[key]]));
     Object.assign(process.env, {
       ANTHROPIC_API_KEY: 'synthetic-test-key',
       OPENAI_API_KEY: 'openai-test-key',
       MODEL_CATALOG: catalog,
-      FEATURE_FLAG_IMAGES: 'true',
     });
     delete process.env.MODEL_CATALOG_FILE;
     const f = await promptFixture();
@@ -180,7 +179,7 @@ test(
       ...f.options,
       fetcher,
       modelFamilyId: 'claude-haiku',
-      files: { enabled: async () => true, bytes },
+      files: { bytes },
     });
     const eventId = await f.event('UPERSON', 'DONE', {
       text: 'Draw tulips from this plan',

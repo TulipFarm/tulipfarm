@@ -44,8 +44,8 @@ tasks. Each file gets one session, which:
 - runs at most 4 units at once;
 - returns one outcome per unit.
 
-With `images: true` (the host's workspace `images` flag) the shared rules also
-apply:
+With `images: true` (TulipFarm's Knowledge, Files and chat set it) the shared
+rules also apply:
 
 - at most `mediaLimits.recognitionsPerFile` (100) units, with `limit` gaps after that;
 - a `MediaRecognitionUnavailable` thrown for one unit, such as a failed credit
@@ -69,7 +69,7 @@ apply:
 | [EligibilityFilter](src/ports/eligibility-filter.ts)                            | Produce a storage-specific eligibility predicate from host selection. Core does not render SQL.                          |
 | [CorpusProvider](src/ports/corpus-provider.ts)                                  | Discover items, fetch content, and report permission evidence. Evidence is not an access grant.                          |
 | [Summarizer](src/ports/summarizer.ts)                                           | Policy, measurement, window, and purpose-scoped summarization with a host fence.                                         |
-| [Clock, Telemetry, FeatureFlags, EgressPolicy](src/ports/runtime.ts)            | Explicit domain time, import diagnostics, actor/tenant feature selection, and protected-operation egress guards.         |
+| [Clock, Telemetry, EgressPolicy](src/ports/runtime.ts)                          | Explicit domain time, import diagnostics, and protected-operation egress guards.                                         |
 
 Repository operations accept named positional tuples to retain the existing
 SQL bindings and ordering. Their declared result is

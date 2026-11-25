@@ -73,8 +73,7 @@ test('a private app chat reads, replaces and checks its draft pages', { timeout:
   const ownerChat = await chat(owner, appId);
   const helperChat = await chat(helper, appId);
 
-  let hosting = true;
-  const pages = createAppPages(runtime, { enabled: async () => hosting });
+  const pages = createAppPages(runtime);
   const read = (on, id) => pages.invoke(on, { tool: 'apps.page.read', ...(id ? { page: id } : {}) });
   const replace = (on, value, expectedRevision) =>
     pages.invoke(on, { tool: 'apps.page.replace', page: value, expectedRevision });
@@ -84,20 +83,12 @@ test('a private app chat reads, replaces and checks its draft pages', { timeout:
       .lease_id;
   const refused = { error: 'forbidden', message: 'This chat cannot edit app pages', retryable: false };
 
-  await t.test('the tools refuse readers, other chats and a workspace without app hosting', async () => {
+  await t.test('the tools refuse readers and other chats', async () => {
     assert.equal(await pages.admitted(ownerChat), true);
     assert.equal(await pages.admitted(await chat(reader, appId)), false);
     assert.deepEqual(await read(await chat(reader, appId)), refused);
     assert.deepEqual(await read(await chat(owner, publicAppId)), refused);
     assert.deepEqual(await read(await chat(owner, null)), refused);
-    hosting = false;
-    assert.equal(await pages.admitted(ownerChat), false);
-    assert.deepEqual(await replace(ownerChat, page('Home'), 0), {
-      error: 'forbidden',
-      message: 'App hosting is off in this workspace',
-      retryable: false,
-    });
-    hosting = true;
   });
 
   await t.test('a new app reads as no pages, and its check says it needs one', async () => {

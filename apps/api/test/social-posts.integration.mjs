@@ -63,7 +63,7 @@ after(async () => {
   await db?.close();
 });
 
-async function harness({ flagged = () => true, withPosts = true } = {}) {
+async function harness({ withPosts = true } = {}) {
   const ws = await db.create();
   const origin = authConfig().webOrigin;
   const admin = { cookie: 'session=admin', origin };
@@ -92,15 +92,7 @@ async function harness({ flagged = () => true, withPosts = true } = {}) {
   const app = Fastify();
   await app.register(swagger, { openapi: { openapi: '3.0.3', info: { title: 'Social', version: '1' } } });
   await app.register(
-    async routes =>
-      registerSocialAccounts(
-        routes,
-        auth,
-        accounts,
-        async (_user, workspace) => flagged(workspace),
-        channels,
-        withPosts ? posts : null,
-      ),
+    async routes => registerSocialAccounts(routes, auth, accounts, channels, withPosts ? posts : null),
     { prefix: '/v1' },
   );
   await app.ready();
@@ -154,13 +146,10 @@ const variant = (channel, text = 'Launching today') => ({
   publishAt: null,
 });
 
-test('PRODUCT 13-21 post routes require the social-publishing flag, a session and the trusted origin', async () => {
-  const { app, base, admin, request } = await harness({ flagged: () => false });
+test('PRODUCT 13-21 post routes require a session and the trusted origin', async () => {
+  const { app, base, admin } = await harness();
   try {
     const post = `${base}/posts/${randomUUID()}`;
-    await request({ url: post }, 404, { error: 'not-found' });
-    for (const url of [`${base}/posts`, `${post}/revisions`, `${post}/decision`])
-      await request({ method: 'POST', url, payload: {} }, 404, { error: 'not-found' });
     const unsigned = await app.inject({ url: post });
     assert.equal(unsigned.statusCode, 401);
     const untrusted = await app.inject({

@@ -9,10 +9,6 @@ export type EgressPolicy = {
   deny(): void;
 };
 
-export type FeatureFlags<Name extends string = string> = {
-  enabled(name: Name, principalId: string, tenantId: string): Promise<boolean>;
-};
-
 export type Telemetry = {
   recordImport(
     stage: 'item' | 'source',

@@ -25,14 +25,7 @@ import { actionFor, tabsFor } from '@/features/integrations/integration-state';
 import { mcpAppById, mcpAppForEndpoint, mcpApps, type McpApp } from '@/features/integrations/mcp-apps';
 import { mcpPagePrefix } from '@/features/integrations/mcp-page';
 import { useIntegrationChanges } from '@/features/integrations/queries';
-import {
-  notSetUp,
-  notYet,
-  statusOf,
-  useIntegrationStatus,
-  type Status,
-  type Statuses,
-} from '@/features/integrations/status';
+import { notSetUp, statusOf, useIntegrationStatus, type Status, type Statuses } from '@/features/integrations/status';
 import { WorkspaceRefreshNotice } from '@/features/integrations/workspace-refresh';
 import type { McpApi } from '@/features/workspace-mcp/api';
 import { useOwnershipChoice } from '@/features/workspace-mcp/app-page';
@@ -45,19 +38,9 @@ import {
 } from '@/features/workspace-mcp/contracts';
 import { useMcpApi, useMcpCapabilities, useMcpCatalog, useMcpIntegrations } from '@/features/workspace-mcp/queries';
 import { McpSetup } from '@/features/workspace-mcp/setup';
-import { useFlag } from '@/lib/feature-flags';
 import { integrationsRoute, workspaceRoute } from '@/router';
 
 const available = integrations.filter(app => app.provider !== 'soon');
-/** The built-in apps this member can see: plan apps show only while their flag is on. */
-function useAvailableApps() {
-  const chatgpt = useFlag('chatgpt-plan');
-  const claude = useFlag('claude-plan');
-  return useMemo(
-    () => available.filter(app => (app.provider !== 'chatgpt' || chatgpt) && (app.provider !== 'claude' || claude)),
-    [chatgpt, claude],
-  );
-}
 // A 'soon' app whose maker now runs an MCP server is listed from the catalog instead.
 const upcoming = (app: Integration) => app.provider === 'soon' && !mcpAppById(app.id);
 export const isConnected = (status: Status | null) => status?.kind === 'connected' || status?.kind === 'installed';
@@ -135,13 +118,13 @@ function IntegrationsContent({ workspaceId, slug }: { workspaceId: string; slug:
   const { workspaceStale, membership } = workspaceRoute.useRouteContext();
   const { returnChat, view: viewParam } = integrationsRoute.useSearch();
   const { statuses, refresh, refreshing } = useIntegrationStatus(workspaceId, undefined, true);
-  const apps = useAvailableApps();
+  const apps = available;
   const navigate = useNavigate();
   const mcp = useMcpDirectory(workspaceId);
   const [query, setQuery] = useState('');
   const searchId = useId();
   const [setup, setSetup] = useState<Setup>(null);
-  const hosted = useFlag('hosted-mcp') && !!mcp.capabilities?.hosted;
+  const hosted = !!mcp.capabilities?.hosted;
   const admin = membership?.role === 'admin';
   const needle = query.trim().toLowerCase();
   const loading = mcp.loading || Object.values(statuses).some(status => status.kind === 'loading');
@@ -477,7 +460,7 @@ function McpMore({
   clear: () => void;
   setup: (setup: Setup) => void;
 }) {
-  const hosted = useFlag('hosted-mcp') && capabilities.hosted;
+  const hosted = capabilities.hosted;
   const [search, setSearch] = useState('');
   useEffect(() => {
     const timer = window.setTimeout(() => setSearch(query), 300);
@@ -1053,8 +1036,6 @@ function AppRow({
       return row(
         status.detail === notSetUp ? (
           <Unavailable label="Not offered" reason="Not offered here. Your workspace admins can’t turn it on." />
-        ) : status.detail === notYet ? (
-          <Unavailable label="Unavailable" reason={`${notYet}.`} />
         ) : (
           <Unavailable
             label={app.provider === 'slack' ? 'Ask for access' : 'Unavailable'}

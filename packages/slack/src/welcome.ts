@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isFeatureEnabled, log } from '@tulipfarm/observability';
+import { log } from '@tulipfarm/observability';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import { lockAuthorization } from '@tulipfarm/access';
 import type { SlackEvent } from './contracts.ts';
@@ -82,7 +82,7 @@ const homeOpenedSchema = z.object({ type: z.literal('app_home_opened'), user: sl
 
 /**
  * Answers Slack's agent and App Home events: suggested prompts and a title when someone starts a conversation in the
- * agent view, and the Home tab when they open it. Both are best effort and need the `generative-ui` flag.
+ * agent view, and the Home tab when they open it. Both are best effort.
  */
 export function createSlackWelcome(options: {
   runtime: SlackRuntime;
@@ -125,7 +125,6 @@ export function createSlackWelcome(options: {
     const home = homeOpenedSchema.safeParse(envelope.event);
     if (!started.success && !(home.success && home.data.tab === 'home')) return;
     try {
-      if (!(await isFeatureEnabled('generative-ui', null, { id: route.workspaceId }))) return;
       const credentials = await bot(route);
       if (!credentials) return;
       if (started.success) {

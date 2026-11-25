@@ -12,8 +12,7 @@ export class GoogleLifecycleError extends Error {
     | 'operation-approval-required'
     | 'operation-revision-required'
     | 'operation-target-stale'
-    | 'operation-unguarded-update'
-    | 'calendar-feature-disabled';
+    | 'operation-unguarded-update';
   constructor(code: GoogleLifecycleError['code']) {
     super(code);
     this.code = code;

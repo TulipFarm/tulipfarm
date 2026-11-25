@@ -107,8 +107,7 @@ export function createPlanComposition(options: {
     const validated = inferenceRouteSchema.parse(resolved.route);
     const price = resolved.price;
     const catalog = loadModelCatalog(env);
-    const images =
-      options.files && (await imageGenerationOffered(assignment.workspaceId, assignment.tools)) ? options.files : null;
+    const images = options.files && imageGenerationOffered(assignment.tools) ? options.files : null;
     const { actor, imageModels } = await runtime.transaction(assignment.workspaceId, commonCompatibility, async tx => {
       await lockAuthorization(tx, 'read');
       // The workspace may have turned the step's family off since the plan was composed.

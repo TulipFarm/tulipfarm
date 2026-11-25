@@ -1,6 +1,5 @@
 import type { FastifyInstance } from 'fastify';
 import { createKnowledgeAgentTools, createKnowledgeSourceFailures, KnowledgeError } from '@tulipfarm/knowledge';
-import { defaultKnowledgeFlagEnabled } from '@tulipfarm/knowledge';
 import { AccessDenied, lockAndResolveHuman, uuidSchema } from '@tulipfarm/access';
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { z } from 'zod';
@@ -247,7 +246,6 @@ export function registerKnowledgeRoutes(
   registerDefaultKnowledge(app, {
     auth: dependencies.auth,
     service: defaults,
-    enabled: defaultKnowledgeFlagEnabled,
     ...(dependencies.defaultKnowledge ? { started: dependencies.defaultKnowledge.hook.started } : {}),
   });
 }

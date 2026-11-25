@@ -84,7 +84,6 @@ test('automatic integration Knowledge disclosure, status and controls in Chromiu
     {
       mobile = false,
       items = [],
-      enabled = true,
       google = 'connected',
       atlassian = [],
       listStatus = [],
@@ -158,7 +157,7 @@ test('automatic integration Knowledge disclosure, status and controls in Chromiu
       else if (path === `${base}/knowledge/defaults`) {
         await state.gate;
         status = state.listStatus.shift() ?? 200;
-        json = status === 200 ? { enabled, items: enabled ? state.items : [] } : { error: 'knowledge-unavailable' };
+        json = status === 200 ? { enabled: true, items: state.items } : { error: 'knowledge-unavailable' };
       } else if (path.startsWith(`${base}/knowledge/defaults/`) && path.endsWith('/manage')) {
         const id = path.split('/defaults/')[1].split('/')[0],
           { action } = request.postDataJSON();
@@ -308,18 +307,6 @@ test('automatic integration Knowledge disclosure, status and controls in Chromiu
           release = resolve;
         }),
       },
-    );
-
-    await fixture(
-      async ({ page }) => {
-        const read = page.waitForResponse(response => response.url().endsWith('/knowledge/defaults'));
-        await page.goto(`${origin}/${workspace.slug}/integrations/gmail?tab=knowledge`);
-        await read;
-        await page.getByRole('tab', { name: 'Knowledge', selected: true }).waitFor();
-        await page.waitForTimeout(300);
-        assert.equal(await page.getByRole('region', { name: 'Automatic Knowledge', exact: true }).count(), 0);
-      },
-      { enabled: false, items: [intent(2, 'gmail', 'ada@example.test')] },
     );
 
     await fixture(

@@ -129,7 +129,7 @@ export function createWorkflowCodingActivities(
     const found = await workflows.codingJob(workspaceId, runId, stepId, jobId);
     if (!found) return null;
     const { job } = found;
-    if (!agents.includes(job.agent) || !(await services.enabled(workspaceId)))
+    if (!agents.includes(job.agent))
       return { kind: 'failed', error: 'unavailable', message: '' } satisfies CodingStepResult;
     const plan = await services.plan(
       workspaceId,

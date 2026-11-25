@@ -4,11 +4,7 @@ import { test } from 'node:test';
 import Fastify from 'fastify';
 import swagger from '@fastify/swagger';
 import { createGoogleWorkspaceService } from '@tulipfarm/google-workspace';
-import {
-  createDefaultKnowledge,
-  recordDefaultKnowledgeIntent,
-  defaultKnowledgeFlagEnabled,
-} from '@tulipfarm/knowledge';
+import { createDefaultKnowledge, recordDefaultKnowledgeIntent } from '@tulipfarm/knowledge';
 import { createSlackMemberLinking, slackCredentialCipher } from '@tulipfarm/slack';
 import { googleFixture } from '../../../packages/google-workspace/test/fixture.mjs';
 import { githubFixture } from '../../../packages/github/test/fixture.mjs';
@@ -21,23 +17,11 @@ import { authConfig } from '../src/auth.ts';
 import { registerDefaultKnowledge } from '../src/knowledge-defaults.ts';
 import { defaultKnowledgeStarter } from '../src/knowledge-defaults-dispatch.ts';
 
-const flag = 'default-connection-knowledge';
-async function flagOff(operation) {
-  const prior = process.env.FEATURE_FLAGS_OFF;
-  process.env.FEATURE_FLAGS_OFF = flag;
-  try {
-    return await operation();
-  } finally {
-    if (prior === undefined) delete process.env.FEATURE_FLAGS_OFF;
-    else process.env.FEATURE_FLAGS_OFF = prior;
-  }
-}
 function hook() {
   const started = [];
   return {
     started,
     hook: {
-      enabled: defaultKnowledgeFlagEnabled,
       record: recordDefaultKnowledgeIntent,
       started: (workspaceId, ids) => started.push({ workspaceId, ids }),
     },
@@ -124,68 +108,48 @@ test(
         2,
         'reconnect after disconnect reuses the durable intent identity',
       );
-      const admin = { userId: f.admin.userId, sessionId: randomUUID() };
-      await flagOff(async () => (await connect(admin)).complete({ code: 'private-code' }));
-      assert.equal(
-        (await intents(f.db, table)).filter(row => row.membership_id === f.admin.membershipId).length,
-        0,
-        'flag off records nothing',
-      );
-      await (await connect(admin)).complete({ code: 'private-code' });
-      assert.equal(
-        (await intents(f.db, table)).filter(row => row.membership_id === f.admin.membershipId).length,
-        0,
-        'enabling the flag later does not backfill an existing grant',
-      );
     } finally {
       await f.close();
     }
   },
 );
 
-test(
-  'GitHub records one intent per first authorization, even with the flag off; replay and reconnect do not',
-  { timeout: 60000 },
-  async () => {
-    const f = await githubFixture();
-    try {
-      const spy = hook();
-      const service = f.makeService({ defaultKnowledge: spy.hook });
-      const connect = async id => {
-        f.setProfile({ id, login: `person-${id}` });
-        const result = await service.begin(f.one.id, f.member.userId, 'test-session');
-        const state = new URL(result.url).searchParams.get('state');
-        await service.complete({ code: 'fixture-code', state }, 'test-session', f.member.userId);
-        return {
-          accountId: result.accountId,
-          replay: () => service.complete({ code: 'fixture-code', state }, 'test-session', f.member.userId),
-        };
+test('GitHub records one intent per first authorization; replay and reconnect do not', { timeout: 60000 }, async () => {
+  const f = await githubFixture();
+  try {
+    const spy = hook();
+    const service = f.makeService({ defaultKnowledge: spy.hook });
+    const connect = async id => {
+      f.setProfile({ id, login: `person-${id}` });
+      const result = await service.begin(f.one.id, f.member.userId, 'test-session');
+      const state = new URL(result.url).searchParams.get('state');
+      await service.complete({ code: 'fixture-code', state }, 'test-session', f.member.userId);
+      return {
+        accountId: result.accountId,
+        replay: () => service.complete({ code: 'fixture-code', state }, 'test-session', f.member.userId),
       };
-      const first = await connect(123);
-      let rows = await intents(f.db, f.table);
-      assert.deepEqual(
-        rows.map(row => [row.product, row.account_key, row.account_label]),
-        [['github', first.accountId, 'person-123']],
-      );
-      await assert.rejects(first.replay());
-      const next = await service.reconnect(f.one.id, f.member.userId, 'test-session', first.accountId);
-      await service.complete(
-        { code: 'fixture-code', state: new URL(next.url).searchParams.get('state') },
-        'test-session',
-        f.member.userId,
-      );
-      assert.equal((await intents(f.db, f.table)).length, 1, 'reconnect is reauthorization');
-      await connect(456);
-      assert.equal((await intents(f.db, f.table)).length, 2, 'a different identity is a separate enablement');
-      await flagOff(() => connect(789));
-      rows = await intents(f.db, f.table);
-      assert.equal(rows.length, 3, 'GitHub Knowledge is on for everyone, so the flag does not stop it');
-      assert.equal(spy.started.length, 3);
-    } finally {
-      await f.close();
-    }
-  },
-);
+    };
+    const first = await connect(123);
+    const rows = await intents(f.db, f.table);
+    assert.deepEqual(
+      rows.map(row => [row.product, row.account_key, row.account_label]),
+      [['github', first.accountId, 'person-123']],
+    );
+    await assert.rejects(first.replay());
+    const next = await service.reconnect(f.one.id, f.member.userId, 'test-session', first.accountId);
+    await service.complete(
+      { code: 'fixture-code', state: new URL(next.url).searchParams.get('state') },
+      'test-session',
+      f.member.userId,
+    );
+    assert.equal((await intents(f.db, f.table)).length, 1, 'reconnect is reauthorization');
+    await connect(456);
+    assert.equal((await intents(f.db, f.table)).length, 2, 'a different identity is a separate enablement');
+    assert.equal(spy.started.length, 2);
+  } finally {
+    await f.close();
+  }
+});
 
 test(
   'Atlassian records Jira and Confluence only after sufficient personal REST consent; MCP stays tool-only',
@@ -344,7 +308,7 @@ test(
 );
 
 test(
-  'default Knowledge routes are owner-scoped, flag-gated and restart work with stable identity',
+  'default Knowledge routes are owner-scoped and restart work with stable identity',
   { timeout: 60000 },
   async () => {
     const f = await githubFixture();
@@ -372,7 +336,6 @@ test(
           registerDefaultKnowledge(routes, {
             auth,
             service: defaults,
-            enabled: defaultKnowledgeFlagEnabled,
             started: (workspaceId, ids) => restarted.push(...ids),
           }),
         { prefix: '/v1' },
@@ -408,16 +371,6 @@ test(
       );
       assert.deepEqual(restarted, [intentId], 'resume restarts the same intent');
       await call({ method: 'POST', url: `${base}/${intentId}/manage`, payload: { action: 'unknown' } }, 400);
-      await flagOff(async () => {
-        assert.deepEqual(await call({ url: base }, 200), { enabled: false, items: [] });
-        await call({ method: 'POST', url: `${base}/${intentId}/manage`, payload: { action: 'retry' } }, 404);
-      });
-      assert.equal(
-        (await f.db.platform.query(`SELECT count(*)::int AS n FROM ${f.table('tf_knowledge_default_intents')}`)).rows[0]
-          .n,
-        1,
-        'flag off retains data',
-      );
       const schema =
         app.swagger().paths['/v1/workspaces/{workspaceId}/knowledge/defaults'].get.responses['200'].content[
           'application/json'

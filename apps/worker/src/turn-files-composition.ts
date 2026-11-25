@@ -8,7 +8,6 @@ import type { TurnFiles } from '@tulipfarm/conversations/turn-files';
 import type { TaskFileReading } from '@tulipfarm/agents/task-files';
 import { createRecognitionCache } from '@tulipfarm/knowledge';
 import type { MediaRecognizer } from '@tulipfarm/memory-core/parser/media-contracts';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import { chatReplyModel } from './conversation-model.ts';
 import {
   createMediaRecognizer,
@@ -45,14 +44,13 @@ function turnLimited(turn: string, recognizer: MediaRecognizer): MediaRecognizer
 }
 
 /**
- * How chat reads attached, referenced and linked files while the `images` flag is on. Recognition reuses the Knowledge
+ * How chat reads attached, referenced and linked files. Recognition reuses the Knowledge
  * media recognizer and the workspace recognition cache on the turn's pinned recognition model, and is charged as the
  * requester's Knowledge credits. Files shared as links are fetched once and kept as attachments of their message.
  */
 export function chatTurnFiles(runtime: ConversationRuntime, objects: { attachments: AttachmentBytes }): TurnFiles {
   const attachments = createAttachments(runtime, objects.attachments);
   return {
-    enabled: workspaceId => isFeatureEnabled('images', null, { id: workspaceId }),
     family(familyId) {
       const model = chatReplyModel(familyId);
       if (!model) throw new Error('conversation-model-unavailable');

@@ -167,7 +167,7 @@ const unmeteredRates: readonly ModelPrice[] = Object.freeze([
 ]);
 
 function providerOf(catalog: ModelCatalogFile, key: string) {
-  // Plan routes read no variable: each workspace's feature flag for the plan switches them.
+  // Plan routes read no variable: each request uses the plan of a member who connected it.
   if (isPlanProvider(key)) return { type: key as ModelProvider, apiKeyEnv: '', endpointEnv: '' };
   const declared = catalog.providers[key];
   const type = (declared?.type ?? key) as ModelProvider;

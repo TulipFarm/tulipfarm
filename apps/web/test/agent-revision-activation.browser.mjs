@@ -195,7 +195,7 @@ test('existing-agent instructions save and activation in the real app', { timeou
           json = { membershipId: membership.membershipId, people: [], teams: [] };
         else if (path.endsWith('/workspace-mcp/capabilities')) json = { enabled: false };
         else if (path.endsWith('/credits')) json = credits;
-        else if (path.endsWith('/feature-flags')) json = state.flags ?? {};
+        else if (path.endsWith('/feature-flags')) json = {};
         else if (path.endsWith('/browser-logins')) json = { enabled: true, logins: state.logins ?? [] };
         else if (path.endsWith('/bud'))
           json = {
@@ -309,7 +309,6 @@ test('existing-agent instructions save and activation in the real app', { timeou
         lastUsedAt: null,
       };
       const hidden = randomUUID();
-      state.flags = { 'browser-use': true };
       state.logins = [login];
       state.detail.definition = {
         ...state.detail.definition,

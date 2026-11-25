@@ -44,7 +44,7 @@ async function serveShell(route, workspace, session, path) {
   if (await serveWorkspaceShellEvent(route, workspace)) return true;
   const shell = new Map([
     ...workspaceShellReads(workspace.id),
-    ['/v1/feature-flags', { images: true }],
+    ['/v1/feature-flags', {}],
     ['/v1/auth/get-session', session],
     ['/v1/user/visit', { firstSession: false }],
     ['/v1/workspaces', [workspace]],

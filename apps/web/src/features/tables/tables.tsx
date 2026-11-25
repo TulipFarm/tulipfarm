@@ -49,7 +49,6 @@ import { workspaceMemberFields } from '@tulipfarm/tables/workspace-members';
 import { RowThreadPanel } from './row-thread';
 import { taskFields } from '@tulipfarm/tables/tasks-table';
 import { printRsql } from '@tulipfarm/tables/query';
-import { useFlag } from '@/lib/feature-flags';
 import {
   fixedGroups,
   groupLink,
@@ -1245,7 +1244,6 @@ function AddressedRecord({
   refresh: () => Promise<void>;
 }) {
   const read = useTableRow(api, table, recordId);
-  const threads = useFlag('assignable-tasks');
   const [selection, setSelection] = useState<{ kind: 'edit' | 'delete' | 'profile'; record: TableDataRow } | null>(
     null,
   );
@@ -1317,7 +1315,7 @@ function AddressedRecord({
               </p>
             )}
             <IncomingLinkedRows table={table} record={record} api={api} workspaceSlug={workspace.slug} />
-            {threads && <RowThreadPanel workspaceId={workspace.id} tableId={table.id} rowId={record.id} />}
+            <RowThreadPanel workspaceId={workspace.id} tableId={table.id} rowId={record.id} />
             <RecordHistory
               key={`${table.revision}/${record.id}/${record.token}`}
               table={table}

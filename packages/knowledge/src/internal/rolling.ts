@@ -13,9 +13,4 @@ export function effectiveSelection<T>(selection: T, now: number): T {
   return value;
 }
 
-/**
- * Returns the automatic source IDs whose owner cannot use the feature now. Engines exclude them before applying
- * their dispatch limit, so held work never starves manual sources. Manual sources are never held.
- */
-export type KnowledgeSourceGate = (workspaceId: string) => Promise<string[]>;
-export type EngineClock = { now?: () => number; clock?: Clock; gate?: KnowledgeSourceGate };
+export type EngineClock = { now?: () => number; clock?: Clock };

@@ -1,4 +1,4 @@
-import { isFeatureEnabled, log } from '@tulipfarm/observability';
+import { log } from '@tulipfarm/observability';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
@@ -565,19 +565,18 @@ export function createSlackChannelAgents(options: {
   ) {
     if (!/^[CG]/.test(event.item.channel)) return null;
     const base = event.reaction.split('::')[0];
-    const rules = (await isFeatureEnabled('slack-reactions', null, { id: workspaceId }))
-      ? (z
-          .object({ reactions: reactionRulesSchema })
-          .optional()
-          .parse(
-            (
-              await tx.client.query(
-                `SELECT reactions FROM ${table(tx, 'tf_slack_channel_attachments')} WHERE installation_id=$1 AND generation=$2 AND channel=$3`,
-                [installationId, generation, event.item.channel],
-              )
-            ).rows[0],
-          )?.reactions ?? [])
-      : [];
+    const rules =
+      z
+        .object({ reactions: reactionRulesSchema })
+        .optional()
+        .parse(
+          (
+            await tx.client.query(
+              `SELECT reactions FROM ${table(tx, 'tf_slack_channel_attachments')} WHERE installation_id=$1 AND generation=$2 AND channel=$3`,
+              [installationId, generation, event.item.channel],
+            )
+          ).rows[0],
+        )?.reactions ?? [];
     const rule = rules.find(item => item.reaction === event.reaction || item.reaction === base);
     // Without a channel rule of its own, ⏰ asks for a reminder about the message an hour later.
     if (!rule) {

@@ -10,7 +10,7 @@ import { calculateUsageCost, loadModelCatalog, reserveModelCost, usageTokenCount
 import type { ConversationRuntime } from '@tulipfarm/conversations/runtime';
 import type { KnowledgeRecognitionAvailability, KnowledgeRecognitionPort } from '@tulipfarm/knowledge';
 import { recordUsage } from '@tulipfarm/extensions';
-import { errorType, isFeatureEnabled, log, observeMedia, type MediaOutcome } from '@tulipfarm/observability';
+import { errorType, log, observeMedia, type MediaOutcome } from '@tulipfarm/observability';
 import {
   MediaRecognitionFailed,
   MediaRecognitionUnavailable,
@@ -349,10 +349,7 @@ function recognitionMeter(
 /** The model that reads a workspace's files; undefined when none can. */
 export type WorkspaceRecognitionModel = (workspaceId: string) => Promise<DocumentVisionModel | undefined>;
 
-/**
- * Under the workspace `images` flag, the workspace recognition model from image settings; without it, the catalog
- * `document-vision` model.
- */
+/** The workspace recognition model from image settings. */
 export function workspaceRecognitionModel(
   runtime: ConversationRuntime,
   env: NodeJS.ProcessEnv = process.env,
@@ -363,26 +360,20 @@ export function workspaceRecognitionModel(
   };
 }
 
-/**
- * Knowledge recognition ports: usage is recorded under the document and charged to its workspace. The workspace
- * `images` flag also turns on the shared parse rules (per-file cap, per-unit credit gaps, labels, standalone images).
- */
+/** Knowledge recognition ports: usage is recorded under the document and charged to its workspace. */
 export function knowledgeMediaRecognition(
   runtime: ConversationRuntime,
   model: WorkspaceRecognitionModel = workspaceRecognitionModel(runtime),
 ): { recognition: KnowledgeRecognitionPort; recognitionAvailable: KnowledgeRecognitionAvailability } {
   return {
     recognition: async scope => {
-      const [images, resolved] = await Promise.all([
-        isFeatureEnabled('images', null, { id: scope.workspaceId }),
-        model(scope.workspaceId),
-      ]);
+      const resolved = await model(scope.workspaceId);
       const recognizer = createMediaRecognizer(
         runtime,
         { workspaceId: scope.workspaceId, sourceId: scope.sourceId, flowId: scope.documentId },
         () => resolved,
       );
-      return { ...(recognizer ? { recognizer } : {}), ...(images ? { images } : {}) };
+      return recognizer ? { recognizer } : {};
     },
     recognitionAvailable: async workspaceId => (await model(workspaceId)) !== undefined,
   };

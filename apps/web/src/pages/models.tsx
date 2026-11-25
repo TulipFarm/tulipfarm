@@ -16,7 +16,6 @@ import { CompactionPolicySection } from '@/features/models/compaction-policy';
 import { ModelAvailability } from '@/features/models/availability';
 import { ModelSetupLink } from '@/features/models/model-setup';
 import { ImageSettingsSection } from '@/features/models/image-settings';
-import { useFlag } from '@/lib/feature-flags';
 import { ProviderPanel } from '@/features/models/provider-panel';
 import { familyPlan } from '@/features/models/chatgpt-plan-api';
 import { ApiKeysPane, ModelSources, SharedPlanPane, type ModelSource } from '@/features/models/model-sources';
@@ -80,12 +79,11 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
   const concealed = read.state.kind !== 'ready';
   const writable = read.state.kind === 'ready' && !read.state.refreshing && !read.state.error;
   const admin = snapshot?.membership.role === 'admin';
-  const images = useFlag('images');
   const navigate = useNavigate({ from: workspaceModelsRoute.fullPath });
   const chatGptOutcome = workspaceModelsRoute.useSearch({ select: search => search.chatgpt });
   const selected: ModelSource = workspaceModelsRoute.useSearch({ select: search => search.tab ?? 'access' });
   // A finished ChatGPT sign-in lands here; show the ChatGPT plan so its result is visible.
-  const source: ModelSource = chatGptOutcome ? 'chatgpt' : selected === 'images' && !images ? 'access' : selected;
+  const source: ModelSource = chatGptOutcome ? 'chatgpt' : selected;
   const builtIn = (snapshot?.families ?? []).filter(family => !familyPlan(family));
   const clearChatGptOutcome = useCallback(
     () => void navigate({ search: previous => ({ ...previous, chatgpt: undefined }), replace: true }),
@@ -125,12 +123,7 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
           </>
         )}
       </ModelRead>
-      <ModelSources
-        workspaceId={workspaceId}
-        source={source}
-        builtInCount={snapshot ? builtIn.length : null}
-        images={images}
-      >
+      <ModelSources workspaceId={workspaceId} source={source} builtInCount={snapshot ? builtIn.length : null}>
         {source === 'access' && (
           <div className="grid gap-4">
             <header>
@@ -144,7 +137,7 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
               userId={userId}
               workspaceId={workspaceId}
               families={builtIn}
-              imageModels={images ? (snapshot?.imageModels ?? []) : []}
+              imageModels={snapshot?.imageModels ?? []}
               admin={admin}
               concealed={concealed}
               writable={writable}

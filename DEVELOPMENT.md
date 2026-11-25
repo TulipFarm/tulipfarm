@@ -73,8 +73,7 @@ you can test sign-in; a new tab signs in again. To always see the login page,
 set `DEV_AUTO_SIGN_IN=false` in `apps/api/.env.local` and restart the API. Auto
 sign-in never runs in production, with an email transport, or off loopback.
 
-The `chatgpt-plan` feature flag (default on) lets each member connect their own ChatGPT plan
-in Models settings. Local development completes the sign-in on
+Each member can connect their own ChatGPT plan in Models settings. Local development completes the sign-in on
 `http://127.0.0.1:1455/auth/callback`; see
 [`self-host/README.md`](self-host/README.md#chatgpt-plan).
 

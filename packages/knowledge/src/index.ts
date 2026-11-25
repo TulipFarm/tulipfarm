@@ -68,10 +68,8 @@ export {
 } from './internal/agent-tools.ts';
 export {
   createDefaultKnowledge,
-  createDefaultKnowledgeGate,
   defaultKnowledgeStorageVersion,
   recordDefaultKnowledgeIntent,
-  defaultKnowledgeFlagEnabled,
   defaultKnowledgeLimits,
   defaultKnowledgeProducts,
   defaultKnowledgeProductSchema,
@@ -85,7 +83,6 @@ export {
   type DefaultKnowledgeProduct,
   type DefaultKnowledgeWork,
 } from './internal/defaults.ts';
-export type { KnowledgeSourceGate } from './internal/rolling.ts';
 export {
   createLearnedKnowledge,
   learnedKnowledgePrompt,

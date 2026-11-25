@@ -25,7 +25,6 @@ import { forgetWorkspace } from '@/lib/last-workspace';
 import { TeamConfirmation } from '@/features/access/team-fields';
 import { AvatarImagePicker } from '@/features/avatar/image-picker';
 import { EntityAvatar } from '@tulipfarm/sprout/avatar';
-import { useFlag } from '@/lib/feature-flags';
 import { KnowledgeSettings } from '@/features/files/knowledge-settings';
 import { AssignmentLimitsSettings } from '@/features/tables/assignment-limits';
 import { InboxSlackSettings } from '@/features/inbox/inbox-slack';
@@ -44,8 +43,6 @@ export function SettingsPage() {
 }
 
 function GeneralSettings({ workspaceId, slug, userId }: { workspaceId: string; slug: string; userId: string }) {
-  const soulExplorer = useFlag('soul-repository-explorer');
-  const assignable = useFlag('assignable-tasks');
   const router = useRouter();
   const api = useMemo(() => settingsApi(workspaceId), [workspaceId]);
   const receipt = useSettingsReceipt(workspaceId);
@@ -354,7 +351,7 @@ function GeneralSettings({ workspaceId, slug, userId }: { workspaceId: string; s
                 </Button>
               </SettingsRow>
             </SettingsGroup>
-            {admin && soulExplorer && (
+            {admin && (
               <SettingsGroup title="Soul repository" titleId="soul-heading">
                 <SettingsRow
                   label="Saved files"
@@ -370,9 +367,9 @@ function GeneralSettings({ workspaceId, slug, userId }: { workspaceId: string; s
                 </SettingsRow>
               </SettingsGroup>
             )}
-            {assignable && <InboxSlackSettings workspaceId={workspaceId} />}
+            <InboxSlackSettings workspaceId={workspaceId} />
             {admin && <KnowledgeSettings workspaceId={workspaceId} />}
-            {admin && assignable && <AssignmentLimitsSettings workspaceId={workspaceId} />}
+            {admin && <AssignmentLimitsSettings workspaceId={workspaceId} />}
             {admin && (
               <SettingsGroup title="Close workspace" titleId="delete-heading">
                 <SettingsRow

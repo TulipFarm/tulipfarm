@@ -14,7 +14,6 @@ import { markMcpConnected, takeMcpConnected } from '@/features/workspace-mcp/sig
 import type { McpApi } from '@/features/workspace-mcp/api';
 import type { Capabilities, Integration } from '@/features/workspace-mcp/contracts';
 import { mcpPagePrefix } from '@/features/integrations/mcp-page';
-import { useFlag } from '@/lib/feature-flags';
 import type { IntegrationCardView } from './conversation-api';
 
 type Proposal = Extract<IntegrationCardView, { action: 'mcp' }>;
@@ -294,11 +293,10 @@ function ConnectPackage({
   slug: string;
   card: PackageProposal;
 }) {
-  const flag = useFlag('hosted-mcp');
   const read = useMcpIntegrations(api);
   const [open, setOpen] = useState(false);
   const [savedId, setSavedId] = useState<string | null>(null);
-  const available = flag && capabilities.hosted && capabilities.integrationsEnabled;
+  const available = capabilities.hosted && capabilities.integrationsEnabled;
   const existing =
     read.state.kind === 'ready'
       ? read.state.data.integrations.find(

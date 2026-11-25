@@ -452,9 +452,7 @@ export function createAgentChat(
         definition: resolved,
         procedures: await resolveRunProcedures(tx, row.id),
         ...(externalGuard ? { runtime: 'slackChannel' as const } : {}),
-        ...(!externalGuard && (await imageGenerationOffered(workspaceId, resolved.tools))
-          ? { images: true as const }
-          : {}),
+        ...(!externalGuard && imageGenerationOffered(resolved.tools) ? { images: true as const } : {}),
       };
       await tx.client.query(
         `UPDATE ${relation(tx, 'tf_agent_chat_turns')} SET attempted_at=clock_timestamp() WHERE id=$1`,

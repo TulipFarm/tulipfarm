@@ -2,7 +2,6 @@ import type { Pool } from 'pg';
 import { previewHosts } from '@tulipfarm/apps';
 import { readAppObject, readPreviewSession, readPreviewTarget, redeemPreviewTicket } from '@tulipfarm/apps/store';
 import { AppHostUnavailableError, appHost } from '@tulipfarm/extensions';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import { objectStorageClient } from '@tulipfarm/workspaces/object-storage';
 import { commonCompatibility, type createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import type { PreviewGatewayDependencies } from './preview.ts';
@@ -36,7 +35,6 @@ export function previewGatewayFromEnvironment(
     shellOrigin,
     redeem: (previewKey, ticket) => redeemPreviewTicket(ready().pool, previewKey, ticket),
     session: (previewKey, token) => readPreviewSession(ready().pool, previewKey, token),
-    enabled: workspaceId => isFeatureEnabled('app-hosting', null, { id: workspaceId }),
     target: session =>
       ready().runtime.transaction(session.workspaceId, commonCompatibility, tx => readPreviewTarget(tx, session)),
     object: key => readAppObject(objects, key),

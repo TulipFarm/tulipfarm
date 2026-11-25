@@ -112,18 +112,9 @@ export function createGoogleOperations(options: {
   runtime: GoogleOperationRuntime;
   integrations: ReturnType<typeof createGoogleWorkspaceService>;
   fetcher?: typeof fetch;
-  calendarFeaturesEnabled?: (workspaceId: string, userId: string) => Promise<boolean>;
 }) {
   const access = authorized(options.runtime);
   const fetcher = options.fetcher ?? fetch;
-  async function requireCalendarFeature(workspaceId: string, userId: string, operation: GoogleOperation) {
-    if (
-      (operation.kind === 'calendar.events.create' || operation.kind === 'calendar.events.update') &&
-      operation.event.conferenceData &&
-      !(await options.calendarFeaturesEnabled?.(workspaceId, userId))
-    )
-      throw new GoogleLifecycleError('calendar-feature-disabled');
-  }
   // A member holds one Google integration per workspace, so workspace and user name the integration before it is loaded.
   const fileReads = new Map<string, number>();
   let activeFileReads = 0;
@@ -264,7 +255,6 @@ export function createGoogleOperations(options: {
       denyMcpEgress();
       const value = proposalRequestSchema.parse(input);
       if (!isGoogleWrite(value.operation)) throw new GoogleLifecycleError('operation-write-required');
-      await requireCalendarFeature(workspaceId, userId, value.operation);
       if (
         (value.operation.kind === 'calendar.events.create' || value.operation.kind === 'calendar.events.update') &&
         value.operation.event.conferenceData
@@ -391,7 +381,6 @@ export function createGoogleOperations(options: {
           const row = await loadProposal(tx, actor, proposalId);
           const existing = await receipt(tx, row.id);
           if (existing) return { kind: 'existing' as const, receipt: existing };
-          await requireCalendarFeature(workspaceId, userId, row.operation);
           const integration = await freshProposal(tx, actor, row);
           if ((await decision(tx, row.id)) !== 'approve') throw new GoogleLifecycleError('operation-approval-required');
           const target = reviewedTarget(row.operation);

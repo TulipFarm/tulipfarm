@@ -2,7 +2,7 @@ import { requireDraftSources } from '@tulipfarm/agents/draft-sources';
 import { requireAgentPermission } from '@tulipfarm/agents/saved-service';
 import { socialPlatformApps } from '@tulipfarm/extensions';
 import { integrationCredentialKeyring } from '@tulipfarm/integrations';
-import { createBackgroundJob, isFeatureEnabled, log } from '@tulipfarm/observability';
+import { createBackgroundJob, log } from '@tulipfarm/observability';
 import { createSocialAccounts, type SocialRuntime } from '@tulipfarm/social/accounts';
 import type { SocialPlatformAdapter } from '@tulipfarm/social/adapter';
 import { createSocialChannels } from '@tulipfarm/social/channels';
@@ -18,8 +18,6 @@ export type SocialPublisherOptions = {
   discover(after: string | null): Promise<string[]>;
   adapters?: Partial<Record<Platform, SocialPlatformAdapter>>;
   mediaUrl?: MediaUrlSigner;
-  /** Whether social publishing is on for a workspace; the worker checks it as the API does. */
-  enabled?(workspaceId: string): Promise<boolean>;
   env?: NodeJS.ProcessEnv;
   intervalMs?: number;
 };
@@ -37,9 +35,8 @@ function socialCallbackUrl(env: NodeJS.ProcessEnv) {
 }
 
 /**
- * The publish sweep and the credential refresh sweep (TECH, The step sweep; Accounts and tokens). Both visit only
- * workspaces where the `social-publishing` flag is on. Returns null when the credential keyring is not configured,
- * or in production without BETTER_AUTH_URL.
+ * The publish sweep and the credential refresh sweep (TECH, The step sweep; Accounts and tokens). Returns null when
+ * the credential keyring is not configured, or in production without BETTER_AUTH_URL.
  */
 export function createSocialPublisherComposition(options: SocialPublisherOptions) {
   const env = options.env ?? process.env;
@@ -81,16 +78,12 @@ export function createSocialPublisherComposition(options: SocialPublisherOptions
     return null;
   }
   const { accounts, publisher } = services;
-  const enabled =
-    options.enabled ??
-    ((workspaceId: string) =>
-      isFeatureEnabled('social-publishing', { id: 'social-publisher' }, { id: workspaceId }, env));
   const publishJob = createBackgroundJob('social-publisher', 15);
   const refreshJob = createBackgroundJob('social-refresh', 60);
   let running: Promise<void> | undefined;
   let refreshedAt = 0;
 
-  /** Runs `each` for every ready workspace with the flag on; one workspace's failure does not stop the others. */
+  /** Runs `each` for every ready workspace; one workspace's failure does not stop the others. */
   async function everyWorkspace(each: (workspaceId: string) => Promise<unknown>, label: string) {
     const failures: unknown[] = [];
     let after: string | null = null;
@@ -98,7 +91,7 @@ export function createSocialPublisherComposition(options: SocialPublisherOptions
       const page = await options.discover(after);
       for (const workspaceId of page) {
         try {
-          if (await enabled(workspaceId)) await each(workspaceId);
+          await each(workspaceId);
         } catch (error) {
           if (!workspaceSchemaPending(error)) failures.push(error);
         }

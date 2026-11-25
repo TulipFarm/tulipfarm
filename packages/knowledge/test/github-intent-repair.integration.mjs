@@ -139,7 +139,7 @@ test('a GitHub intent left on a removed account row follows its GitHub user', { 
         configure: async () => assert.fail('a covered intent creates no source'),
         manage: async (_ws, _user, sourceId, value) => retried.push({ sourceId, action: value.action }),
       };
-      const defaults = createDefaultKnowledge({ runtime, engines: { github }, enabled: async () => true });
+      const defaults = createDefaultKnowledge({ runtime, engines: { github } });
       for (const work of (await defaults.due(ws.id)).filter(w => w.intentId === stuck)) await defaults.process(work);
       assert.deepEqual(retried, [{ sourceId: oldSource, action: 'retry' }]);
 

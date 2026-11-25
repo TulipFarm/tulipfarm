@@ -6,11 +6,7 @@ import { NativeConnection } from '@temporalio/worker';
 import { Client, Connection } from '@temporalio/client';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { createGoogleWorkspaceService } from '@tulipfarm/google-workspace';
-import {
-  createDefaultKnowledgeGate,
-  defaultKnowledgeFlagEnabled,
-  recordDefaultKnowledgeIntent,
-} from '@tulipfarm/knowledge';
+import { recordDefaultKnowledgeIntent } from '@tulipfarm/knowledge';
 import { createGoogleKnowledgeParts } from '../dist/knowledge-google-composition.js';
 import { createSlackKnowledgeParts } from '../dist/knowledge-slack-composition.js';
 import { createAtlassianKnowledgeParts } from '../dist/knowledge-atlassian-composition.js';
@@ -32,7 +28,7 @@ async function eventually(operation, message) {
   assert.fail(message);
 }
 
-const automatic = { enabled: defaultKnowledgeFlagEnabled, record: recordDefaultKnowledgeIntent };
+const automatic = { record: recordDefaultKnowledgeIntent };
 
 /**
  * Runs one product family through real Temporal: the API sweep dispatches the intent, the knowledge worker's
@@ -58,7 +54,6 @@ async function journey(name, setup, body) {
     await f.db.platform.query(
       `UPDATE ${f.table('tf_credit_account')} SET available=10000000000000,granted=10000000000000`,
     );
-    const gate = createDefaultKnowledgeGate({ runtime: f.runtime });
     const start = async worker => {
       workers.push({ worker, running: worker.run() });
       return worker;
@@ -69,7 +64,7 @@ async function journey(name, setup, body) {
       item.worker.shutdown();
       await item.running;
     };
-    const engine = setup.engine({ f, gate });
+    const engine = setup.engine({ f });
     // One knowledge worker serves the provider and defaults activities together, as in production.
     const defaults = (engines = { [setup.kind]: engine.service }) =>
       createKnowledgeWorker({
@@ -207,10 +202,9 @@ test(
       {
         kind: 'google',
         fixture: async extra => ({ googleOptions: { ...google.options, defaultKnowledge: automatic }, ...extra }),
-        engine: ({ f, gate }) =>
+        engine: ({ f }) =>
           createGoogleKnowledgeParts({
             runtime: f.runtime,
-            gate,
             googleService: createGoogleWorkspaceService({ runtime: f.runtime, ...google.options }),
             providerFetch: google.providerFetch,
           }),
@@ -261,10 +255,9 @@ test(
       {
         kind: 'slack',
         fixture: async extra => ({ slackCorpus: slack.provider, ...extra }),
-        engine: ({ f, gate }) =>
+        engine: ({ f }) =>
           createSlackKnowledgeParts({
             runtime: f.runtime,
-            gate,
             slackCorpus: slack.provider(f.runtime),
           }),
       },
@@ -308,10 +301,9 @@ test(
       {
         kind: 'atlassian',
         fixture: async extra => ({ atlassianCorpus: atlassian.provider, ...extra }),
-        engine: ({ f, gate }) =>
+        engine: ({ f }) =>
           createAtlassianKnowledgeParts({
             runtime: f.runtime,
-            gate,
             atlassianCorpus: atlassian.provider(f.runtime),
           }),
       },
@@ -363,10 +355,9 @@ test(
       {
         kind: 'atlassian',
         fixture: async extra => ({ atlassianCorpus: atlassian.provider, ...extra }),
-        engine: ({ f, gate }) =>
+        engine: ({ f }) =>
           createAtlassianKnowledgeParts({
             runtime: f.runtime,
-            gate,
             atlassianCorpus: atlassian.provider(f.runtime),
           }),
       },
@@ -429,10 +420,9 @@ test(
       {
         kind: 'slack',
         fixture: async extra => ({ slackCorpus: slack.provider, ...extra }),
-        engine: ({ f, gate }) =>
+        engine: ({ f }) =>
           createSlackKnowledgeParts({
             runtime: f.runtime,
-            gate,
             slackCorpus: slack.provider(f.runtime),
           }),
       },
@@ -525,10 +515,9 @@ test(
       {
         kind: 'github',
         fixture: async extra => ({ githubCorpus: gh.provider, ...extra }),
-        engine: ({ f, gate }) =>
+        engine: ({ f }) =>
           createGitHubKnowledgeParts({
             runtime: f.runtime,
-            gate,
             githubCorpus: gh.provider(f.runtime),
           }),
       },
@@ -563,10 +552,9 @@ test(
       {
         kind: 'google',
         fixture: async extra => ({ googleOptions: { ...google.options, defaultKnowledge: automatic }, ...extra }),
-        engine: ({ f, gate }) =>
+        engine: ({ f }) =>
           createGoogleKnowledgeParts({
             runtime: f.runtime,
-            gate,
             googleService: createGoogleWorkspaceService({ runtime: f.runtime, ...google.options }),
             providerFetch: google.providerFetch,
           }),
@@ -620,10 +608,9 @@ test(
       {
         kind: 'slack',
         fixture: async extra => ({ slackCorpus: slack.provider, ...extra }),
-        engine: ({ f, gate }) =>
+        engine: ({ f }) =>
           createSlackKnowledgeParts({
             runtime: f.runtime,
-            gate,
             slackCorpus: slack.provider(f.runtime),
           }),
       },
@@ -666,10 +653,9 @@ test(
       {
         kind: 'atlassian',
         fixture: async extra => ({ atlassianCorpus: atlassian.provider, ...extra }),
-        engine: ({ f, gate }) =>
+        engine: ({ f }) =>
           createAtlassianKnowledgeParts({
             runtime: f.runtime,
-            gate,
             atlassianCorpus: atlassian.provider(f.runtime),
           }),
       },

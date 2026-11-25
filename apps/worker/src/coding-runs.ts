@@ -1,6 +1,6 @@
 import { Context } from '@temporalio/activity';
 import { Client, Connection } from '@temporalio/client';
-import { planProviders, type PlanProvider } from '@tulipfarm/config';
+import type { PlanProvider } from '@tulipfarm/config';
 import { temporalConnectionOptions } from '@tulipfarm/config/temporal';
 import { createFileOutput, type FileOutputStore } from '@tulipfarm/conversations/file-outputs';
 import type { ConversationRuntime, ResumeCodingRun } from '@tulipfarm/conversations/runtime';
@@ -18,7 +18,6 @@ import {
   runApprovedCodingRun,
 } from '@tulipfarm/agents/coding-run-store';
 import type { Subscriptions } from '@tulipfarm/integrations/subscriptions';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import { githubChatReads } from './github-composition.ts';
 import {
   isUnusablePlan,
@@ -45,17 +44,12 @@ export function codingRunServices(
   const cached: Partial<Record<PlanProvider, PlanCredentials>> = {};
   const credentials = (provider: PlanProvider) =>
     (cached[provider] ??= options.credentials?.(provider) ?? planCredentialsFromEnvironment(runtime, provider));
-  const planOn = (workspaceId: string, provider: PlanProvider) =>
-    isFeatureEnabled(planProviders[provider].flag, null, { id: workspaceId });
   let reads: ReturnType<typeof githubChatReads> | undefined;
   return {
-    enabled: workspaceId => isFeatureEnabled('coding-runs', null, { id: workspaceId }),
     async hasPlan(workspaceId, membershipId, provider) {
-      if (!(await planOn(workspaceId, provider))) return false;
       return (await subscriptions.eligible(workspaceId, provider, membershipId, 'coding')).length > 0;
     },
     async plan(workspaceId, membershipId, provider, preferredConnectionId) {
-      if (!(await planOn(workspaceId, provider))) return null;
       for (const candidate of await subscriptions.eligible(
         workspaceId,
         provider,

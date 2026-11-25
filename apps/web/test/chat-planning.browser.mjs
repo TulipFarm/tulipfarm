@@ -211,11 +211,11 @@ test(
       const reference = page.getByRole('region', { name: `Plan: ${plan.title}` });
       await reference.waitFor();
       assert.equal(await canvas.count(), 0, 'a returning list cannot reopen a closed plan');
-      await reference.getByRole('button', { name: 'Start plan' }).click();
+      await reference.getByRole('button', { name: 'Approve and start' }).click();
       await reference.getByRole('alert').waitFor();
-      await reference.getByRole('button', { name: 'Start plan' }).click();
+      await reference.getByRole('button', { name: 'Approve and start' }).click();
       await reference.getByRole('button', { name: 'Pause plan' }).waitFor();
-      assert.deepEqual(starts[0], starts[1], 'uncertain Start retries keep the exact version and request ID');
+      assert.deepEqual(starts[0], starts[1], 'uncertain approval retries keep the exact version and request ID');
       assert.equal(
         await page.getByRole('button', { name: 'Mode: Plan' }).count(),
         1,

@@ -4,11 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import { NativeConnection } from '@temporalio/worker';
 import { Client, Connection } from '@temporalio/client';
-import {
-  createDefaultKnowledgeGate,
-  defaultKnowledgeFlagEnabled,
-  recordDefaultKnowledgeIntent,
-} from '@tulipfarm/knowledge';
+import { recordDefaultKnowledgeIntent } from '@tulipfarm/knowledge';
 import { createGitHubKnowledgeParts } from '../dist/knowledge-github-composition.js';
 import { createDefaultKnowledgeParts } from '../dist/knowledge-defaults-composition.js';
 import { createKnowledgeWorker } from '../dist/knowledge-worker.js';
@@ -26,11 +22,10 @@ async function eventually(operation, message) {
 }
 
 test(
-  'real Temporal turns a new GitHub authorization into owner-only Knowledge without opening Knowledge; flag off stops queued automatic work',
+  'real Temporal turns a new GitHub authorization into owner-only Knowledge without opening Knowledge',
   { timeout: 240000 },
   async () => {
-    const priorQueue = process.env.TEMPORAL_TASK_QUEUE,
-      priorFlags = process.env.FEATURE_FLAGS_OFF;
+    const priorQueue = process.env.TEMPORAL_TASK_QUEUE;
     const queue = `default-knowledge-${randomUUID()}`;
     process.env.TEMPORAL_TASK_QUEUE = queue;
     const gh = githubProviderFixture();
@@ -48,11 +43,9 @@ test(
       await f.db.platform.query(
         `UPDATE ${f.table('tf_credit_account')} SET available=10000000000000,granted=10000000000000`,
       );
-      const gate = createDefaultKnowledgeGate({ runtime: f.runtime });
       const github = createGitHubKnowledgeParts({
         runtime: f.runtime,
         githubCorpus: gh.provider(f.runtime),
-        gate,
       });
       const defaults = createDefaultKnowledgeParts({ runtime: f.runtime, engines: { github: github.service } });
       knowledgeWorker = await createKnowledgeWorker({
@@ -62,7 +55,6 @@ test(
       });
       knowledgeRunning = knowledgeWorker.run();
       const owner = await gh.connect(f, f.signed.owner, 101, 'owner', undefined, {
-        enabled: defaultKnowledgeFlagEnabled,
         record: recordDefaultKnowledgeIntent,
       });
       const intent = async () =>
@@ -137,31 +129,7 @@ test(
             ]);
       }
       assert.equal(JSON.stringify(history).includes(owner.token), false);
-
-      // GitHub Knowledge is on for everyone: turning the automatic-knowledge flag off never holds its sources.
-      process.env.FEATURE_FLAGS_OFF = 'default-connection-knowledge';
-      const sourceRow = async () =>
-        (
-          await f.db.platform.query(
-            `SELECT generation::int AS generation, lease_token FROM ${f.table('tf_knowledge_github_sources')} WHERE source_id=$1`,
-            [source.source_id],
-          )
-        ).rows[0];
-      await eventually(async () => (await sourceRow()).lease_token === null, 'in-flight GitHub work settles');
-      const running = await sourceRow();
-      await f.db.platform.query(
-        `UPDATE ${f.table('tf_knowledge_github_sources')} SET next_attempt_at=clock_timestamp() WHERE source_id=$1`,
-        [source.source_id],
-      );
-      await eventually(
-        async () => (await sourceRow()).generation > running.generation,
-        'flag off does not hold automatic GitHub work',
-      );
-      assert.ok(await published('doc:7001:docs/supplier.md'));
-      delete process.env.FEATURE_FLAGS_OFF;
     } finally {
-      if (priorFlags === undefined) delete process.env.FEATURE_FLAGS_OFF;
-      else process.env.FEATURE_FLAGS_OFF = priorFlags;
       await f?.app.close();
       if (knowledgeWorker) {
         knowledgeWorker.shutdown();

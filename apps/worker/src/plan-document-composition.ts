@@ -7,7 +7,6 @@ import {
   type PlanDocumentMode,
   type PlanDocumentTarget,
 } from '@tulipfarm/agents/plan-document-store';
-import { planDocumentsEnabled } from '@tulipfarm/agents/plans';
 import {
   planDocumentObjectPath,
   planDocumentRenderQueue,
@@ -76,10 +75,9 @@ export function createPlanDocumentComposition(options: {
   };
 
   return {
-    /** Starts rendering the plan's current revision and approval when the workspace uses plan documents. */
+    /** Starts rendering the plan's current revision and approval. */
     async dispatch(workspaceId: string, planId: string) {
       try {
-        if (!(await planDocumentsEnabled(workspaceId))) return;
         if (await store.claim(workspaceId, planId)) await options.start(workspaceId, planId);
       } catch (error) {
         if (!unmigrated(error)) throw error;

@@ -63,7 +63,7 @@ only.
 `FIRECRAWL_API_KEY_FILE` are removed. The api and worker stop at startup while any
 is set, naming what replaces it.
 
-With the workspace `images` flag on, the worker also fetches files directly,
+The worker also fetches files directly,
 without Huntsman: files linked in a chat message and `web.fetch` links that
 serve a file. It needs egress from the worker to the public internet on port 443. Each fetch resolves the host to IPv4 only, refuses any private, loopback,
 link-local or metadata address, connects only to the addresses it checked (so a
@@ -72,9 +72,9 @@ redirects with each hop checked again, sends no cookie, authorization or
 referrer, and stops at 10 MiB or 25 seconds. HTML goes to Huntsman.
 A linked file is kept as an attachment of its message and counts against
 workspace file storage. Without `HUNTSMAN_ENDPOINT`, links are not fetched and
-the model is told web access is off. Before turning the flag on, run
-`pnpm db workspace-rollout` so every workspace has common migration
-`0014_conversation_links.sql`; a workspace without it reads no links.
+the model is told web access is off. Run `pnpm db workspace-rollout` so every
+workspace has common migration `0014_conversation_links.sql`; a workspace
+without it reads no links.
 
 ## Private API hosts
 
@@ -272,10 +272,9 @@ restart the api. The login and sign-up pages then ask for a password.
 
 TulipFarm reads the text in images with a model whose catalog entry declares
 `"imageInput": true`. It does this for images in Knowledge documents, in files
-attached to chat, and in task inputs. Without the workspace `images` flag, the
-model is the catalog's `document-vision` role. With the flag, it is the image
-reader a workspace admin picks in image settings, which defaults to that role.
-Turning the flag on or off needs no migration.
+attached to chat, and in task inputs. The model is the image reader a workspace
+admin picks in image settings, which defaults to the catalog's `document-vision`
+role.
 
 Recognitions are stored per workspace in `tf_knowledge_recognitions`, keyed by
 image hash, model and prompt version. Changing the model or prompt reads images
@@ -438,10 +437,7 @@ and Slack can't use another member's plan. A ChatGPT plan model is never the
 default, a role model or a fallback, so the catalog still needs at least one
 provider key.
 
-It is on by default. Set `FEATURE_FLAG_CHATGPT_PLAN=false`, or turn off the
-`chatgpt-plan` flag in your feature flag provider, to remove the routes, models
-and settings card. The Claude and GitHub Copilot plans work the same way with
-the `claude-plan` (off by default) and `copilot-plan` (on by default) flags.
+The Claude and GitHub Copilot plans work the same way.
 
 Sign in with ChatGPT only redirects to `http://127.0.0.1:<port>/auth/callback`.
 The api listens there, on port 1455 or another free port, and completes the

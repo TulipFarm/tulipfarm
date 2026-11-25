@@ -75,14 +75,12 @@ async function setup(t) {
     OPENAI_API_KEY: 'openai-test-key',
     XAI_API_KEY: 'xai-test-key',
     MODEL_CATALOG: catalog,
-    FEATURE_FLAG_IMAGES: 'true',
   });
   delete process.env.MODEL_CATALOG_FILE;
   t.after(async () => {
     for (const [key, value] of Object.entries(saved))
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
-    delete process.env.FEATURE_FLAG_IMAGES;
     await f.close();
   });
   const w = f.workspace;

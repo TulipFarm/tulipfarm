@@ -1,11 +1,9 @@
 import { createAtlassianKnowledge, type AtlassianCorpusProvider } from '@tulipfarm/knowledge';
-import type { KnowledgeSourceGate } from '@tulipfarm/knowledge';
 import { atlassianCorpusFromEnvironment } from '@tulipfarm/atlassian/corpus';
 import { createAtlassianKnowledgeActivities } from './knowledge-atlassian-activities.ts';
 
 export function createWorkerAtlassianKnowledge(dependencies: {
   runtime: Parameters<typeof createAtlassianKnowledge>[0]['runtime'];
-  gate?: KnowledgeSourceGate;
   atlassianCorpus?: AtlassianCorpusProvider;
   env?: NodeJS.ProcessEnv;
 }) {
@@ -17,7 +15,6 @@ export function createWorkerAtlassianKnowledge(dependencies: {
         runtime: dependencies.runtime,
         ...(dependencies.env ? { env: dependencies.env } : {}),
       }),
-    ...(dependencies.gate ? { gate: dependencies.gate } : {}),
   });
 }
 

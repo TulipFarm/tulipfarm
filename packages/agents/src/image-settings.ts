@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { AccessDenied, currentMember, type HumanActor, lockAndResolveHuman, uuidSchema } from '@tulipfarm/access';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
 import { loadModelCatalog, resolveModelCapabilities, type ServedModelCatalog } from '@tulipfarm/config';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { relation, type AgentStorage, type AgentTransaction } from './store.ts';
 import { AgentError } from './saved-contracts.ts';
@@ -160,11 +159,10 @@ const recognitionSwitchVersion = 11;
 const imageSettingsVersion = 12;
 
 /**
- * The family that reads images for a workspace's Files, Knowledge and tasks, or null when none can. Under the
- * workspace `images` flag it is resolved as `resolveImageModels` resolves recognition for a chat turn: the saved
- * choice, else the catalog `document-vision` model, while usable here and while the recognition switch is on. Before
- * image settings are stored it is the catalog `document-vision` model while the switch is on. Without the flag it is
- * the catalog `document-vision` model.
+ * The family that reads images for a workspace's Files, Knowledge and tasks, or null when none can. It is resolved as
+ * `resolveImageModels` resolves recognition for a chat turn: the saved choice, else the catalog `document-vision`
+ * model, while usable here and while the recognition switch is on. Before image settings are stored it is the catalog
+ * `document-vision` model while the switch is on.
  */
 export async function workspaceRecognitionFamily(
   storage: AgentStorage,
@@ -172,7 +170,6 @@ export async function workspaceRecognitionFamily(
   catalog: ServedModelCatalog = loadModelCatalog(),
 ): Promise<string | null> {
   const role = catalog.role('document-vision')?.id ?? null;
-  if (!(await isFeatureEnabled('images', null, { id: workspaceId }))) return role;
   return storage.transaction(workspaceId, commonCompatibility, async tx => {
     if (tx.commonVersion < recognitionSwitchVersion) return role;
     if (tx.commonVersion < imageSettingsVersion) return (await recognitionSwitchedOn(tx)) ? role : null;

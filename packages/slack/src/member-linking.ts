@@ -288,10 +288,7 @@ export function createSlackMemberLinking(options: {
     if (proof.teamId !== challenge.team_id || proof.userId !== challenge.slack_user_id) throw new AccessDenied();
     const target = z.uuid().safeParse(state.split('.')[0]);
     const automatic =
-      target.success &&
-      proof.scopes.some(scope => knowledgeScopes.includes(scope)) &&
-      options.defaultKnowledge &&
-      (await options.defaultKnowledge.enabled(target.data, userId))
+      target.success && proof.scopes.some(scope => knowledgeScopes.includes(scope))
         ? options.defaultKnowledge
         : undefined;
     let intent: string | null = null;

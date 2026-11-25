@@ -80,10 +80,8 @@ test(
     const { ws, table, runtime, member, record, db } = env;
     try {
       const { state, github } = fakes();
-      const flags = new Map();
-      const enabled = async (_ws, userId) => flags.get(userId) ?? true;
       let clock = new Date(Date.now() + 1000);
-      const defaults = createDefaultKnowledge({ runtime, engines: { github }, enabled, now: () => clock });
+      const defaults = createDefaultKnowledge({ runtime, engines: { github }, now: () => clock });
       const accountId = randomUUID();
       const owner = { userId: ws.userId, membershipId: ws.membershipId };
       const drain = async () => {
@@ -122,17 +120,6 @@ test(
           await assert.rejects(record({ ...input, product: 'teams' }));
         },
       );
-
-      await t.test('GitHub is never gated: a disabled flag still leaves the queued intent due', async () => {
-        flags.set(owner.userId, false);
-        const [intent] = (await defaults.list(ws.id, owner.userId)).items;
-        assert.equal(intent.syncState, 'queued');
-        assert.deepEqual(
-          (await defaults.due(ws.id)).map(w => w.intentId),
-          [intent.intentId],
-        );
-        flags.delete(owner.userId);
-      });
 
       await t.test(
         'connecting creates one owner-only source following every repository, with all content and full history',
@@ -237,14 +224,6 @@ test(
         assert.equal((await defaults.due(ws.id)).length, 1);
       });
 
-      await t.test('the automatic gate never holds GitHub sources, even for a disabled owner', async () => {
-        assert.equal((await db.platform.query(`SELECT count(*)::int n FROM ${table('default_sources')}`)).rows[0].n, 1);
-        assert.deepEqual(await defaults.held(ws.id), []);
-        flags.set(owner.userId, false);
-        assert.deepEqual(await defaults.held(ws.id), []);
-        flags.delete(owner.userId);
-      });
-
       await t.test('runtime role cannot delete policy rows', async () => {
         await assert.rejects(
           runtime.transaction(ws.id, commonCompatibility, tx =>
@@ -326,7 +305,7 @@ test(
         google: { configure: configure('google') },
       };
       let clock = new Date(Date.now() + 1000);
-      const defaults = createDefaultKnowledge({ runtime, engines, enabled: async () => true, now: () => clock });
+      const defaults = createDefaultKnowledge({ runtime, engines, now: () => clock });
       const drain = async () => {
         for (let i = 0; i < 40; i++) {
           const work = await defaults.due(ws.id);

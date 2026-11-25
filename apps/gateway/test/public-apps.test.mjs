@@ -107,7 +107,6 @@ async function gatewayFor(t, options = {}) {
       shellOrigin: 'https://app.tulipfarm.test',
       redeem: async () => null,
       session: async () => null,
-      enabled: async () => true,
       target: async () => ({ ok: true, target: { kind: 'files', build: null } }),
       object: async () => null,
       connectHost: async () => {
@@ -120,7 +119,6 @@ async function gatewayFor(t, options = {}) {
         calls.routes += 1;
         return name === 'acme-api' ? { workspaceId, appId, route } : null;
       },
-      enabled: async id => id === workspaceId && options.enabled !== false,
       host: {
         async connect(input) {
           calls.connects += 1;
@@ -503,13 +501,6 @@ test('a keepalive frame never lands inside a frame the app is still sending', as
 });
 
 test('names that lead nowhere get 404, stopped apps and a missing host get 503', async t => {
-  await t.test('the workspace has app hosting off', async t => {
-    const { port, upstream } = await gatewayFor(t, { enabled: false });
-    const response = await call(port, { headers: { accept: 'text/html' } });
-    assert.equal(response.status, 404);
-    assert.match(response.body, /There is no app at this address/);
-    assert.equal(upstream.requests, 0);
-  });
   await t.test('no app holds the name', async t => {
     const { port } = await gatewayFor(t);
     const response = await call(port, { headers: { host: 'acme-web.apps.tulipfarm.test' } });
@@ -547,7 +538,6 @@ test('a static app is served from its live release', async t => {
     {
       domain: 'apps.tulipfarm.test',
       route: async name => (name === 'acme-api' ? { workspaceId, appId, route } : null),
-      enabled: async () => true,
       host: {},
       async files(release, path) {
         read.push([release, path]);
@@ -578,7 +568,6 @@ test('a static app is left to the edge when the gateway has no released files', 
     {
       domain: 'apps.tulipfarm.test',
       route: async () => ({ workspaceId, appId, route }),
-      enabled: async () => true,
       host: {},
     },
     {},
@@ -588,10 +577,7 @@ test('a static app is left to the edge when the gateway has no released files', 
 });
 
 test('one client is limited to 1,200 requests a minute', async t => {
-  const { http } = buildPublicAppsGateway(
-    { domain: 'apps.tulipfarm.test', route: async () => null, enabled: async () => true, host: {} },
-    {},
-  );
+  const { http } = buildPublicAppsGateway({ domain: 'apps.tulipfarm.test', route: async () => null, host: {} }, {});
   t.after(() => http.close());
   const send = () => http.inject({ url: '/', headers: { host } });
   for (let sent = 0; sent < 1_200; sent += 1) assert.equal((await send()).statusCode, 404);
@@ -663,7 +649,7 @@ test('the app sees only the forwarding headers the gateway derived, over HTTP an
 
 test('two clients behind the same CloudFront edge have separate request limits', async t => {
   const { http } = buildPublicAppsGateway(
-    { domain: 'apps.tulipfarm.test', route: async () => null, enabled: async () => true, host: {} },
+    { domain: 'apps.tulipfarm.test', route: async () => null, host: {} },
     gatewayServerOptions({ GATEWAY_PROXY_MODE: 'cloudfront' }),
   );
   t.after(() => http.close());

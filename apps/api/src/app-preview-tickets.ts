@@ -4,14 +4,12 @@ import { previewHostOf, type AppId, type PreviewHosts } from '@tulipfarm/apps';
 import { admitPreview, issuePreviewTicket, registerPreviewHost, requestDraftHost } from '@tulipfarm/apps/store';
 import { previewEnterPath } from '@tulipfarm/gateway/preview';
 import type { PreviewStorage } from '@tulipfarm/gateway/preview-environment';
-import { errorAttributes, isFeatureEnabled } from '@tulipfarm/observability';
+import { errorAttributes } from '@tulipfarm/observability';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import type { AppRouteDependencies } from './apps.ts';
 import type { registerAuth } from './auth.ts';
 import { requestBoundaryError } from './security.ts';
 import { requestSession } from './request-session.ts';
-
-const enabled = (workspaceId: string) => isFeatureEnabled('app-hosting', null, { id: workspaceId });
 
 const params = z.object({ workspaceId: z.uuid(), appId: z.uuid() });
 
@@ -36,8 +34,7 @@ export function registerPreviewTickets(
       const session = await requestSession(request, auth);
       if (!session) return reply.code(401).send({ error: 'sign-in-required' });
       const parsed = params.safeParse(request.params);
-      if (!parsed.success || !(await enabled(parsed.data.workspaceId)))
-        return reply.code(404).send({ error: 'not-found' });
+      if (!parsed.success) return reply.code(404).send({ error: 'not-found' });
       const workspaceId = parsed.data.workspaceId.toLowerCase();
       const appId = parsed.data.appId.toLowerCase() as AppId;
       try {

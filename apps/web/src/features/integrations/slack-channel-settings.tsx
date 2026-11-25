@@ -36,7 +36,6 @@ import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Table, type TableColumn } from '@tulipfarm/sprout/table';
 import { ToggleGroup, ToggleGroupItem } from '@tulipfarm/sprout/toggle-group';
 import { SlackChannelName, slackChannelLabel, slackChannelMatches } from '@/components/slack-channel-name';
-import { useFlag } from '@/lib/feature-flags';
 import { useFeatureRead } from '@/lib/query';
 import { UnsavedChanges } from '@/features/tables/feedback';
 import { integrationKeys } from './queries';
@@ -95,11 +94,9 @@ export function SlackChannelSettingsTab({ workspaceId }: { workspaceId: string }
   const [notice, setNotice] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
-  const reactionsEnabled = useFlag('slack-reactions');
   const emojiRead = useFeatureRead({
     key: [...integrationKeys.content('slack'), 'emoji'],
     load: signal => loadSlackEmoji(workspaceId, signal),
-    enabled: reactionsEnabled,
   });
   const glyphs = useEmojiGlyphs();
   const custom = useMemo(
@@ -174,7 +171,7 @@ export function SlackChannelSettingsTab({ workspaceId }: { workspaceId: string }
       setting: channel,
     }));
 
-  const allColumns: TableColumn<Row>[] = [
+  const columns: TableColumn<Row>[] = [
     {
       key: 'channel',
       header: 'Channel',
@@ -239,7 +236,6 @@ export function SlackChannelSettingsTab({ workspaceId }: { workspaceId: string }
         ),
     },
   ];
-  const columns = allColumns.filter(column => reactionsEnabled || column.key !== 'reactions');
 
   const current = channels.find(channel => channel.id === editing) ?? null;
   const edit = (row: Row) => {
@@ -304,18 +300,14 @@ export function SlackChannelSettingsTab({ workspaceId }: { workspaceId: string }
               <ToggleGroupItem value="every-message">
                 Every message <Count value={counts['every-message']} />
               </ToggleGroupItem>
-              {reactionsEnabled && (
-                <ToggleGroupItem value="reactions">
-                  Reactions <Count value={counts.reactions} />
-                </ToggleGroupItem>
-              )}
+              <ToggleGroupItem value="reactions">
+                Reactions <Count value={counts.reactions} />
+              </ToggleGroupItem>
             </ToggleGroup>
             {/* Kept mounted so the announcement is reliable; sits in the toolbar so saving doesn't shift the table. */}
             {data.canManage && !notice && (
               <p className="text-sm text-muted-foreground sm:ml-auto">
-                {reactionsEnabled
-                  ? 'Select a channel to edit its agent, replies or reactions.'
-                  : 'Select a channel to edit its agent or replies.'}
+                Select a channel to edit its agent, replies or reactions.
               </p>
             )}
             <p role="status" className={notice ? 'text-sm sm:ml-auto' : 'sr-only'}>
@@ -371,7 +363,6 @@ export function SlackChannelSettingsTab({ workspaceId }: { workspaceId: string }
           channel={current}
           data={data}
           emoji={emoji}
-          reactionsEnabled={reactionsEnabled}
           onSaved={channel => {
             setSaved(previous => ({ ...previous, [channel.id]: channel }));
             setEditing(null);
@@ -394,7 +385,6 @@ function ChannelEditor({
   channel,
   data,
   emoji,
-  reactionsEnabled,
   onSaved,
   onReload,
   onClose,
@@ -403,7 +393,6 @@ function ChannelEditor({
   channel: SlackChannelSetting;
   data: SlackChannelSettings;
   emoji: Emoji;
-  reactionsEnabled: boolean;
   onSaved: (channel: SlackChannelSetting) => void;
   onReload: () => void;
   onClose: () => void;
@@ -539,99 +528,96 @@ function ChannelEditor({
                 value={draft.replies}
                 onValueChange={replies => setDraft(previous => ({ ...previous, replies }))}
               />
-              {reactionsEnabled && (
-                <fieldset className="space-y-3">
-                  <legend className="text-sm font-medium">Reactions</legend>
-                  <p className="text-sm text-muted-foreground">
-                    When anyone reacts to a message with one of these emoji, the agent follows your prompt on that
-                    message and its thread. It can use any tool it has, like adding a table row or replying in the
-                    thread.
-                  </p>
-                  {draft.reactions.length > 0 && (
-                    <ul className="space-y-3">
-                      {draft.reactions.map((rule, index) => {
-                        const error = showErrors ? promptError(rule.prompt) : undefined;
-                        const update = (change: Partial<SlackReactionRule>) =>
-                          setDraft(previous => ({
-                            ...previous,
-                            reactions: previous.reactions.map((item, at) =>
-                              at === index ? { ...item, ...change } : item,
-                            ),
-                          }));
-                        return (
-                          <li key={index} className="space-y-3 rounded-lg border p-3">
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="min-w-0 flex-1 sm:max-w-72">
-                                <Field
-                                  id={`${reactionInputId}-${index}`}
-                                  label={`Reaction ${index + 1}`}
-                                  labelVisibility="screen-reader"
-                                  required
-                                >
-                                  <SlackEmojiPicker
-                                    id={`${reactionInputId}-${index}`}
-                                    value={rule.reaction}
-                                    taken={used.filter(name => name !== rule.reaction)}
-                                    glyphs={emoji.glyphs}
-                                    custom={emoji.custom}
-                                    onValueChange={reaction => update({ reaction })}
-                                    onKeyDown={escapeClosedList}
-                                  />
-                                </Field>
-                              </div>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                aria-label={`Remove :${rule.reaction}: reaction`}
-                                onClick={() =>
-                                  setDraft(previous => ({
-                                    ...previous,
-                                    reactions: previous.reactions.filter((_, at) => at !== index),
-                                  }))
-                                }
-                              >
-                                <CloseIcon aria-hidden="true" />
-                              </Button>
-                            </div>
-                            <Field
-                              required
-                              label="Prompt"
-                              counter={`${rule.prompt.length.toLocaleString()} / ${maxReactionPromptLength.toLocaleString()}`}
-                              error={error}
-                            >
-                              <Textarea
-                                data-reaction-prompt={index}
-                                rows={3}
-                                value={rule.prompt}
-                                placeholder="For example: Add this message to Support tickets with a one-line summary, then reply in the thread with a link to the row."
-                                onChange={event => update({ prompt: event.target.value })}
-                              />
-                            </Field>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                  {draft.reactions.length < maxReactionRules && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        const reaction = nextReaction ?? starterReactions[0] ?? 'bookmark';
+              <fieldset className="space-y-3">
+                <legend className="text-sm font-medium">Reactions</legend>
+                <p className="text-sm text-muted-foreground">
+                  When anyone reacts to a message with one of these emoji, the agent follows your prompt on that message
+                  and its thread. It can use any tool it has, like adding a table row or replying in the thread.
+                </p>
+                {draft.reactions.length > 0 && (
+                  <ul className="space-y-3">
+                    {draft.reactions.map((rule, index) => {
+                      const error = showErrors ? promptError(rule.prompt) : undefined;
+                      const update = (change: Partial<SlackReactionRule>) =>
                         setDraft(previous => ({
                           ...previous,
-                          reactions: [...previous.reactions, { reaction, prompt: '' }],
+                          reactions: previous.reactions.map((item, at) =>
+                            at === index ? { ...item, ...change } : item,
+                          ),
                         }));
-                      }}
-                    >
-                      <AddIcon aria-hidden="true" />
-                      Add reaction
-                    </Button>
-                  )}
-                </fieldset>
-              )}
+                      return (
+                        <li key={index} className="space-y-3 rounded-lg border p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0 flex-1 sm:max-w-72">
+                              <Field
+                                id={`${reactionInputId}-${index}`}
+                                label={`Reaction ${index + 1}`}
+                                labelVisibility="screen-reader"
+                                required
+                              >
+                                <SlackEmojiPicker
+                                  id={`${reactionInputId}-${index}`}
+                                  value={rule.reaction}
+                                  taken={used.filter(name => name !== rule.reaction)}
+                                  glyphs={emoji.glyphs}
+                                  custom={emoji.custom}
+                                  onValueChange={reaction => update({ reaction })}
+                                  onKeyDown={escapeClosedList}
+                                />
+                              </Field>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              aria-label={`Remove :${rule.reaction}: reaction`}
+                              onClick={() =>
+                                setDraft(previous => ({
+                                  ...previous,
+                                  reactions: previous.reactions.filter((_, at) => at !== index),
+                                }))
+                              }
+                            >
+                              <CloseIcon aria-hidden="true" />
+                            </Button>
+                          </div>
+                          <Field
+                            required
+                            label="Prompt"
+                            counter={`${rule.prompt.length.toLocaleString()} / ${maxReactionPromptLength.toLocaleString()}`}
+                            error={error}
+                          >
+                            <Textarea
+                              data-reaction-prompt={index}
+                              rows={3}
+                              value={rule.prompt}
+                              placeholder="For example: Add this message to Support tickets with a one-line summary, then reply in the thread with a link to the row."
+                              onChange={event => update({ prompt: event.target.value })}
+                            />
+                          </Field>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                {draft.reactions.length < maxReactionRules && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const reaction = nextReaction ?? starterReactions[0] ?? 'bookmark';
+                      setDraft(previous => ({
+                        ...previous,
+                        reactions: [...previous.reactions, { reaction, prompt: '' }],
+                      }));
+                    }}
+                  >
+                    <AddIcon aria-hidden="true" />
+                    Add reaction
+                  </Button>
+                )}
+              </fieldset>
               {failure && (
                 <Alert variant="destructive">
                   <AlertDescription>

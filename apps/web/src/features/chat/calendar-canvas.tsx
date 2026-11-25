@@ -6,10 +6,8 @@ import { CalendarEventList } from '@/components/calendar-event-list';
 import { CanvasSection } from '@tulipfarm/sprout/canvas';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { useGoogleProposal } from '@/features/integrations/queries';
-import { GoogleProposalReview } from '@/features/google/proposals';
 import { calendarActionTitle, isCalendarAction } from '@/features/google/calendar-action';
 import { GoogleReadFeedback } from '@/features/google/read';
-import { useFlag } from '@/lib/feature-flags';
 import { useCanvas, useResultAttention } from './canvas-state';
 import { workspaceRoute } from '@/router';
 import { googleActionState, googleActionTitle } from '@/features/google/action-state';
@@ -71,7 +69,6 @@ export function CalendarReadCanvas({ result }: { result: CalendarHistoryResult }
 
 export function CalendarReadCard({ result }: { result: CalendarHistoryResult }) {
   const canvas = useCanvas();
-  const enabled = useFlag('google-calendar-canvas');
   const title =
     result.kind === 'events'
       ? `Calendar read · ${result.events.length} ${result.events.length === 1 ? 'event' : 'events'}`
@@ -85,24 +82,6 @@ export function CalendarReadCard({ result }: { result: CalendarHistoryResult }) 
   useEffect(() => {
     canvas.update(`calendar:${result.callId}`, { content: { kind: 'calendar-read', result } });
   }, [result, canvas.update]);
-  if (!enabled)
-    return (
-      <section aria-label="Google Calendar result" className="space-y-2">
-        {result.kind === 'events' ? (
-          <>
-            <p className="text-xs text-muted-foreground">
-              Google Calendar · Requested {new Date(result.requestedAt).toLocaleString()}
-            </p>
-            <CalendarEventList events={result.events} timeZone={Intl.DateTimeFormat().resolvedOptions().timeZone} />
-            {result.continuation === 'more-available' && (
-              <p className="text-xs text-muted-foreground">More events are available. This result shows one page.</p>
-            )}
-          </>
-        ) : (
-          <p>Calendar result unavailable. Reconnect Google and ask again.</p>
-        )}
-      </section>
-    );
   return (
     <section aria-label="Google Calendar result">
       <ResultCard
@@ -130,7 +109,6 @@ export function CalendarReadCard({ result }: { result: CalendarHistoryResult }) 
 
 export function ChatGoogleProposal({ workspaceId, proposalId }: { workspaceId: string; proposalId: string }) {
   const read = useGoogleProposal(workspaceId, proposalId);
-  const enabled = useFlag('google-calendar-canvas');
   const canvas = useCanvas();
   const proposal = read.data;
   const mutation = canvas.googleMutations[proposalId];
@@ -160,8 +138,6 @@ export function ChatGoogleProposal({ workspaceId, proposalId }: { workspaceId: s
       title,
       content: { kind: calendar ? 'calendar-action' : 'google-action', workspaceId, proposalId },
     });
-  if (calendar && !enabled)
-    return <GoogleProposalReview workspaceId={workspaceId} proposalId={proposalId} available focusOnLoad={false} />;
   return (
     <section aria-label={calendar ? 'Calendar action card' : 'Google action card'} className="space-y-3">
       {!proposal && read.busy ? (

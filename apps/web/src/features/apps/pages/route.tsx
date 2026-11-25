@@ -4,10 +4,9 @@ import { Button } from '@tulipfarm/sprout/button';
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { WindowIcon } from '@tulipfarm/icons';
-import { useFlag } from '@/lib/feature-flags';
 import { workspaceRoute } from '@/router';
 import type { AppDetail } from '../api';
-import { AppGate, AppsUnavailable, useWorkspaceAdmin } from '../app-page';
+import { AppGate, useWorkspaceAdmin } from '../app-page';
 import { AppActions, AppOverview } from '../overview';
 import { AppPageView } from './page-view';
 
@@ -53,12 +52,11 @@ export function LivePage({ app, slug, missing }: { app: AppDetail; slug: string 
  * or is turned off. A public app shows its details.
  */
 export function AppHomePage() {
-  const enabled = useFlag('app-hosting');
   return (
     <PageContent>
       <AppGate>
         {app =>
-          enabled && app.kind === 'private' ? (
+          app.kind === 'private' ? (
             <LivePage app={app} slug={undefined} missing={<AppOverview app={app} />} />
           ) : (
             <AppOverview app={app} />
@@ -70,11 +68,10 @@ export function AppHomePage() {
 }
 
 export function AppPagePage() {
-  const enabled = useFlag('app-hosting');
   const { page } = useParams({ strict: false }) as { page?: string };
   return (
     <PageContent>
-      {enabled ? <AppGate>{app => <LivePage app={app} slug={page} />}</AppGate> : <AppsUnavailable />}
+      <AppGate>{app => <LivePage app={app} slug={page} />}</AppGate>
     </PageContent>
   );
 }

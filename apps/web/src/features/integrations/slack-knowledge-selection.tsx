@@ -7,7 +7,6 @@ import { Label } from '@tulipfarm/sprout/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 import { SearchField } from '@tulipfarm/sprout/search-field';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
-import { useFlag } from '@/lib/feature-flags';
 import { useFeatureRead, useFeatureScope } from '@/lib/query';
 import {
   SlackKnowledgeError,
@@ -107,7 +106,6 @@ export function SlackSelectionForm({
         ? [...current.filter(value => value.conversationId !== item.conversationId), item]
         : current.filter(value => value.conversationId !== item.conversationId),
     );
-  const automatic = useFlag('default-connection-knowledge');
   const matching = (items: readonly SlackConversationChoice[]) =>
     items.filter(item => slackChannelMatches(item.title, query));
   return (
@@ -117,9 +115,7 @@ export function SlackSelectionForm({
         Choose up to 50 conversations you belong to.{' '}
         {accountId
           ? 'Only your selected conversations will be indexed for this account.'
-          : automatic
-            ? 'Automatic Knowledge covers channels you’ve joined; add direct or group messages here.'
-            : 'Linking Slack does not import your whole workspace.'}{' '}
+          : 'Automatic Knowledge covers channels you’ve joined; add direct or group messages here.'}{' '}
         Only messages after the chosen date are imported, one thread per document.
       </p>
       <form

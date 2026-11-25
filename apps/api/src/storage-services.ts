@@ -21,7 +21,6 @@ import { createGitHubSubscriptions } from '@tulipfarm/workflows/github-triggers'
 import { createGoogleWorkspaceService } from '@tulipfarm/google-workspace';
 import { createGmailHeartbeat } from '@tulipfarm/google-workspace/heartbeat';
 import { configuredSkillRuntimeProbe } from '@tulipfarm/workflow-snippets/client';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import type { createTemporalClient } from './temporal.ts';
 import { createAgentWork, registerAgentSweeps } from './agent-sweeps.ts';
 import { createFilesService } from './files-service.ts';
@@ -116,8 +115,7 @@ export function createStorageServices(app: FastifyInstance, dependencies: Storag
     skillRuntimeAvailable: configuredSkillRuntimeProbe(),
   });
   const conversations = createConversations(runtime, chatSkills, {
-    pinTurn: async (tx, workspaceId, familyId) =>
-      (await isFeatureEnabled('images', null, { id: workspaceId })) ? pinTurnImageModels(tx, familyId) : null,
+    pinTurn: (tx, _workspaceId, familyId) => pinTurnImageModels(tx, familyId),
     retryTurn: resumeOwnerEndedPlans,
   });
   return {

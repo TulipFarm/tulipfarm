@@ -547,7 +547,7 @@ badge. Managers open a row into a `Sheet` editor (agent `Combobox`, replies
 message; the table truncates each prompt to one line with the full text as a title);
 others get a read-only note. Manager rows end in a ghost chevron button, hidden
 in stacked cards. Closing a changed editor asks "Leave these edits?" like the
-record editor. The reaction column, filter and editor section show only with the `slack-reactions` flag. Saves send the row's version, confirm in a `role="status"` line at
+record editor. Saves send the row's version, confirm in a `role="status"` line at
 the end of the toolbar (so the table doesn't shift), and a conflict offers to load the newer settings.
 
 Workflows follow the same directory pattern. The list has a `SearchField`, an

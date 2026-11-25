@@ -28,7 +28,7 @@ import { chatGptPlan, registerChatGptPlan } from './chatgpt-plan.ts';
 import { registerTokenPlan, tokenPlan } from './token-plans.ts';
 import { createDevPlans } from './dev-plans.ts';
 import type { TokenPlan, TokenPlanProvider } from '@tulipfarm/integrations/token-plans';
-import { planModelFamilyId, planProviders, type PlanProvider } from '@tulipfarm/config';
+import { planModelFamilyId, type PlanProvider } from '@tulipfarm/config';
 import { registerSubscriptions } from './subscriptions.ts';
 import { createSubscriptions } from '@tulipfarm/integrations/subscriptions';
 import { createPlanUsage } from './plan-usage.ts';
@@ -45,7 +45,7 @@ import { registerViewer } from './viewer.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { registerPublicGuide } from './public-guide.ts';
 import { getLastWorkspace, getWorkspace } from '@tulipfarm/workspaces/store';
-import { isFeatureEnabled, registerFlagSubjectResolver } from '@tulipfarm/observability';
+import { registerFlagSubjectResolver } from '@tulipfarm/observability';
 import { apiFlagSubjects } from './flag-subjects.ts';
 import { registerFeatureFlags } from './feature-flags.ts';
 import { protectExpectedSession } from './authenticated-routes.ts';
@@ -161,7 +161,7 @@ export function buildApp(
         const channels = socialChannels(social, runtime);
         const posts = socialPosts(social, channels, runtime);
         if (posts) business.addHook('onClose', posts.close);
-        registerSocialAccounts(business, auth.auth, social, undefined, channels, posts?.posts ?? null);
+        registerSocialAccounts(business, auth.auth, social, channels, posts?.posts ?? null);
         const github = githubAccounts(runtime, process.env, defaultKnowledge.hook);
         const planFor = (provider: TokenPlanProvider) =>
           options.tokenPlans && provider in options.tokenPlans
@@ -178,10 +178,7 @@ export function buildApp(
           runtime && github ? createGitHubBotGrants(runtime) : undefined,
           // One GitHub sign-in also connects Copilot when the account has a plan and no other Copilot connection works.
           copilot
-            ? async (workspaceId, userId, accountId) => {
-                if (await isFeatureEnabled(planProviders.copilot.flag, null, { id: workspaceId }))
-                  await copilot.useGitHubAccount(workspaceId, userId, accountId, true);
-              }
+            ? (workspaceId, userId, accountId) => copilot.useGitHubAccount(workspaceId, userId, accountId, true)
             : undefined,
         );
         const chatGpt = chatGptPlan(runtime, auth.pool);

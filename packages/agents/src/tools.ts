@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import { evalLimits } from './eval-case-contracts.ts';
 import { createFiles, FileError, fileRole, requireFileManager } from '@tulipfarm/files';
 import { fileNameSchema } from '@tulipfarm/files/contracts';
@@ -189,7 +188,7 @@ import {
 } from './agent-trigger-workflows.ts';
 import { agentTriggerSchema, unattendedTrigger } from './setup-contracts.ts';
 import { createAgentTasks } from './tasks.ts';
-import { createAgentPlans, planCompatibility, planDocumentsEnabled } from './plans.ts';
+import { createAgentPlans, planCompatibility } from './plans.ts';
 import { createFileShareDrafts } from './file-share-drafts.ts';
 import { findMembers } from './members.ts';
 import { createPlanRuntime, coordinatorAdmission } from './plan-runtime.ts';
@@ -618,10 +617,6 @@ const chatFileTools: ReadonlySet<string> = new Set([
   'files.share',
   'members.find',
 ]);
-const planSharingUnavailable = {
-  error: 'unavailable',
-  instruction: 'Sharing from chat is not available in this workspace. The human can share the file from Files.',
-};
 const chatKnowledgeTools: ReadonlySet<string> = new Set([
   'knowledge.list',
   'knowledge.add',
@@ -1088,7 +1083,7 @@ function admittedToolSchemas(access: ToolAccess) {
           ? admittedMcpTools(access.mcp).includes(schema.shape.tool.value)
           : access.kind === 'chat'
             ? (access.earlierMessages === true || schema.shape.tool.value !== 'conversation.messages.read') &&
-              // Both need the images flag; chatFiles is offered only under it.
+              // Both need chatFiles, offered only where the turn reads files.
               (access.chatFiles === true ||
                 (schema.shape.tool.value !== 'files.read' && schema.shape.tool.value !== 'images.generate'))
             : (access.task === true ||
@@ -1944,14 +1939,12 @@ export function createChatTools(
           expectedWorkflowRevision: linkedWorkflow?.revision ?? null,
           expectedWorkflowGeneration: linkedWorkflow?.generation ?? null,
           tools: toolNameSchema.options.map(name => ({ name, runtimes: supportedAgentToolRuntimes(name) })),
-          evals: (await isFeatureEnabled('agent-evals', null, { id: workspaceId }).catch(() => false))
-            ? {
-                available: true,
-                maximumCases: evalLimits.draftCases,
-                instruction:
-                  'Include evalCases in agents.draft: 3 to 5 starter test cases that check the job this agent was set up for. The person adds them to the agent’s Evals after saving.',
-              }
-            : { available: false, instruction: 'Workspace Evals are off. Do not include evalCases.' },
+          evals: {
+            available: true,
+            maximumCases: evalLimits.draftCases,
+            instruction:
+              'Include evalCases in agents.draft: 3 to 5 starter test cases that check the job this agent was set up for. The person adds them to the agent’s Evals after saving.',
+          },
           models: {
             choices: models,
             instruction:
@@ -2021,11 +2014,7 @@ export function createChatTools(
       case 'agents.draft': {
         if (!context.origin) throw new AccessDenied();
         const { evalCases, ...rest } = call.input;
-        // Starter test cases only reach the card where workspace Evals are on.
-        const input =
-          evalCases?.length && (await isFeatureEnabled('agent-evals', null, { id: workspaceId }).catch(() => false))
-            ? { ...rest, evalCases }
-            : rest;
+        const input = evalCases?.length ? { ...rest, evalCases } : rest;
         const origin = context.origin;
         const proposal = {
           kind: 'agent' as const,
@@ -2807,7 +2796,6 @@ export function createChatTools(
       }
       case 'files.share': {
         if (!context.origin) throw new AccessDenied();
-        if (!(await planDocumentsEnabled(workspaceId))) return planSharingUnavailable;
         const subjects = call.subjects.map(({ kind, id }) => ({ kind, id }));
         if (new Set(subjects.map(subject => subject.id)).size !== subjects.length)
           return {
@@ -3447,7 +3435,6 @@ export function createChatTools(
     const origin = context.origin;
     const links = chatFiles?.turnFiles.links;
     if (!origin || !chatFiles || !links || telemetryRuntime !== 'chat') return null;
-    if (!(await chatFiles.turnFiles.enabled(context.workspaceId))) return null;
     const probe = await links.fetch(call.url, context.signal ?? new AbortController().signal);
     if (probe.kind !== 'file') return null;
     // A public-web result keeps the chat's web receipt; the file block rides beside it.
@@ -3672,9 +3659,9 @@ export function createChatTools(
         privateResults,
       });
     const keep = chatFiles?.turnFiles.apiFiles?.keep;
-    // Bodies are kept only where files.read can read them back: an app chat with the images reader on.
+    // Bodies are kept only where files.read can read them back: an app chat.
     const files: ApiCallFiles | undefined =
-      origin && keep && telemetryRuntime === 'chat' && (await chatFiles.turnFiles.enabled(context.workspaceId))
+      origin && keep && telemetryRuntime === 'chat'
         ? {
             save: async file =>
               (await keep(context.workspaceId, {

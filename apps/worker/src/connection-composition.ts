@@ -6,7 +6,6 @@ import type { ConnectionServices } from '@tulipfarm/agents/connections';
 import type { ConversationRuntime } from '@tulipfarm/conversations/runtime';
 import { searchRegistry } from '@tulipfarm/workspace-mcp-transport';
 import { mcpHost } from '@tulipfarm/extensions';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 
 /** The person's own Google, GitHub and Atlassian accounts, and the MCP registry, read for `integrations.*` chat tools. */
 export function chatConnections(
@@ -26,8 +25,7 @@ export function chatConnections(
       env.WORKSPACE_MCP_ADMISSION_ENABLED === 'true'
         ? {
             search: (query, signal) => searchRegistry(query, signal ? { signal } : {}),
-            hosted: async workspaceId =>
-              !!mcpHost() && (await isFeatureEnabled('hosted-mcp', null, { id: workspaceId })),
+            hosted: async () => !!mcpHost(),
           }
         : undefined,
     google: optional(() => createGoogleWorkspaceService({ runtime, keyring: integrationCredentialKeyring(env) })),

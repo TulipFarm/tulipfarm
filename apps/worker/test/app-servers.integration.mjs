@@ -194,7 +194,6 @@ test('server apps publish, roll back, resize and reconcile against an app host',
     async *workspaces() {
       yield workspace.id;
     },
-    enabled: async () => true,
   });
   const work = options(host);
   const builds = createAppActivities(work);
@@ -597,7 +596,6 @@ test('reconcile removes every host of a deleted workspace without opening it', {
     async *workspaces() {
       for (const id of opened.keys()) if (!deleted.has(id)) yield id;
     },
-    enabled: async () => true,
   };
   const builds = createAppActivities(work);
   const servers = createAppServerActivities(work);
@@ -723,7 +721,6 @@ test('the server output sweep keeps what can run again and discards the rest', {
     async *workspaces() {
       yield workspace.id;
     },
-    enabled: async () => true,
   };
   const builds = createAppActivities(work);
   const servers = createAppServerActivities(work);
@@ -902,7 +899,6 @@ test('server drafts run on draft hosts that reconcile keeps while used and retir
     async *workspaces() {
       yield workspace.id;
     },
-    enabled: async () => true,
   };
   const builds = createAppActivities(work);
   const servers = createAppServerActivities(work);

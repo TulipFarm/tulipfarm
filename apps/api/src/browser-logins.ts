@@ -15,7 +15,7 @@ import {
   shareBrowserLoginSchema,
   type BrowserLogins,
 } from '@tulipfarm/browser/logins';
-import { errorAttributes, isFeatureEnabled } from '@tulipfarm/observability';
+import { errorAttributes } from '@tulipfarm/observability';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import type { registerAuth } from './auth.ts';
 import { authConfig } from './auth.ts';
@@ -65,8 +65,6 @@ function schema(
   };
 }
 
-class FeatureOff extends Error {}
-
 /**
  * Browser logins: a member saves a chat browser's signed-in state for a site, loads saved logins they may use into
  * a chat's browser, and renames, shares and deletes them. Nobody can read a saved state back.
@@ -78,11 +76,9 @@ export function registerBrowserLogins(
     chats: { read(workspaceId: string, userId: string, chatId: string): Promise<{ projectId: string | null }> };
     client: BrowserHostClient | undefined;
     logins: BrowserLogins;
-    enabled?: (workspaceId: string) => Promise<boolean>;
   },
 ) {
   const { chats, client, logins } = dependencies;
-  const enabled = dependencies.enabled ?? (workspaceId => isFeatureEnabled('browser-use', null, { id: workspaceId }));
   app.register(async routes => {
     validation.install(routes, true);
     const user = authenticateRoutes(routes, dependencies.auth, { origin: () => authConfig().webOrigin });
@@ -91,7 +87,6 @@ export function registerBrowserLogins(
     });
     routes.setErrorHandler((error, request, reply) => {
       if (requestBoundaryError(error, reply)) return;
-      if (error instanceof FeatureOff) return reply.code(404).send({ error: 'browser-logins-unavailable' });
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'browser-login-not-found' });
       if (error instanceof StorageUnavailableError)
         return reply.code(503).send({ error: 'browser-logins-unavailable' });
@@ -114,15 +109,11 @@ export function registerBrowserLogins(
       return reply.code(503).send({ error: 'browser-logins-unavailable' });
     });
 
-    async function gate(workspaceId: string) {
-      if (!(await enabled(workspaceId))) throw new FeatureOff();
-    }
     /**
      * Authorizes the chat's owner and returns its browser session. Project members can watch a project chat's browser,
      * so logins are saved and loaded only in a member's own chats outside projects.
      */
     async function session(request: FastifyRequest, params: { workspaceId: string; chatId: string }) {
-      await gate(params.workspaceId);
       const chat = await chats.read(params.workspaceId, user(request), params.chatId);
       if (chat.projectId) throw new BrowserLoginError('project-chat');
       if (!client) throw new BrowserHostError('unavailable', 'Browser use is not configured');
@@ -146,7 +137,6 @@ export function registerBrowserLogins(
       async request => {
         const { workspaceId } = workspaceParams.parse(request.params);
         const { site } = listQuery.parse(request.query);
-        await gate(workspaceId);
         if (!logins.capabilities().enabled) return { enabled: false, logins: [] };
         return { enabled: true, logins: await logins.list(workspaceId, user(request), site ? { site } : {}) };
       },
@@ -166,7 +156,6 @@ export function registerBrowserLogins(
       },
       async request => {
         const { workspaceId, loginId } = loginParams.parse(request.params);
-        await gate(workspaceId);
         return logins.rename(workspaceId, user(request), loginId, renameBody.parse(request.body).name);
       },
     );
@@ -185,7 +174,6 @@ export function registerBrowserLogins(
       },
       async request => {
         const { workspaceId, loginId } = loginParams.parse(request.params);
-        await gate(workspaceId);
         return logins.share(workspaceId, user(request), loginId, request.body);
       },
     );
@@ -197,7 +185,6 @@ export function registerBrowserLogins(
       },
       async request => {
         const { workspaceId, loginId } = loginParams.parse(request.params);
-        await gate(workspaceId);
         await logins.remove(workspaceId, user(request), loginId);
         return { ok: true as const };
       },

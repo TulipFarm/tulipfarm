@@ -141,18 +141,11 @@ test('Google operations select only the trusted human integration and protect ex
   }
 });
 
-test('Meet creation is flagged, bound to the exact proposal and never repeated', async () => {
+test('Meet creation is bound to the exact proposal and never repeated', async () => {
   const f = await fixture();
   try {
     await f.connect();
-    let enabled = false;
-    const operations = f.make({
-      calendarFeaturesEnabled: async (workspaceId, userId) => {
-        assert.equal(workspaceId, f.workspace.id);
-        assert.equal(userId, f.member.userId);
-        return enabled;
-      },
-    });
+    const operations = f.make();
     const commandId = randomUUID();
     const operation = {
       kind: 'calendar.events.create',
@@ -165,9 +158,6 @@ test('Meet creation is flagged, bound to the exact proposal and never repeated',
       },
     };
     const propose = () => operations.propose(f.workspace.id, f.member.userId, { commandId, operation });
-    await assert.rejects(propose(), /calendar-feature-disabled/);
-    assert.equal(f.calls.length, 0);
-    enabled = true;
     const proposal = await propose();
     assert.equal(proposal.operation.event.conferenceData.createRequest.requestId, commandId);
     assert.deepEqual(await propose(), proposal);
@@ -176,10 +166,6 @@ test('Meet creation is flagged, bound to the exact proposal and never repeated',
       /operation-approval-required/,
     );
     await f.decide(proposal);
-    enabled = false;
-    await assert.rejects(operations.execute(f.workspace.id, f.member.userId, proposal.id), /calendar-feature-disabled/);
-    assert.equal(f.calls.length, 0);
-    enabled = true;
     f.provider(async () =>
       Response.json({
         ...proposal.operation.event,
@@ -191,7 +177,6 @@ test('Meet creation is flagged, bound to the exact proposal and never repeated',
     assert.equal(receipt.status, 'succeeded');
     assert.equal(new URL(f.calls[0].url).searchParams.get('conferenceDataVersion'), '1');
     assert.equal(JSON.parse(f.calls[0].init.body).conferenceData.createRequest.requestId, commandId);
-    enabled = false;
     assert.deepEqual(await operations.execute(f.workspace.id, f.member.userId, proposal.id), receipt);
     assert.equal(f.calls.length, 1);
   } finally {

@@ -78,7 +78,6 @@ import { pinnedImageModels } from '@tulipfarm/conversations/turn-image-models';
 import { pinnedImageChoice } from '@tulipfarm/agents/image-generation';
 import { chatSkills } from '@tulipfarm/agents/chat-skills';
 import { createReplyTextPublisher } from '@tulipfarm/conversations/event-publisher';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import { browserSessionId, createBrowserHostClient } from '@tulipfarm/browser';
 import { createBrowserLogins } from '@tulipfarm/browser/logins';
 import { browserHostConfiguration } from '@tulipfarm/config/browser-host';
@@ -331,11 +330,6 @@ export function meteredReply(
               references,
             )
         : undefined;
-    // A Slack turn is laid out as Block Kit, with follow-ups and forms. The flag only changes what the model is asked
-    // for; saved layouts always render.
-    const generativeUi = await observeChatDetail('feature-flag', () =>
-      isFeatureEnabled('generative-ui', null, { id: fence.workspaceId }),
-    );
     const context = observeChatDetailSync('render', () => [
       ...projectReminder(project),
       ...(destinations
@@ -350,7 +344,7 @@ export function meteredReply(
         ? [
             {
               role: 'user' as const,
-              text: `Server note: your answer is posted in a Slack thread. Slack shows a card with the values of each row you create or update, so confirm a row change in one short sentence without listing its values. ${generativeUi ? 'Lay the answer out with slack_render; when the user must choose, offer buttons.' : 'Choice buttons are not available here; when the user must choose, ask with a short numbered list.'}`,
+              text: `Server note: your answer is posted in a Slack thread. Slack shows a card with the values of each row you create or update, so confirm a row change in one short sentence without listing its values. Lay the answer out with slack_render; when the user must choose, offer buttons.`,
             },
           ]
         : []),
@@ -364,9 +358,9 @@ export function meteredReply(
       ? undefined
       : ({ step, text }: { step: number; text: string }) => publisher.update(step, text);
     const progress: ToolInferenceContext['progress'] = update => publisher.progress(update);
-    const layout = generativeUi ? (externalContext ? { slack: { interactive: true } } : true) : undefined;
+    const layout = externalContext ? { slack: { interactive: true } } : true;
     const layoutPreview: ToolInferenceContext['layoutPreview'] =
-      project || layout !== true ? undefined : ({ step, json }) => publisher.layout(step, json);
+      project || externalContext ? undefined : ({ step, json }) => publisher.layout(step, json);
     const subagentPool = observeChatDetailSync('subagent-pool', () => createSubagentPool());
     let delegations = 0;
     // A coding run uses the member's own plan and GitHub account, so only in their own chat in the app.
@@ -375,16 +369,12 @@ export function meteredReply(
     const browserHost = browserHostConfiguration();
     const browser =
       requester && !externalContext && !project && browserHost
-        ? (await observeChatDetail('feature-flag', () =>
-            isFeatureEnabled('browser-use', null, { id: fence.workspaceId }),
-          ))
-          ? {
-              client: createBrowserHostClient(browserHost),
-              imageInput: routeCapabilities(validatedRoute).imageInput,
-              secrets: chatBrowserSecrets(secretServices),
-              meter: chatBrowserMeter(runtime),
-            }
-          : undefined
+        ? {
+            client: createBrowserHostClient(browserHost),
+            imageInput: routeCapabilities(validatedRoute).imageInput,
+            secrets: chatBrowserSecrets(secretServices),
+            meter: chatBrowserMeter(runtime),
+          }
         : undefined;
     const appChat =
       requester && !externalContext && !project
@@ -566,7 +556,7 @@ export function meteredReply(
         timeZone,
         mcp && requester && !externalContext
           ? {
-              ...(layout ? { layout } : {}),
+              layout,
               priorCalls,
               priorToolCalls,
               priorFileResults,
@@ -605,7 +595,7 @@ export function meteredReply(
               ...(session.catalog ? { catalog: session.catalog } : {}),
             }
           : {
-              ...(layout ? { layout } : {}),
+              layout,
               priorCalls,
               priorToolCalls,
               priorFileResults,
@@ -764,24 +754,23 @@ export function createConversationActivities(
               })
             : undefined;
           const keep = turnFiles?.apiFiles?.keep;
-          const files =
-            keep && (await turnFiles.enabled(context.workspaceId))
-              ? {
-                  save: async (file: Parameters<ApiCallFiles['save']>[0]) =>
-                    (await keep(context.workspaceId, {
-                      conversationId: context.conversationId,
-                      turnId: context.turnId,
-                      callId: context.callId,
-                      membershipId: context.actor.membershipId,
-                      filename: file.name,
-                      mediaType: file.mediaType,
-                      bytes: file.bytes,
-                      sourceUrl: file.private ? null : publicSourceUrl(file.url),
-                    }))
-                      ? { source: context.callId }
-                      : null,
-                }
-              : undefined;
+          const files = keep
+            ? {
+                save: async (file: Parameters<ApiCallFiles['save']>[0]) =>
+                  (await keep(context.workspaceId, {
+                    conversationId: context.conversationId,
+                    turnId: context.turnId,
+                    callId: context.callId,
+                    membershipId: context.actor.membershipId,
+                    filename: file.name,
+                    mediaType: file.mediaType,
+                    bytes: file.bytes,
+                    sourceUrl: file.private ? null : publicSourceUrl(file.url),
+                  }))
+                    ? { source: context.callId }
+                    : null,
+              }
+            : undefined;
           const resumed = await resumeApiCall(context.runtime, context.workspaceId, context.callId, {
             secrets: held && {
               resolve: held.resolve,

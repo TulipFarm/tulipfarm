@@ -83,7 +83,6 @@ async function previewFor(t, options = {}) {
     role: 'edit',
     host: { state: 'ready', hostRef: 'host-1' },
     app: true,
-    enabled: true,
     failing: false,
   };
   const calls = { targets: 0, connects: 0 };
@@ -93,7 +92,6 @@ async function previewFor(t, options = {}) {
       shellOrigin,
       redeem: async () => null,
       session: async (previewKey, token) => (previewKey === key && token === 'token-1' ? session : null),
-      enabled: async () => access.enabled,
       async target() {
         calls.targets += 1;
         if (access.failing) throw new Error('connect ECONNREFUSED');
@@ -206,7 +204,6 @@ test("a draft's server never gets a request handle, even for an app whose live r
   const apps = {
     domain: 'apps.tulipfarm.test',
     route: async () => ({ workspaceId: session.workspaceId, appId, route: null }),
-    enabled: async () => true,
     host: {},
     liveRequests: {
       store: {
@@ -311,9 +308,6 @@ test('the next request after access is lost is denied', async t => {
   access.app = false;
   assert.equal((await call(port)).status, 404);
 
-  access.app = true;
-  access.enabled = false;
-  assert.equal((await call(port)).status, 404);
   assert.equal(upstream.requests, 1);
   assert.equal(upstream.sockets, 0);
 });

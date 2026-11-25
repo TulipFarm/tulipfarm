@@ -129,7 +129,7 @@ hierarchy scope; this was not verified against a live site.
 
 ## Automatic Knowledge
 
-With `default-connection-knowledge` on, the first successful personal REST Knowledge
+The first successful personal REST Knowledge
 consent with `read:jira-work` or `read:page:confluence` also creates owner-only sources for
 every visible Jira project or Confluence space on each approved site, current content only;
 see [automatic integration Knowledge](../../docs/knowledge-defaults-delivery.md). MCP tools never trigger indexing, and the Integrations sheet

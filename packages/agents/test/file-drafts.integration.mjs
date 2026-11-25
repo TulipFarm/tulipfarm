@@ -177,12 +177,7 @@ test('chat finds, renames, moves, trashes and restores files only after the huma
   assert.equal(JSON.stringify(unseen).includes('Hidden'), false, 'an item the human cannot see is never named');
 });
 
-test('chat lists every team with its people, without plan documents, and hides people the asker cannot see', async t => {
-  const flagsOff = process.env.FEATURE_FLAGS_OFF;
-  process.env.FEATURE_FLAGS_OFF = 'plan-documents';
-  t.after(() =>
-    flagsOff === undefined ? delete process.env.FEATURE_FLAGS_OFF : (process.env.FEATURE_FLAGS_OFF = flagsOff),
-  );
+test('chat lists every team with its people and hides people the asker cannot see', async t => {
   const { db, w, tool, table } = await setup(t);
   const [{ id: mine }] = (
     await db.platform.query(`SELECT id FROM ${table('tf_memberships')} WHERE user_id=$1`, [w.userId])
@@ -237,7 +232,7 @@ test('chat lists every team with its people, without plan documents, and hides p
     ],
   );
   const asAdmin = await tool({ tool: 'members.find' });
-  assert.equal(asAdmin.error, undefined, 'the lookup does not depend on plan documents');
+  assert.equal(asAdmin.error, undefined);
   assert.deepEqual(
     asAdmin.pendingInvitations.map(invite => [invite.email, invite.status, invite.teams]),
     [[pendingEmail, 'pending', [{ name: 'Ops', role: 'member' }]]],

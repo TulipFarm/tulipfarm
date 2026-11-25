@@ -242,7 +242,6 @@ export function createGitHubKnowledge({
   clock = systemClock,
   now = () => clock.now(),
   telemetry = knowledgeTelemetry,
-  gate,
   parseDocument = parseKnowledgeDocument,
   sync = {},
 }: {
@@ -1186,7 +1185,6 @@ export function createGitHubKnowledge({
    * sources keep their backoff.
    */
   async function due(workspaceId: string, changes?: GitHubKnowledgeChanges): Promise<GitHubKnowledgeWork[]> {
-    const held = gate ? await gate(workspaceId) : [];
     return transaction(
       workspaceId,
       async tx => {
@@ -1211,8 +1209,7 @@ export function createGitHubKnowledge({
           .parse(
             (
               await tx.client.query(
-                `SELECT g.source_id,g.generation FROM ${table(tx, 'github_sources')} g JOIN ${table(tx, 'sources')} s ON s.id=g.source_id WHERE s.state='active' AND g.lease_token IS NULL AND g.next_attempt_at<=clock_timestamp() AND NOT g.source_id=ANY($1::uuid[]) ORDER BY g.next_attempt_at,g.source_id LIMIT 20`,
-                [held],
+                `SELECT g.source_id,g.generation FROM ${table(tx, 'github_sources')} g JOIN ${table(tx, 'sources')} s ON s.id=g.source_id WHERE s.state='active' AND g.lease_token IS NULL AND g.next_attempt_at<=clock_timestamp() ORDER BY g.next_attempt_at,g.source_id LIMIT 20`,
               )
             ).rows,
           );
@@ -1768,7 +1765,6 @@ export function createGitHubKnowledge({
     denyMcpEgress();
     const work = githubKnowledgeWorkSchema.parse(value);
     const token = randomUUID();
-    if (gate && (await gate(work.workspaceId)).includes(work.sourceId)) return { disposition: 'stale' };
     const claimed = await transaction(
       work.workspaceId,
       async tx => {

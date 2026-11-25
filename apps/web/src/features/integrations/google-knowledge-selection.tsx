@@ -7,7 +7,6 @@ import { Label } from '@tulipfarm/sprout/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 import { SearchField } from '@tulipfarm/sprout/search-field';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
-import { useFlag } from '@/lib/feature-flags';
 import { useFeatureRead, useFeatureScope } from '@/lib/query';
 import {
   GoogleKnowledgeError,
@@ -109,14 +108,13 @@ export function GoogleSelectionForm({
   const discoveryReady = discovery.state.kind === 'ready' && !discovery.state.error && !discovery.state.data.blocked;
   const busy = command.state.kind === 'sending';
   const choiceLabel = kind === 'gmail' ? 'Gmail scope' : kind === 'shared-drive' ? 'Shared drive' : 'Folder';
-  const automatic = useFlag('default-connection-knowledge');
   return (
     <section aria-label="Select Google source" className="space-y-4 border-t pt-4">
       <h4 className="text-base font-medium">Select Google source</h4>
       <p className="text-sm text-muted-foreground">
         {kind === 'gmail'
           ? 'Choose a label or your whole mailbox within a date range. Gmail stays private to you.'
-          : `Choose My Drive, one folder, or a shared drive. ${accountId ? 'Only this selection will be indexed for this account.' : automatic ? 'This adds a source; it does not narrow Automatic Knowledge.' : 'Connecting Google does not import anything until you save a source.'}`}
+          : `Choose My Drive, one folder, or a shared drive. ${accountId ? 'Only this selection will be indexed for this account.' : 'This adds a source; it does not narrow Automatic Knowledge.'}`}
       </p>
       <form
         noValidate

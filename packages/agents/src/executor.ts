@@ -139,8 +139,6 @@ type Options = {
 /** The cloud browser of agents' runs. */
 export type TaskBrowser = {
   client: BrowserHostClient;
-  /** Whether browser use is on in the workspace now. */
-  enabled(workspaceId: string): Promise<boolean>;
   /** The secrets `browser.signIn` types, held by the run; absent while secrets are turned off. */
   secrets?:
     | ((holder: { workspaceId: string; actor: HumanActor; origin: TaskSecretOrigin }) => BrowserSecrets)
@@ -212,10 +210,7 @@ async function requireIssueAccess(
 export function createAgentExecutor(options: Options) {
   const runtime = withTaskTelemetry(options.runtime);
   const store = createAgentStore(runtime, options.externalGuard);
-  async function taskFileLinks(workspaceId: string) {
-    const reading = options.reading;
-    return reading?.links && (await reading.enabled(workspaceId)) ? reading.links : undefined;
-  }
+  const taskFileLinks = options.reading?.links;
   async function captureExternalSources(tx: Transaction, ids: ExecutionIds, actor: HumanActor, call: ToolCall) {
     if (
       !(await tx.client.query(`SELECT 1 FROM ${relation(tx, 'tf_slack_agent_turns')} WHERE run_id=$1`, [ids.runId]))
@@ -297,10 +292,10 @@ export function createAgentExecutor(options: Options) {
         }
         return failure ? ('failed' as const) : status;
       });
-    if (!browser || !(await browser.enabled(ids.workspaceId)))
+    if (!browser)
       return settle('completed', {
         error: 'browser-unavailable',
-        instruction: 'Browser use is turned off in this workspace. Finish without the browser and say why.',
+        instruction: 'Browser use is not available here. Finish without the browser and say why.',
       });
     if (call.tool === 'browser.handoff' && task.waitingUntil) {
       const deadline = Date.parse(task.waitingUntil);
@@ -680,8 +675,7 @@ export function createAgentExecutor(options: Options) {
                   return 'completed';
                 }
                 if (row.call.tool === 'images.generate') {
-                  if (!options.images || !(await imageGenerationOffered(ids.workspaceId, definition.tools)))
-                    throw new AccessDenied();
+                  if (!options.images || !imageGenerationOffered(definition.tools)) throw new AccessDenied();
                   if (row.status === 'completed' || row.status === 'failed' || row.status === 'blocked')
                     return row.status;
                   if (
@@ -1071,7 +1065,7 @@ export function createAgentExecutor(options: Options) {
                       break;
                     case 'files.read':
                       result = await readTaskApiFile(
-                        (await taskFileLinks(ids.workspaceId))?.objects,
+                        taskFileLinks?.objects,
                         { workspaceId: ids.workspaceId, taskId: binding!.task_id },
                         row.call,
                         taskFileResultChars,
@@ -1374,13 +1368,12 @@ export function createAgentExecutor(options: Options) {
             const access = options.taskSecrets;
             const held = access?.held?.({ workspaceId: ids.workspaceId, actor: outcome.actor, origin });
             const reach = { secrets: held, privateHosts: access?.privateHosts };
-            const links = await taskFileLinks(ids.workspaceId);
             const task = { workspaceId: ids.workspaceId, taskId: origin.taskId, callId: ids.callId };
-            const files = links
+            const files = taskFileLinks
               ? {
                   files: {
                     save: async (file: Parameters<typeof keepTaskApiFile>[2]) =>
-                      (await keepTaskApiFile(links, task, file)) ? { source: ids.callId } : null,
+                      (await keepTaskApiFile(taskFileLinks, task, file)) ? { source: ids.callId } : null,
                   },
                 }
               : {};

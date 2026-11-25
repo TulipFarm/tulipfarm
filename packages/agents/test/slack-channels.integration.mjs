@@ -209,7 +209,6 @@ for (const scenario of [
       model,
       publicDelivery: scenario === 'public',
     });
-    process.env.FEATURE_FLAG_SLACK_REACTIONS = 'true';
     const inbox = createSlackInbox(f.runtime, channels.freeze, channels.react);
     const { default: Fastify } = await import('../../../apps/api/node_modules/fastify/fastify.js');
     const { registerSlack } = await import('../../../apps/api/dist/slack.js');

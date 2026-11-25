@@ -28,7 +28,7 @@ import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import type { registerAuth } from './auth.ts';
 import { requestBoundaryError } from './security.ts';
 import { modelAvailability } from '@tulipfarm/agents/model-policy';
-import { flaggedOffModels, plansOn } from '@tulipfarm/agents/model-availability';
+import { catalogPlans, flaggedOffModels } from '@tulipfarm/agents/model-availability';
 import { creditPricing } from '@tulipfarm/extensions';
 
 export type ModelCatalogEligibility = (input: {
@@ -94,14 +94,11 @@ export type PlanUsage = NonNullable<ModelCatalogFamily['planUsage']>;
 export type PlanModelChoice = { slug: string; label: string; usage?: PlanUsage };
 type OfferedPlanModel = { provider: PlanProvider; slug: string; label: string; usage?: PlanUsage | undefined };
 
-/** The plan models of plans whose feature flag, such as `copilot-plan`, is on for the workspace. */
-async function offeredPlanModels(
-  transaction: Parameters<typeof plansOn>[0],
-  planModels: Map<string, OfferedPlanModel>,
-) {
+/** The plan models of plans the catalog offers. */
+function offeredPlanModels(planModels: Map<string, OfferedPlanModel>) {
   if (!planModels.size) return planModels;
-  const on = await plansOn(transaction);
-  return new Map([...planModels].filter(([, model]) => on.has(model.provider)));
+  const offered = catalogPlans();
+  return new Map([...planModels].filter(([, model]) => offered.has(model.provider)));
 }
 
 function projectCatalog(
@@ -319,7 +316,7 @@ export function registerModelCatalog(app: FastifyInstance, dependencies: ModelCa
             snapshot.modelFamilyPaused ?? (() => false),
             disabled,
             await flaggedOffModels(transaction),
-            await offeredPlanModels(transaction, planModels),
+            offeredPlanModels(planModels),
           );
         });
       },

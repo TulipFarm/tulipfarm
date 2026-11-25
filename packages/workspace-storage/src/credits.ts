@@ -377,31 +377,27 @@ export async function recoverReplyHolds(tx: Transaction, flowId: string, current
 // only the given flows: its totals and rows exclude every other flow and workspace knowledge spend.
 // Without a view, the ledger is returned unchanged.
 /**
- * Who the summary is for. With `images` (the workspace `images` flag), image generations and image recognitions are
- * their own activities, `image-generation` and `image-recognition`, instead of the chat, agent or Knowledge ingestion
- * spend they are charged as.
+ * Who the summary is for. Image generations and image recognitions are their own activities, `image-generation` and
+ * `image-recognition`, instead of the chat, agent or Knowledge ingestion spend they are charged as.
  */
-export type CreditUsageView = ({ kind: 'workspace' } | { kind: 'personal'; flowIds: readonly string[] }) & {
-  images?: boolean;
-};
+export type CreditUsageView = { kind: 'workspace' } | { kind: 'personal'; flowIds: readonly string[] };
 
 // The common migrations that add tf_image_generations (0015) and tf_recognition_receipts (0016).
 const imageGenerationsVersion = 15;
 const recognitionReceiptsVersion = 16;
 
-/** The ledger's activity for a row of `tf_credit_usage` aliased `u`, with image generations named when asked. */
-function usageActivity(tx: Transaction & { commonVersion?: number }, view: CreditUsageView | undefined) {
-  if (!view?.images || (tx.commonVersion ?? 0) < imageGenerationsVersion) return { activity: 'u.activity', join: '' };
+/** The ledger's activity for a row of `tf_credit_usage` aliased `u`, with image generations named. */
+function usageActivity(tx: Transaction & { commonVersion?: number }) {
+  if ((tx.commonVersion ?? 0) < imageGenerationsVersion) return { activity: 'u.activity', join: '' };
   return {
     activity: `CASE WHEN g.usage_id IS NULL THEN u.activity ELSE 'image-generation' END`,
     join: `LEFT JOIN (SELECT DISTINCT usage_id FROM ${table(tx, 'tf_image_generations')} WHERE usage_id IS NOT NULL) g ON g.usage_id=u.id`,
   };
 }
 
-/** The activity for a Knowledge attempt aliased `a`, with image recognitions named when asked. */
-function knowledgeActivity(tx: Transaction & { commonVersion?: number }, view: CreditUsageView | undefined) {
-  if (!view?.images || (tx.commonVersion ?? 0) < recognitionReceiptsVersion)
-    return { activity: `'knowledge-' || a.purpose`, join: '' };
+/** The activity for a Knowledge attempt aliased `a`, with image recognitions named. */
+function knowledgeActivity(tx: Transaction & { commonVersion?: number }) {
+  if ((tx.commonVersion ?? 0) < recognitionReceiptsVersion) return { activity: `'knowledge-' || a.purpose`, join: '' };
   return {
     activity: `CASE WHEN r.credit_attempt_id IS NULL THEN 'knowledge-' || a.purpose ELSE 'image-recognition' END`,
     join: `LEFT JOIN ${table(tx, 'tf_recognition_receipts')} r ON r.credit_attempt_id=a.id`,
@@ -427,7 +423,7 @@ export async function creditSummary(tx: Transaction & { commonVersion?: number }
   const periodStart = `(((clock_timestamp() AT TIME ZONE 'UTC')::date-29)::timestamp AT TIME ZONE 'UTC')`;
   if (view?.kind === 'personal') {
     const flows = [...view.flowIds];
-    const kind = usageActivity(tx, view);
+    const kind = usageActivity(tx);
     const activity = `SELECT u.model_id,u.agent_id,${kind.activity} AS activity,u.charged,u.created_at AS occurred_at FROM ${table(tx, 'tf_credit_usage')} u ${kind.join} WHERE u.created_at >= ${periodStart} AND u.flow_id = ANY($1::text[])`;
     const balance = await creditBalance(tx);
     const [ownRows, { days, breakdown, series }] = await pipelinedAll(tx.client, [
@@ -450,8 +446,8 @@ export async function creditSummary(tx: Transaction & { commonVersion?: number }
     });
   }
   const knowledgeGroup = `SELECT known,pending,unfunded FROM ${table(tx, 'tf_knowledge_credit_group')} WHERE version=1`;
-  const kind = usageActivity(tx, view);
-  const knowledge = knowledgeActivity(tx, view);
+  const kind = usageActivity(tx);
+  const knowledge = knowledgeActivity(tx);
   const usage = `
     SELECT u.model_id,u.agent_id,${kind.activity} AS activity,u.charged,u.created_at AS occurred_at FROM ${table(tx, 'tf_credit_usage')} u ${kind.join} WHERE u.created_at >= ${periodStart}
     UNION ALL

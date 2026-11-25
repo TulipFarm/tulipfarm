@@ -64,7 +64,7 @@ export const agentModelInputSchema = z
     procedures: resolvedProceduresSchema.optional(),
     task: z.literal(true).optional(),
     runtime: z.literal('slackChannel').optional(),
-    /** Offers `images.generate` when the agent lists it; set only while the images flag is on. */
+    /** Offers `images.generate` when the agent lists it. */
     images: z.literal(true).optional(),
     personalMemory: z
       .strictObject({
@@ -83,7 +83,7 @@ export const agentModelInputSchema = z
     taskFiles: z.literal(true).optional(),
     /** Offers `secrets.request` and `secrets.list` to a task; set only while secrets are on. */
     taskSecrets: z.literal(true).optional(),
-    /** Offers the browser tools to a task whose agent lists `browser.act`; set only while browser use is on. */
+    /** Offers the browser tools to a task whose agent lists `browser.act`; set only while a browser host is configured. */
     browser: z.literal(true).optional(),
   })
   .superRefine((input, ctx) => {

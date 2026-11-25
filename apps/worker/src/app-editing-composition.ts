@@ -21,13 +21,11 @@ import {
 import { temporalConnectionOptions } from '@tulipfarm/config/temporal';
 import type { ConversationRuntime } from '@tulipfarm/conversations/runtime';
 import { turnRequester } from '@tulipfarm/conversations/turn-requester';
-import { errorAttributes, isFeatureEnabled, log } from '@tulipfarm/observability';
+import { errorAttributes, log } from '@tulipfarm/observability';
 import { objectStorageClient } from '@tulipfarm/workspaces/object-storage';
 import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
 
 type AppRepositories = ReturnType<typeof appRepositories>;
-
-const appHosting = (workspaceId: string) => isFeatureEnabled('app-hosting', null, { id: workspaceId });
 
 /** How this worker builds apps: starting a queued build, and the builder that runs build commands, if it has one. */
 export type AppBuilds = {
@@ -52,7 +50,7 @@ export function createAppBuildDispatcher() {
   return { start, close: () => connection.close() };
 }
 
-/** The app tools of an app's own chat, on when the workspace has the `app-hosting` flag. */
+/** The app tools of an app's own chat. */
 export function workerAppEditing(
   runtime: ConversationRuntime,
   repositories: AppRepositories,
@@ -62,7 +60,6 @@ export function workerAppEditing(
     runtime.transaction(workspaceId, commonCompatibility, tx => action({ client: tx.client, schema: tx.schema }));
   return createAppEditing(runtime, {
     repositories,
-    enabled: appHosting,
     async requestBuild({ workspaceId, appId, commit, requestedBy }) {
       const repository = await repositories.open(
         workspaceId,
@@ -92,9 +89,9 @@ export function workerAppEditing(
   });
 }
 
-/** The page tools of a private app's own chat, on when the workspace has the `app-hosting` flag. */
+/** The page tools of a private app's own chat. */
 export function workerAppPages(runtime: ConversationRuntime): AppPages {
-  return createAppPages(runtime, { enabled: appHosting });
+  return createAppPages(runtime);
 }
 
 /** App editing for a worker whose apps bucket is configured. */
@@ -136,9 +133,7 @@ export async function finishAppTurn(
   work: { readonly workspaceId: string; readonly conversationId: string; readonly turnId: string },
 ) {
   try {
-    // Page tools are only offered with app hosting on, so without it a turn holds no page lease to free.
-    const pages = editing.pages && (await appHosting(work.workspaceId)) ? editing.pages : undefined;
-    if (!editing.apps && !pages) return;
+    if (!editing.apps && !editing.pages) return;
     const settled = await runtime.transaction(work.workspaceId, commonCompatibility, async tx => {
       const [turn] = (
         await tx.client.query(
@@ -156,7 +151,7 @@ export async function finishAppTurn(
     const finished = await editing.apps?.finishTurn(chat, settled.outcome);
     if (finished && 'error' in finished)
       log('warn', 'activity', 'call_failed', { operation: 'app.finish-turn', 'error.code': finished.error });
-    await pages?.finishTurn(chat);
+    await editing.pages?.finishTurn(chat);
   } catch (error) {
     log('warn', 'activity', 'call_failed', { ...errorAttributes(error), operation: 'app.finish-turn' });
   }

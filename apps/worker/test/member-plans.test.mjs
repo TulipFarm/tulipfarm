@@ -3,7 +3,6 @@ import { test } from 'node:test';
 import { memberPlans } from '../src/member-plans.ts';
 
 test('own tells whether the plan tried last belongs to the caller', async () => {
-  process.env.FEATURE_FLAG_CLAUDE_PLAN = 'true';
   const candidate = owner => ({ connectionId: `c-${owner}`, ownerMembershipId: owner, models: [], disabled: [] });
   const plans = await memberPlans({
     provider: 'claude',
@@ -27,7 +26,6 @@ test('own tells whether the plan tried last belongs to the caller', async () => 
 });
 
 test('a usage-limit refusal marks the plan limited and the plan that answers clears its own limit', async () => {
-  process.env.FEATURE_FLAG_CLAUDE_PLAN = 'true';
   const calls = [];
   const candidate = owner => ({ connectionId: `c-${owner}`, ownerMembershipId: owner, models: [], disabled: [] });
   const plans = await memberPlans({
@@ -57,7 +55,6 @@ test('a usage-limit refusal marks the plan limited and the plan that answers cle
 });
 
 test('a turn asks for plans on for chats, with the plan its member picked first', async () => {
-  process.env.FEATURE_FLAG_CLAUDE_PLAN = 'true';
   const asked = [];
   await memberPlans({
     provider: 'claude',

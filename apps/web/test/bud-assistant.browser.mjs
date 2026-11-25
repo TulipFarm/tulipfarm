@@ -107,7 +107,7 @@ test(
           path = new URL(request.url()).pathname;
         let json,
           status = 200;
-        if (path === '/v1/feature-flags') return route.fulfill({ json: { 'bud-quick-chat': true } });
+        if (path === '/v1/feature-flags') return route.fulfill({ json: {} });
         if (path === '/v1/auth/get-session')
           json = {
             session: { id: 'bud-session', userId: 'ada' },

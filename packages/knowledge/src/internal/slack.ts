@@ -123,7 +123,6 @@ export function createSlackKnowledge({
   provider,
   clock = systemClock,
   now = () => clock.now(),
-  gate,
 }: { runtime: Runtime; provider: SlackCorpusProvider } & EngineClock) {
   const corpus = createSlackCorpusAdapter(provider);
   async function requireExternalSource(tx: AuthorizationTransaction, actor: HumanActor, source: ExternalSource) {
@@ -674,7 +673,6 @@ export function createSlackKnowledge({
     return renew(workspaceId, userId, uuidSchema.parse(sourceId), 20, false);
   }
   async function due(workspaceId: string): Promise<SlackKnowledgeWork[]> {
-    const held = gate ? await gate(workspaceId) : [];
     return transaction(workspaceId, 'write', async tx => {
       await tx.client.query(
         `UPDATE ${table(tx, 'slack_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL WHERE lease_until<=clock_timestamp()`,
@@ -684,8 +682,7 @@ export function createSlackKnowledge({
         .parse(
           (
             await tx.client.query(
-              `SELECT g.source_id,g.generation FROM ${table(tx, 'slack_sources')} g JOIN ${table(tx, 'sources')} s ON s.id=g.source_id WHERE s.state IN ('active','paused') AND g.lease_token IS NULL AND g.next_attempt_at<=clock_timestamp() AND NOT g.source_id=ANY($1::uuid[]) ORDER BY g.next_attempt_at,g.source_id LIMIT 20`,
-              [held],
+              `SELECT g.source_id,g.generation FROM ${table(tx, 'slack_sources')} g JOIN ${table(tx, 'sources')} s ON s.id=g.source_id WHERE s.state IN ('active','paused') AND g.lease_token IS NULL AND g.next_attempt_at<=clock_timestamp() ORDER BY g.next_attempt_at,g.source_id LIMIT 20`,
             )
           ).rows,
         );
@@ -943,7 +940,6 @@ export function createSlackKnowledge({
     denyMcpEgress();
     const work = slackKnowledgeWorkSchema.parse(value);
     const token = randomUUID();
-    if (gate && (await gate(work.workspaceId)).includes(work.sourceId)) return { disposition: 'stale' };
     const claim = await transaction(work.workspaceId, 'write', async tx => {
       const s = await source(tx, work.sourceId);
       if (s.generation !== work.generation || !['active', 'paused'].includes(s.state)) return 'stale' as const;

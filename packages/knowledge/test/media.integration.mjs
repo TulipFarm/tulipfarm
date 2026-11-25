@@ -53,7 +53,6 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const scopes = [];
     const calls = [];
     let available = false;
-    let images = false;
     let answer = () => ({ kind: 'recognized', text: 'Plant tulips in October.', description: 'A planting calendar' });
     const recognizer = {
       modelId: 'vision-test',
@@ -68,7 +67,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       files,
       recognition: async scope => {
         scopes.push(scope);
-        return { ...(available ? { recognizer } : {}), ...(images ? { images } : {}) };
+        return available ? { recognizer } : {};
       },
       recognitionAvailable: async () => available,
     });
@@ -178,8 +177,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.ok(!(await api.due(one.id)).some(item => item.revisionId === failing.commandId));
     });
 
-    await t.test('under the images flag a Files image is searchable by text only the image holds', async () => {
-      images = true;
+    await t.test('a Files image is searchable by text only the image holds', async () => {
       answer = () => ({ kind: 'recognized', text: 'Greenhouse vents open at 28 degrees.', description: '' });
       const photo = await upload('Greenhouse sign', await png(120, 80, '#4a6'), 'sign.png', 'image/png');
       assert.equal(await process(photo.commandId), 'ready');
@@ -228,27 +226,24 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.ok(kept.includes(unheld), 'a younger recognition is kept whether or not a file holds it');
     });
 
-    await t.test(
-      'under the images flag a scan refused for credits is retried, not marked ocr-unavailable',
-      async () => {
-        answer = () => {
-          throw new MediaRecognitionUnavailable('Credits are exhausted');
-        };
-        await db.platform.query(`DELETE FROM ${table('recognitions')}`);
-        const unpaid = await upload('Unpaid scan', await pdf(['scan', 'scan']));
-        assert.equal(await process(unpaid.commandId), 'failed');
-        const waiting = await api.get(one.id, member.userId, unpaid.documentId);
-        assert.equal(waiting.parsing, 'failed');
-        assert.equal(waiting.failure, 'credits');
-        const requeued = (await api.due(one.id)).find(item => item.revisionId === unpaid.commandId);
-        assert.ok(requeued, 'the sweep queues it again while a model reads images');
+    await t.test('a scan refused for credits is retried, not marked ocr-unavailable', async () => {
+      answer = () => {
+        throw new MediaRecognitionUnavailable('Credits are exhausted');
+      };
+      await db.platform.query(`DELETE FROM ${table('recognitions')}`);
+      const unpaid = await upload('Unpaid scan', await pdf(['scan', 'scan']));
+      assert.equal(await process(unpaid.commandId), 'failed');
+      const waiting = await api.get(one.id, member.userId, unpaid.documentId);
+      assert.equal(waiting.parsing, 'failed');
+      assert.equal(waiting.failure, 'credits');
+      const requeued = (await api.due(one.id)).find(item => item.revisionId === unpaid.commandId);
+      assert.ok(requeued, 'the sweep queues it again while a model reads images');
 
-        answer = () => ({ kind: 'recognized', text: 'Water the bulbs weekly.', description: '' });
-        await api.acknowledge(requeued);
-        assert.equal((await api.process(requeued)).disposition, 'ready');
-        assert.equal((await api.get(one.id, member.userId, unpaid.documentId)).parsing, 'ready');
-      },
-    );
+      answer = () => ({ kind: 'recognized', text: 'Water the bulbs weekly.', description: '' });
+      await api.acknowledge(requeued);
+      assert.equal((await api.process(requeued)).disposition, 'ready');
+      assert.equal((await api.get(one.id, member.userId, unpaid.documentId)).parsing, 'ready');
+    });
   } finally {
     await runtime?.close();
     await db.close();

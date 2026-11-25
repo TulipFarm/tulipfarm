@@ -7,7 +7,6 @@ import { createWorkspaceRuntime, qualified, commonCompatibility } from '@tulipfa
 import { workspaceTableMigrations } from '../../workspaces/dist/table-migrations.js';
 import {
   createDefaultKnowledge,
-  createDefaultKnowledgeGate,
   createGitHubKnowledge,
   GitHubCorpusError,
   recordDefaultKnowledgeIntent,
@@ -123,12 +122,9 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           docs: { 'README.md': 'readme', 'docs/guide.md': 'guide', 'vendor/lib.md': 'vendored' },
           issues: { 1: { at: old } },
         });
-      // The feature flag is off for everyone: GitHub must neither be held by the gate nor skipped by defaults.
-      const disabled = async () => false;
-      const gate = createDefaultKnowledgeGate({ runtime, enabled: disabled });
-      const github = createGitHubKnowledge({ runtime, provider: fake.provider, gate });
+      const github = createGitHubKnowledge({ runtime, provider: fake.provider });
       let clock = new Date(Date.now() + 1000);
-      const defaults = createDefaultKnowledge({ runtime, engines: { github }, enabled: disabled, now: () => clock });
+      const defaults = createDefaultKnowledge({ runtime, engines: { github }, now: () => clock });
       const record = () =>
         runtime.transaction(ws.id, commonCompatibility, tx =>
           recordDefaultKnowledgeIntent(tx, {
@@ -178,12 +174,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           { intentId: migrated.id, created: false },
           'the migration backfill and a later connect agree on one intent per account',
         );
-        assert.equal((await defaults.due(ws.id)).length, 1, 'the disabled flag does not hold GitHub');
+        assert.equal((await defaults.due(ws.id)).length, 1);
         for (const work of await defaults.due(ws.id)) await defaults.process(work);
         const [intent] = (await defaults.list(ws.id, ws.userId)).items;
         assert.equal(intent.syncState, 'ready');
         sourceId = intent.sources[0].sourceId;
-        assert.deepEqual(await gate(ws.id), [], 'the automatic GitHub source is never held');
         const source = await listed();
         assert.deepEqual(source.selection, { scope: 'all', repositories: [], kinds: allKinds });
         await sync();

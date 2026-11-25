@@ -2,14 +2,13 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied } from '@tulipfarm/access';
 import { actorDirectorySchema, createActorDirectory } from '@tulipfarm/agents/actors';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import { commonCompatibility, StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { authConfig, type registerAuth } from './auth.ts';
 import { authenticateRoutes } from './authenticated-routes.ts';
 import { requestBoundaryError } from './security.ts';
 import { routeValidation } from './route-validation.ts';
 
-/** The people and agents a row's actor fields can name. Behind the assignable-tasks flag. */
+/** The people and agents a row's actor fields can name. */
 export function registerActors(
   app: FastifyInstance,
   dependencies: {
@@ -47,9 +46,8 @@ export function registerActors(
           response: { 200: validation.json(actorDirectorySchema), ...errors },
         },
       },
-      async request => {
+      request => {
         const { workspaceId } = params.parse(request.params);
-        if (!(await isFeatureEnabled('assignable-tasks', null, { id: workspaceId }))) throw new AccessDenied();
         return service.read(workspaceId, user(request), commonCompatibility);
       },
     );

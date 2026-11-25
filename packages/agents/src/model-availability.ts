@@ -4,7 +4,6 @@ import {
   loadModelCatalog,
   planModelOfFamily,
   planProviderNames,
-  planProviders,
   readModelCatalog,
   type PlanProvider,
   type ServedModelCatalog,
@@ -16,7 +15,7 @@ import { modelAvailabilitySchema } from './model-policy-contracts.ts';
 
 /**
  * The workspace's model availability. `familyIds` may name models a member's plan lists that the catalog does not, such
- * as one an agent prefers; each is included while its plan is on for the workspace.
+ * as one an agent prefers; each is included while the catalog offers its plan.
  */
 export async function modelAvailability(tx: AgentTransaction, familyIds: readonly string[] = []) {
   const rows = z
@@ -31,7 +30,7 @@ export async function modelAvailability(tx: AgentTransaction, familyIds: readonl
   // Every catalog model and image model, served or not, so workspace choices survive a missing key.
   const { catalog } = readModelCatalog();
   const flaggedOff = await flaggedOffModels(tx);
-  const plans = await plansOn(tx);
+  const plans = catalogPlans();
   const offered = (provider: string) => !isPlanProvider(provider) || plans.has(provider);
   const named = new Set([...catalog.models, ...catalog.imageModels].map(family => family.id));
   const planListed = familyIds.filter(id => {
@@ -41,7 +40,6 @@ export async function modelAvailability(tx: AgentTransaction, familyIds: readonl
   return [
     ...[...catalog.models, ...catalog.imageModels]
       .filter(family => !flaggedOff.has(family.id))
-      // A plan model whose feature flag, such as chatgpt-plan, is off is not offered at all.
       .filter(family => !('routes' in family) || family.routes.every(route => offered(route.provider)))
       .map(
         family =>
@@ -82,18 +80,12 @@ export async function flaggedOffModels(tx: Pick<AgentTransaction, 'schema'>): Pr
   return new Set(flagged.filter(model => !on.has(model.featureFlag!)).map(model => model.id));
 }
 
-/** The member plans, such as ChatGPT, that the catalog offers and whose feature flag is on for the transaction's workspace. */
-export async function plansOn(tx: Pick<AgentTransaction, 'schema'>): Promise<Set<PlanProvider>> {
+/** The member plans, such as ChatGPT, that the catalog offers. */
+export function catalogPlans(): Set<PlanProvider> {
   const { catalog } = readModelCatalog();
-  const listed = planProviderNames.filter(plan =>
-    catalog.models.some(model => model.routes.some(route => route.provider === plan)),
+  return new Set(
+    planProviderNames.filter(plan => catalog.models.some(model => model.routes.some(route => route.provider === plan))),
   );
-  if (!listed.length) return new Set();
-  const workspace = { id: workspaceIdFromSchema(tx.schema) };
-  const on = await Promise.all(
-    listed.map(async plan => ((await isFeatureEnabled(planProviders[plan].flag, null, workspace)) ? plan : null)),
-  );
-  return new Set(on.filter(plan => plan !== null));
 }
 
 /**

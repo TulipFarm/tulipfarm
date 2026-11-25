@@ -101,7 +101,7 @@ is read through `tf_knowledge_slack_eligible_for()`, whose plan is cached per se
 
 ## Automatic Knowledge
 
-With `default-connection-knowledge` on, completing a member link also creates owner-only
+Completing a member link also creates owner-only
 sources for joined public and private channels over a rolling 90-day window; see
 [automatic integration Knowledge](../../docs/knowledge-defaults-delivery.md). Installation alone does not qualify. TulipFarm never joins
 channels, and DMs and group messages stay opt-in.

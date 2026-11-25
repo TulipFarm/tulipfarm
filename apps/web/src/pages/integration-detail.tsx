@@ -55,7 +55,6 @@ import { mcpPagePrefix } from '@/features/integrations/mcp-page';
 import { ToolGroup } from '@/features/integrations/tools-list';
 import { McpAppPage } from '@/features/workspace-mcp/app-page';
 import { WorkspaceRefreshNotice } from '@/features/integrations/workspace-refresh';
-import { useFlag } from '@/lib/feature-flags';
 import { integrationDetailRoute, workspaceRoute } from '@/router';
 
 export function IntegrationDetailPage() {
@@ -397,7 +396,6 @@ function Overview({
   onTab: (tab: IntegrationTab) => void;
   tabs: IntegrationTab[];
 }) {
-  const copilot = useFlag('copilot-plan');
   const info = app.provider === 'soon' ? null : providers[app.provider];
   const granted = status?.kind === 'connected' || status?.kind === 'off' ? status.granted : undefined;
   const needed =
@@ -421,7 +419,7 @@ function Overview({
               {[
                 ...(app.can ?? []),
                 ...info.can,
-                ...(app.provider === 'github-personal' && copilot
+                ...(app.provider === 'github-personal'
                   ? [{ text: 'Use your Copilot plan for chat models and coding' }]
                   : []),
               ].map(item => {
@@ -563,7 +561,7 @@ function KnowledgeFact({
   workspaceId: string;
   onTab: (tab: IntegrationTab) => void;
 }) {
-  const { enabled, read } = useDefaultKnowledge(workspaceId);
+  const { read } = useDefaultKnowledge(workspaceId);
   const product = defaultKnowledgeProducts[app.id];
   const items = read.state.kind === 'ready' ? read.state.data.items.filter(intent => intent.product === product) : [];
   const counts = items.reduce(
@@ -592,11 +590,11 @@ function KnowledgeFact({
   );
   return (
     <Fact label="Knowledge">
-      {enabled && read.state.kind === 'loading' ? (
+      {read.state.kind === 'loading' ? (
         <span className="block w-32">
           <Skeleton />
         </span>
-      ) : enabled && counts.total > 0 ? (
+      ) : counts.total > 0 ? (
         <div className="space-y-2 pt-1">
           <KnowledgeMeter counts={counts} compact />
           {link}
@@ -626,7 +624,6 @@ function Accounts({
   onChanged: () => void;
   primary: ReactNode;
 }) {
-  const copilot = useFlag('copilot-plan');
   const empty = (status?.kind === 'off' || status?.kind === 'unavailable') && (
     <StatePanel
       kind="empty"
@@ -663,9 +660,7 @@ function Accounts({
     return (
       <div className="space-y-10">
         <GitHubAccounts workspaceId={workspaceId} workspaceSlug={slug} onChanged={onChanged} />
-        {copilot && (
-          <ProviderPanel workspaceId={workspaceId} provider="copilot" header={false} nested="Copilot plans" />
-        )}
+        <ProviderPanel workspaceId={workspaceId} provider="copilot" header={false} nested="Copilot plans" />
       </div>
     );
   if (app.provider === 'atlassian' || app.provider === 'trello')
@@ -734,7 +729,6 @@ function Advanced({
   refreshing: boolean;
   onRefresh: () => void;
 }) {
-  const automatic = useFlag('default-connection-knowledge');
   const maker = makerOf(app);
   const granted = status?.kind === 'connected' ? status.granted : undefined;
   return (
@@ -742,11 +736,7 @@ function Advanced({
       {app.provider === 'github-personal' && (
         <AdvancedRow
           title="Privacy"
-          description={`Your integration is private to you. Workspace admins cannot use it. ${
-            automatic
-              ? 'New integrations import content only you can search.'
-              : 'Importing content into Knowledge is a separate choice in the Knowledge tab.'
-          }`}
+          description="Your integration is private to you. Workspace admins cannot use it. New integrations import content only you can search."
         />
       )}
       {granted && granted.length > 0 && (

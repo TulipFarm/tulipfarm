@@ -121,7 +121,7 @@ test('agent model choices list enabled chat models with their price and mark the
   assert.deepEqual(choices[0].usdPerMillionTokens, { input: 3, output: 15 });
 });
 
-test("a plan model is offered only while its plan's workspace flag is on", async t => {
+test('a plan model the catalog offers is available, but never to a specialist step', async t => {
   const plans = JSON.stringify({
     ...JSON.parse(catalog),
     models: [
@@ -137,13 +137,9 @@ test("a plan model is offered only while its plan's workspace flag is on", async
     MODEL_CATALOG: plans,
     ANTHROPIC_API_KEY: 'test-placeholder',
     OPENAI_API_KEY: 'test-placeholder',
-    FEATURE_FLAG_CHATGPT_PLAN: 'false',
   });
   // A model the member's plan lists but the catalog does not name, such as one an agent prefers.
   const listed = 'chatgpt-gpt-6--1-sol';
-  assert.equal(await modelFamilyEnabled(tx, 'chatgpt-luna'), false);
-  assert.equal(await modelFamilyEnabled(tx, listed), false);
-  process.env.FEATURE_FLAG_CHATGPT_PLAN = 'true';
   assert.equal(await modelFamilyEnabled(tx, 'chatgpt-luna'), true);
   assert.equal(await modelFamilyEnabled(tx, listed), true);
   assert.ok((await modelAvailability(tx, [listed])).some(row => row.familyId === listed));

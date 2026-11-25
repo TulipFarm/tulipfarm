@@ -1,4 +1,3 @@
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import { loadModelCatalog, type ServedModelCatalog } from '@tulipfarm/config';
 import type { ImageGenerator, ImageModelChoice } from '@tulipfarm/conversations/image-outputs';
 import { turnImageModelsSchema, type TurnImageModels } from '@tulipfarm/conversations/turn-image-models';
@@ -80,9 +79,9 @@ export async function runImageModels(
   return stored ? turnImageModelsSchema.parse(stored) : null;
 }
 
-/** Whether a run should be offered `images.generate`: the agent lists it and the images flag is on. */
-export async function imageGenerationOffered(workspaceId: string, tools: readonly string[]) {
-  return tools.includes('images.generate') && (await isFeatureEnabled('images', null, { id: workspaceId }));
+/** Whether a run should be offered `images.generate`: the agent lists it. */
+export function imageGenerationOffered(tools: readonly string[]) {
+  return tools.includes('images.generate');
 }
 
 /**

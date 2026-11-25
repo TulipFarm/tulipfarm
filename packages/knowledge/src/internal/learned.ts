@@ -137,14 +137,11 @@ const sameTitle = (a: string, b: string) => clean(a).toLowerCase() === clean(b).
 
 /**
  * Saves business facts Bud learned from a member's own chat or task into that member's Knowledge, as Learned notes only
- * they can see. `enabled` is the workspace's kill switch.
+ * they can see.
  */
-export function createLearnedKnowledge(
-  options: Pick<LocalKnowledgeOptions, 'runtime' | 'files'> & { enabled(workspaceId: string): Promise<boolean> },
-) {
+export function createLearnedKnowledge(options: Pick<LocalKnowledgeOptions, 'runtime' | 'files'>) {
   const local = createLocalKnowledge({ runtime: options.runtime, files: options.files });
   return {
-    enabled: options.enabled,
     /** The member's most recently learned entries, for the model to update rather than repeat. */
     entries(workspaceId: string, userId: string): Promise<LearnedEntry[]> {
       return local.learnedEntries(workspaceId, userId, learnedLimits.shown);

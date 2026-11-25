@@ -215,7 +215,7 @@ export type UnreadableReason = 'unsupported' | 'failed' | 'too-large' | 'downloa
 
 /** A file's text for a reader outside chat, or why there is none. */
 export type Extraction = { representation: 'text' | 'extracted'; text: string } | { failure: 'unsupported' | 'failed' };
-/** Turns a downloaded file into text; tasks under the `images` flag supply one that recognises images. */
+/** Turns a downloaded file into text; tasks supply one that recognises images. */
 export type FileExtract = (file: { name: string; mediaType: string; bytes: Uint8Array }) => Promise<Extraction>;
 
 const extract: FileExtract = async file => {

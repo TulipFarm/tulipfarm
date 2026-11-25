@@ -35,7 +35,6 @@ test('an app chat turn edits its app, and only a turn that completes saves', { t
   const endpoint = await objects.storage.client.config.endpoint();
   const env = {
     ANTHROPIC_API_KEY: 'synthetic-test-key',
-    FEATURE_FLAG_APP_HOSTING: 'true',
     TULIPFARM_OBJECT_STORAGE_APPS_BUCKET: objects.storage.bucket,
     TULIPFARM_OBJECT_STORAGE_ENDPOINT: `http://${endpoint.hostname}:${endpoint.port}`,
     TULIPFARM_OBJECT_STORAGE_ACCESS_KEY_ID: 'test',
@@ -178,15 +177,10 @@ test('an app chat turn edits its app, and only a turn that completes saves', { t
     assert.deepEqual(await savedFiles(saved), { 'index.html': '<h1>Orders</h1>' });
   });
 
-  await t.test('a chat that edits no app, or a workspace without app hosting, gets no app tools', async () => {
+  await t.test('a chat that edits no app gets no app tools', async () => {
     const plain = await turn(await chat(null), () => answer('Hello.'));
     assert.equal(plain.result, 'completed');
     assert.deepEqual(appToolNames(plain.requests[0]), []);
-    process.env.FEATURE_FLAG_APP_HOSTING = 'false';
-    const off = await turn(await chat(appId), () => answer('Hello.'));
-    process.env.FEATURE_FLAG_APP_HOSTING = 'true';
-    assert.equal(off.result, 'completed');
-    assert.deepEqual(appToolNames(off.requests[0]), []);
   });
 
   await t.test('a private app chat turn replaces a page and frees the draft when it completes', async () => {
@@ -250,7 +244,6 @@ test('an app chat turn edits its app, and only a turn that completes saves', { t
       builder,
       credits: { available: async () => null, debit: async () => {} },
       async *workspaces() {},
-      enabled: async () => true,
     });
     const commandBuilder = { id: builder.id };
     const apps = workerAppEditing(f.runtime, appRepositories({ root: join(root, 'tools'), storage: objects.storage }), {

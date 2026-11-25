@@ -197,8 +197,7 @@ function installBudMock() {
     if (googleResponse) return googleResponse;
     if (path === '/v1/user/visit') return Response.json({ firstSession: false });
     if (path === '/v1/workspaces/bud-mock/last-used' && method === 'PUT') return new Response(null, { status: 204 });
-    // The demo exists to show Bud, so its quick chat is on here.
-    if (path === '/v1/feature-flags') return Response.json({ 'bud-quick-chat': true });
+    if (path === '/v1/feature-flags') return Response.json({});
     if (path.endsWith('/bud')) {
       if (method === 'POST') {
         const value =

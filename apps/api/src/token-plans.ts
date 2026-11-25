@@ -1,8 +1,7 @@
 import type { FastifyError, FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied, uuidSchema } from '@tulipfarm/access';
-import { loadModelCatalog, planModelName, planProviders } from '@tulipfarm/config';
-import { isFeatureEnabled } from '@tulipfarm/observability';
+import { loadModelCatalog, planModelName } from '@tulipfarm/config';
 import { integrationCredentialKeyring } from '@tulipfarm/integrations';
 import {
   copilotGitHubClient,
@@ -164,7 +163,7 @@ const statuses: Record<string, number> = {
 
 /**
  * Routes for a member's own Claude or GitHub Copilot connection, under `/workspaces/:workspaceId/<provider>/connection`.
- * Without a service, or while the workspace's feature flag for the plan is off, they answer 404 `<provider>-plan-disabled`.
+ * Without a service, they answer 404 `<provider>-plan-disabled`.
  */
 export function registerTokenPlan(
   app: FastifyInstance,
@@ -220,13 +219,6 @@ export function registerTokenPlan(
       );
       return;
     }
-    // Members can still disconnect, so turning the plan off never strands a stored token.
-    routes.addHook('preHandler', async (request, reply) => {
-      if (request.routeOptions.url?.endsWith('/disconnect')) return;
-      const { workspaceId } = request.params as { workspaceId: string };
-      if (!(await isFeatureEnabled(planProviders[provider].flag, null, { id: workspaceId })))
-        return reply.code(404).send({ error: `${provider}-plan-disabled` });
-    });
     const withDevice = <T extends object>(status: T) => ({ ...status, deviceSignIn: plan.deviceSignIn });
     routes.get(base, statusRoute, async request =>
       withDevice(await plan.status(workspaceParams.parse(request.params).workspaceId, user(request))),

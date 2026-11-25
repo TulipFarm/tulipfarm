@@ -115,7 +115,7 @@ test('agent evals in the real app', { timeout: 240_000 }, async t => {
     }
     browser = await chromium.launch();
     let activeContext;
-    async function open({ flag, tab }) {
+    async function open({ tab }) {
       await activeContext?.close();
       const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
       activeContext = context;
@@ -203,7 +203,7 @@ test('agent evals in the real app', { timeout: 240_000 }, async t => {
           json = { membershipId: membership.membershipId, people: [], teams: [] };
         else if (path.endsWith('/workspace-mcp/capabilities')) json = { enabled: false };
         else if (path.endsWith('/credits')) json = credits;
-        else if (path.endsWith('/feature-flags')) json = { 'agent-evals': flag };
+        else if (path.endsWith('/feature-flags')) json = {};
         else if (path.endsWith('/bud'))
           json = {
             conversationId: null,
@@ -224,15 +224,8 @@ test('agent evals in the real app', { timeout: 240_000 }, async t => {
       return { page, errors, state };
     }
 
-    await t.test('the Evals tab stays hidden while the flag is off', async () => {
-      const { page, errors } = await open({ flag: false, tab: 'overview' });
-      await page.getByRole('tab', { name: 'Settings', exact: true }).waitFor();
-      assert.equal(await page.getByRole('tab', { name: 'Evals', exact: true }).count(), 0);
-      assert.deepEqual(errors, []);
-    });
-
     await t.test('add a case, compare two models, then use the cheaper one', async () => {
-      const { page, errors, state } = await open({ flag: true, tab: 'evals' });
+      const { page, errors, state } = await open({ tab: 'evals' });
       const cases = page.getByRole('region', { name: 'Eval cases' });
       await cases.getByRole('button', { name: 'Add case', exact: true }).click();
       const editor = page.getByRole('dialog', { name: 'New eval case' });

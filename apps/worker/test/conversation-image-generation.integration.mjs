@@ -113,7 +113,7 @@ const imageHosts = ['api.openai.com', 'api.x.ai', 'generativelanguage.googleapis
  * A chat whose model follows `script`, one entry per model step: a list of images.generate calls (run as one step),
  * or text. Image providers answer through `draw`, which sees the provider, the request and its signal.
  */
-async function setup(t, { flag = 'true' } = {}) {
+async function setup(t) {
   const f = await conversationFixture();
   const keys = [
     'ANTHROPIC_API_KEY',
@@ -122,7 +122,6 @@ async function setup(t, { flag = 'true' } = {}) {
     'GEMINI_API_KEY',
     'MODEL_CATALOG',
     'MODEL_CATALOG_FILE',
-    'FEATURE_FLAG_IMAGES',
   ];
   const saved = Object.fromEntries(keys.map(key => [key, process.env[key]]));
   Object.assign(process.env, {
@@ -131,7 +130,6 @@ async function setup(t, { flag = 'true' } = {}) {
     XAI_API_KEY: 'xai-test-key',
     GEMINI_API_KEY: 'gemini-test-key',
     MODEL_CATALOG: catalog,
-    FEATURE_FLAG_IMAGES: flag,
   });
   delete process.env.MODEL_CATALOG_FILE;
   t.after(async () => {
@@ -638,17 +636,6 @@ test('a provider refusal is not charged and returns no provider text', async t =
   assert.equal(usage.charged, '0');
   assert.equal(usage.provider_pico_usd, '0');
   assert.deepEqual(await f.rows(`SELECT id FROM ${f.table('tf_files')} WHERE kind='file'`), []);
-});
-
-test('with the images flag off, images.generate is not a tool and nothing is generated', async t => {
-  const f = await setup(t, { flag: 'false' });
-  const chatId = await f.chat();
-  const { results, requests } = await f.turn(chatId, [[{ prompt: 'A tulip', channel: 'instagram' }], 'I cannot.']);
-  assert.ok(requests.every(request => !JSON.stringify(request.tools ?? []).includes('images_generate')));
-  assert.ok(typeof results[0] === 'string' || !('images' in results[0]));
-  assert.match(JSON.stringify(results[0]), /Unknown tool|not available|not permitted/i);
-  assert.equal(f.state.images.length, 0);
-  assert.deepEqual(await f.imageUsage(), []);
 });
 
 /** Resolves once `check` returns a truthy value, polling the database-backed state every 50ms. */

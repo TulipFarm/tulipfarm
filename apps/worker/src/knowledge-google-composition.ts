@@ -1,12 +1,10 @@
 import { createGoogleWorkspaceService } from '@tulipfarm/google-workspace';
 import { createGoogleCorpusProvider } from '@tulipfarm/google-workspace/corpus';
 import { createGoogleKnowledge } from '@tulipfarm/knowledge';
-import type { KnowledgeSourceGate } from '@tulipfarm/knowledge';
 import { createGoogleKnowledgeActivities } from './knowledge-google-activities.ts';
 
 export function createWorkerGoogleKnowledge(dependencies: {
   runtime: Parameters<typeof createGoogleKnowledge>[0]['runtime'];
-  gate?: KnowledgeSourceGate;
   googleService?: ReturnType<typeof createGoogleWorkspaceService>;
   providerFetch?: typeof fetch;
   recognition?: Parameters<typeof createGoogleKnowledge>[0]['recognition'];
@@ -23,7 +21,6 @@ export function createWorkerGoogleKnowledge(dependencies: {
         }),
       ...(dependencies.providerFetch ? { providerFetch: dependencies.providerFetch } : {}),
     }),
-    ...(dependencies.gate ? { gate: dependencies.gate } : {}),
     ...(dependencies.recognition ? { recognition: dependencies.recognition } : {}),
     ...(dependencies.recognitionAvailable ? { recognitionAvailable: dependencies.recognitionAvailable } : {}),
   });

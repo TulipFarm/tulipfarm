@@ -48,7 +48,7 @@ function model(facts = () => []) {
   };
 }
 
-async function setup(t, enabled = true) {
+async function setup(t) {
   const f = await conversationFixture();
   const reset = configureKeepPersonalMemory({ client: fakeKeep().client });
   t.after(async () => {
@@ -62,7 +62,7 @@ async function setup(t, enabled = true) {
   };
   const files = createFiles(f.runtime, { read: unavailable, putIfAbsent: unavailable, remove: unavailable });
   const knowledge = createLocalKnowledge({ runtime: f.runtime, files });
-  const learned = createLearnedKnowledge({ runtime: f.runtime, files, enabled: async () => enabled });
+  const learned = createLearnedKnowledge({ runtime: f.runtime, files });
   async function chat(text) {
     const id = randomUUID();
     await f.store.create(w.id, w.userId, { chatId: id, commandId: randomUUID() });
@@ -141,13 +141,4 @@ test('a closed chat saves the member’s business facts as Learned entries', { t
     after.map(item => [item.documentId, item.noteText, item.learned.sourceId]),
     [[items[0].documentId, 'The Pro plan costs 59 dollars per seat a month.', next]],
   );
-});
-
-test('with learning turned off, chats are not read for facts', { timeout: 60000 }, async t => {
-  const { w, knowledge, chat, close } = await setup(t, false);
-  const id = await chat('Our Pro plan costs 49 dollars per seat each month.');
-  const selected = model(() => [{ title: 'Pro plan pricing', text: 'Pro costs 49 dollars.', quote: 'Pro plan' }]);
-  assert.equal(await close(id, selected), 'ready');
-  assert.equal(selected.calls.filter(call => call.purpose === 'knowledge').length, 0);
-  assert.deepEqual((await knowledge.list(w.id, w.userId, { filter: 'learned' })).items, []);
 });

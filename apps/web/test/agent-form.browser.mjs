@@ -40,7 +40,7 @@ async function environment(t, { width = 1440, height = 1000, floating = false, w
   await page.route('**/v1/**', route => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
-    if (path === '/v1/feature-flags') return route.fulfill({ json: { 'bud-quick-chat': true } });
+    if (path === '/v1/feature-flags') return route.fulfill({ json: {} });
     if (floating && path.endsWith('/bud'))
       return route.fulfill({
         json: {

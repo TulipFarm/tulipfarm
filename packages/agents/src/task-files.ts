@@ -34,11 +34,10 @@ type FileSource = Extract<TaskSource, { kind: 'attachment' | 'file' | 'google-dr
 type Scope = { workspaceId: string; userId: string; membershipId: string; taskId: string };
 
 /**
- * How a task reads its file sources and instruction links while the workspace `images` flag is on: the chat reader,
- * with the same budget and recognition, so images reach image-reading families as images and others as recognised text.
+ * How a task reads its file sources and instruction links: the chat reader, with the same budget and recognition, so
+ * images reach image-reading families as images and others as recognised text.
  */
 export type TaskFileReading = {
-  enabled(workspaceId: string): Promise<boolean>;
   attachments?: AttachmentReader | undefined;
   files?: FileContent | undefined;
   google?: GoogleFileReader | undefined;

@@ -42,7 +42,6 @@ export type PreviewGatewayDependencies = {
   readonly shellOrigin: string;
   readonly redeem: (previewKey: string, ticket: string) => Promise<{ readonly token: string } | null>;
   readonly session: (previewKey: string, token: string) => Promise<PreviewSession | null>;
-  readonly enabled: (workspaceId: string) => Promise<boolean>;
   readonly target: (session: PreviewSession) => Promise<AppResult<{ readonly target: PreviewTarget }>>;
   /** Reads an object from the apps bucket, or null when it is missing. */
   readonly object: (key: string) => Promise<Readable | null>;
@@ -239,7 +238,6 @@ export function buildPreviewGateway(dependencies: PreviewGatewayDependencies, se
   async function access(headers: IncomingHttpHeaders): Promise<Access> {
     const session = await sessionOf(headers);
     if (!session) return ended;
-    if (!(await dependencies.enabled(session.workspaceId))) return nothing;
     const found = await dependencies.target(session);
     if (!found.ok) return found.failure.code === 'forbidden' ? notEditor : nothing;
     return found.target.kind === 'server' ? { ...found.target, appId: session.appId } : found.target;
@@ -341,7 +339,7 @@ export function buildPreviewGateway(dependencies: PreviewGatewayDependencies, se
 
     routes.get(previewCheckPath, async (request, reply) => {
       const session = await sessionOf(request.headers);
-      return reply.code(session && (await dependencies.enabled(session.workspaceId)) ? 204 : 401).send();
+      return reply.code(session ? 204 : 401).send();
     });
   });
 

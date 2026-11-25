@@ -14,7 +14,7 @@ import type { MaintenanceFence } from './maintenance-contracts.ts';
 import type { ConversationCompactor, EffectiveCompactionPolicy } from './compaction.ts';
 
 /** Saves business facts to the member's Knowledge. Absent where the worker does not provide it. */
-export type LearnedKnowledgePort = Pick<LearnedKnowledge, 'enabled' | 'entries' | 'apply'>;
+export type LearnedKnowledgePort = Pick<LearnedKnowledge, 'entries' | 'apply'>;
 
 type KnowledgeTransaction = <T>(
   operation: (
@@ -70,7 +70,6 @@ export async function reconcileMaintenanceKnowledge(
   compactor: ConversationCompactor,
   learned: LearnedKnowledgePort | undefined,
 ): Promise<boolean> {
-  const enabled = learned ? await learned.enabled(fence.workspaceId) : false;
   const input = await transaction(async (tx, current) => {
     if (!knowledgeLearningInstalled(tx)) return { kind: 'done' } as const;
     const progress = z
@@ -93,7 +92,7 @@ export async function reconcileMaintenanceKnowledge(
           ])
         ).rows[0],
       );
-    if (!enabled || owner.owner_membership_id !== current.actor.membershipId) {
+    if (!learned || owner.owner_membership_id !== current.actor.membershipId) {
       await complete(tx, fence.jobId);
       return { kind: 'done' } as const;
     }

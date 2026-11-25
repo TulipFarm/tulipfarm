@@ -9,7 +9,6 @@ import {
   KnowledgeError,
   withKnowledgeSourceAuthorization,
 } from '@tulipfarm/knowledge';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import { withGitHubSourceAuthorization } from '@tulipfarm/github/source-runtime';
 import { conversationCompactor } from './conversation-compactor.ts';
 import { conversationModel } from './conversation-model.ts';
@@ -40,6 +39,5 @@ export function learnedKnowledge(runtime: Parameters<typeof createLearnedKnowled
   return createLearnedKnowledge({
     runtime,
     files: createFiles(runtime, { read: unavailable, putIfAbsent: unavailable, remove: unavailable }),
-    enabled: workspaceId => isFeatureEnabled('learned-knowledge', null, { id: workspaceId }).catch(() => false),
   });
 }

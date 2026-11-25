@@ -25,7 +25,6 @@ import { AgentPolicy } from '@/features/agents/policy';
 import { AgentTriggerWorkflows } from '@/features/agents/agent-workflows';
 import { AgentEvals } from '@/features/agents/evals';
 import { AgentLessons } from '@/features/agents/lessons';
-import { useFlag } from '@/lib/feature-flags';
 import { AssignmentLimitsSettings } from '@/features/tables/assignment-limits';
 import { useOwnMembership } from '@/features/governance/queries';
 import { AgentChat } from '@/features/agents/chat';
@@ -476,11 +475,9 @@ function AgentPage({
   const detail = creating ? null : (snapshot?.detail ?? null);
   const can = (capability: string) => !!detail?.capabilities.includes(capability);
   const concealed = !ready || (!!detail && !can('edit'));
-  const evalsOn = useFlag('agent-evals');
-  const assignable = useFlag('assignable-tasks');
   const membership = useOwnMembership(workspaceId);
   const admin = membership.state.kind === 'ready' && membership.state.data.role === 'admin';
-  const tabs = detail ? visibleTabs(detail.capabilities).filter(item => item.value !== 'evals' || evalsOn) : [];
+  const tabs = detail ? visibleTabs(detail.capabilities) : [];
   const [suggestedModel, setSuggestedModel] = useState<{ id: string; at: number } | null>(null);
   const active = tabs.some(item => item.value === tab) ? tab : 'overview';
   const open = (next: AgentTab, target: string) => {
@@ -718,7 +715,7 @@ function AgentPage({
                           workspaceId={workspaceId}
                           detail={detail}
                           concealed={!ready || !can('invoke')}
-                          canSaveEval={evalsOn && can('edit')}
+                          canSaveEval={can('edit')}
                         />
                       </Disclosure>
                     </>,
@@ -758,8 +755,7 @@ function AgentPage({
                     )}
                   {can('manage') &&
                     panel('schedules', <AgentTriggerWorkflows agentId={id} workspaceId={workspaceId} slug={slug} />)}
-                  {evalsOn &&
-                    can('invoke') &&
+                  {can('invoke') &&
                     panel(
                       'evals',
                       <AgentEvals
@@ -794,9 +790,7 @@ function AgentPage({
                           <dd>{detail.definitionRevision}</dd>
                         </dl>
                       </Disclosure>
-                      {ready && admin && assignable && (
-                        <AssignmentLimitsSettings workspaceId={workspaceId} agentId={id} />
-                      )}
+                      {ready && admin && <AssignmentLimitsSettings workspaceId={workspaceId} agentId={id} />}
                       <AgentArchive
                         api={api}
                         id={id}

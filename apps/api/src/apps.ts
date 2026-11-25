@@ -53,7 +53,7 @@ import {
   type AppVersionResult,
 } from '@tulipfarm/apps/store';
 import type { AppPublisher } from '@tulipfarm/extensions';
-import { errorAttributes, isFeatureEnabled } from '@tulipfarm/observability';
+import { errorAttributes } from '@tulipfarm/observability';
 import { commonCompatibility, qualified, type createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import { AccessDenied, type HumanActor } from '@tulipfarm/access';
 import {
@@ -243,8 +243,7 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
       const workspace = workspaceParams.safeParse({
         workspaceId: (request.params as { workspaceId?: string }).workspaceId,
       });
-      if (!workspace.success || !(await isFeatureEnabled('app-hosting', null, { id: workspace.data.workspaceId })))
-        return reply.code(404).send({ error: 'not-found' });
+      if (!workspace.success) return reply.code(404).send({ error: 'not-found' });
       users.set(request, session.user.id);
     });
 

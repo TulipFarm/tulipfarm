@@ -1,7 +1,6 @@
 import type { FastifyError, FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied } from '@tulipfarm/access';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import type { SocialAccounts } from '@tulipfarm/social/accounts';
 import type { SocialChannels } from '@tulipfarm/social/channels';
 import type { SocialPosts } from '@tulipfarm/social/posts';
@@ -116,13 +115,11 @@ function requestWorkspace(request: FastifyRequest) {
   return query.success ? query.data.state.slice(0, 36) : null;
 }
 
-/** Social connection routes. Every route, including the OAuth callback, sits behind `social-publishing`. */
+/** Social connection routes, including the OAuth callback. */
 export function registerSocialAccounts(
   app: FastifyInstance,
   auth: Pick<ReturnType<typeof registerAuth>['auth'], 'api'>,
   accounts: SocialAccounts | null = null,
-  enabled: (userId: string, workspaceId: string) => Promise<boolean> = (userId, workspaceId) =>
-    isFeatureEnabled('social-publishing', { id: userId }, { id: workspaceId }),
   channels: SocialChannels | null = null,
   posts: SocialPosts | null = null,
 ) {
@@ -162,10 +159,7 @@ export function registerSocialAccounts(
         return reply.code(403).send({ error: 'untrusted-origin' });
       const session = await requestSession(request, auth);
       if (!session) return reply.code(401).send({ error: 'sign-in-required' });
-      const workspaceId = requestWorkspace(request);
-      if (!workspaceId) return reply.code(400).send({ error: 'invalid-request' });
-      // A workspace without the flag sees no social routes at all.
-      if (!(await enabled(session.user.id, workspaceId))) return reply.code(404).send({ error: 'not-found' });
+      if (!requestWorkspace(request)) return reply.code(400).send({ error: 'invalid-request' });
       sessions.set(request, { userId: session.user.id, sessionId: session.session.id });
       if (!accounts) return reply.code(503).send({ error: 'account-unavailable' });
     });

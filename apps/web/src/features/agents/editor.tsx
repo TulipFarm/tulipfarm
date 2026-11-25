@@ -23,7 +23,6 @@ import type { agentApi, AgentCommand, AgentContext, AgentDetail, AgentInput } fr
 import { activateRevision, needsActivationReview, type RevisionActivation } from './revision-activation';
 import { RevisionReview } from './revision-review';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
-import { useFlag } from '@/lib/feature-flags';
 import { AgentBrowserSettingsSection, browserSettings, parseBrowserSites } from './browser-settings';
 
 const responseRules = [
@@ -96,7 +95,7 @@ export function AgentEditor({
   suggestedModel?: { id: string; at: number } | null | undefined;
 }) {
   const [draft, setDraft] = useState(() => savedDraft(detail));
-  const browsing = useFlag('browser-use') && draft.tools.includes('browser.act');
+  const browsing = draft.tools.includes('browser.act');
   const appliedSuggestion = useRef<number | null>(null);
   useEffect(() => {
     if (!suggestedModel || appliedSuggestion.current === suggestedModel.at) return;

@@ -44,7 +44,6 @@ function setup(t, { projectId = null, loaded = [], exported }) {
   const attached = [];
   registerBrowserLogins(app, {
     auth,
-    enabled: async () => true,
     chats: { read: async () => ({ projectId }) },
     client: {
       state: async () => ({ sessionId, logins: loaded }),

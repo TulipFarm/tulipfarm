@@ -230,7 +230,7 @@ type Materialized = {
   files: { source: FileSource; filename: string; text: string }[];
   reads: TaskSource[];
   stop: keyof typeof fileStops | null;
-  /** Under the `images` flag: the step's files and links as the model reads them, and the stop naming a file. */
+  /** The step's files and links as the model reads them, and the stop naming a file. */
   content?: TaskFileContent | null;
   stopMessage?: string;
 };
@@ -834,8 +834,7 @@ export function createTaskRuntime(
       const images =
         !materializing &&
         reading !== undefined &&
-        (sources.length > 0 || ownerTexts.some(message => messageLinks(message.text).read.length > 0)) &&
-        (await reading.enabled(workspaceId));
+        (sources.length > 0 || ownerTexts.some(message => messageLinks(message.text).read.length > 0));
       if (!materializing && (sources.length || images)) {
         const activity = await reserveTaskWork(tx, taskId, 'files');
         return activity
@@ -927,12 +926,10 @@ export function createTaskRuntime(
         ...(lessons ? { lessons } : {}),
         ...(catalog ? { mcp: catalog.model } : {}),
         ...(materializing?.content ? { files: materializing.content } : {}),
-        ...((await imageGenerationOffered(workspaceId, c.definition.tools)) ? { images: true as const } : {}),
-        ...(reading?.links && (await reading.enabled(workspaceId)) ? { taskFiles: true as const } : {}),
+        ...(imageGenerationOffered(c.definition.tools) ? { images: true as const } : {}),
+        ...(reading?.links ? { taskFiles: true as const } : {}),
         ...(secrets?.tools.enabled() ? { taskSecrets: true as const } : {}),
-        ...(browser && c.definition.tools.includes('browser.act') && (await browser.enabled(workspaceId))
-          ? { browser: true as const }
-          : {}),
+        ...(browser && c.definition.tools.includes('browser.act') ? { browser: true as const } : {}),
       });
       const timeoutMs = Math.min(
         modelCallTimeoutMs + 2000,
