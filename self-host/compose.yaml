@@ -211,7 +211,7 @@ services:
   # Page reads for agents. Huntsman refuses private and metadata addresses itself; it publishes no port.
   huntsman:
     profiles: [public-web]
-    image: ghcr.io/tulipfarm/huntsman:0.2.0@sha256:419ffd153c9d8b935d9ef43ddd60f9ddf4daaff929eebdfbafced608bb9d9161
+    image: ghcr.io/tulipfarm/huntsman:0.4.0@sha256:65c520ea5855122ee8156d8c680a90f612e3c98cac94d23f4bd8f19221a559bc
     restart: unless-stopped
     environment:
       HUNTSMAN_TOKEN: ${HUNTSMAN_TOKEN:-}
