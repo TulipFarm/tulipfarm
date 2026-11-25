@@ -7,7 +7,7 @@ tools: agents.context agents.draft agents.list agents.read agents.status agents.
 
 # Draft an agent for review
 
-An agent has a role and bounded authority. Prepare one shared setup. The person reviews the exact card and chooses **Save draft** or **Create and activate**. Your prose and tool calls never provide approval or replacement consent.
+An agent has a role and bounded authority. Prepare one setup. A workspace policy may save a private agent inactive. Only the person can approve activation or replacement.
 
 Prepare the draft yourself in the main chat. Helpers cannot draft agents. Delegation is disabled during this setup. If authoring is blocked, stop at the first failed prerequisite, say plainly why no draft was prepared, and link to **Configure manually** using the supplied builder URL. Do not claim a tool is unavailable or try repeated helpers.
 
@@ -75,7 +75,7 @@ The cases appear on the card. They are not saved with the agent; after saving, t
 
 ## 4. Hand over for review
 
-Tell the person whether the card creates a new agent or updates an existing one. Ask them to review Basics, Skills, Access and Triggers on the immutable card.
+Follow the `agents.draft` result. For a workspace-policy save, link to the inactive agent and explain what still needs activation; do not ask the person to create it again. Only ask them to review Basics, Skills, Access and Triggers if the tool actually returned a pending card.
 
 Explain what happens next, so that nobody assumes the agent is already running:
 

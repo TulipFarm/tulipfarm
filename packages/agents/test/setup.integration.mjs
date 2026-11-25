@@ -1129,6 +1129,54 @@ test('publication resume rechecks removed membership after Soul accepted the def
   assert.deepEqual((await f.state()).workflows, []);
 });
 
+test('private chat saves a personal agent with proposed access without activating it', async t => {
+  const f = await environment(t);
+  const chats = createConversations(f.runtime);
+  const chatId = randomUUID();
+  await chats.create(f.w.id, f.user, { chatId, commandId: randomUUID() });
+  const sent = await chats.send(f.w.id, f.user, chatId, {
+    messageId: randomUUID(),
+    commandId: randomUUID(),
+    parts: [{ kind: 'text', text: 'Create a helper agent that uses model 5.5 from my Copilot plan.' }],
+  });
+  const { definition, owningTeamId, ...setup } = f.setup();
+  const input = {
+    definition,
+    owningTeamId,
+    setup,
+    expectedPolicyVersion: 0,
+    expectedActivationIds: [],
+    expectedWorkflowRevision: null,
+    expectedWorkflowGeneration: null,
+    expectedSoulRevision: await f.head(),
+  };
+  let result;
+  await createConversationExecutor(f.runtime, async ({ executeTool }) => {
+    result = await executeTool('agents.draft', false, ctx =>
+      createChatTools(ctx.runtime, { privateBud: { link: async (_, kind, id) => `/test/${kind}/${id}` } }).invoke(ctx, {
+        tool: 'agents.draft',
+        agent: 'new',
+        input,
+      }),
+    );
+    return { text: 'Saving the inactive agent.', sources: [] };
+  }).process({ workspaceId: f.w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 });
+  assert.equal(result.status, 'saving');
+  assert.equal((await f.worker.prepare(f.w.id, result.receipt.commandId)).status, 'accepted');
+  const coordinator = createAgentSetup(f.runtime);
+  const draft = await coordinator.readDraft(f.w.id, f.user, result.agentId);
+  assert.deepEqual(draft.setup.policy, setup.policy);
+  assert.equal((await coordinator.advance(f.w.id, f.user, draft.commandId)).status, 'saved');
+  assert.deepEqual(
+    (
+      await f.db.platform.query(`SELECT enabled,policy_version FROM ${f.table('tf_agents')} WHERE id=$1`, [
+        result.agentId,
+      ])
+    ).rows[0],
+    { enabled: false, policy_version: 0 },
+  );
+});
+
 test('chat full setup approves the same coordinator or continues in the builder; historical drafts stay save-only', async t => {
   const f = await environment(t),
     chats = createConversations(f.runtime),

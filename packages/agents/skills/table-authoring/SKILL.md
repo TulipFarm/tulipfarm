@@ -7,7 +7,7 @@ tools: tables.definitions schema.context schema.inspect tables.propose
 
 # Propose business tables for review
 
-Use this procedure when a person wants to create a table, change its fields, or archive or restore it. A table defines the shape of business data; a row is one item in it. You never create or change a table yourself. You prepare a proposal, and a human approves it on a review card.
+Use this procedure when a person wants to create a table, change its fields, or archive or restore it. A table defines the shape of business data; a row is one item in it. Submit the proposal and follow its result. For `saving`, creation is queued under workspace policy: do not ask for approval, link to an unpublished table or say it already exists.
 
 When this table is part of a larger setup, use Planning in the default chat and keep the table's required applied state and verification in that plan. A proposal awaiting review does not complete the table deliverable.
 

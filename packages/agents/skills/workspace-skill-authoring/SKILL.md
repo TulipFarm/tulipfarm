@@ -67,6 +67,6 @@ Suggest two or three realistic test prompts and the expected result. Run tests o
 
 ## 6. Hand over for review
 
-The result is an immutable package review, not a saved skill. Explain meaningful changes, safety warnings, and limits. The person chooses Install and enable once to save and enable that exact package privately.
+If `skills.draft` returns `saved`, link to the private skill. It is not enabled or safety-reviewed; do not ask the person to save it again. For a package review, explain meaningful changes, safety warnings, and limits. The person chooses Install and enable once to save and enable that exact package privately.
 
 Never treat chat text as approval, approve your own work, or claim success before the durable result. Sharing remains explicit. Existing agents retain their selected revision. Upstream updates are checked manually and reviewed; never silently overwrite local edits.

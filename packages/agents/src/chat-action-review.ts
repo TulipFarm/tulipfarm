@@ -22,10 +22,18 @@ export type PrivateBudReview = {
 };
 
 export function explicitCreation(text: string, kind: string) {
+  // A subscription is not a request for a plan; a version number is not a sentence break.
+  text = text
+    .trim()
+    .replace(/\b(Copilot|Claude|ChatGPT) plan\b/gi, '$1 subscription')
+    .replace(/(?<=\d)\.(?=\d)/g, '-');
   // Accept a single imperative only. Questions, qualifications and previews keep their card.
   if (
     /[?;\n]/.test(text) ||
     /[.!]\s+\S/.test(text) ||
+    /\b(?:and|then|or)\s+(?:please\s+)?(?:create|build|make|set up|activate|enable|share|send|publish|delete|run)\b/i.test(
+      text,
+    ) ||
     /\b(?:not|no|never|don't|don’t|without|before|after|if|unless|until|first|later|only|just|instead|but|preview\w*|example|draft\w*|review\w*|mock\w*|simulat\w*|plan|propos\w*|approv\w*|confirm\w*|wait|hold|show|explain|hypothetical|imaginary|illustrat\w*|sketch|diagram|representation|prototype|dry.run|in.chat)\b/i.test(
       text,
     )
