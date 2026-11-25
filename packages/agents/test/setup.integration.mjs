@@ -1153,11 +1153,17 @@ test('private chat saves a personal agent with proposed access without activatin
   let result;
   await createConversationExecutor(f.runtime, async ({ executeTool }) => {
     result = await executeTool('agents.draft', false, ctx =>
-      createChatTools(ctx.runtime, { privateBud: { link: async (_, kind, id) => `/test/${kind}/${id}` } }).invoke(ctx, {
-        tool: 'agents.draft',
-        agent: 'new',
-        input,
-      }),
+      createChatTools(ctx.runtime, { privateBud: { link: async (_, kind, id) => `/test/${kind}/${id}` } }).invoke(
+        {
+          ...ctx,
+          origin: { ...ctx.origin, sources: [{ kind: 'personal-memory', membershipId: f.member }] },
+        },
+        {
+          tool: 'agents.draft',
+          agent: 'new',
+          input,
+        },
+      ),
     );
     return { text: 'Saving the inactive agent.', sources: [] };
   }).process({ workspaceId: f.w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 });
@@ -1175,6 +1181,33 @@ test('private chat saves a personal agent with proposed access without activatin
     ).rows[0],
     { enabled: false, policy_version: 0 },
   );
+
+  const untrustedChatId = randomUUID();
+  await chats.create(f.w.id, f.user, { chatId: untrustedChatId, commandId: randomUUID() });
+  const untrustedSent = await chats.send(f.w.id, f.user, untrustedChatId, {
+    messageId: randomUUID(),
+    commandId: randomUUID(),
+    parts: [{ kind: 'text', text: 'Create a helper agent for #tech.' }],
+  });
+  const nextSoulRevision = await f.head();
+  let untrustedResult;
+  await createConversationExecutor(f.runtime, async ({ executeTool }) => {
+    untrustedResult = await executeTool('agents.draft', false, ctx =>
+      createChatTools(ctx.runtime, { privateBud: { link: async (_, kind, id) => `/test/${kind}/${id}` } }).invoke(
+        {
+          ...ctx,
+          origin: { ...ctx.origin, sources: [{ kind: 'public-web', url: 'https://example.com/' }] },
+        },
+        {
+          tool: 'agents.draft',
+          agent: 'new',
+          input: { ...input, expectedSoulRevision: nextSoulRevision },
+        },
+      ),
+    );
+    return { text: 'Prepared for review.', sources: [] };
+  }).process({ workspaceId: f.w.id, conversationId: untrustedChatId, turnId: untrustedSent.turnId, generation: 0 });
+  assert.equal(untrustedResult.status, 'review-required');
 });
 
 test('chat full setup approves the same coordinator or continues in the builder; historical drafts stay save-only', async t => {
