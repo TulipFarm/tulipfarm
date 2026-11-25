@@ -478,6 +478,7 @@ test('isolated buildApp documents success responses for all route groups while d
         'Bud',
         'ChatGPT plan',
         'Claude plan',
+        'Code sessions',
         'Coding runs',
         'Conversations',
         'Files',

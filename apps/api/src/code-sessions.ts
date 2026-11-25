@@ -414,6 +414,13 @@ export function registerCodeSessions(
     });
 
     const userIdOf = (request: FastifyRequest) => sessions.get(request)!;
+    const errorBody = {
+      type: 'object',
+      properties: { error: { type: 'string' }, message: { type: 'string' } },
+      required: ['error'],
+      additionalProperties: true,
+    };
+    const errorResponses = Object.fromEntries([400, 401, 403, 404, 409, 500, 503].map(status => [status, errorBody]));
 
     const codeRepositoriesResponseSchema = z.object({
       items: z.array(
@@ -429,8 +436,10 @@ export function registerCodeSessions(
       '/workspaces/:workspaceId/code-mode/availability',
       {
         schema: {
+          operationId: 'getCodeModeAvailabilityV1',
+          tags: ['Code sessions'],
           params: validation.json(workspaceParams),
-          response: { 200: validation.json(codeModeAvailabilitySchema) },
+          response: { 200: validation.json(codeModeAvailabilitySchema), ...errorResponses },
         },
       },
       request => {
@@ -443,8 +452,10 @@ export function registerCodeSessions(
       '/workspaces/:workspaceId/code-mode/repositories',
       {
         schema: {
+          operationId: 'listCodeModeRepositoriesV1',
+          tags: ['Code sessions'],
           params: validation.json(workspaceParams),
-          response: { 200: validation.json(codeRepositoriesResponseSchema) },
+          response: { 200: validation.json(codeRepositoriesResponseSchema), ...errorResponses },
         },
       },
       request => {
@@ -457,8 +468,10 @@ export function registerCodeSessions(
       '/workspaces/:workspaceId/members/me/code-settings',
       {
         schema: {
+          operationId: 'getMemberCodeSettingsV1',
+          tags: ['Code sessions'],
           params: validation.json(workspaceParams),
-          response: { 200: validation.json(memberCodeSettingsSchema) },
+          response: { 200: validation.json(memberCodeSettingsSchema), ...errorResponses },
         },
       },
       request => {
@@ -471,9 +484,11 @@ export function registerCodeSessions(
       '/workspaces/:workspaceId/members/me/code-settings',
       {
         schema: {
+          operationId: 'updateMemberCodeSettingsV1',
+          tags: ['Code sessions'],
           params: validation.json(workspaceParams),
           body: validation.json(memberCodeSettingsSchema),
-          response: { 200: validation.json(memberCodeSettingsSchema) },
+          response: { 200: validation.json(memberCodeSettingsSchema), ...errorResponses },
         },
       },
       request => {
@@ -487,8 +502,10 @@ export function registerCodeSessions(
       '/workspaces/:workspaceId/chats/:chatId/turn-mode',
       {
         schema: {
+          operationId: 'getChatTurnModeV1',
+          tags: ['Code sessions'],
           params: validation.json(chatParams),
-          response: { 200: validation.json(turnModeBody) },
+          response: { 200: validation.json(turnModeBody), ...errorResponses },
         },
       },
       request => {
@@ -501,9 +518,11 @@ export function registerCodeSessions(
       '/workspaces/:workspaceId/chats/:chatId/turn-mode',
       {
         schema: {
+          operationId: 'setChatTurnModeV1',
+          tags: ['Code sessions'],
           params: validation.json(chatParams),
           body: validation.json(turnModeBody),
-          response: { 200: validation.json(turnModeBody) },
+          response: { 200: validation.json(turnModeBody), ...errorResponses },
         },
       },
       request => {
@@ -528,8 +547,10 @@ export function registerCodeSessions(
       '/workspaces/:workspaceId/code-sessions/open-requests',
       {
         schema: {
+          operationId: 'listOpenCodeSessionRequestsV1',
+          tags: ['Code sessions'],
           params: validation.json(workspaceParams),
-          response: { 200: validation.json(openRequestsResponse) },
+          response: { 200: validation.json(openRequestsResponse), ...errorResponses },
         },
       },
       request => {
@@ -542,8 +563,10 @@ export function registerCodeSessions(
       '/workspaces/:workspaceId/code-sessions',
       {
         schema: {
+          operationId: 'listCodeSessionsV1',
+          tags: ['Code sessions'],
           params: validation.json(workspaceParams),
-          response: { 200: validation.json(sessionsListResponse) },
+          response: { 200: validation.json(sessionsListResponse), ...errorResponses },
         },
       },
       request => {
@@ -567,9 +590,11 @@ export function registerCodeSessions(
       '/workspaces/:workspaceId/code-sessions',
       {
         schema: {
+          operationId: 'startCodeSessionV1',
+          tags: ['Code sessions'],
           params: validation.json(workspaceParams),
           body: validation.json(startSessionBody),
-          response: { 200: validation.json(codeSessionViewSchema) },
+          response: { 200: validation.json(codeSessionViewSchema), ...errorResponses },
         },
       },
       request => {
@@ -583,8 +608,10 @@ export function registerCodeSessions(
       '/workspaces/:workspaceId/code-sessions/:sessionId',
       {
         schema: {
+          operationId: 'readCodeSessionV1',
+          tags: ['Code sessions'],
           params: validation.json(sessionParams),
-          response: { 200: validation.json(codeSessionViewSchema) },
+          response: { 200: validation.json(codeSessionViewSchema), ...errorResponses },
         },
       },
       request => {
@@ -597,8 +624,10 @@ export function registerCodeSessions(
       '/workspaces/:workspaceId/code-sessions/:sessionId/stop',
       {
         schema: {
+          operationId: 'stopCodeSessionV1',
+          tags: ['Code sessions'],
           params: validation.json(sessionParams),
-          response: { 200: validation.json(codeSessionViewSchema) },
+          response: { 200: validation.json(codeSessionViewSchema), ...errorResponses },
         },
       },
       request => {
@@ -611,9 +640,11 @@ export function registerCodeSessions(
       '/workspaces/:workspaceId/code-sessions/:sessionId/requests/:requestId/answer',
       {
         schema: {
+          operationId: 'answerCodeSessionRequestV1',
+          tags: ['Code sessions'],
           params: validation.json(requestParams),
           body: validation.json(answerBody),
-          response: { 200: validation.json(sessionRequestPairSchema) },
+          response: { 200: validation.json(sessionRequestPairSchema), ...errorResponses },
         },
       },
       request => {
@@ -635,8 +666,10 @@ export function registerCodeSessions(
       '/workspaces/:workspaceId/code-sessions/:sessionId/terminal',
       {
         schema: {
+          operationId: 'getCodeSessionTerminalV1',
+          tags: ['Code sessions'],
           params: validation.json(sessionParams),
-          response: { 200: validation.json(terminalSnapshotResponse) },
+          response: { 200: validation.json(terminalSnapshotResponse), ...errorResponses },
         },
       },
       request => {
@@ -651,12 +684,15 @@ export function registerCodeSessions(
       {
         logLevel: 'silent',
         schema: {
+          operationId: 'streamCodeSessionTerminalV1',
+          tags: ['Code sessions'],
           params: validation.json(sessionParams),
           response: {
             200: {
               description: 'Live terminal output stream',
               content: { 'text/event-stream': { schema: { type: 'string' } } },
             },
+            ...errorResponses,
           },
         },
       },
