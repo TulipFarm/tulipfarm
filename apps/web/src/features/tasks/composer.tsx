@@ -277,14 +277,14 @@ export function TaskComposer({
                 <SelectTrigger>
                   <SelectValue>
                     {activationId === 'latest'
-                      ? 'Latest eligible activation'
+                      ? 'Current active version'
                       : activation
                         ? `Pin ${activationLabel(mode.detail, activation)}`
-                        : 'Choose an available activation'}
+                        : 'Choose an active version'}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="latest">Latest eligible activation</SelectItem>
+                  <SelectItem value="latest">Current active version</SelectItem>
                   {activations.map(item => (
                     <SelectItem key={item.id} value={item.id}>
                       Pin {activationLabel(mode.detail, item)}

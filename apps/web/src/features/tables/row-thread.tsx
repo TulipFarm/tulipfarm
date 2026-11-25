@@ -86,14 +86,14 @@ const runStateLabels: Record<z.infer<typeof runStateSchema>, [string, BadgeVaria
 
 const time = (value: string) => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
-function eventText(event: Record<string, unknown> | null) {
+function eventText(event: Record<string, unknown> | null, noun = 'record') {
   switch (event?.type) {
     case 'assigned':
-      return 'assigned this row';
+      return `assigned this ${noun}`;
     case 'reassigned':
-      return 'reassigned this row';
+      return `reassigned this ${noun}`;
     case 'unassigned':
-      return 'unassigned this row';
+      return `unassigned this ${noun}`;
     case 'run-stopped':
       return 'run stopped';
     case 'approval-requested':
@@ -103,7 +103,7 @@ function eventText(event: Record<string, unknown> | null) {
     case 'reopened':
       return 'reopened this';
     default:
-      return typeof event?.type === 'string' ? event.type.replaceAll('-', ' ') : 'updated this row';
+      return typeof event?.type === 'string' ? event.type.replaceAll('-', ' ') : `updated this ${noun}`;
   }
 }
 
@@ -147,6 +147,7 @@ export function RowThreadPanel({
   rowId,
   changed,
   conversationOnly = false,
+  noun = 'record',
 }: {
   workspaceId: string;
   tableId: string;
@@ -155,6 +156,8 @@ export function RowThreadPanel({
   changed?: () => void;
   /** Leaves out the agent's state, wake-up, Run now and run history for a page that shows them itself. */
   conversationOnly?: boolean;
+  /** Human label used in thread events, such as "task" on the Tasks board. */
+  noun?: string;
 }) {
   const { api, read } = useRowThread(workspaceId, tableId, rowId);
   const [latest, setLatest] = useState<RowThread | null>(null);
@@ -231,7 +234,7 @@ export function RowThreadPanel({
           >
             <div className="mb-1 flex flex-wrap items-center gap-2 text-sm">
               {item.author ? <ActorName workspaceId={workspaceId} actor={item.author} compact /> : <span>System</span>}
-              {item.kind === 'event' && <span>{eventText(item.event)}</span>}
+              {item.kind === 'event' && <span>{eventText(item.event, noun)}</span>}
               {item.kind === 'progress' && <Badge variant="secondary">Progress note</Badge>}
               <span className="text-muted-foreground">{time(item.createdAt)}</span>
               {repeats > 1 && <span className="text-muted-foreground">{repeats} times</span>}

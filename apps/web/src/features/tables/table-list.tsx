@@ -53,7 +53,10 @@ export function TableList({
   const shelf = archived ? 'archived' : 'active';
   return (
     <section className="space-y-6">
-      <PageHeader title="Tables" />
+      <PageHeader
+        title="Tables"
+        description="Structured workspace data for customers, projects, and records. New tables open in chat."
+      />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
           <SearchField
@@ -148,7 +151,7 @@ export function TableList({
                   kind="empty"
                   icon={DatabaseIcon}
                   title="No tables yet"
-                  description="A table holds one kind of business row, such as customers or invoices. Describe the fields in chat, and the table appears here after it is created. Ask an administrator if you need read access."
+                  description="Tables organize structured records like customers, invoices, or inventory. Describe the fields you need in chat to create one. Ask an admin if you need read access."
                   sample={<TablesSample />}
                 >
                   <Button

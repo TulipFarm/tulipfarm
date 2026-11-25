@@ -114,41 +114,46 @@ test('the integrations directory lists every app with one action per row', { tim
   const tab = name => page.getByRole('tab', { name });
   const row = name => page.getByRole('listitem').filter({ has: page.getByRole('link', { name, exact: true }) });
   const count = async view => Number((await tab(new RegExp(`^${view} \\d+$`)).innerText()).match(/\d+$/)[0]);
-  const yours = page.getByRole('list', { name: 'Your apps', exact: true }).getByRole('listitem');
-  const search = page.getByRole('searchbox', { name: 'Search apps', exact: true });
+  const yours = page.getByRole('list', { name: 'Connected integrations', exact: true }).getByRole('listitem');
+  const search = page.getByRole('searchbox', { name: 'Search integrations', exact: true });
 
   try {
     await page.goto(`${origin}/${workspace.slug}/integrations`);
     // The first visit waits for Vite to transform the whole app on a cold server.
-    await tab('Your apps 7').waitFor({ timeout: 90000 });
+    await tab('Connected 7').waitFor({ timeout: 90000 });
 
-    await t.test('Your apps lists connected apps and ones needing attention; Browse lists the rest', async () => {
-      assert.equal(await tab(/^Your apps /).getAttribute('aria-selected'), 'true');
-      // Apps that need attention come first, then connected ones.
-      assert.equal(await yours.first().getByRole('link').first().innerText(), 'GitHub');
-      assert.equal(await yours.count(), 7, 'GitHub and every granted Google app');
-      await row('GitHub').getByText('Needs attention', { exact: true }).waitFor();
-      await row('Gmail').getByText('Connected', { exact: true }).waitFor();
-      const browse = await count('Browse');
-      await tab(/^Browse /).click();
-      await page.waitForURL(/\?view=browse$/);
-      const connectable = page.getByRole('list', { name: 'Apps you can connect', exact: true }).getByRole('listitem');
-      await connectable.first().waitFor();
-      assert.equal(await connectable.count(), browse);
-      assert.equal(await row('Gmail').count(), 0, 'connected apps stay in Your apps');
-      await tab(/^Your apps /).click();
-      await page.waitForURL(/\?view=yours$/);
-    });
+    await t.test(
+      'Connected lists connected integrations and ones needing attention; Browse lists the rest',
+      async () => {
+        assert.equal(await tab(/^Connected /).getAttribute('aria-selected'), 'true');
+        // Apps that need attention come first, then connected ones.
+        assert.equal(await yours.first().getByRole('link').first().innerText(), 'GitHub');
+        assert.equal(await yours.count(), 7, 'GitHub and every granted Google app');
+        await row('GitHub').getByText('Needs attention', { exact: true }).waitFor();
+        await row('Gmail').getByText('Connected', { exact: true }).waitFor();
+        const browse = await count('Browse');
+        await tab(/^Browse /).click();
+        await page.waitForURL(/\?view=browse$/);
+        const connectable = page
+          .getByRole('list', { name: 'Integrations you can connect', exact: true })
+          .getByRole('listitem');
+        await connectable.first().waitFor();
+        assert.equal(await connectable.count(), browse);
+        assert.equal(await row('Gmail').count(), 0, 'connected apps stay in Connected');
+        await tab(/^Connected /).click();
+        await page.waitForURL(/\?view=yours$/);
+      },
+    );
 
     await t.test('the view comes from the address, including older links', async () => {
       for (const [view, selected] of [
-        ['attention', 'Your apps'],
-        ['connected', 'Your apps'],
+        ['attention', 'Connected'],
+        ['connected', 'Connected'],
         ['available', 'Browse'],
-        ['email-and-calendar', 'Your apps'],
+        ['email-and-calendar', 'Connected'],
       ]) {
         await page.goto(`${origin}/${workspace.slug}/integrations?view=${view}`);
-        await tab('Your apps 7').waitFor();
+        await tab('Connected 7').waitFor();
         assert.equal(await tab(new RegExp(`^${selected} `)).getAttribute('aria-selected'), 'true', view);
       }
     });
@@ -156,11 +161,11 @@ test('the integrations directory lists every app with one action per row', { tim
     await t.test('while searching, the counts are of the matching apps', async () => {
       await search.fill('google');
       // Gmail doesn't say Google; the other five Google apps do.
-      await tab('Your apps 5').waitFor();
+      await tab('Connected 5').waitFor();
       assert.equal(await yours.count(), 5);
       assert.equal(await row('GitHub').count(), 0);
       await search.fill('');
-      await tab('Your apps 7').waitFor();
+      await tab('Connected 7').waitFor();
     });
 
     await t.test('connected apps manage, apps needing attention reconnect, and none disconnect here', async () => {
@@ -186,7 +191,7 @@ test('the integrations directory lists every app with one action per row', { tim
           .count(),
         0,
       );
-      await tab(/^Your apps /).click();
+      await tab(/^Connected /).click();
     });
 
     await t.test('clicking a row opens the app’s page, and its action stays a separate control', async () => {
@@ -197,7 +202,7 @@ test('the integrations directory lists every app with one action per row', { tim
       await row('Gmail').getByRole('link', { name: 'Manage Gmail', exact: true }).click();
       await page.waitForURL(new RegExp(`${origin}/${workspace.slug}/integrations/gmail(\\?|$)`));
       await page.goBack();
-      await tab('Your apps 7').waitFor();
+      await tab('Connected 7').waitFor();
     });
 
     await t.test('apps nobody here can connect show why instead of a button', async () => {

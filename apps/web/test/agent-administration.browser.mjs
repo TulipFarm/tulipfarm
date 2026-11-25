@@ -276,7 +276,7 @@ test(
           .getByRole('button', { name: 'Go to Enable execution', exact: true })
           .click();
         await eventually(
-          () => page.getByRole('tab', { name: 'Execution', exact: true }).getAttribute('aria-selected'),
+          () => page.getByRole('tab', { name: 'Activation', exact: true }).getAttribute('aria-selected'),
           'true',
         );
         await eventually(() => isFocused(page.getByRole('checkbox', { name: 'Enable execution', exact: true })), true);
@@ -323,7 +323,7 @@ test(
         await ownership.getByText('Unsaved changes', { exact: true }).waitFor();
         assert.equal(await enrollment.getByText('Unsaved changes', { exact: true }).count(), 0);
 
-        await openTab('Execution');
+        await openTab('Activation');
         const activate = activations.getByRole('button', { name: 'Activate saved instructions', exact: true });
         await eventually(
           () => describedTexts(activate),
@@ -414,7 +414,7 @@ test(
         await openTab('Access');
         await enrollment.getByRole('checkbox', { name: 'Support', exact: true }).click();
         await enrollment.getByText('Unsaved changes', { exact: true }).waitFor();
-        await openTab('Execution');
+        await openTab('Activation');
         await dataScope.getByRole('button', { name: 'Save data access', exact: true }).click();
         await dataScope.getByText('Administration saved.', { exact: true }).waitFor();
         assert.deepEqual(dataScopeWrites, [{ version: 1, scope: widened }]);
@@ -555,7 +555,7 @@ test(
         assert.equal(await ownership.getByText('Unsaved changes', { exact: true }).count(), 0);
         await eventually(() => saveOwnership.isDisabled(), false);
 
-        await openTab('Execution');
+        await openTab('Activation');
         await slack.getByRole('combobox', { name: 'Destination team', exact: true }).click();
         await page.getByRole('option', { name: 'Support', exact: true }).click();
         await slack.getByLabel('Destination name', { exact: true }).fill('Sales alerts');

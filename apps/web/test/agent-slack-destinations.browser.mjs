@@ -123,7 +123,7 @@ test(
 
       await page.goto(`${origin}/acme/agents/${agentId}`);
       await page.getByRole('heading', { name: 'Customer reviewer', exact: true }).waitFor();
-      await page.getByRole('tab', { name: 'Execution', exact: true }).click();
+      await page.getByRole('tab', { name: 'Activation', exact: true }).click();
       const execution = page.getByRole('region', { name: 'Execution', exact: true });
       const slack = page.getByRole('region', { name: 'Slack destinations', exact: true });
       const addDestination = slack.getByRole('button', { name: 'Add Slack destination', exact: true });
@@ -154,7 +154,7 @@ test(
         .getByRole('region', { name: 'Team enrollment', exact: true })
         .getByRole('button', { name: 'Save enrollment', exact: true })
         .waitFor();
-      await page.getByRole('tab', { name: 'Execution', exact: true }).click();
+      await page.getByRole('tab', { name: 'Activation', exact: true }).click();
 
       destinations = { status: 503 };
       await slack.getByRole('button', { name: 'Check Slack access again', exact: true }).click();

@@ -65,7 +65,10 @@ export function InboxList({ workspaceId, workspaceSlug }: { workspaceId: string;
   const { items } = read.state.data;
   return (
     <section aria-label="Inbox" className="mx-auto w-full max-w-3xl space-y-4 overflow-auto p-6">
-      <h1 className="text-xl font-semibold">Inbox</h1>
+      <div className="space-y-1">
+        <h1 className="text-xl font-semibold">Inbox</h1>
+        <p className="text-sm text-muted-foreground">Tasks assigned to you, agent questions, and mentions.</p>
+      </div>
       {tables.map(table => (
         <RowTitles
           key={table.tableId}
@@ -84,7 +87,7 @@ export function InboxList({ workspaceId, workspaceSlug }: { workspaceId: string;
         <StatePanel
           kind="empty"
           title="Nothing needs you"
-          description="Rows assigned to you, questions from your agents and mentions show up here."
+          description="Tasks assigned to you, questions from your agents, and mentions show up here."
         />
       ) : (
         <ul className="divide-y rounded-md border">
@@ -114,7 +117,7 @@ export function InboxList({ workspaceId, workspaceSlug }: { workspaceId: string;
                     />
                   }
                 >
-                  Open row
+                  {item.tableName.toLowerCase() === 'tasks' ? 'Open task' : 'Open record'}
                 </Button>
                 {item.taskId && (
                   <Button

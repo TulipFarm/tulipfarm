@@ -64,18 +64,23 @@ export function rowLabel(
   );
 }
 
-/** The V4 title rule: the first text field, otherwise the first field, otherwise `Row` and the short row ID. */
+/** The title rule: the first non-empty text field, otherwise the first labelable values, otherwise `Row` and the short row ID. */
 export function rowTitle(
   definition: TableDefinition,
   record: { id: string; values: TableValues },
   systemKind?: 'workspace-members' | 'tasks',
 ): string {
   if (systemKind === 'workspace-members') return workspaceMemberLabel(record.values);
-  const field = definition.fields.find(item => item.kind === 'text') ?? definition.fields[0];
-  const value = field && record.values[field.id];
-  const title =
-    field && value && labelKinds.has(value.kind) ? formatTableValue(value, definition, field.id).trim() : '';
-  return title || `Row ${record.id.slice(0, 8)}`;
+  for (const field of definition.fields) {
+    if (field.kind !== 'text') continue;
+    const value = record.values[field.id];
+    if (!value || !labelKinds.has(value.kind)) continue;
+    const text = formatTableValue(value, definition, field.id).trim();
+    if (text) return text;
+  }
+  const fallback = rowLabel(definition, record.values, systemKind);
+  if (fallback !== 'Untitled row') return fallback;
+  return `Row ${record.id.slice(0, 8)}`;
 }
 
 function FieldDetails({ field }: { field: TableField }) {

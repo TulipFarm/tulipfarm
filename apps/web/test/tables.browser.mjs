@@ -1256,7 +1256,7 @@ try {
   await page.getByLabel('Resolved', { exact: true }).click();
   await page.getByRole('option', { name: 'No', exact: true }).click();
   await page.keyboard.press('Escape');
-  await page.getByRole('alertdialog', { name: 'Leave these edits?', exact: true }).waitFor();
+  await page.getByRole('alertdialog', { name: 'Discard unsaved changes?', exact: true }).waitFor();
   await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
   assert.equal(await page.getByLabel('Subject', { exact: true }).inputValue(), 'Updated subject');
   const beforeDraftFocus = tableReads.length;
@@ -1411,7 +1411,7 @@ try {
   await page.getByText(/The file was not uploaded/).waitFor();
   uploadStatus = 200;
   await chooser.setInputFiles({ name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from('png bytes') });
-  await page.getByText('Uploaded and attached photo.png. Save the row to keep it.', { exact: true }).waitFor();
+  await page.getByText('Uploaded and attached photo.png. Save to keep it.', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Remove photo.png from Evidence', exact: true }).waitFor();
   assert.equal(uploads.length, 2);
   assert.deepEqual(

@@ -384,7 +384,7 @@ function AccessContent({
       <PageHeader
         titleId="governance-heading"
         focusable
-        title="Members"
+        title="Members & teams"
         description="People in this workspace, the teams they belong to, and what they can access."
       />
     ) : section === 'invite' ? (

@@ -138,20 +138,28 @@ const SecretsSettingsPage = lazyRouteComponent(routePage('secretsSettings'), 'Se
 const BrowserLoginsSettingsPage = lazyRouteComponent(routePage('browserLoginsSettings'), 'BrowserLoginsSettingsPage');
 const UsagePage = lazyRouteComponent(routePage('usage'), 'UsagePage');
 
-function NotFoundPanel() {
+function NotFoundPanel({ workspaceSlug }: { workspaceSlug?: string }) {
   return (
     <StatePanel
       heading="h1"
       kind="unavailable"
       title="Page not found"
-      description="Check the URL or return to a workspace you can access."
+      description="This link doesn't match a page in your workspace. Check the address or head back home."
     >
-      <Button nativeButton={false} render={<Link to="/" />}>
-        Back to TulipFarm
-      </Button>
-      <Button variant="outline" nativeButton={false} render={<Link to="/account/workspace-recovery" />}>
-        Recover workspace changes
-      </Button>
+      {workspaceSlug ? (
+        <Button nativeButton={false} render={<Link to="/$workspaceSlug" params={{ workspaceSlug }} />}>
+          Back to workspace home
+        </Button>
+      ) : (
+        <>
+          <Button nativeButton={false} render={<Link to="/" />}>
+            Back to TulipFarm
+          </Button>
+          <Button variant="outline" nativeButton={false} render={<Link to="/account/workspace-recovery" />}>
+            Recover workspace changes
+          </Button>
+        </>
+      )}
     </StatePanel>
   );
 }
@@ -166,11 +174,11 @@ function NotFoundPage() {
 
 /** Inside the admitted workspace shell, the shell owns the main landmark; an unknown workspace has no shell. */
 function WorkspaceNotFoundPage() {
-  const inShell = useMatch({ from: '/$workspaceSlug', shouldThrow: false })?.status === 'success';
-  if (!inShell) return <NotFoundPage />;
+  const match = useMatch({ from: '/$workspaceSlug', shouldThrow: false });
+  if (match?.status !== 'success') return <NotFoundPage />;
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto">
-      <NotFoundPanel />
+      <NotFoundPanel workspaceSlug={match.params.workspaceSlug} />
     </div>
   );
 }

@@ -303,10 +303,10 @@ function GeneralSettings({ workspaceId, slug, userId }: { workspaceId: string; s
             </SettingsGroup>
             <SettingsGroup title="Your membership" titleId="membership-heading">
               <SettingsRow label="Role" description="Your role in this workspace.">
-                <Badge variant="secondary">{membership.role}</Badge>
+                <Badge variant="secondary">{membership.role === 'admin' ? 'Admin' : 'Member'}</Badge>
               </SettingsRow>
               <SettingsRow
-                label="Leave workspace"
+                label="Workspace access"
                 description={
                   membership.capabilities.canLeave
                     ? 'Leaving removes your membership and team access. Your account and other workspaces remain available.'
@@ -344,13 +344,13 @@ function GeneralSettings({ workspaceId, slug, userId }: { workspaceId: string; s
                   </Alert>
                 </div>
               )}
-              <SettingsRow label="Members" description="Invite people and manage roles.">
+              <SettingsRow label="Members & teams" description="Invite people, manage roles, and organize teams.">
                 <Button
                   variant="outline"
                   nativeButton={false}
                   render={<Link to="/$workspaceSlug/members" params={{ workspaceSlug: slug }} />}
                 >
-                  Manage members
+                  Manage members &amp; teams
                 </Button>
               </SettingsRow>
             </SettingsGroup>
@@ -377,7 +377,7 @@ function GeneralSettings({ workspaceId, slug, userId }: { workspaceId: string; s
               <SettingsGroup title="Close workspace" titleId="delete-heading">
                 <SettingsRow
                   label="Close this workspace"
-                  description="Access ends for everyone. Rows, files, and backups stay stored. Closing does not erase them."
+                  description="Access ends for everyone. Tables, files, and backups stay stored. Closing does not erase them."
                 >
                   <Button
                     variant="destructive"
@@ -420,7 +420,7 @@ function GeneralSettings({ workspaceId, slug, userId }: { workspaceId: string; s
           </DialogHeader>
           <div className="space-y-4 overflow-y-auto">
             <ul className="list-disc space-y-2 pl-5 text-base">
-              <li>Rows, files, and backups are retained.</li>
+              <li>Tables, files, and backups are retained.</li>
               <li>Your account and other workspaces remain available.</li>
               <li>Restoration and an erasure deadline are not promised.</li>
             </ul>

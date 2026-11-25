@@ -263,12 +263,12 @@ function IntegrationsContent({ workspaceId, slug }: { workspaceId: string; slug:
               <Button
                 variant="outline"
                 size="sm"
-                aria-label="Add custom app"
+                aria-label="Add custom integration"
                 disabled={!mcp.capabilities.integrationsEnabled}
                 onClick={() => setSetup({})}
               >
                 <AddIcon aria-hidden="true" />
-                <span className="hidden sm:inline">Add custom app</span>
+                <span className="hidden sm:inline">Add custom integration</span>
               </Button>
             ) : undefined
           }
@@ -334,9 +334,9 @@ function IntegrationsContent({ workspaceId, slug }: { workspaceId: string; slug:
               {/* Tabs and search stay in reach while the list scrolls. */}
               <div className="sticky top-0 z-20 -mx-4 flex flex-col gap-2 bg-background px-4 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                 {tabbed && (
-                  <TabsList aria-label="Show apps">
+                  <TabsList aria-label="Filter integrations">
                     <TabsTrigger value="yours">
-                      Your apps
+                      Connected
                       {!holding && <span className="text-muted-foreground tabular-nums"> {sorted.yours.length}</span>}
                     </TabsTrigger>
                     <TabsTrigger value="browse">
@@ -350,10 +350,10 @@ function IntegrationsContent({ workspaceId, slug }: { workspaceId: string; slug:
                 <div className={tabbed ? 'w-full sm:max-w-xs' : 'w-full sm:max-w-md'}>
                   <SearchField
                     id={searchId}
-                    label="Search apps"
+                    label="Search integrations"
                     value={query}
                     onChange={setQuery}
-                    placeholder="Search apps, like PostHog or Jira"
+                    placeholder="Search integrations, like PostHog or Jira"
                   />
                 </div>
               </div>
@@ -365,7 +365,7 @@ function IntegrationsContent({ workspaceId, slug }: { workspaceId: string; slug:
                 <>
                   <TabsContent value="yours">
                     {sorted.yours.length > 0 ? (
-                      <ul aria-label="Your apps" className="grid gap-3 pt-2 lg:grid-cols-2">
+                      <ul aria-label="Connected integrations" className="grid gap-3 pt-2 lg:grid-cols-2">
                         {sorted.yours.map(entry => (
                           <li key={entryKey(entry)} className="min-w-0 rounded-2xl border bg-card">
                             {renderEntry(entry)}
@@ -377,8 +377,8 @@ function IntegrationsContent({ workspaceId, slug }: { workspaceId: string; slug:
                         kind="empty"
                         heading="h3"
                         icon={PlugIcon}
-                        title={`None of your apps match ${searched}`}
-                        description="Try Browse to find apps you haven’t connected."
+                        title={`No connected integrations match ${searched}`}
+                        description="Try Browse to find integrations you haven’t connected."
                       >
                         <Button variant="outline" onClick={() => setView('browse')}>
                           Search Browse
@@ -389,14 +389,19 @@ function IntegrationsContent({ workspaceId, slug }: { workspaceId: string; slug:
                   <TabsContent value="browse">
                     <div className="space-y-8 pt-2">
                       {sorted.connectable.length > 0 ? (
-                        <ul aria-label={needle ? 'Search results' : 'Apps you can connect'} className={gridClass}>
+                        <ul
+                          aria-label={needle ? 'Search results' : 'Integrations you can connect'}
+                          className={gridClass}
+                        >
                           {sorted.connectable.map(entry => (
                             <li key={entryKey(entry)}>{renderEntry(entry)}</li>
                           ))}
                         </ul>
                       ) : (
                         !needle && (
-                          <p className="text-sm text-muted-foreground">You’ve connected every app available to you.</p>
+                          <p className="text-sm text-muted-foreground">
+                            You’ve connected every integration available to you.
+                          </p>
                         )
                       )}
                       {sorted.unavailable.length > 0 && (

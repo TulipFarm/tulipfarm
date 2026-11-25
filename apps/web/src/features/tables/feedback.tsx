@@ -151,15 +151,12 @@ export function UnsavedChanges({
       }}
     >
       <AlertDialogContent>
-        <AlertDialogTitle>Leave these edits?</AlertDialogTitle>
-        <AlertDialogDescription>
-          Your input will be lost if you leave. Any submitted operation continues on the server, even if its result has
-          not been confirmed here.
-        </AlertDialogDescription>
+        <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
+        <AlertDialogDescription>Your unsaved edits will be lost if you leave this page.</AlertDialogDescription>
         <AlertDialogFooter>
           <AlertDialogCancel onClick={() => blocker.reset?.()}>Keep editing</AlertDialogCancel>
           <AlertDialogAction variant="destructive" onClick={() => blocker.proceed?.()}>
-            Leave editor
+            Discard changes
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

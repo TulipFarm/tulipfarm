@@ -403,7 +403,7 @@ try {
   await page.getByRole('alertdialog').getByRole('button', { name: 'Keep agent', exact: true }).click();
   assert.equal(deletes, 0);
   await remove.click();
-  await page.getByRole('alertdialog').getByRole('button', { name: 'Delete saved agent', exact: true }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Delete agent', exact: true }).click();
   await deletion.getByRole('button', { name: 'Retry same operation', exact: true }).waitFor();
   assert.equal(await remove.getAttribute('aria-disabled'), 'true');
   assert.equal(await describedBy(remove, page), 'Check whether the agent was deleted before trying again.');

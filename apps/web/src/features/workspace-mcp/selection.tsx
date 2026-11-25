@@ -105,13 +105,10 @@ function McpSelection({
       </div>
     );
   return (
-    <section aria-label="MCP integration selection" className="space-y-3">
-      <h3 className="text-base font-medium">
-        MCP integrations for this {kind === 'chat' ? 'personal chat' : 'private task'}
-      </h3>
+    <section aria-label="Custom integration selection" className="space-y-3">
+      <h3 className="text-base font-medium">Custom integrations for this {kind === 'chat' ? 'chat' : 'run'}</h3>
       <p className="text-sm text-muted-foreground">
-        Only your explicit selections make tools available. The assistant cannot choose or switch accounts. Selection
-        does not approve a call or disclose private input.
+        Only integrations you select are available here. The assistant cannot choose or switch accounts on its own.
       </p>
       <McpRead state={read.state} refresh={read.refresh} label="MCP selections">
         {(data, blocked) => (
@@ -183,9 +180,8 @@ function SelectionEditor({
         </Alert>
       )}
       {!data.choices.length && (
-        <p>
-          No eligible MCP integrations. Set up and review an integration in Integrations. Named tasks also need an
-          active agent allowlist and an approved account-independent server identity.
+        <p className="text-sm text-muted-foreground">
+          No custom integrations are approved for this agent yet. Connect and approve one in Integrations.
         </p>
       )}
       {data.choices.map(choice => {

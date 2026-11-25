@@ -1199,7 +1199,11 @@ function ConversationDetail({
         <UnsavedChanges
           dirty={
             !persistent &&
-            (!!text || staged || !!editing || write.state.kind === 'sending' || write.state.kind === 'uncertain')
+            ((!!text && !(prefill?.prompt && text === prefill.prompt && !staged)) ||
+              staged ||
+              !!editing ||
+              write.state.kind === 'sending' ||
+              write.state.kind === 'uncertain')
           }
           allowNavigation={sendNavigation}
         />
@@ -1214,7 +1218,7 @@ function ConversationDetail({
                     ref={heading}
                     tabIndex={-1}
                     title={data.chat.title}
-                    className="min-w-0 flex-1 truncate text-sm font-medium"
+                    className="min-w-0 flex-1 truncate text-sm font-medium outline-none"
                   >
                     <TypedText text={data.chat.title} animate={!data.chat.titleManual && data.chat.titleRevision > 1} />
                   </h1>
@@ -1317,7 +1321,7 @@ function ConversationDetail({
           >
             {data?.chat.archived && (
               <p role="status" className="text-sm text-muted-foreground">
-                This chat is archived. Messages remain saved and reply work continues.
+                This chat is archived. Messages stay saved and any active reply finishes.
               </p>
             )}
             {editing && (
@@ -1746,9 +1750,19 @@ function ConversationDetail({
             </ConversationRead>
             {!compact && empty && (
               <StartingTasks
-                disabled={locked || !models.usable || !!text || staged}
+                disabled={
+                  locked || !models.usable || (!!text && !(prefill?.prompt && text === prefill.prompt)) || staged
+                }
+                disabledReason={
+                  !models.usable
+                    ? 'Waiting for an available AI model before starting a prompt.'
+                    : (!!text && !(prefill?.prompt && text === prefill.prompt)) || staged
+                      ? 'Clear your current draft to use a suggested prompt.'
+                      : null
+                }
                 onChoose={prompt => {
-                  if (!locked && models.usable && !text && !staged)
+                  const canReplaceDraft = !text || (!!prefill?.prompt && text === prefill.prompt);
+                  if (!locked && models.usable && canReplaceDraft && !staged)
                     post(textDocument(prompt), [{ kind: 'text', text: prompt }]);
                 }}
               />

@@ -382,7 +382,11 @@ function WorkflowPage({
       </AlertDialog>
       <PageHeader
         title={detail ? detail.definition.name : 'Workflows'}
-        description={detail ? undefined : 'See how repeatable work runs. Create and edit workflows in chat.'}
+        description={
+          detail
+            ? undefined
+            : 'Automate repeatable work with schedules, webhooks, and agent steps. New workflows open in chat.'
+        }
         actions={detail ? refreshList : undefined}
         parent={
           detail

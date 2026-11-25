@@ -12,7 +12,7 @@ const createdAt = '2026-10-01T00:00:00Z';
 const cases = [
   {
     page: 'agents',
-    action: 'New agent',
+    action: 'Build in chat',
     empty: 'No agents yet',
     skillId: 'agent-authoring',
     placeholder: 'Describe the job, for example "Answer questions about my Customers table"',

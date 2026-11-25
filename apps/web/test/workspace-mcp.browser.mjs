@@ -517,7 +517,7 @@ try {
   assert.equal(mcpReads.length, beforeFocus, 'window focus does not bypass MCP query freshness');
   // Registry results list under Browse, beside the apps this member can still connect.
   await page.getByRole('tab', { name: /^Browse/ }).click();
-  const directory = page.getByRole('searchbox', { name: 'Search apps' });
+  const directory = page.getByRole('searchbox', { name: 'Search integrations' });
   catalogDelay = 500;
   await directory.fill('Registry customer');
   await page.getByRole('status', { name: 'Searching the MCP Registry' }).waitFor();
@@ -528,7 +528,7 @@ try {
   await page.getByRole('button', { name: 'Clear search', exact: true }).and(page.getByText('Clear search')).click();
   assert.equal(await directory.inputValue(), '');
   const addApp = async (name, endpoint, signIn) => {
-    await page.getByRole('button', { name: 'Add custom app', exact: true }).click();
+    await page.getByRole('button', { name: 'Add custom integration', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Add a custom app' });
     await dialog.getByLabel('Server link', { exact: true }).fill(endpoint);
     await dialog.getByLabel('Name', { exact: true }).fill(name);
@@ -634,7 +634,7 @@ try {
 
   await go(`/chat/${chatId}`);
   await page.getByText('Retained confidential answer', { exact: false }).waitFor();
-  assert.equal(await page.getByRole('region', { name: 'MCP integration selection' }).count(), 0);
+  assert.equal(await page.getByRole('region', { name: 'Custom integration selection' }).count(), 0);
   assert.equal(await page.getByRole('region', { name: 'MCP actions and receipts' }).count(), 0);
   // A chat call waiting for approval is decided in a card under the reply.
   actions = [structuredClone(action)];
@@ -783,7 +783,7 @@ try {
   assert.equal(
     await page
       .getByRole('region', { name: 'Agent chat', exact: true })
-      .getByRole('region', { name: 'MCP integration selection' })
+      .getByRole('region', { name: 'Custom integration selection' })
       .count(),
     0,
   );
@@ -802,7 +802,7 @@ try {
   await start.getByRole('button', { name: 'Start task', exact: true }).click();
   await page.waitForURL(`**/agent-tasks/${taskId}`);
   assert.ok(writes.find(write => write.suffix === '/task-start').body.mcpSelection);
-  await page.getByRole('heading', { name: 'MCP integrations for this private task' }).waitFor();
+  await page.getByRole('heading', { name: 'Custom integrations for this run' }).waitFor();
   actionStatus = 403;
   await changed();
   await page.getByRole('heading', { name: 'Private task access changed' }).waitFor();

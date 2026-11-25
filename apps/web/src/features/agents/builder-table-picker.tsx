@@ -55,7 +55,7 @@ export function BuilderTablePicker({
           <ChoiceGroup
             type="checkbox"
             optional
-            legend="Business tables"
+            legend="Tables"
             legendVisibility={hideLegend ? 'screen-reader' : 'visible'}
             helper="Only tables you can access are listed."
             disabled={disabled}

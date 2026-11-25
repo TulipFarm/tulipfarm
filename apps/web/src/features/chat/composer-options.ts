@@ -32,6 +32,8 @@ export type Model = {
   logo: Icon;
   brand: ModelBrand | null;
   cost?: number | undefined;
+  speed?: number | null | undefined;
+  isDefault?: boolean | undefined;
 };
 
 export type Persona = { kind: 'mode'; mode: Mode } | { kind: 'agent'; agent: Agent };

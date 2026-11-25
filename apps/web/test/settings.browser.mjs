@@ -668,15 +668,15 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 36
       await general(page);
       await page.getByLabel('Workspace name', { exact: true }).fill('Unsaved');
       await nav(page).getByRole('link', { name: 'Members & teams', exact: true }).click();
-      await page.getByRole('heading', { name: 'Leave these edits?' }).waitFor();
+      await page.getByRole('heading', { name: 'Discard unsaved changes?' }).waitFor();
       await page.getByRole('button', { name: 'Keep editing' }).click();
       assert.equal(await page.getByLabel('Workspace name', { exact: true }).inputValue(), 'Unsaved');
       await page.getByRole('button', { name: 'Reset name' }).click();
       // Members and Teams share one link; the Teams tab keeps that link current.
       for (const [label, heading, tab] of [
-        ['Members & teams', 'Members', 'Teams'],
+        ['Members & teams', 'Members & teams', 'Teams'],
         ['Table access', 'Table access'],
-        ['Members & teams', 'Members'],
+        ['Members & teams', 'Members & teams'],
         ['General', 'General'],
       ]) {
         await nav(page).getByRole('link', { name: label, exact: true }).click();
@@ -758,7 +758,7 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 36
           await general(page);
           await page.getByRole('button', { name: 'Close workspace', exact: true }).click();
           const dialog = page.getByRole('dialog');
-          await dialog.getByText(/Rows, files, and backups are retained/).waitFor();
+          await dialog.getByText(/Tables, files, and backups are retained/).waitFor();
           const remove = dialog.getByRole('button', { name: 'Close workspace for everyone' });
           await dialog.getByLabel('Type the exact workspace name').fill('acme');
           await dialog

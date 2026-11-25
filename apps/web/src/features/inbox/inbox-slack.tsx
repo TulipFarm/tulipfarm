@@ -6,10 +6,10 @@ import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson } from '@/lib/http';
 
 const kinds = [
-  { kind: 'assigned', label: 'Assigned to you', description: 'Someone assigns you a row.' },
+  { kind: 'assigned', label: 'Assigned to you', description: 'Someone assigns you a task.' },
   { kind: 'waiting', label: 'Waiting for you', description: 'An agent needs your answer or approval.' },
-  { kind: 'finished', label: 'Agent finished', description: 'An agent finishes a row you sponsor.' },
-  { kind: 'mention', label: 'Mentioned you', description: 'Someone mentions you on a row.' },
+  { kind: 'finished', label: 'Agent finished', description: 'An agent finishes a task you’re following.' },
+  { kind: 'mention', label: 'Mentioned you', description: 'Someone mentions you in a task.' },
 ] as const;
 type Kind = (typeof kinds)[number]['kind'];
 const preferencesSchema = z.object({
@@ -65,25 +65,27 @@ export function InboxSlackSettings({ workspaceId }: { workspaceId: string }) {
   return (
     <SettingsGroup title="Inbox in Slack" titleId="inbox-slack-heading">
       {preferences && !preferences.connected && (
-        <p className="text-sm text-muted-foreground">
-          Link your Slack account to get these as direct messages: message the TulipFarm app in Slack and follow its
-          link.
-        </p>
+        <div className="px-4 py-3">
+          <p className="text-sm text-muted-foreground">
+            Slack isn’t linked yet. Message the TulipFarm app in Slack and follow its link to receive Inbox
+            notifications as direct messages.
+          </p>
+        </div>
       )}
-      {preferences &&
+      {preferences?.connected &&
         kinds.map(({ kind, label, description }) => (
           <SettingsRow key={kind} label={label} description={description}>
             <Switch
               size="sm"
               aria-label={`Send “${label}” to Slack`}
               checked={preferences.kinds[kind]}
-              disabled={saving || !preferences.connected}
+              disabled={saving}
               onCheckedChange={checked => save(kind, checked === true)}
             />
           </SettingsRow>
         ))}
       {error && (
-        <p role="alert" className="text-sm text-destructive">
+        <p role="alert" className="px-4 py-3 text-sm text-destructive">
           {error}
         </p>
       )}

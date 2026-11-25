@@ -193,7 +193,7 @@ test('the inbox keeps its own title while the next page is still loading', async
   );
   release();
   await evidence(page, 'a18-inbox-destination', async () => {
-    await page.getByRole('heading', { level: 1, name: 'My agent tasks', exact: true }).waitFor();
+    await page.getByRole('heading', { level: 1, name: 'Agent runs', exact: true }).waitFor();
     assert.equal(await page.getByText(/isn’t available yet/).count(), 0);
   });
   assert.deepEqual(errors, []);

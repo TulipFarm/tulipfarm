@@ -28,13 +28,16 @@ export function BuilderTriggers({
   return (
     <FormSection
       title="Triggers"
-      description="Activating saves these triggers to this agent's workflow. To add a trigger, ask in chat."
-      meta={value.length ? `${value.length} added` : undefined}
+      description="Optional. Run this agent automatically on a schedule, webhook, or table change — or skip this step and start it anytime from chat or Slack."
+      meta={value.length ? `${value.length} added` : 'Optional'}
     >
       {!value.length && (
         <div className="flex items-start gap-3 text-sm">
           <WorkflowIcon aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
-          <p className="text-muted-foreground">No triggers. People can still use this agent in chat and Slack.</p>
+          <p className="text-muted-foreground">
+            No automatic triggers yet. Continue to Review to activate this agent now, or add schedules and webhooks
+            later in Workflows.
+          </p>
         </div>
       )}
       <p className="text-sm">

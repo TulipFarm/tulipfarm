@@ -387,7 +387,6 @@ test('the whole choice row toggles its checkbox', async () => {
   // Actions sit on the builder's Access step, chosen from a select below sm (features/agents/builder-layout.tsx).
   await page.getByRole('combobox', { name: 'Setup section', exact: true }).click();
   await page.getByRole('option', { name: '2. Access', exact: true }).click();
-  await page.getByRole('button', { name: 'More actions', exact: true }).click();
   const group = page.getByRole('region', { name: 'Tables actions', exact: true });
   await group.getByRole('button').first().click();
   const option = group

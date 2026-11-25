@@ -28,9 +28,9 @@ export const agentTabs: readonly {
   },
   {
     value: 'execution',
-    label: 'Execution',
+    label: 'Activation',
     description:
-      'Turn execution on, limit the tables and Slack channels it may use, then activate the saved instructions.',
+      'Turn this agent on, limit the tables and Slack channels it may use, and publish your latest instructions.',
     requires: 'manage',
   },
   {
@@ -199,7 +199,7 @@ export function agentSetup({
       id: 'access',
       title: 'Get run access',
       status: 'todo',
-      detail: 'Give yourself or one of your teams the invoke permission, then save sharing.',
+      detail: 'Grant yourself or your team run access, then save sharing.',
       link: { kind: 'tab', label: 'Go to Access', tab: 'access', target: 'agent-ownership' },
     });
   else
@@ -227,7 +227,7 @@ export function agentSetup({
       id: 'model',
       title: 'Model available',
       status: 'done',
-      detail: 'No saved preference. The runtime must supply an available model.',
+      detail: 'Uses the workspace default model.',
     });
   else
     steps.push({

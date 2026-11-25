@@ -115,7 +115,7 @@ test(
           const url = new URL(response.url());
           return url.pathname === `${base}/agent-tasks` && url.searchParams.get('search') === 'existing';
         }),
-        page.getByRole('searchbox', { name: 'Find a task request' }).fill('existing'),
+        page.getByRole('searchbox', { name: 'Find an agent run' }).fill('existing'),
       ]);
       await page.getByRole('button', { name: 'Next task page', exact: true }).click();
       await page.getByRole('link', { name: names[2], exact: true }).waitFor();
@@ -126,7 +126,7 @@ test(
       await page.getByRole('link', { name: names[0], exact: true }).waitFor();
       const rows = page.getByRole('row').filter({ has: page.getByRole('link') });
       assert.ok((await rows.first().innerText()).includes(names[0]));
-      assert.equal(await page.getByRole('searchbox', { name: 'Find a task request' }).inputValue(), '');
+      assert.equal(await page.getByRole('searchbox', { name: 'Find an agent run' }).inputValue(), '');
       assert.ok(reads.some(read => read.after === cursor && read.search === 'existing'));
       assert.equal(await page.getByRole('button', { name: 'Previous task page', exact: true }).count(), 0);
       await captureBuilderScreenshot(page, 'tasks-newest-first');

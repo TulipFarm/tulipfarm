@@ -66,6 +66,20 @@ export function RecordEditor({
 }) {
   const isMember = table.systemKind === 'workspace-members';
   const isTasks = table.systemKind === 'tasks';
+  const noun = isTasks ? 'task' : 'row';
+  const title = repair
+    ? 'Complete member'
+    : isMember
+      ? record
+        ? 'Edit member'
+        : 'Add member'
+      : isTasks
+        ? record
+          ? 'Edit task'
+          : 'New task'
+        : record
+          ? 'Edit row'
+          : 'Add row';
   const [recordId] = useState(() => record?.id ?? repair?.id ?? crypto.randomUUID());
   const memberRead = useWorkspaceMembers(workspace.id, table.id, { ids: [recordId] }, isMember && record !== null);
   const member =
@@ -150,24 +164,19 @@ export function RecordEditor({
     >
       <SheetContent size="lg" showCloseButton={!sending} finalFocus={finalFocus}>
         <SheetHeader>
-          <SheetTitle>
-            {repair
-              ? 'Complete member'
-              : isMember
-                ? record
-                  ? 'Edit member'
-                  : 'Add member'
-                : record
-                  ? 'Edit row'
-                  : 'Add row'}
-          </SheetTitle>
+          <SheetTitle>{title}</SheetTitle>
           <SheetDescription>
-            {table.definition.label}
-            {record
-              ? `: ${rowLabel(table.definition, record.values, table.systemKind)}`
-              : isMember
-                ? ': create a person without sending an invitation or granting access.'
-                : ': fill in the fields, then save.'}
+            {isTasks
+              ? record
+                ? rowLabel(table.definition, record.values, table.systemKind)
+                : 'Add details and assign this task to a person or an agent.'
+              : `${table.definition.label}${
+                  record
+                    ? `: ${rowLabel(table.definition, record.values, table.systemKind)}`
+                    : isMember
+                      ? ': create a person without sending an invitation or granting access.'
+                      : ': fill in the fields, then save.'
+                }`}
           </SheetDescription>
         </SheetHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
@@ -216,11 +225,19 @@ export function RecordEditor({
               </AlertDescription>
             </Alert>
           )}
-          <Form label={record ? 'Edit row' : 'Add row'} disabled={locked || fieldsChanged} onSubmit={submit}>
+          <Form
+            label={isTasks ? title : record ? 'Edit row' : 'Add row'}
+            disabled={locked || fieldsChanged}
+            onSubmit={submit}
+          >
             <div className="grid gap-5">
-              {definition.fields
-                .filter(field => !isMember || field.id !== workspaceMemberFields.photo)
-                .map(field => (
+              {(() => {
+                const visibleFields = definition.fields.filter(
+                  field =>
+                    (!isMember || field.id !== workspaceMemberFields.photo) &&
+                    (!isTasks || record !== null || field.id !== taskFields.runState),
+                );
+                const renderField = (field: (typeof visibleFields)[number]) => (
                   <FieldInput
                     key={field.id}
                     field={field}
@@ -235,12 +252,44 @@ export function RecordEditor({
                           (field.id === workspaceMemberFields.name && record !== null && !member?.canEditProfile))) ||
                       (isTasks && field.id === taskFields.runState)
                     }
+                    singleLine={isTasks && field.id === taskFields.title}
+                    placeholder={
+                      isTasks && field.id === taskFields.title
+                        ? 'Task title'
+                        : isTasks && field.id === taskFields.description
+                          ? 'Add description…'
+                          : undefined
+                    }
+                    rows={isTasks && field.id === taskFields.description ? 5 : undefined}
+                    hideHelper={
+                      isTasks &&
+                      (field.id === taskFields.title ||
+                        field.id === taskFields.description ||
+                        field.id === taskFields.assignee ||
+                        field.id === taskFields.reporter)
+                    }
                     change={value => setValues(previous => ({ ...previous, [field.id]: value }))}
                     api={api}
                     workspace={workspace}
                     unavailableFileIds={record?.unavailableFileIds ?? []}
                   />
-                ))}
+                );
+                if (!isTasks) return visibleFields.map(renderField);
+                const assignee = visibleFields.find(f => f.id === taskFields.assignee);
+                const reporter = visibleFields.find(f => f.id === taskFields.reporter);
+                const paired = assignee && reporter;
+                return visibleFields.flatMap(field => {
+                  if (paired && field.id === taskFields.reporter) return [];
+                  if (paired && field.id === taskFields.assignee)
+                    return [
+                      <div key="task-actors" className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        {renderField(assignee)}
+                        {renderField(reporter)}
+                      </div>,
+                    ];
+                  return [renderField(field)];
+                });
+              })()}
               {definition.uniqueKeys.length > 0 && (
                 <p className="text-sm text-muted-foreground">
                   Must be unique:{' '}
@@ -252,23 +301,30 @@ export function RecordEditor({
                   .
                 </p>
               )}
-              <div className="sticky bottom-0 bg-popover pt-3">
+              <div className="sticky bottom-0 -mx-4 -mb-4 border-t bg-popover px-4 py-3">
                 <FormFooter
+                  layout="compact"
                   dirty={dirty}
-                  error={count ? `Fix ${count} ${count === 1 ? 'field' : 'fields'} to save the row.` : undefined}
+                  error={count ? `Fix ${count} ${count === 1 ? 'field' : 'fields'} to save this ${noun}.` : undefined}
                   submit={{
-                    label: record ? 'Save row' : 'Save new row',
-                    pendingLabel: record ? 'Saving row…' : 'Saving new row…',
+                    label: record ? (isTasks ? 'Save task' : 'Save row') : isTasks ? 'Create task' : 'Save new row',
+                    pendingLabel: record
+                      ? isTasks
+                        ? 'Saving task…'
+                        : 'Saving row…'
+                      : isTasks
+                        ? 'Creating task…'
+                        : 'Saving new row…',
                     state: sending
                       ? { kind: 'busy' }
                       : locked || fieldsChanged
                         ? {
                             kind: 'blocked',
                             reason: uncertain
-                              ? 'Check the row request before making more changes.'
+                              ? `Check the ${noun} request before making more changes.`
                               : fieldsChanged
                                 ? 'Review the changed fields before saving.'
-                                : 'Reload the table to check your access and current fields.',
+                                : 'Reload to check your access and current fields.',
                           }
                         : { kind: 'ready' },
                   }}
@@ -283,7 +339,8 @@ export function RecordEditor({
                           target="_blank"
                           rel="noopener"
                         >
-                          Open the existing row<span className="sr-only"> in a new tab</span>
+                          Open the existing {noun}
+                          <span className="sr-only"> in a new tab</span>
                         </Link>
                       </p>
                     )}
@@ -294,7 +351,15 @@ export function RecordEditor({
                     </Button>
                   )}
                   <Button variant="outline" disabled={sending} onClick={dismiss}>
-                    {uncertain ? 'Close and inspect current rows' : record ? 'Discard edits' : 'Discard new row'}
+                    {uncertain
+                      ? isTasks
+                        ? 'Close and inspect tasks'
+                        : 'Close and inspect current rows'
+                      : record
+                        ? 'Discard edits'
+                        : isTasks
+                          ? 'Cancel'
+                          : 'Discard new row'}
                   </Button>
                 </FormFooter>
               </div>
@@ -344,16 +409,16 @@ export function RecordEditor({
         </div>
         <AlertDialog open={confirmClose} onOpenChange={setConfirmClose}>
           <AlertDialogContent>
-            <AlertDialogTitle>Leave these edits?</AlertDialogTitle>
+            <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
             <AlertDialogDescription>
               {uncertain
-                ? 'The save result is not confirmed. The request can still finish after you close this editor.'
-                : 'Your unsaved row changes will be lost.'}
+                ? 'The save result is not confirmed. The request may still finish after you close this drawer.'
+                : `Your unsaved ${noun} changes will be lost.`}
             </AlertDialogDescription>
             <AlertDialogFooter>
               <AlertDialogCancel>Keep editing</AlertDialogCancel>
               <AlertDialogAction variant="destructive" onClick={dismiss}>
-                Leave editor
+                Discard changes
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

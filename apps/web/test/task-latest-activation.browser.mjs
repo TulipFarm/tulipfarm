@@ -68,7 +68,7 @@ export async function latestActivationJourney({
   await page.getByRole('combobox', { name: 'Activated instructions', exact: true }).waitFor();
   assert.match(
     await page.getByRole('combobox', { name: 'Activated instructions', exact: true }).innerText(),
-    /Latest eligible activation/,
+    /Current active version/,
   );
   await page.getByText('Uses the newest active version when the task starts.', { exact: true }).waitFor();
   const revision = await authoring.revise(other.user.id, {

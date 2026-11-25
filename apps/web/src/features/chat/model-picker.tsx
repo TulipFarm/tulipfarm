@@ -93,11 +93,42 @@ function ModelMark({ model, warning = false }: { model: ComposerModel; warning?:
   );
 }
 
-function Row({ mark, label, children }: { mark: ReactNode; label: string; children?: ReactNode }) {
+/** Short guidance hint for a model row so people can pick between speed, quality, and cost without memorizing names. */
+function modelHint(model: ComposerModel, medianCost: number | null): string | null {
+  const parts: string[] = [];
+  if (model.isDefault) parts.push('Recommended');
+  if (typeof model.speed === 'number' && model.speed >= 90) parts.push('Fast');
+  else if (/fast|flash|mini|haiku|nano/i.test(model.label)) parts.push('Fast');
+  else if (/opus|pro|o1|o3|o4|reason/i.test(model.label)) parts.push('Deep reasoning');
+  if (!model.plan && typeof model.cost === 'number' && medianCost !== null && medianCost > 0) {
+    if (model.cost <= medianCost * 0.5) parts.push('Low credit cost');
+    else if (model.cost >= medianCost * 2.2) parts.push('Higher credit cost');
+  }
+  return parts.length > 0 ? parts.slice(0, 2).join(' · ') : null;
+}
+
+function Row({
+  mark,
+  label,
+  hint,
+  children,
+}: {
+  mark: ReactNode;
+  label: string;
+  hint?: string | null | undefined;
+  children?: ReactNode;
+}) {
   return (
     <span className="flex min-w-0 flex-1 items-center gap-2">
       <span className="flex shrink-0">{mark}</span>
-      <span className="min-w-0 truncate">{label}</span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate">{label}</span>
+        {hint && (
+          <span className="truncate text-xs text-muted-foreground" aria-hidden="true">
+            {hint}
+          </span>
+        )}
+      </span>
       {children}
     </span>
   );
@@ -120,6 +151,11 @@ export function ModelPicker({ model, models, disabled, onModelChange, account }:
   const groups = groupModels(models);
   const planGroups = groups.filter(group => group.offers.some(offer => offer.plan));
   const creditGroups = groups.filter(group => !group.offers.some(offer => offer.plan));
+  const pricedCosts = models
+    .filter(item => !item.plan && typeof item.cost === 'number')
+    .map(item => item.cost!)
+    .sort((a, b) => a - b);
+  const medianCost = pricedCosts.length > 0 ? pricedCosts[Math.floor(pricedCosts.length / 2)]! : null;
   const off = disabled || models.length === 0;
   const source = model ? sourceOf(model) : null;
   // The trigger names the source when it matters: always for a plan, and for credits when a plan also offers the model.
@@ -139,6 +175,7 @@ export function ModelPicker({ model, models, disabled, onModelChange, account }:
     if (group.offers.length === 1 || group.offers.every(offer => offer.disabled)) {
       const only = group.offers.length === 1 ? group.offers[0]! : group.model;
       const usage = only.disabled ? null : usageOf(only);
+      const hint = only.disabled ? null : modelHint(only, medianCost);
       return (
         <DropdownMenuRadioItem
           key={group.key}
@@ -148,11 +185,13 @@ export function ModelPicker({ model, models, disabled, onModelChange, account }:
           aria-label={
             only.plan && !only.disabled
               ? `${only.label}, on ${sources[only.plan].name}${usage ? `, ${usage.status}` : ''}`
-              : undefined
+              : hint
+                ? `${only.label}, ${hint}`
+                : undefined
           }
           closeOnClick
         >
-          <Row mark={<ModelMark model={only} warning={Boolean(usage?.warning)} />} label={only.label}>
+          <Row mark={<ModelMark model={only} warning={Boolean(usage?.warning)} />} label={only.label} hint={hint}>
             {only.disabled ? (
               <UnavailableTag model={only} />
             ) : (
@@ -168,6 +207,8 @@ export function ModelPicker({ model, models, disabled, onModelChange, account }:
     }
     const current = group.offers.find(offer => offer.id === model?.id);
     const warning = Boolean(usageOf(current ?? group.model)?.warning);
+    const hint = modelHint(current ?? group.model, medianCost);
+    const subline = current ? sources[sourceOf(current)].name : hint;
     return (
       <DropdownMenuSub key={group.key}>
         <DropdownMenuSubTrigger
@@ -175,7 +216,7 @@ export function ModelPicker({ model, models, disabled, onModelChange, account }:
           aria-label={
             current
               ? `${group.model.label}, selected, on ${sources[sourceOf(current)].name}`
-              : `${group.model.label}, choose where it runs`
+              : `${group.model.label}${hint ? `, ${hint}` : ''}, choose where it runs`
           }
         >
           <span className="flex min-w-0 flex-1 items-center gap-2">
@@ -184,10 +225,10 @@ export function ModelPicker({ model, models, disabled, onModelChange, account }:
             </span>
             <span className="flex min-w-0 flex-col">
               <span className="truncate">{group.model.label}</span>
-              {/* The chosen model names where it runs underneath, keeping the right edge for the chevron. */}
-              {current && (
+              {/* The chosen source or capability hint sits underneath, keeping the right edge for the chevron. */}
+              {subline && (
                 <span className="truncate text-xs text-muted-foreground" aria-hidden="true">
-                  {sources[sourceOf(current)].name}
+                  {subline}
                 </span>
               )}
             </span>
@@ -229,10 +270,15 @@ export function ModelPicker({ model, models, disabled, onModelChange, account }:
     );
   };
 
-  const section = (label: string, list: ModelGroup[]) =>
+  const section = (label: string, description: string | null, list: ModelGroup[]) =>
     list.length > 0 && (
       <DropdownMenuGroup>
-        <DropdownMenuLabel>{label}</DropdownMenuLabel>
+        <DropdownMenuLabel>
+          <span className="flex flex-col gap-0.5">
+            <span>{label}</span>
+            {description && <span className="text-xs font-normal text-muted-foreground">{description}</span>}
+          </span>
+        </DropdownMenuLabel>
         <DropdownMenuRadioGroup value={model?.id ?? ''} onValueChange={choose}>
           {list.map(item)}
         </DropdownMenuRadioGroup>
@@ -256,13 +302,13 @@ export function ModelPicker({ model, models, disabled, onModelChange, account }:
             />
           }
         >
-          {/* Phones drop the logo and shorten the name so the trigger clears the composer's other controls. */}
+          {/* Phones drop the logo so the full model name stays readable beside the other composer controls. */}
           {model && (
             <span className="hidden sm:flex">
               <ModelMark model={model} />
             </span>
           )}
-          <span className="max-w-20 truncate sm:max-w-40">{model?.label ?? 'Model'}</span>
+          <span className="max-w-36 truncate sm:max-w-44">{model?.label ?? 'Model'}</span>
           {(accountName ?? shownSource) && (
             <span className="hidden max-w-40 truncate text-xs text-muted-foreground sm:inline">{`· ${accountName ?? shownSource}`}</span>
           )}
@@ -271,9 +317,13 @@ export function ModelPicker({ model, models, disabled, onModelChange, account }:
         <TooltipContent>AI model that writes replies, and where it runs</TooltipContent>
       </Tooltip>
       <DropdownMenuContent size="menu" side="top" align="end">
-        {section('Your plans', planGroups)}
+        {section('Your plans', 'Billed to your connected account', planGroups)}
         {planGroups.length > 0 && creditGroups.length > 0 && <DropdownMenuSeparator />}
-        {section(planGroups.length > 0 ? 'Workspace credits' : 'Model', creditGroups)}
+        {section(
+          planGroups.length > 0 ? 'Workspace credits' : 'Model',
+          planGroups.length > 0 ? 'Billed to shared workspace credits' : null,
+          creditGroups,
+        )}
         {accounts && model?.plan && (
           <>
             <DropdownMenuSeparator />
