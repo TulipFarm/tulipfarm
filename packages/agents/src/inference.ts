@@ -1526,6 +1526,8 @@ export type ToolInferenceContext = {
   codingRuns?: boolean;
   /** This chat has a cloud browser, so the model may call `browser.*`. */
   browser?: boolean;
+  /** The workspace has the upgraded Tasks, so the model may call `tasks.*`. */
+  tasks?: boolean;
   /** The kind of app this chat edits, when the person may edit it, so the model may call that kind's `apps.*` tools. */
   apps?: AppKind | undefined;
   /** Deferred chat tools, by framework name, offered from the first round without a `tools_search`. */
@@ -3375,7 +3377,7 @@ export const blamesFailure = (candidate: string) =>
 
 const toolNames = [
   ...toolNameSchema.options,
-  ...nativeChatTools(undefined, true, undefined, true).tools.map(tool => tool.name),
+  ...nativeChatTools(undefined, true, undefined, true, false, undefined, false, true).tools.map(tool => tool.name),
   toolSearchName,
 ];
 function toolNamePattern(offered: readonly NativeTool[] = []) {
@@ -5272,6 +5274,7 @@ export async function inferWithTools(
         tools?.codingRuns ?? false,
         tools?.apps,
         tools?.browser ?? false,
+        tools?.tasks ?? false,
       );
       chatToolNameMention = toolNamePattern(catalog.tools);
       previousCatalog = catalogKey(mcp);
@@ -5536,6 +5539,7 @@ export async function inferWithTools(
               tools?.codingRuns ?? false,
               tools?.apps,
               tools?.browser ?? false,
+              tools?.tasks ?? false,
             ),
           );
           chatToolNameMention = toolNamePattern(catalog.tools);
@@ -5555,6 +5559,7 @@ export async function inferWithTools(
                   chatFiles: tools?.chatFiles ?? false,
                   codingRuns: tools?.codingRuns ?? false,
                   browser: tools?.browser ?? false,
+                  tasks: tools?.tasks ?? false,
                   personalMemory,
                   inventory,
                 },
@@ -6643,6 +6648,7 @@ export async function inferWithTools(
             chatFiles: tools?.chatFiles ?? false,
             codingRuns: tools?.codingRuns ?? false,
             browser: tools?.browser ?? false,
+            tasks: tools?.tasks ?? false,
           }),
         );
         if (instruction && value && typeof value === 'object') value = { ...value, instruction };
