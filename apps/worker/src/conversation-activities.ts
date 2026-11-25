@@ -76,7 +76,6 @@ import type { FileOutputStore } from '@tulipfarm/conversations/file-outputs';
 import type { ImageOutputStore } from '@tulipfarm/conversations/image-outputs';
 import { pinnedImageModels } from '@tulipfarm/conversations/turn-image-models';
 import { pinnedImageChoice } from '@tulipfarm/agents/image-generation';
-import { tasksUpgradeEnabled } from '@tulipfarm/agents/task-reminders';
 import { chatSkills } from '@tulipfarm/agents/chat-skills';
 import { createReplyTextPublisher } from '@tulipfarm/conversations/event-publisher';
 import { browserSessionId, createBrowserHostClient } from '@tulipfarm/browser';
@@ -384,7 +383,6 @@ export function meteredReply(
     const appTools = apps && appChat && (await apps.admitted(appChat)) ? apps : undefined;
     const pageTools = !appTools && appPages && appChat && (await appPages.admitted(appChat)) ? appPages : undefined;
     const appKind = appTools ? 'public' : pageTools ? 'private' : undefined;
-    const tasksOffered = Boolean(requester) && (await tasksUpgradeEnabled(fence.workspaceId).catch(() => false));
     const chatToolOptions = (
       toolRuntime: Parameters<typeof createChatTools>[0],
       tool?: string,
@@ -572,7 +570,6 @@ export function meteredReply(
               chatFiles: chatFilesOffered && Boolean(chatFiles),
               codingRuns: codingRunsOffered && Boolean(codingRunTools),
               browser: Boolean(browser),
-              tasks: tasksOffered,
               apps: appKind,
               ...(answerText ? { answerText } : {}),
               ...(layoutPreview ? { layoutPreview } : {}),
@@ -612,7 +609,6 @@ export function meteredReply(
               chatFiles: chatFilesOffered && Boolean(chatFiles),
               codingRuns: codingRunsOffered && Boolean(codingRunTools),
               browser: Boolean(browser),
-              tasks: tasksOffered,
               apps: appKind,
               ...(externalContext ? { preloadedTools: ['slack.thread.react'] } : {}),
               ...(answerText ? { answerText } : {}),

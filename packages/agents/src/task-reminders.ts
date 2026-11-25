@@ -4,12 +4,7 @@ import { AccessDenied, type HumanActor, requireTablePermission } from '@tulipfar
 import { activeGeneration, ensureWelcomeTask, readRecord } from '@tulipfarm/tables/store';
 import { formatTaskKey, taskKeysReady, taskNumberOf } from '@tulipfarm/tables/task-keys';
 import { runStateOptions, taskFields } from '@tulipfarm/tables/tasks-table';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import { agentCompatibility, relation, type AgentStorage, type AgentTransaction } from './store.ts';
-
-/** Whether the workspace has the Tasks upgrade: task keys, reminders, the welcome task and the chat tasks tools. */
-export const tasksUpgradeEnabled = (workspaceId: string) =>
-  isFeatureEnabled('assignable-tasks', null, { id: workspaceId });
 
 /** At most this many reminders run at once on one task. */
 export const maxActiveRemindersPerTask = 5;
@@ -40,7 +35,15 @@ export const reminderInputSchema = z.strictObject({
 });
 export type ReminderInput = z.infer<typeof reminderInputSchema>;
 
-export const reminderStopReasons = ['cancelled', 'commented', 'done', 'access-lost', 'deleted', 'finished'] as const;
+export const reminderStopReasons = [
+  'cancelled',
+  'commented',
+  'done',
+  'access-lost',
+  'deleted',
+  'finished',
+  'reassigned',
+] as const;
 export type ReminderStopReason = (typeof reminderStopReasons)[number];
 
 export const reminderSchema = z.object({
@@ -434,7 +437,6 @@ export async function fireDueReminders(tx: AgentTransaction, limit = 50) {
 export function createTaskUpkeep(runtime: AgentStorage) {
   return {
     async step(workspaceId: string) {
-      if (!(await tasksUpgradeEnabled(workspaceId))) return 0;
       return runtime.transaction(workspaceId, agentCompatibility, async tx => {
         if (!(await taskKeysReady(tx))) return 0;
         await ensureWelcomeTask(tx);

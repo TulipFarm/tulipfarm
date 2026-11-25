@@ -289,10 +289,9 @@ export function nativeChatTools(
   codingRuns = false,
   apps?: AppKind,
   browser = false,
-  tasks = false,
 ): ChatCatalog {
   const full = nativeTools(
-    { kind: 'chat', mcp, earlierMessages, chatFiles, codingRuns, apps, browser, tasks },
+    { kind: 'chat', mcp, earlierMessages, chatFiles, codingRuns, apps, browser },
     chatCallSchema,
   );
   if (!full.tools.length) throw new Error('tool-catalog-empty');

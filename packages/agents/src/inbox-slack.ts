@@ -3,7 +3,7 @@ import { AccessDenied, requireTablePermission, type HumanActor } from '@tulipfar
 import { openBotDirectMessage, postBotMessage, type slackCredentialCipher } from '@tulipfarm/slack';
 import { formatTaskKey, taskNumberOf } from '@tulipfarm/tables/task-keys';
 import { rowTitle } from './row-assignments.ts';
-import { tasksTableId, tasksUpgradeEnabled } from './task-reminders.ts';
+import { tasksTableId } from './task-reminders.ts';
 import { agentCompatibility, relation, type AgentStorage } from './store.ts';
 
 const kindText: Record<string, string> = {
@@ -121,7 +121,7 @@ export function createInboxSlackNotifier(options: {
 
   /** Sends what is due in one workspace and returns how many messages went out. */
   async function notify(workspaceId: string) {
-    const claimed = await claim(workspaceId, Boolean(options.taskLink) && (await tasksUpgradeEnabled(workspaceId)));
+    const claimed = await claim(workspaceId, Boolean(options.taskLink));
     if (!claimed?.messages.length) return 0;
     // A credential that no longer decrypts drops this batch, which was already marked, instead of retrying forever.
     const token = options.cipher.decrypt(

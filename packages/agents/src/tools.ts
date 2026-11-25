@@ -79,7 +79,7 @@ import { skillImportInputSchema, skillImportSelectionSchema } from './skill-impo
 import { SkillPackageError } from './skill-package-contracts.ts';
 import { agentCompatibility, currentActivation, relation, type AgentStorage, type AgentTransaction } from './store.ts';
 import { createRowWork } from './row-work.ts';
-import { TaskReminderError, tasksTableId, tasksUpgradeEnabled } from './task-reminders.ts';
+import { TaskReminderError, tasksTableId } from './task-reminders.ts';
 import {
   getTask,
   listTasks,
@@ -1035,8 +1035,6 @@ export type ToolAccess = (
       apps?: AppKind | undefined;
       /** Offers `slack.*` tools. Defaults to whether this deployment enables Slack actions. */
       slack?: boolean;
-      /** Offers `tasks.*` tools: the workspace has the upgraded Tasks. */
-      tasks?: boolean;
     }
   | { kind: 'agent'; tools: readonly ToolName[]; selectedSkills?: boolean; task?: boolean }
 ) & { mcp?: McpModelCatalog | undefined };
@@ -1088,9 +1086,7 @@ function admittedToolSchemas(access: ToolAccess) {
         const kind = appToolKinds.get(schema.shape.tool.value);
         return !kind || (access.kind === 'chat' && access.apps === kind);
       })
-      .filter(
-        schema => !taskToolNames.has(schema.shape.tool.value) || (access.kind === 'chat' && access.tasks === true),
-      )
+      .filter(schema => !taskToolNames.has(schema.shape.tool.value) || access.kind === 'chat')
       // Follow-ups belong to the chat or Slack thread a person asked in, so only a chat reply offers them.
       .filter(schema => !schema.shape.tool.value.startsWith('followups.') || access.kind === 'chat')
       // Projects belong to the person in this chat; saved agent runs cannot cite project sources.
@@ -3763,7 +3759,7 @@ export function createChatTools(
 
   /** The Tasks table's ID when chat must use the tasks.* tools for it, or null. */
   async function chatTasksTable(context: Parameters<typeof invoke>[0]) {
-    if (!context.origin || !(await tasksUpgradeEnabled(context.workspaceId))) return null;
+    if (!context.origin) return null;
     return withHuman(runtime, context.workspaceId, context.actor, 'read', tx => tasksTableId(tx));
   }
   async function invokeTasks(
@@ -3771,7 +3767,7 @@ export function createChatTools(
     call: TaskToolCall,
   ): Promise<{ result: unknown; sources: SourceDependency[] }> {
     const { workspaceId, actor } = context;
-    if (!context.origin || !(await tasksUpgradeEnabled(workspaceId)))
+    if (!context.origin)
       return {
         result: { error: 'tasks-unavailable', instruction: 'Tasks tools are not available here. Nothing was changed.' },
         sources: [],

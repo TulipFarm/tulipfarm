@@ -52,7 +52,7 @@ CREATE TABLE {{schema}}.tf_task_reminders (
   once_at timestamptz,
   next_fire_at timestamptz,
   status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'stopped')),
-  stop_reason text CHECK (stop_reason IN ('cancelled', 'commented', 'done', 'access-lost', 'deleted', 'finished')),
+  stop_reason text CHECK (stop_reason IN ('cancelled', 'commented', 'done', 'access-lost', 'deleted', 'finished', 'reassigned')),
   stopped_by_membership_id uuid REFERENCES {{schema}}.tf_memberships(id),
   fired_count integer NOT NULL DEFAULT 0 CHECK (fired_count >= 0),
   last_fired_at timestamptz,

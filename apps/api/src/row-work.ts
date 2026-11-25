@@ -20,7 +20,6 @@ import {
   TaskReminderError,
   tasksTableSchema,
 } from '@tulipfarm/agents/row-work';
-import { tasksUpgradeEnabled } from '@tulipfarm/agents/task-reminders';
 import { commonCompatibility, StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { authConfig, type registerAuth } from './auth.ts';
 import { authenticateRoutes } from './authenticated-routes.ts';
@@ -42,10 +41,6 @@ export function registerRowWork(
   const inboxItem = workspace.extend({ itemId: z.uuid() });
   const taskKey = workspace.extend({ key: z.string().regex(/^tul-\d{1,10}$/i) });
   const reminder = row.extend({ reminderId: z.uuid() });
-  /** The Tasks upgrade's routes answer not found while its flag is off for the workspace. */
-  const upgraded = async (workspaceId: string) => {
-    if (!(await tasksUpgradeEnabled(workspaceId))) throw new AccessDenied();
-  };
   const validation = routeValidation({
     missing: 'Missing row work validator',
     invalid: () => new Error('invalid-request'),
@@ -186,7 +181,6 @@ export function registerRowWork(
       { schema: { operationId: 'taskReminders', params: validation.json(row), response: reminders } },
       async request => {
         const p = row.parse(request.params);
-        await upgraded(p.workspaceId);
         return service.reminders(p.workspaceId, user(request), p.tableId, p.rowId);
       },
     );
@@ -202,7 +196,6 @@ export function registerRowWork(
       },
       async request => {
         const p = row.parse(request.params);
-        await upgraded(p.workspaceId);
         return service.createReminder(p.workspaceId, user(request), p.tableId, p.rowId, request.body);
       },
     );
@@ -211,7 +204,6 @@ export function registerRowWork(
       { schema: { operationId: 'taskReminderCancel', params: validation.json(reminder), response: reminders } },
       async request => {
         const p = reminder.parse(request.params);
-        await upgraded(p.workspaceId);
         return service.cancelReminder(p.workspaceId, user(request), p.tableId, p.rowId, p.reminderId);
       },
     );
@@ -227,7 +219,6 @@ export function registerRowWork(
       },
       async request => {
         const p = workspace.parse(request.params);
-        await upgraded(p.workspaceId);
         return service.taskKeys(p.workspaceId, user(request));
       },
     );
@@ -243,7 +234,6 @@ export function registerRowWork(
       },
       async request => {
         const p = taskKey.parse(request.params);
-        await upgraded(p.workspaceId);
         return service.taskByKey(p.workspaceId, user(request), p.key);
       },
     );
