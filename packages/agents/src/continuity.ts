@@ -441,7 +441,7 @@ export async function claimAttempt(
     await failGeneration(tx, generation, 'image-input-unavailable');
     return null;
   }
-  if (size.bytes + envelopeBytes + size.files.contextTokens > resolution.route.maxInputTokens) {
+  if (estimateInputTokens(size.bytes + envelopeBytes) + size.files.contextTokens > resolution.route.maxInputTokens) {
     await failGeneration(tx, generation, 'context-overflow');
     return null;
   }
