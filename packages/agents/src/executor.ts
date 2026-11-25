@@ -230,6 +230,10 @@ const githubTaskHandoffs = {
   },
 } as const;
 
+// A parallel batch call's synchronous settlement ends the shared reservation, so
+// an in-flight sibling waits for a fresh reservation instead of being blocked.
+class TaskWorkFenced extends AccessDenied {}
+
 async function requireIssueAccess(
   transaction: AuthorizationTransaction,
   actor: Actor,
@@ -1341,7 +1345,7 @@ export function createAgentExecutor(options: Options) {
                   await lockTask(tx, binding.task_id);
                   await taskOutputAllowed(tx, workspaceId, ids.runId, true);
                   await resolveRunProcedures(tx, ids.runId);
-                  if (!(await work.live(tx))) throw new AccessDenied();
+                  if (!(await work.live(tx))) throw new TaskWorkFenced();
                   return action(tx);
                 }),
             };
@@ -1403,7 +1407,7 @@ export function createAgentExecutor(options: Options) {
                   await lockTask(tx, binding.task_id);
                   await taskOutputAllowed(tx, workspaceId, ids.runId, true);
                   await resolveRunProcedures(tx, ids.runId);
-                  if (!(await work.live(tx))) throw new AccessDenied();
+                  if (!(await work.live(tx))) throw new TaskWorkFenced();
                   return action(tx);
                 }),
             };
@@ -1656,7 +1660,7 @@ export function createAgentExecutor(options: Options) {
                     throw new AccessDenied();
                   const binding = await taskRun(tx, ids.runId);
                   if (binding) await taskOutputAllowed(tx, workspaceId, ids.runId, true);
-                  if (!(await work.live(tx))) throw new AccessDenied();
+                  if (!(await work.live(tx))) throw new TaskWorkFenced();
                   const persisted = await tx.client.query(
                     `SELECT 1 FROM ${relation(tx, 'tf_agent_tool_calls')} c JOIN ${relation(tx, 'tf_agent_runs')} r ON r.id=c.run_id
             JOIN ${relation(tx, 'tf_agent_definitions')} d ON d.agent_id=r.agent_id AND d.revision=r.definition_revision
@@ -1731,7 +1735,7 @@ export function createAgentExecutor(options: Options) {
                   const binding = await taskRun(tx, ids.runId);
                   if (!binding || binding.task_id !== knowledge.taskId) throw new AccessDenied();
                   await taskOutputAllowed(tx, workspaceId, ids.runId, true);
-                  if (!(await work.live(tx))) throw new AccessDenied();
+                  if (!(await work.live(tx))) throw new TaskWorkFenced();
                   return action(tx);
                 }),
             };
@@ -1951,6 +1955,7 @@ export function createAgentExecutor(options: Options) {
           });
         } catch (error) {
           if (error instanceof TaskApprovalError && error.code === 'approval-required') return 'waiting';
+          if (error instanceof TaskWorkFenced) return 'waiting';
           if (
             !(error instanceof TaskApprovalError) &&
             !(error instanceof AccessDenied) &&
