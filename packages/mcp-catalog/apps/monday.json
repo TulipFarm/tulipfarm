@@ -21,7 +21,7 @@
     "url": "https://mcp.monday.com/mcp",
     "transport": "streamable-http",
     "auth": "oauth",
-    "checked": "2026-11-17"
+    "checked": "2026-11-23"
   },
   "registryName": "com.monday/monday.com",
   "icons": {

@@ -24,7 +24,7 @@
         "description": "Netdata Cloud API token"
       }
     ],
-    "checked": "2026-11-17"
+    "checked": "2026-11-23"
   },
   "registryName": "io.github.netdata/mcp-server",
   "icons": {

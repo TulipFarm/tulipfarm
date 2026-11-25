@@ -20,7 +20,7 @@
     "url": "https://api.fathom.ai/mcp",
     "transport": "streamable-http",
     "auth": "oauth",
-    "checked": "2026-11-17"
+    "checked": "2026-11-23"
   },
   "registryName": "ai.fathom.api/mcp",
   "icons": {

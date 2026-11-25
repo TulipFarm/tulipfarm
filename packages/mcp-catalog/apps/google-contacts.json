@@ -20,7 +20,7 @@
     "url": "https://people.googleapis.com/mcp/v1",
     "transport": "streamable-http",
     "auth": "oauth",
-    "checked": "2026-11-17"
+    "checked": "2026-11-23"
   },
   "icons": {
     "lobehub": "Google",

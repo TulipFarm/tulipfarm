@@ -21,7 +21,7 @@
     "url": "https://mcp.gitguardian.com/mcp",
     "transport": "streamable-http",
     "auth": "oauth",
-    "checked": "2026-11-17"
+    "checked": "2026-11-23"
   },
   "icons": {
     "color": "#1B2D4B"

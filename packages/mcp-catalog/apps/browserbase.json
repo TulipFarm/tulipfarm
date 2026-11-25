@@ -17,7 +17,7 @@
     "url": "https://mcp.browserbase.com/mcp?browserbaseApiKey={key}",
     "transport": "streamable-http",
     "auth": "api-key",
-    "checked": "2026-11-17"
+    "checked": "2026-11-23"
   },
   "icons": {
     "color": "#F03603"

@@ -17,7 +17,7 @@
     "url": "https://mcp.opus.pro/mcp",
     "transport": "streamable-http",
     "auth": "oauth",
-    "checked": "2026-11-17"
+    "checked": "2026-11-23"
   },
   "registryName": "io.github.opus-pro/opusclip",
   "icons": {

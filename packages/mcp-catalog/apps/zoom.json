@@ -21,7 +21,7 @@
     "url": "https://mcp.zoom.us/mcp/zoom/streamable",
     "transport": "streamable-http",
     "auth": "oauth",
-    "checked": "2026-11-17"
+    "checked": "2026-11-23"
   },
   "registryName": "io.github.zoom/zoom-workspace",
   "icons": {

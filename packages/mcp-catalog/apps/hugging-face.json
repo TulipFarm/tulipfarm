@@ -17,7 +17,7 @@
     "url": "https://huggingface.co/mcp",
     "transport": "streamable-http",
     "auth": "oauth",
-    "checked": "2026-11-17"
+    "checked": "2026-11-23"
   },
   "icons": {
     "lobehub": "HuggingFace",

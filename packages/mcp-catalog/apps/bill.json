@@ -20,7 +20,7 @@
     "url": "https://gateway.prod.bill.com/ai-mcp-server/v1",
     "transport": "streamable-http",
     "auth": "oauth",
-    "checked": "2026-11-17"
+    "checked": "2026-11-23"
   },
   "icons": {
     "color": "#FF5A00"
