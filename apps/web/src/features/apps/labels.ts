@@ -10,9 +10,9 @@ export const kindLabels = { public: 'Public', private: 'Private' } as const;
 export function servingStatus(app: AppSummary): { label: string; tone: Tone } | null {
   if (app.kind === 'private') return null;
   if (app.stops.disabledAt) return { label: 'Turned off by an admin', tone: 'destructive' };
-  if (app.stops.budgetPausedAt) return { label: 'Paused: credits used up', tone: 'warning' };
+  if (app.stops.budgetPausedAt) return { label: 'Paused: app credit limit reached', tone: 'warning' };
   if (app.stops.editorPausedAt) return { label: 'Paused by an editor', tone: 'warning' };
-  if (!app.liveReleaseId) return { label: 'Not published', tone: 'secondary' };
+  if (!app.liveReleaseId) return { label: 'Draft', tone: 'secondary' };
   return { label: 'Live', tone: 'success' };
 }
 
@@ -60,8 +60,9 @@ export const formatDay = (iso: string) => dateFormat.format(new Date(iso));
 
 export const shortCommit = (commit: string) => commit.slice(0, 7);
 
-/** Why a credit pause needs no action from the editor. */
-export const creditPauseNote = 'It resumes on its own when credits are available again.';
+/** Why a credit pause happened and how an admin can resume the app. */
+export const creditPauseNote =
+  'This app reached its monthly credit limit. Raise the limit in Settings to resume now, or wait for next month’s reset.';
 
 /** The address inside TulipFarm, which every app has. */
 export const tulipfarmAddress = (workspaceSlug: string, appSlug: string) => `/${workspaceSlug}/apps/${appSlug}`;

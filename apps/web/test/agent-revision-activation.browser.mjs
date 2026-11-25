@@ -274,7 +274,6 @@ test('existing-agent instructions save and activation in the real app', { timeou
     await t.test('new actions require review in place; cancel keeps edits and makes no writes', async () => {
       const state = fixture();
       const { page } = await open(state);
-      await page.getByRole('button', { name: 'More actions', exact: true }).click();
       await page.getByRole('button', { name: 'Knowledge and web', exact: false }).click();
       await page.getByRole('checkbox', { name: 'Read a web page', exact: false }).check();
       await save(page).click();
@@ -350,7 +349,6 @@ test('existing-agent instructions save and activation in the real app', { timeou
       const replacedId = randomUUID();
       state.detail.replacedActivations = [{ id: replacedId, revision: '0'.repeat(64), scope }];
       const { page } = await open(state);
-      await page.getByRole('button', { name: 'More actions', exact: true }).click();
       await page.getByRole('button', { name: 'Knowledge and web', exact: false }).click();
       await page.getByRole('checkbox', { name: 'Read a web page', exact: false }).check();
       await save(page).click();
@@ -362,7 +360,7 @@ test('existing-agent instructions save and activation in the real app', { timeou
       await dialog.getByRole('button', { name: 'Save and activate', exact: true }).click();
       await live(page).waitFor();
       assert.equal(state.detail.activations.length, 2);
-      await page.getByRole('tab', { name: 'Execution', exact: true }).click();
+      await page.getByRole('tab', { name: 'Activation', exact: true }).click();
       const replaced = page.getByText('Replaced. Running tasks may still use it.', { exact: true });
       await replaced.waitFor();
       if (process.env.AGENT_REVISION_SCREENSHOT) {
@@ -395,7 +393,7 @@ test('existing-agent instructions save and activation in the real app', { timeou
         await page.getByRole('alert').last().scrollIntoViewIfNeeded();
         await page.screenshot({ path: '/tmp/agent-revision-ambiguous.png' });
       }
-      await page.getByRole('tab', { name: 'Execution', exact: true }).click();
+      await page.getByRole('tab', { name: 'Activation', exact: true }).click();
       await page.getByRole('button', { name: 'Revoke activation', exact: true }).last().click();
       await page.getByText('Activation revoked.', { exact: true }).waitFor();
       state.activationError = null;

@@ -137,6 +137,7 @@ function TableCell({
       data-sticky-end={stickyEnd || undefined}
       className={cn(
         'p-2 align-middle whitespace-nowrap',
+        !selection && !stickyEnd && 'max-w-44 overflow-hidden text-ellipsis sm:max-w-80',
         align === 'right' && 'text-right tabular-nums',
         selection && 'w-12 min-w-12',
         stickyEnd &&

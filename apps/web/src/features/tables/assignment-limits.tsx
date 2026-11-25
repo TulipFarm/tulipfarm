@@ -69,11 +69,12 @@ const zones = (current: string) => {
   return [...new Set(['UTC', current, ...known])];
 };
 
-/** Admin caps on assigned rows: how many agents work at once, and the runs and credits they use each day. */
+/** Admin caps on assigned tasks: how many agents work at once, and the runs and credits they use each day. */
 export function AssignmentLimitsSettings({ workspaceId, agentId }: { workspaceId: string; agentId?: string }) {
   const api = useMemo(() => limitsApi(workspaceId), [workspaceId]);
   const [saved, setSaved] = useState<Limits | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
+  const [showAgents, setShowAgents] = useState(!!agentId);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -139,23 +140,27 @@ export function AssignmentLimitsSettings({ workspaceId, agentId }: { workspaceId
       }}
     />
   );
+  const visibleAgents = saved?.agents.filter(agent => !agentId || agent.agentId === agentId) ?? [];
   return (
-    <SettingsGroup title="Assigned rows" titleId="assignment-limits-heading">
+    <SettingsGroup title="Agent task limits" titleId="assignment-limits-heading">
       {!agentId && (
         <>
           <SettingsRow
             label="Agents working at once"
-            description="The most assigned rows all agents in this workspace work on at the same time. 1 to 100."
+            description="Maximum assigned tasks all agents in this workspace can run at the same time (1 to 100)."
           >
             {saved && field('workspace', 'Agents working at once')}
           </SettingsRow>
           <SettingsRow
             label="Credits a day"
-            description="The most credits assigned work in this workspace uses each day. Leave empty for no daily cap."
+            description="Maximum credits assigned agent tasks can use each day. Leave empty for no daily cap."
           >
             {saved && field('credits', 'Credits a day', 'No cap')}
           </SettingsRow>
-          <SettingsRow label="Day starts in" description="Daily runs and credits reset at midnight in this time zone.">
+          <SettingsRow
+            label="Day starts in"
+            description="Daily task and credit caps reset at midnight in this time zone."
+          >
             {saved && (
               <Select
                 value={draft.timeZone ?? saved.timeZone}
@@ -182,23 +187,45 @@ export function AssignmentLimitsSettings({ workspaceId, agentId }: { workspaceId
           </SettingsRow>
         </>
       )}
-      {saved?.agents
-        .filter(agent => !agentId || agent.agentId === agentId)
-        .map(agent => (
+      {!agentId && visibleAgents.length > 0 && (
+        <SettingsRow
+          label={`Per-agent limits (${visibleAgents.length})`}
+          description="Set concurrent tasks (1–20), daily runs, and daily credits for individual agents. Leave daily boxes empty for no cap."
+        >
+          <Button variant="outline" size="sm" onClick={() => setShowAgents(current => !current)}>
+            {showAgents ? 'Hide agent limits' : 'Customize per agent'}
+          </Button>
+        </SettingsRow>
+      )}
+      {(showAgents || !!agentId) &&
+        visibleAgents.map(agent => (
           <SettingsRow
             key={agent.agentId}
             label={agent.name}
-            description="Rows this agent works on at once (1 to 20), then its runs and credits a day. Leave a daily box empty for no cap."
+            description={
+              agentId
+                ? 'Tasks this agent works on at once (1 to 20), plus optional daily run and credit caps.'
+                : undefined
+            }
           >
-            <div className="flex gap-2">
-              {field(`${agent.agentId}:concurrent`, `${agent.name}, rows at once`)}
-              {field(`${agent.agentId}:daily`, `${agent.name}, runs a day`, 'No cap')}
-              {field(`${agent.agentId}:credits`, `${agent.name}, credits a day`, 'No cap')}
+            <div className="grid grid-cols-3 gap-2">
+              <div className="space-y-1">
+                <span className="block text-xs text-muted-foreground">At once</span>
+                {field(`${agent.agentId}:concurrent`, `${agent.name}, tasks at once`)}
+              </div>
+              <div className="space-y-1">
+                <span className="block text-xs text-muted-foreground">Runs / day</span>
+                {field(`${agent.agentId}:daily`, `${agent.name}, runs a day`, 'No cap')}
+              </div>
+              <div className="space-y-1">
+                <span className="block text-xs text-muted-foreground">Credits / day</span>
+                {field(`${agent.agentId}:credits`, `${agent.name}, credits a day`, 'No cap')}
+              </div>
             </div>
           </SettingsRow>
         ))}
       {saved && (
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3 px-4 py-3">
           <Button
             disabled={saving || invalid}
             onClick={() => {
@@ -240,7 +267,7 @@ export function AssignmentLimitsSettings({ workspaceId, agentId }: { workspaceId
         </div>
       )}
       {error && (
-        <p role="alert" className="text-sm text-destructive">
+        <p role="alert" className="px-4 py-3 text-sm text-destructive">
           {error}
         </p>
       )}

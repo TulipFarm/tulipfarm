@@ -59,7 +59,15 @@ const destinationIcons = {
 const tones: SuggestionTone[] = ['primary', 'info', 'success', 'warning'];
 const sourceNames = { google: 'Google', github: 'GitHub', slack: 'Slack' };
 
-export function StartingTasks({ onChoose, disabled }: { onChoose: (prompt: string) => void; disabled: boolean }) {
+export function StartingTasks({
+  onChoose,
+  disabled,
+  disabledReason,
+}: {
+  onChoose: (prompt: string) => void;
+  disabled: boolean;
+  disabledReason?: string | null;
+}) {
   const { workspace } = workspaceRoute.useRouteContext();
   const { workspaceSlug } = workspaceRoute.useParams();
   const navigate = useNavigate();
@@ -125,6 +133,11 @@ export function StartingTasks({ onChoose, disabled }: { onChoose: (prompt: strin
           />
         ))}
       </SuggestionGrid>
+      {disabled && disabledReason && (
+        <p role="status" className="text-xs text-muted-foreground">
+          {disabledReason}
+        </p>
+      )}
       {message &&
         (error ? (
           <div className="flex flex-col gap-2">
@@ -138,7 +151,7 @@ export function StartingTasks({ onChoose, disabled }: { onChoose: (prompt: strin
             </div>
           </div>
         ) : (
-          <p role="status" className="sr-only">
+          <p role="status" className="text-xs text-muted-foreground">
             {message}
           </p>
         ))}

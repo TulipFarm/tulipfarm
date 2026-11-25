@@ -56,9 +56,9 @@ export function AgentDelete({
       />
       <AlertDialog open={confirming} onOpenChange={setConfirming}>
         <AlertDialogContent>
-          <AlertDialogTitle>Delete this saved agent?</AlertDialogTitle>
+          <AlertDialogTitle>Delete this agent?</AlertDialogTitle>
           <AlertDialogDescription>
-            This removes it from accessible lists, revokes its activations and archives its trigger workflows.
+            This permanently deletes the agent, stops active runs, and archives its triggers.
           </AlertDialogDescription>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep agent</AlertDialogCancel>
@@ -69,7 +69,7 @@ export function AgentDelete({
                 void write.submit(id);
               }}
             >
-              Delete saved agent
+              Delete agent
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

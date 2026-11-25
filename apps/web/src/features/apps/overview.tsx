@@ -137,6 +137,29 @@ export function AppOverview({ app }: { app: AppDetail }) {
         actions={<AppActions app={app} admin={admin} />}
       />
       <div className="space-y-6">
+        {app.stops.budgetPausedAt && !app.stops.disabledAt && (
+          <Alert variant="default">
+            <AlertTitle>Paused: monthly credit limit reached</AlertTitle>
+            <AlertDescription>
+              This app reached its own monthly credit limit (your workspace balance may still have credits).{' '}
+              {(canEdit(app) || admin) && (
+                <Button
+                  variant="link"
+                  size="sm"
+                  nativeButton={false}
+                  render={
+                    <Link
+                      to="/$workspaceSlug/apps/$appSlug/settings"
+                      params={{ workspaceSlug: workspace.slug, appSlug: app.slug }}
+                    />
+                  }
+                >
+                  Adjust monthly limit in Settings
+                </Button>
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
         {app.draft.state === 'failed' && (
           <Alert variant="destructive">
             <AlertTitle>The last build failed</AlertTitle>

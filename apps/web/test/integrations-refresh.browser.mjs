@@ -251,8 +251,8 @@ test('integration status recovery and Google review lifecycle', { timeout: 480_0
         .waitFor({ timeout: 30_000 });
       await page.getByRole('button', { name: 'Check again', exact: true }).waitFor({ timeout: 30_000 });
       assert.match(await statusErrors.innerText(), /Couldn’t check GitHub/);
-      // An app that couldn't be checked may still be connected, so it's listed with Your apps.
-      await show('Your apps');
+      // An app that couldn't be checked may still be connected, so it's listed with Connected.
+      await show('Connected');
       await listRow('GitHub').getByText('Couldn’t check', { exact: true }).waitFor();
       // A connected app's row names the account it uses.
       for (const app of ['Gmail', 'Google Calendar', 'Google Drive', 'Google Sheets', 'Google Docs', 'Google Slides']) {

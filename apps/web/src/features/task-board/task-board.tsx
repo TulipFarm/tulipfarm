@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChatIcon } from '@tulipfarm/icons';
+import { Link } from '@tanstack/react-router';
+import { ChatIcon, TasksIcon } from '@tulipfarm/icons';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Board, type BoardColumn } from '@tulipfarm/sprout/board';
 import { Button } from '@tulipfarm/sprout/button';
@@ -17,6 +18,7 @@ import { tableKeys } from '@/features/tables/queries';
 import { RecordEditor } from '@/features/tables/record-editor';
 import type { TableWorkspace } from '@/features/tables/references';
 import { ActorName } from '@/features/tables/actors';
+import { useTaskApi, useTasks } from '@/features/tasks/queries';
 import { lanes, readTaskActivity, readTaskRows, taskCards, type Lane, type TaskActivity, type TaskCard } from './api';
 import { ago, currentStep, duration, useAssignmentRun, useNow, sentence } from './live';
 import { taskShows, type TaskBoardSearch, type TaskShow } from './search';
@@ -117,11 +119,22 @@ export function TaskBoard({
       (!query || card.title.toLowerCase().includes(query)),
   );
   const open = search.task ? cards.find(card => card.id === search.task) : undefined;
+  const filtered = show !== 'all' || query.length > 0;
   const working = visible.filter(card => card.lane === 'working').length;
   const needsYou = visible.filter(card => card.lane === 'needs-you').length;
   const now = useNow(visible.some(card => card.lane === 'working' || card.lane === 'queued'));
   const canCreate = Boolean(state?.rowPermissions.create) && !state?.archived;
   const canUpdate = Boolean(state?.rowPermissions.update) && !state?.archived;
+  const canDelete = Boolean(state?.rowPermissions.delete) && !state?.archived;
+  const agentRunsRead = useTasks(useTaskApi(workspace.id), undefined, '');
+  const agentRunCount = agentRunsRead.state.kind === 'ready' ? agentRunsRead.state.data.tasks.length : 0;
+  const boardContainer = useRef<HTMLDivElement>(null);
+  const scrollToLane = (index: number) => {
+    const columnsEl = boardContainer.current?.querySelectorAll<HTMLElement>(
+      '[data-slot="board-column"], [role="region"]',
+    );
+    columnsEl?.[index]?.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
+  };
   const columns = useMemo<BoardColumn[]>(
     () =>
       lanes.map(lane => ({
@@ -168,14 +181,25 @@ export function TaskBoard({
         description={
           cards.length === 0
             ? 'Assign work to a person or an agent and follow it here.'
-            : `${cards.length} ${cards.length === 1 ? 'task' : 'tasks'} · ${working} working · ${needsYou} ${needsYou === 1 ? 'needs' : 'need'} you`
+            : filtered
+              ? `Showing ${visible.length} of ${cards.length} ${cards.length === 1 ? 'task' : 'tasks'} · ${working} working · ${needsYou} ${needsYou === 1 ? 'needs' : 'need'} you`
+              : `${cards.length} ${cards.length === 1 ? 'task' : 'tasks'} · ${working} working · ${needsYou} ${needsYou === 1 ? 'needs' : 'need'} you`
         }
         actions={
-          canCreate && (
-            <Button onClick={() => setCreating(true)} disabled={creating}>
-              New task
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              nativeButton={false}
+              render={<Link to="/$workspaceSlug/agent-tasks" params={{ workspaceSlug: workspace.slug }} />}
+            >
+              {agentRunCount > 0 ? `Agent runs (${agentRunCount})` : 'Agent runs'}
             </Button>
-          )
+            {canCreate && (
+              <Button onClick={() => setCreating(true)} disabled={creating}>
+                New task
+              </Button>
+            )}
+          </div>
         }
       />
       <div className="flex flex-wrap items-center gap-3">
@@ -213,13 +237,25 @@ export function TaskBoard({
       {cards.length === 0 ? (
         <StatePanel
           kind="empty"
+          icon={TasksIcon}
           title="No tasks yet"
           description="Create a task and assign it to an agent. Its progress shows here as it works."
         >
           {canCreate && <Button onClick={() => setCreating(true)}>New task</Button>}
         </StatePanel>
       ) : (
-        <div data-task-board="" className="flex min-h-0 flex-1 flex-col">
+        <div ref={boardContainer} data-task-board="" className="flex min-h-0 flex-1 flex-col gap-3">
+          <nav aria-label="Task columns" className="flex gap-1.5 overflow-x-auto pb-0.5 sm:hidden">
+            {lanes.map((lane, index) => {
+              const laneCount = visible.filter(card => card.lane === lane.id).length;
+              return (
+                <Button key={lane.id} variant="outline" size="sm" onClick={() => scrollToLane(index)}>
+                  <Status state={laneStatus[lane.id]} size="sm" aria-hidden="true" tooltip={false} />
+                  {lane.title} ({laneCount})
+                </Button>
+              );
+            })}
+          </nav>
           <Board
             label="Tasks by status"
             columns={columns}
@@ -256,6 +292,7 @@ export function TaskBoard({
           me={progress?.me}
           now={now}
           canUpdate={canUpdate}
+          canDelete={canDelete}
           close={() => changeSearch({ task: undefined })}
           refresh={refresh}
         />

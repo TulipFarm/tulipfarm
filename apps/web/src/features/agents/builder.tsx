@@ -180,11 +180,18 @@ export function AgentBuilder({
   const tableProblem = tableAccessProblem(context.teams, draft.access.scope, draft.access.enrollment, initial?.setup);
   const parsed = parseBuilder(draft, membershipId, activating, id, tableAccess);
   const review = parseBuilder(draft, membershipId, false, id, tableAccess);
-  const errors = showErrors ? agentDraftErrors(draft.definition) : {};
-  const errorSteps = new Set(showErrors ? parsed.problems.map(problem => problem.step) : []);
+  const draftErrors = agentDraftErrors(draft.definition);
+  const errors = showErrors ? draftErrors : {};
+  const stepHasProblem = (target: BuilderStep) =>
+    (target === 'basics' && Object.keys(draftErrors).length > 0) ||
+    parsed.problems.some(problem => problem.step === target) ||
+    review.problems.some(problem => problem.step === target);
+  const errorSteps = new Set(
+    showErrors ? builderSteps.filter(item => stepHasProblem(item.id)).map(item => item.id) : [],
+  );
   const completed = new Set(
     builderSteps
-      .filter(item => visited.has(item.id) && !review.problems.some(problem => problem.step === item.id))
+      .filter(item => item.id !== step && visited.has(item.id) && !stepHasProblem(item.id))
       .map(item => item.id),
   );
   const currentIndex = builderSteps.findIndex(item => item.id === step);
@@ -249,6 +256,7 @@ export function AgentBuilder({
       hasSlackAccess={draft.access.scope.some(entry =>
         entry.permissions.some(permission => permission.startsWith('slack.')),
       )}
+      showIdentity={false}
       onEdit={chooseStep}
     />
   );
@@ -257,6 +265,11 @@ export function AgentBuilder({
     submitIntent.current = null;
     if (locked) return;
     if (!decision) {
+      if (stepHasProblem(step)) {
+        setShowErrors(true);
+        return 'invalid';
+      }
+      setShowErrors(false);
       chooseStep(nextBuilderStep(step, draft));
       return;
     }
@@ -418,9 +431,9 @@ export function AgentBuilder({
           />
         </FormSection>
         <FormSection
-          title="Business tables"
+          title="Tables"
           meta="Optional"
-          description="Choose the tables this agent can read. You can change its actions and table access later in the Access step."
+          description="Choose the tables this agent can read. You can adjust its actions and table permissions later in Access."
         >
           <BuilderTablePicker
             workspaceId={workspaceId}

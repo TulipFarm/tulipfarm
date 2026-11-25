@@ -498,7 +498,7 @@ test('agent flows resolve permitted names without changing commands or approvals
         assert.equal(writes.at(-1).body.expectedGeneration, 1);
       } else await removeContext();
       await page.goto(`${origin}/agent-proof/agents/${aid}`);
-      await openTab('Execution');
+      await openTab('Activation');
       const dataScope = page.getByRole('region', { name: 'What data it can use', exact: true });
       await dataScope.getByText('Customers', { exact: true }).waitFor();
       assert.doesNotMatch(await dataScope.innerText(), new RegExp(tableId));

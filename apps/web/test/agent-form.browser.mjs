@@ -292,7 +292,6 @@ test(
       await agentView.getByRole('heading', { name: 'People Ops helper' }).waitFor();
       await step('Access');
       await form.getByText('No actions chosen.', { exact: false }).waitFor();
-      await form.getByRole('button', { name: 'More actions', exact: true }).click();
       await form.getByRole('button', { name: /Tables.*available/ }).click();
       await form.getByRole('checkbox', { name: 'Find rows', exact: true }).check();
       await form.getByRole('checkbox', { name: 'Read a row', exact: true }).check();
@@ -329,7 +328,10 @@ test(
       await form.getByRole('combobox', { name: 'Add a channel', exact: true }).click();
       await page.getByRole('option', { name: 'new-starters', exact: true }).click();
       await form
-        .getByText('No triggers. People can still use this agent in chat and Slack.', { exact: true })
+        .getByText(
+          'No automatic triggers yet. Continue to Review to activate this agent now, or add schedules and webhooks later in Workflows.',
+          { exact: true },
+        )
         .waitFor();
       await step('Basics');
       await form.getByRole('heading', { name: 'Identity', exact: true }).scrollIntoViewIfNeeded();

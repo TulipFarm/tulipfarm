@@ -498,7 +498,7 @@ try {
       await page
         .getByRole('row')
         .filter({ hasText: 'Customer reviewer' })
-        .getByRole('cell', { name: 'Not activated', exact: true })
+        .getByRole('cell', { name: 'Draft', exact: true })
         .waitFor();
       const agents = page.getByRole('navigation', { name: 'Agent pages' });
       await agents.getByRole('button', { name: 'Next page' }).click();
@@ -536,7 +536,7 @@ try {
     await page.goto(`${origin}/acme/settings`);
     if (!before) {
       await page.getByRole('button', { name: 'Close workspace', exact: true }).click();
-      await page.getByRole('dialog').getByText('Rows, files, and backups are retained.', { exact: true }).waitFor();
+      await page.getByRole('dialog').getByText('Tables, files, and backups are retained.', { exact: true }).waitFor();
       if (mobile) {
         await page.setViewportSize({ width: 390, height: 450 });
         await page.getByRole('button', { name: 'Close workspace for everyone' }).scrollIntoViewIfNeeded();

@@ -425,7 +425,7 @@ try {
       await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
       assert.equal(await page.getByRole('checkbox', { name: 'customer-notes.txt', exact: true }).isChecked(), true);
       await page.getByRole('link', { name: 'Back to agents', exact: true }).click();
-      await page.getByRole('button', { name: 'Leave editor', exact: true }).click();
+      await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
       await page.waitForURL('**/acme/agents');
     } else await shot('draft');
     await visit(`/acme/chat/${cid}`);

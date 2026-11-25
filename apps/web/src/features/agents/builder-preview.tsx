@@ -29,6 +29,7 @@ export function AgentDraftSummary({
   triggerLabels,
   dataAccess,
   hasSlackAccess = false,
+  showIdentity = true,
   onEdit,
 }: {
   name: string;
@@ -43,10 +44,46 @@ export function AgentDraftSummary({
   triggerLabels: readonly string[];
   dataAccess?: ReactNode;
   hasSlackAccess?: boolean;
+  /** Hide the repeated avatar + title when rendered inside a card that already displays them. */
+  showIdentity?: boolean;
   onEdit?: ((step: BuilderStep) => void) | undefined;
 }) {
   return (
     <div className="grid min-w-0 gap-5">
+      {showIdentity ? (
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <AgentMark size={32} />
+            <h3 className="min-w-0 wrap-anywhere text-base font-medium text-foreground">
+              {name.trim() || 'Untitled agent'}
+            </h3>
+          </div>
+          {onEdit && (
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label="Edit agent name and instructions"
+              onClick={() => onEdit('basics')}
+            >
+              Edit
+            </Button>
+          )}
+        </div>
+      ) : (
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <span className="text-sm font-medium text-foreground">Instructions</span>
+          {onEdit && (
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label="Edit agent name and instructions"
+              onClick={() => onEdit('basics')}
+            >
+              Edit
+            </Button>
+          )}
+        </div>
+      )}
       <p className="whitespace-pre-wrap wrap-anywhere text-sm leading-relaxed text-foreground-secondary">
         {instructions.trim()
           ? instructions.slice(0, 260) + (instructions.length > 260 ? '…' : '')
@@ -56,7 +93,7 @@ export function AgentDraftSummary({
         <span className="text-muted-foreground">Preferred model</span>
         <div className="min-w-0 text-foreground">{model}</div>
       </div>
-      <dl className="grid gap-4 text-sm">
+      <ul aria-label="Agent configuration summary" className="grid gap-4 text-sm">
         {(
           [
             {
@@ -98,22 +135,22 @@ export function AgentDraftSummary({
             },
           ] as const
         ).map(({ step, Icon, term, value }) => (
-          <div key={term} className="flex min-w-0 items-start gap-3">
+          <li key={term} className="flex min-w-0 items-start gap-3">
             <span className="mt-0.5 shrink-0 text-muted-foreground">
               <Icon aria-hidden="true" size={16} />
             </span>
             <div className="grid min-w-0 flex-1 gap-0.5">
-              <dt className="text-muted-foreground">{term}</dt>
-              <dd className="wrap-anywhere text-foreground">{value}</dd>
+              <span className="text-muted-foreground">{term}</span>
+              <span className="wrap-anywhere text-foreground">{value}</span>
             </div>
             {onEdit && (
               <Button variant="ghost" size="sm" aria-label={`Edit ${term.toLowerCase()}`} onClick={() => onEdit(step)}>
                 Edit
               </Button>
             )}
-          </div>
+          </li>
         ))}
-      </dl>
+      </ul>
       {dataAccess && (
         <div className="flex min-w-0 items-start gap-3 text-sm">
           <DatabaseIcon aria-hidden="true" size="md" className="mt-0.5 shrink-0 text-muted-foreground" />

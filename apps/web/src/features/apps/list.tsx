@@ -56,13 +56,16 @@ export function AppsPage() {
         badges={app => {
           const serving = servingStatus(app);
           const approval = approvalLabel(app.approval);
+          const showApproval =
+            app.kind === 'public' &&
+            (app.approval.state === 'requested' ||
+              app.approval.state === 'rejected' ||
+              (app.approval.state === 'not-requested' && !!app.liveReleaseId));
           return (
             <>
               <Badge variant="outline">{kindLabels[app.kind]}</Badge>
               {serving && <Badge variant={serving.tone}>{serving.label}</Badge>}
-              {app.kind === 'public' && app.approval.state !== 'approved' && (
-                <Badge variant={approval.tone}>{approval.label}</Badge>
-              )}
+              {showApproval && <Badge variant={approval.tone}>{approval.label}</Badge>}
             </>
           );
         }}

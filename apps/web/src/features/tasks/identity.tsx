@@ -1,6 +1,7 @@
 import { Link } from '@tanstack/react-router';
 import { Button } from '@tulipfarm/sprout/button';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
+import { DataListLink } from '@/components/data-list';
 import type { TaskSummary } from './api';
 import { useTaskIdentity } from './queries';
 export { useTaskIdentity } from './queries';
@@ -33,15 +34,12 @@ export function TaskIdentity({ workspaceId, slug, task }: { workspaceId: string;
     );
   return (
     <div className="grid min-w-0 grid-cols-1 gap-1">
-      <Button
-        variant="link"
-        size="md"
-        role="link"
-        nativeButton={false}
+      <DataListLink
+        tone="primary"
         render={<Link to="/$workspaceSlug/agent-tasks/$taskId" params={{ workspaceSlug: slug, taskId: task.id }} />}
       >
-        <span className="min-w-0 flex-1 truncate text-start">{read.state.data.title}</span>
-      </Button>
+        {read.state.data.title}
+      </DataListLink>
       <p className="break-words text-sm text-muted-foreground">{read.state.data.agent}</p>
       {read.state.error && (
         <p role="alert">

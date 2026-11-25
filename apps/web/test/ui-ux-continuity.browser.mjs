@@ -481,7 +481,7 @@ test('the agent tab lives in the URL, survives reload, and keeps unsaved edits w
   const tab = name => page.getByRole('tab', { name, exact: true });
   await evidence(page, 'a09-agent-tab-link', async () => {
     await page.waitForFunction(() =>
-      document.querySelector('[role="tab"][aria-selected="true"]')?.textContent?.includes('Execution'),
+      document.querySelector('[role="tab"][aria-selected="true"]')?.textContent?.includes('Activation'),
     );
   });
   await tab('Instructions').click();

@@ -138,10 +138,10 @@ test(
       assert.equal(await page.getByLabel('Integration authorization', { exact: true }).count(), 0);
       assert.equal(await summary.getByText('Needs attention', { exact: true }).count(), 0);
     };
-    // With nothing connected the directory has no Your apps tab: the page is just Browse.
+    // With nothing connected the directory has no Connected tab: the page is just Browse.
     const untabbed = async () => {
       await page.getByRole('button', { name: 'Connect GitHub', exact: true }).waitFor();
-      assert.equal(await page.getByRole('tablist', { name: 'Show apps', exact: true }).count(), 0);
+      assert.equal(await page.getByRole('tablist', { name: 'Filter integrations', exact: true }).count(), 0);
     };
     try {
       for (const id of Object.keys(appNames)) {
@@ -155,7 +155,7 @@ test(
       assert.equal(external.length, 5);
       await visit();
       await untabbed();
-      const search = page.getByRole('searchbox', { name: 'Search apps', exact: true });
+      const search = page.getByRole('searchbox', { name: 'Search integrations', exact: true });
       for (const name of Object.values(appNames)) {
         await search.fill(name);
         const row = page.getByRole('listitem').filter({ has: page.getByRole('link', { name, exact: true }) });
@@ -216,7 +216,7 @@ test(
       );
       slack = { ...slack, state: 'reconnect-required', teamId: 'TEXISTING', scopes: ['chat:write'] };
       await visit(undefined, undefined, true);
-      await page.getByRole('tab', { name: 'Your apps 4', exact: true }).waitFor();
+      await page.getByRole('tab', { name: 'Connected 4', exact: true }).waitFor();
       await page.getByLabel('Integration authorization', { exact: true }).waitFor();
       for (const id of ['github', 'slack', 'jira', 'confluence']) {
         await visit(id);

@@ -44,7 +44,7 @@ function RowField({
   field: TableField;
   error: string | undefined;
   disabled: boolean;
-  helper?: string;
+  helper?: string | undefined;
   children: ReactElement;
 }) {
   const id = `record-field-${field.id}`;
@@ -103,6 +103,10 @@ export function FieldInput({
   api,
   workspace,
   unavailableFileIds,
+  singleLine = false,
+  placeholder,
+  rows,
+  hideHelper = false,
 }: {
   field: TableField;
   value: TableValue | undefined;
@@ -112,6 +116,10 @@ export function FieldInput({
   api: TableApi;
   workspace: TableWorkspace;
   unavailableFileIds: readonly string[];
+  singleLine?: boolean;
+  placeholder?: string | undefined;
+  rows?: number | undefined;
+  hideHelper?: boolean;
 }) {
   const id = `record-field-${field.id}`;
   if (field.kind === 'file')
@@ -228,7 +236,7 @@ export function FieldInput({
   }
   if (field.kind === 'actor')
     return (
-      <RowField field={field} error={error} disabled={disabled} helper={fieldHint(field)}>
+      <RowField field={field} error={error} disabled={disabled} helper={hideHelper ? undefined : fieldHint(field)}>
         <ActorPicker
           workspaceId={workspace.id}
           value={value?.kind === 'actor' ? value.actor : null}
@@ -241,22 +249,25 @@ export function FieldInput({
   const text = value && 'value' in value ? String(value.value) : '';
   if (field.kind === 'text' && field.markdown)
     return (
-      <RowField field={field} error={error} disabled={disabled} helper={fieldHint(field)}>
+      <RowField field={field} error={error} disabled={disabled} helper={hideHelper ? undefined : fieldHint(field)}>
         <MarkdownInput
           label={field.label}
           text={text}
+          placeholder={placeholder}
+          rows={rows}
           change={next => change(next === '' ? null : { kind: 'text', value: next })}
         />
       </RowField>
     );
   const timestamp = field.kind === 'timestamp';
   const zone = timestamp ? (Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC') : '';
-  if (field.kind === 'text' && field.maxLength > 255)
+  if (field.kind === 'text' && field.maxLength > 255 && !singleLine)
     return (
-      <RowField field={field} error={error} disabled={disabled} helper={fieldHint(field)}>
+      <RowField field={field} error={error} disabled={disabled} helper={hideHelper ? undefined : fieldHint(field)}>
         <Textarea
           value={text}
-          rows={3}
+          rows={rows ?? 3}
+          placeholder={placeholder}
           onChange={event => change(event.target.value === '' ? null : { kind: 'text', value: event.target.value })}
         />
       </RowField>
@@ -266,11 +277,12 @@ export function FieldInput({
       field={field}
       error={error}
       disabled={disabled}
-      helper={timestamp ? `Your time zone: ${zone}. Saved in UTC.` : fieldHint(field)}
+      helper={timestamp ? `Your time zone: ${zone}. Saved in UTC.` : hideHelper ? undefined : fieldHint(field)}
     >
       <Input
         type={field.kind === 'date' ? 'date' : timestamp ? 'datetime-local' : 'text'}
         inputMode={field.kind === 'numeric' ? 'decimal' : undefined}
+        placeholder={placeholder}
         value={timestamp ? localDateTime(text) : text}
         onChange={event => {
           const next = timestamp ? utcTimestamp(event.target.value) : event.target.value;
@@ -282,7 +294,19 @@ export function FieldInput({
 }
 
 /** Write and formatted modes for a Markdown text field. Pasted Markdown stays Markdown. */
-function MarkdownInput({ label, text, change }: { label: string; text: string; change: (text: string) => void }) {
+function MarkdownInput({
+  label,
+  text,
+  placeholder,
+  rows = 8,
+  change,
+}: {
+  label: string;
+  text: string;
+  placeholder?: string | undefined;
+  rows?: number | undefined;
+  change: (text: string) => void;
+}) {
   return (
     <Tabs defaultValue="write">
       <TabsList variant="line" aria-label={`${label} editor`}>
@@ -290,7 +314,7 @@ function MarkdownInput({ label, text, change }: { label: string; text: string; c
         <TabsTrigger value="formatted">Formatted</TabsTrigger>
       </TabsList>
       <TabsContent value="write" keepMounted>
-        <Textarea value={text} rows={8} onChange={event => change(event.target.value)} />
+        <Textarea value={text} rows={rows} placeholder={placeholder} onChange={event => change(event.target.value)} />
       </TabsContent>
       <TabsContent value="formatted">
         {text.trim() ? (
@@ -569,7 +593,7 @@ function FileUpload({
       )}
       {uploaded && state.kind === 'accepted' && (
         <p role="status" className="text-sm">
-          Uploaded and attached {uploaded}. Save the row to keep it.
+          Uploaded and attached {uploaded}. Save to keep it.
         </p>
       )}
       {problem && (
@@ -620,6 +644,9 @@ function RelationshipInput({
   const selected = value?.kind === 'relationship' ? value.recordIds : [];
   const linked = useLinkedRows(api, value?.kind === 'relationship' ? [{ [field.id]: value }] : []);
   const target = useTableDetail(api, field.targetTableId);
+  const isTargetTasks = target.state.kind === 'ready' && target.state.data.systemKind === 'tasks';
+  const targetNoun = isTargetTasks ? 'task' : 'row';
+  const targetPlural = isTargetTasks ? 'tasks' : 'rows';
   const searchable =
     target.state.kind === 'ready' && !!target.state.data.applied?.definition.fields.some(item => item.kind === 'text');
   const read = useTableRelationship(api, field.targetTableId, after, searchable && search ? search : undefined);
@@ -629,10 +656,10 @@ function RelationshipInput({
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">
-        {field.cardinality === 'one' ? 'Choose one row.' : 'Choose linked rows.'} Incoming links block deletion.
+        {field.cardinality === 'one' ? `Choose one ${targetNoun}.` : `Choose linked ${targetPlural}.`}
       </p>
       {selected.length > 0 && (
-        <ul aria-label={`Rows linked from ${field.label}`} className="space-y-1">
+        <ul aria-label={`${isTargetTasks ? 'Tasks' : 'Rows'} linked from ${field.label}`} className="space-y-1">
           {selected.map((id, index) => {
             const label = linkedLabel(linked.state, id);
             const known = linked.state.kind === 'ready' && id in linked.state.data;
@@ -655,7 +682,9 @@ function RelationshipInput({
                   variant="ghost"
                   size="sm"
                   disabled={disabled}
-                  aria-label={known ? `Remove link to ${label}` : `Remove linked row ${index + 1} from ${field.label}`}
+                  aria-label={
+                    known ? `Remove link to ${label}` : `Remove linked ${targetNoun} ${index + 1} from ${field.label}`
+                  }
                   onClick={() => select(selected.filter(item => item !== id))}
                 >
                   Remove
@@ -669,8 +698,8 @@ function RelationshipInput({
       {searchable && (
         <SearchField
           id={`record-field-${field.id}-search`}
-          label={`Search rows for ${field.label}`}
-          placeholder="Search rows"
+          label={`Search ${targetPlural} for ${field.label}`}
+          placeholder={`Search ${targetPlural}`}
           value={query}
           maxLength={255}
           onChange={next => {
@@ -685,7 +714,9 @@ function RelationshipInput({
             {records.length === 0 &&
               (search && searchable ? (
                 <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-sm">No rows match “{search}”.</p>
+                  <p className="text-sm">
+                    No {targetPlural} match “{search}”.
+                  </p>
                   <Button
                     variant="outline"
                     size="sm"
@@ -700,13 +731,17 @@ function RelationshipInput({
                 </div>
               ) : (
                 <p className="text-sm">
-                  {after ? 'No rows on this page.' : `${target.definition.label} has no rows you can read yet.`}
+                  {after
+                    ? `No ${targetPlural} on this page.`
+                    : `${target.definition.label} has no ${targetPlural} yet.`}
                 </p>
               ))}
             {field.cardinality === 'one' ? (
               <Select value={selected[0] ?? ''} disabled={locked} onValueChange={id => select(id ? [id] : [])}>
                 <SelectTrigger width="full" aria-label={`Choose ${field.label.toLowerCase()}`}>
-                  <SelectValue>{selected[0] ? linkedLabel(linked.state, selected[0]) : 'Choose a row'}</SelectValue>
+                  <SelectValue>
+                    {selected[0] ? linkedLabel(linked.state, selected[0]) : `Choose a ${targetNoun}`}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="">Not set</SelectItem>

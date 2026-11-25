@@ -141,7 +141,7 @@ export function PersonalMemoryEditor({ workspaceId, workspaceName }: { workspace
   return (
     <FormSection
       title="Memory"
-      description={`What Bud knows about you and your work in ${workspaceName}. Bud learns from your chats, keeps this up to date, and uses it in your private chats with Bud. Private to you.`}
+      description={`What Bud (your TulipFarm assistant) remembers about you and your work in ${workspaceName}. Bud learns from your chats, keeps these notes up to date, and uses them in your private chats. Only you can see this.`}
     >
       {load?.kind === 'loading' ? (
         <StatePanel kind="loading" heading="h3" title="Loading your memory" description="Getting your memory files." />

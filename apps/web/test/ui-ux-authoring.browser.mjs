@@ -292,7 +292,6 @@ test('new agents choose other actions inside their app, and apps they do not use
   const actions = form.getByRole('region', { name: 'What it can do', exact: true });
   await evidence(page, 'a03-agent-tool-picker', async () => {
     await actions.getByText('No actions chosen.', { exact: false }).waitFor();
-    await actions.getByRole('button', { name: 'More actions', exact: true }).click();
     const tables = actions.getByRole('region', { name: 'Tables actions', exact: true });
     await tables.getByText('11 available', { exact: true }).waitFor();
     await tables.getByRole('button').first().click();

@@ -122,11 +122,23 @@ export function AgentTasksPage() {
   const read = useTasks(api, after, search);
   return (
     <PageContent>
-      <PageHeader title="My agent tasks" description="Private work, history, and row-change reviews." />
+      <PageHeader
+        title="Agent runs"
+        description="Private runs you started directly with an agent, plus their history and pending changes."
+        actions={
+          <Button
+            variant="outline"
+            nativeButton={false}
+            render={<Link to="/$workspaceSlug/tasks" params={{ workspaceSlug: workspace.slug }} />}
+          >
+            Tasks board
+          </Button>
+        }
+      />
       <SearchField
         id="task-search"
-        label="Find a task request"
-        placeholder="Search tasks"
+        label="Find an agent run"
+        placeholder="Search runs"
         maxLength={120}
         value={search}
         onChange={pages.setSearch}
@@ -135,14 +147,14 @@ export function AgentTasksPage() {
         {data => (
           <>
             {data.tasks.length ? (
-              <DataList aria-label="Tasks" columns="three" headings={['Task', 'Status', 'Started']}>
+              <DataList aria-label="Agent runs" columns="three" headings={['Run', 'Status', 'Started']}>
                 {data.tasks.map(task => (
-                  <DataListRow key={task.id}>
+                  <DataListRow key={task.id} align="start">
                     <DataListCell>
                       <TaskIdentity workspaceId={workspace.id} slug={workspace.slug} task={task} />
                     </DataListCell>
                     <DataListCell>
-                      <div className="space-y-1">
+                      <div className="space-y-1.5">
                         <Badge
                           variant={
                             task.status === 'completed'
@@ -161,7 +173,9 @@ export function AgentTasksPage() {
                       </div>
                     </DataListCell>
                     <DataListSecondary>
-                      <time dateTime={task.createdAt}>{taskTime(task.createdAt)}</time>
+                      <time dateTime={task.createdAt} className="tabular-nums whitespace-nowrap">
+                        {taskTime(task.createdAt)}
+                      </time>
                     </DataListSecondary>
                   </DataListRow>
                 ))}
@@ -170,8 +184,8 @@ export function AgentTasksPage() {
               <StatePanel
                 kind="empty"
                 icon={TasksIcon}
-                title="No matching task requests"
-                description="Try another phrase or clear the search. Only requests you can still access are included."
+                title="No matching agent runs"
+                description="Try another phrase or clear the search. Only runs you can still access are included."
               >
                 <Button variant="outline" onClick={() => pages.setSearch('')}>
                   Clear search
@@ -181,8 +195,8 @@ export function AgentTasksPage() {
               <StatePanel
                 kind="empty"
                 icon={TasksIcon}
-                title="No agent tasks yet"
-                description="Hand a piece of work to an activated agent and follow it here. You review every proposed row change before it runs."
+                title="No agent runs yet"
+                description="Hand a piece of work to an active agent and follow it here. You review any proposed table changes before they run."
                 sample={<AgentTasksSample />}
               >
                 <Button
@@ -688,9 +702,10 @@ function TaskProposals({
   const [after, setAfter] = useState<string>();
   const [selected, setSelected] = useState<string>();
   const read = useTaskProposals(api, taskId, after, running);
+  if (read.state.kind === 'ready' && !read.state.error && !after && read.state.data.proposals.length === 0) return null;
   return (
     <section className="space-y-4">
-      <h2 className="text-lg font-medium">Proposed row changes</h2>
+      <h2 className="text-lg font-medium">Proposed table changes</h2>
       <TaskRead state={read.state} refresh={read.refresh}>
         {data => (
           <>
@@ -720,7 +735,7 @@ function TaskProposals({
                 ))}
               </ul>
             ) : (
-              <p>No changes have been proposed. No row writes are authorized.</p>
+              <p className="text-sm text-muted-foreground">No table changes have been proposed.</p>
             )}
             <nav className="flex gap-2">
               {after && (

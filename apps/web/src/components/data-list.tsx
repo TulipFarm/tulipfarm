@@ -56,10 +56,10 @@ function DataList({
         className="hidden border-b px-2 py-2 text-xs font-medium text-muted-foreground list-wide:grid list-wide:grid-cols-(--data-list-columns) list-wide:gap-4"
       >
         <TooltipProvider>
-          {headings.map(heading =>
+          {headings.map((heading, index) =>
             typeof heading === 'string' ? (
-              <div key={heading} role="columnheader">
-                {heading}
+              <div key={heading || `column-${index}`} role="columnheader">
+                {heading === '' ? <span className="sr-only">Actions</span> : heading}
               </div>
             ) : (
               <div key={heading.label} role="columnheader" className="flex items-center gap-1">
@@ -92,15 +92,17 @@ function DataList({
 function DataListRow({
   className,
   dropTarget = false,
+  align = 'center',
   ...props
-}: React.ComponentProps<'div'> & { dropTarget?: boolean }) {
+}: React.ComponentProps<'div'> & { dropTarget?: boolean; align?: 'center' | 'start' }) {
   return (
     <div
       role="row"
       data-slot="data-list-row"
       data-drop-target={dropTarget || undefined}
       className={cn(
-        'relative grid min-w-0 gap-1 border-b px-2 py-2.5 transition-colors hover:bg-muted/50 list-wide:grid-cols-(--data-list-columns) list-wide:items-center list-wide:gap-4 [&_[data-slot=data-list-actions]]:relative [&_[data-slot=data-list-actions]]:z-10',
+        'relative grid min-w-0 gap-1 border-b px-2 transition-colors hover:bg-muted/50 list-wide:grid-cols-(--data-list-columns) list-wide:gap-4 [&_[data-slot=data-list-actions]]:relative [&_[data-slot=data-list-actions]]:z-10',
+        align === 'start' ? 'py-3.5 list-wide:items-start' : 'py-2.5 list-wide:items-center',
         'data-drop-target:bg-primary-subtle data-drop-target:ring-2 data-drop-target:ring-ring data-drop-target:ring-inset',
         className,
       )}
@@ -161,16 +163,18 @@ function DataListLink({
   className,
   render,
   weight = 'normal',
+  tone = 'default',
   ...props
-}: useRender.ComponentProps<'a'> & { weight?: 'normal' | 'strong' }) {
+}: useRender.ComponentProps<'a'> & { weight?: 'normal' | 'strong'; tone?: 'default' | 'primary' }) {
   return useRender({
     defaultTagName: 'a',
     props: mergeProps<'a'>(
       {
         'data-slot': 'data-list-link',
         className: cn(
-          'min-w-0 truncate outline-none after:absolute after:inset-0 focus-visible:underline',
+          'min-w-0 truncate outline-none after:absolute after:inset-0 hover:underline focus-visible:underline',
           weight === 'strong' ? 'font-semibold' : 'font-medium',
+          tone === 'primary' && 'text-primary-text',
           className,
         ),
       } as React.ComponentProps<'a'>,

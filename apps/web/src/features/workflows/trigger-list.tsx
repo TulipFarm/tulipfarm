@@ -68,6 +68,18 @@ type Failure = { message: string; triggerId: string | null };
 
 const addOrder: TriggerKind[] = ['cron', 'interval', 'once', 'webhook', 'github', 'row', 'record', 'provider', 'event'];
 
+const triggerKindDescriptions: Record<TriggerKind, string> = {
+  cron: 'Run on a calendar schedule, such as weekdays at 9 AM',
+  interval: 'Run every N minutes or hours',
+  once: 'Run once at a specific date and time',
+  webhook: 'Run when an external service calls a URL',
+  github: 'Run on pull requests, issues, or repository events',
+  row: 'Run when a record is created or updated in a table',
+  record: 'Run when a date field in a table arrives',
+  provider: 'Run on updates from a connected integration',
+  event: 'Run when a TulipFarm app emits an event',
+};
+
 const itemOf = (trigger: Trigger): Item => {
   const { id, label, ...body } = trigger;
   return {
@@ -297,7 +309,10 @@ export function TriggerList({
               <DropdownMenuGroup>
                 {addOrder.map(kind => (
                   <DropdownMenuItem key={kind} onClick={() => add(kind)}>
-                    {triggerKindNames[kind]}
+                    <span className="flex flex-col gap-0.5">
+                      <span>{triggerKindNames[kind]}</span>
+                      <span className="text-xs text-muted-foreground">{triggerKindDescriptions[kind]}</span>
+                    </span>
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuGroup>

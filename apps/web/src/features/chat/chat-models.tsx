@@ -13,13 +13,15 @@ import { ModelSetupLink, noModelsConfigured } from '@/features/models/model-setu
 import { familyPlan } from '@/features/models/chatgpt-plan-api';
 import { planUsageStatus } from './plan-usage';
 
-function composerModel(family: ModelCatalogFamily): ComposerModel {
+function composerModel(family: ModelCatalogFamily, defaultChatFamilyId?: string | null): ComposerModel {
   return {
     id: family.id,
     label: family.displayName,
     logo: modelLogo(family.vendor),
     brand: modelBrand(family.vendor),
     cost: familyCost(family),
+    speed: family.speed,
+    isDefault: Boolean(defaultChatFamilyId && family.id === defaultChatFamilyId),
     ...(familyPlan(family) ? { plan: familyPlan(family)!, planUsage: family.planUsage ?? undefined } : {}),
     disabled: !family.available,
     ...(!family.available
@@ -84,13 +86,19 @@ export function useChatModels(
     if (startDefault) defaultApplied.current = true;
   }, [state, families, saved, preferWorkspaceDefault]);
   useEffect(() => setAcknowledged(dismissedNotice(workspaceId)), [workspaceId]);
+  const defaultChatFamilyId = state.kind === 'ready' ? state.data.defaultChatFamilyId : null;
   const current = families.find(family => family.id === selected?.id);
-  const model = state.kind === 'unavailable' ? null : current ? composerModel(current) : selected;
+  const model = state.kind === 'unavailable' ? null : current ? composerModel(current, defaultChatFamilyId) : selected;
   const ready = state.kind === 'ready';
   // The member's own plan models come first, before the workspace's models that use credits.
   const choices = families
-    .map(composerModel)
-    .sort((a, b) => Number(!!a.disabled) - Number(!!b.disabled) || Number(!a.plan) - Number(!b.plan));
+    .map(family => composerModel(family, defaultChatFamilyId))
+    .sort(
+      (a, b) =>
+        Number(!!a.disabled) - Number(!!b.disabled) ||
+        Number(!a.plan) - Number(!b.plan) ||
+        Number(!a.isDefault) - Number(!b.isDefault),
+    );
   // The member's remembered model can no longer be used here, so new messages use another one until they choose.
   const savedUnavailable =
     ready && !!saved && saved !== acknowledged && !families.some(family => family.id === saved && family.available);

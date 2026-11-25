@@ -70,7 +70,7 @@ export function AgentsPage() {
   }
   return (
     <PageContent>
-      <PageHeader title="Agents" description="Private instructions you can share with people and teams." />
+      <PageHeader title="Agents" description="AI assistants with their own instructions, tools, and triggers." />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <SearchField
           id="agent-search"
@@ -102,12 +102,6 @@ export function AgentsPage() {
             <Button
               variant="outline"
               nativeButton={false}
-              render={<Link to="/$workspaceSlug/agents/new" params={{ workspaceSlug: workspace.slug }} />}
-            >
-              Configure manually
-            </Button>
-            <Button
-              nativeButton={false}
               render={
                 <Link
                   to="/$workspaceSlug"
@@ -115,6 +109,12 @@ export function AgentsPage() {
                   search={{ intent: 'create-agent' }}
                 />
               }
+            >
+              Build in chat
+            </Button>
+            <Button
+              nativeButton={false}
+              render={<Link to="/$workspaceSlug/agents/new" params={{ workspaceSlug: workspace.slug }} />}
             >
               <AddIcon size="md" aria-hidden="true" />
               New agent
@@ -290,11 +290,13 @@ function AgentSummary({ api, id }: { api: ReturnType<typeof agentApi>; id: strin
     <>
       <DataListSecondary>{definition.instructions}</DataListSecondary>
       <DataListCell>
-        {!activations.length
-          ? 'Not activated'
-          : !capabilities.includes('invoke')
-            ? 'Run permission required'
-            : 'Activated'}
+        {!activations.length ? (
+          <Badge variant="secondary">Draft</Badge>
+        ) : !capabilities.includes('invoke') ? (
+          <Badge variant="outline">Run access required</Badge>
+        ) : (
+          <Badge variant="success">Active</Badge>
+        )}
       </DataListCell>
     </>
   );
@@ -521,7 +523,7 @@ function AgentPage({
             creating && !receipt && !deleted
               ? 'Describe the job and choose what this agent may use.'
               : detail && !deleted
-                ? 'Start tasks with this agent. Managers set up how it runs and who can use it.'
+                ? 'Run this agent, adjust its instructions, or manage who can use it.'
                 : undefined
           }
           actions={status && <Badge variant={statusVariant[status.kind]}>{status.label}</Badge>}
@@ -530,13 +532,13 @@ function AgentPage({
           <StatePanel
             kind="success"
             title="Agent archived"
-            description="Its activations have ended and its trigger workflows are archived. Restore it from Archived on the agents page."
+            description="The agent is paused and its triggers are archived. Restore it anytime from Archived on the Agents page."
           />
         ) : deleted ? (
           <StatePanel
             kind="success"
             title="Agent deleted"
-            description="Its activations are revoked. Return to agents to see your remaining accessible definitions."
+            description="This agent and its triggers have been removed."
           />
         ) : receipt ? (
           <section aria-label="Agent creation receipt" className="space-y-4">
@@ -626,7 +628,7 @@ function AgentPage({
                   {panel(
                     'overview',
                     <>
-                      {can('edit') && <ContinueAgentSetup api={api} id={id} slug={slug} />}
+                      {can('edit') && status?.kind !== 'active' && <ContinueAgentSetup api={api} id={id} slug={slug} />}
                       {ready && (
                         <AgentSetup
                           detail={detail}

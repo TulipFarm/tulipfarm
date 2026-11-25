@@ -513,7 +513,7 @@ test(
       await until(() => api.state.sends.length === 1, 'one send is pending');
       release();
       await page.waitForURL(`**/chat/${api.state.chatCreates[0].id}`);
-      assert.equal(await page.getByText('Leave these edits?', { exact: true }).count(), 0);
+      assert.equal(await page.getByText('Discard unsaved changes?', { exact: true }).count(), 0);
       assert.equal(api.state.sends.length, 1);
     });
   },
@@ -524,7 +524,7 @@ test('project chat drafts do not move to a different project', { timeout: 60000 
     api.state.created.push({ ...api.state.project, id: otherId, name: 'Other project' });
     await editor.fill('Only for Spring launch.');
     await page.getByRole('link', { name: 'Back to projects', exact: true }).click();
-    await page.getByRole('button', { name: 'Leave editor', exact: true }).click();
+    await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
     await page.locator(`a[href="/${workspace.slug}/projects/${otherId}"]`).click();
     await page.locator('[contenteditable=true]').first().waitFor();
     assert.equal(await page.locator('[contenteditable=true]').first().textContent(), '');

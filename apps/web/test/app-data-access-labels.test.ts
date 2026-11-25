@@ -172,8 +172,8 @@ test('an app that is not serving says why', () => {
   const sentence = (summary: AppSummary) => viewStatus(blocked, summary, orders).sentence;
   const stops = (over: Partial<AppSummary['stops']>) => ({ ...app, stops: { ...app.stops, ...over } });
   assert.equal(sentence(stops({ editorPausedAt: '2026-11-02T00:00:00Z' })), 'Paused by an editor.');
-  assert.equal(sentence(stops({ budgetPausedAt: '2026-11-02T00:00:00Z' })), 'Paused: credits used up.');
+  assert.equal(sentence(stops({ budgetPausedAt: '2026-11-02T00:00:00Z' })), 'Paused: app credit limit reached.');
   assert.equal(sentence(stops({ disabledAt: '2026-11-02T00:00:00Z' })), 'Turned off by an admin.');
-  assert.equal(sentence({ ...app, liveReleaseId: null }), 'Not published.');
+  assert.equal(sentence({ ...app, liveReleaseId: null }), 'Draft.');
   assert.equal(sentence(app), 'The app isn’t open to visitors right now.');
 });

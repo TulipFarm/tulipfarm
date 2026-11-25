@@ -39,7 +39,7 @@ async function environment(t, fromDirectory = false) {
     route.fulfill(fixture.respond(route.request().method(), route.request().url(), route.request().postDataJSON())),
   );
   await page.goto(`${server.origin}/${fixture.workspace.slug}/agents${fromDirectory ? '' : '/new'}`);
-  const openBuilder = () => page.getByRole('link', { name: 'Configure manually', exact: true }).first().click();
+  const openBuilder = () => page.getByRole('link', { name: 'New agent', exact: true }).first().click();
   if (fromDirectory) return { page, fixture, openBuilder, errors };
   const form = page.getByRole('form', { name: 'Agent setup', exact: true });
   try {
@@ -68,7 +68,7 @@ test(
   async t => {
     const { page, fixture, openBuilder, errors } = await environment(t, true);
     const form = page.getByRole('form', { name: 'Agent setup', exact: true });
-    await page.getByRole('link', { name: 'Configure manually', exact: true }).first().waitFor({ timeout: 30000 });
+    await page.getByRole('link', { name: 'New agent', exact: true }).first().waitFor({ timeout: 30000 });
     let interactions = 0;
     const started = performance.now();
     const act = async operation => {
@@ -88,9 +88,9 @@ test(
       'instructions alone never infer tools',
     );
     await act(() => form.getByRole('checkbox', { name: 'Customers', exact: true }).first().check());
-    const tableCard = form.getByRole('region', { name: 'Business tables', exact: true });
+    const tableCard = form.getByRole('region', { name: 'Tables', exact: true });
     await tableCard.getByRole('region', { name: 'Suggested actions: read tables' }).waitFor();
-    assert.equal(await tableCard.getByRole('group', { name: 'Business tables', exact: true }).count(), 1);
+    assert.equal(await tableCard.getByRole('group', { name: 'Tables', exact: true }).count(), 1);
     const summary = page.getByRole('complementary', { name: 'Agent view' });
     await summary.getByText('Customers: read rows', { exact: true }).waitFor();
     await act(() => form.getByRole('button', { name: 'Continue', exact: true }).click());
@@ -138,7 +138,7 @@ test(
     await form.getByRole('textbox', { name: 'Instructions', exact: true }).fill('Read customers.');
     const customers = form.getByRole('checkbox', { name: 'Customers', exact: true });
     assert.equal(await customers.count(), 2);
-    const choices = form.getByRole('group', { name: 'Business tables', exact: true });
+    const choices = form.getByRole('group', { name: 'Tables', exact: true });
     assert.match(await choices.innerText(), /People Ops/);
     assert.match(await choices.innerText(), /Team name unavailable/);
     for (const table of fixture.tables)
@@ -165,7 +165,6 @@ test(
     await form.getByRole('alert').filter({ hasText: 'This agent has table access' }).first().waitFor();
     await form.getByRole('button', { name: 'Go to Access', exact: true }).waitFor();
     assert.equal(fixture.publications.size, 0);
-    await form.getByRole('button', { name: 'More actions', exact: true }).click();
     const tables = form.getByRole('region', { name: 'Tables actions', exact: true });
     await tables.getByRole('button').first().click();
     await tables.getByRole('button', { name: 'Tables: read only', exact: true }).click();
@@ -185,7 +184,6 @@ test(
 test('app presets replace only their own group and individual choices remain editable', { timeout: 60000 }, async t => {
   const { form, step } = await environment(t);
   await step('Access');
-  await form.getByRole('button', { name: 'More actions', exact: true }).click();
   const knowledge = form.getByRole('region', { name: 'Knowledge and web actions', exact: true });
   const tables = form.getByRole('region', { name: 'Tables actions', exact: true });
   await knowledge.getByRole('button').first().click();
@@ -205,7 +203,6 @@ test('removing suggested actions keeps a row reader that was picked manually', {
   const { page, form, step } = await environment(t);
   await form.getByRole('checkbox', { name: 'Customers', exact: true }).first().check();
   await step('Access');
-  await form.getByRole('button', { name: 'More actions', exact: true }).click();
   const tables = form.getByRole('region', { name: 'Tables actions', exact: true });
   await tables.getByRole('button').first().click();
   const row = tables.getByRole('checkbox', { name: 'Read a row', exact: true });
@@ -226,7 +223,6 @@ test(
   async t => {
     const { form, step } = await environment(t);
     await step('Access');
-    await form.getByRole('button', { name: 'More actions', exact: true }).click();
     for (const app of ['Tables', 'Knowledge and web', 'GitHub']) {
       const group = form.getByRole('region', { name: `${app} actions`, exact: true });
       await group.getByRole('button').first().click();

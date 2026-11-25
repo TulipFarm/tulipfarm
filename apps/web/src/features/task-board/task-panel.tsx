@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { taskFields } from '@tulipfarm/tables/tasks-table';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+} from '@tulipfarm/sprout/alert-dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@tulipfarm/sprout/collapsible';
 import { Button } from '@tulipfarm/sprout/button';
 import { MessageResponse } from '@tulipfarm/sprout/message-response';
@@ -40,6 +49,7 @@ export function TaskSheet({
   me,
   now,
   canUpdate,
+  canDelete,
   close,
   refresh,
 }: {
@@ -50,10 +60,12 @@ export function TaskSheet({
   me: string | undefined;
   now: number;
   canUpdate: boolean;
+  canDelete: boolean;
   close: () => void;
   refresh: () => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [moving, setMoving] = useState(false);
   const move = taskMove(card, 'done') ?? (taskMove(card, 'todo') ? 'reopen' : null);
   const moveTask = async (next: TaskMove) => {
@@ -73,6 +85,12 @@ export function TaskSheet({
     void changed({ keys: [['tables', 'row-thread', workspace.id, table.id, card.id]] });
   }, [progress, changed, workspace.id, table.id, card.id]);
   const assign = useRecordMutation(api, () => void refresh());
+  const remove = useRecordMutation(api, () => {
+    setConfirmDelete(false);
+    close();
+    void refresh();
+  });
+  const locked = assign.locked || remove.locked;
   const change = (actor: Actor | null) =>
     void assign.submit({
       kind: 'update',
@@ -82,6 +100,15 @@ export function TaskSheet({
       recordId: card.id,
       expectedToken: card.record.token,
       values: { [taskFields.assignee]: actor ? { kind: 'actor', actor } : null },
+    });
+  const deleteTask = () =>
+    void remove.submit({
+      kind: 'delete',
+      requestId: crypto.randomUUID(),
+      tableId: table.id,
+      revision: table.revision,
+      recordId: card.id,
+      expectedToken: card.record.token,
     });
   if (editing)
     return (
@@ -100,16 +127,16 @@ export function TaskSheet({
       />
     );
   return (
-    <Sheet open onOpenChange={open => !open && !assign.locked && close()}>
-      <SheetContent size="lg" showCloseButton={!assign.locked}>
+    <Sheet open onOpenChange={open => !open && !locked && close()}>
+      <SheetContent size="lg" showCloseButton={!locked}>
         <SheetHeader>
           <SheetTitle>{card.title}</SheetTitle>
           <SheetDescription render={<div />}>
-            <span className="flex items-center gap-2">
+            <span className="flex flex-wrap items-center gap-2">
               <Status state={cardStatus(card)} size="sm" aria-hidden="true" tooltip={false} />
               {card.state ? stateLabels[card.state] : card.assignee ? 'To do' : 'Not assigned'}
               {canUpdate && move && (
-                <Button size="sm" variant="outline" disabled={moving} onClick={() => void moveTask(move)}>
+                <Button size="sm" variant="outline" disabled={moving || locked} onClick={() => void moveTask(move)}>
                   {move === 'done' ? 'Mark done' : 'Reopen'}
                 </Button>
               )}
@@ -124,7 +151,7 @@ export function TaskSheet({
                 <ActorPicker
                   workspaceId={workspace.id}
                   value={card.assignee}
-                  disabled={!canUpdate || assign.locked}
+                  disabled={!canUpdate || locked}
                   change={change}
                   label="Assignee"
                   size="sm"
@@ -139,17 +166,25 @@ export function TaskSheet({
             )}
           </div>
           <RecordMutationFeedback mutation={assign} />
+          <RecordMutationFeedback mutation={remove} />
           {card.assignee?.type === 'agent' && (
             <AgentWork card={card} table={table} workspace={workspace} me={me} now={now} refresh={refresh} />
           )}
           <section className="space-y-2" data-compact-text>
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-sm font-medium">Description</h3>
-              {canUpdate && (
-                <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
-                  Edit
-                </Button>
-              )}
+              <div className="flex items-center gap-2">
+                {canUpdate && (
+                  <Button size="sm" variant="outline" disabled={locked} onClick={() => setEditing(true)}>
+                    Edit
+                  </Button>
+                )}
+                {canDelete && (
+                  <Button size="sm" variant="ghost" disabled={locked} onClick={() => setConfirmDelete(true)}>
+                    Delete
+                  </Button>
+                )}
+              </div>
             </div>
             {card.description ? (
               <MessageResponse>{card.description}</MessageResponse>
@@ -163,8 +198,21 @@ export function TaskSheet({
             rowId={card.id}
             changed={() => void refresh()}
             conversationOnly
+            noun="task"
           />
         </div>
+        <AlertDialog open={confirmDelete} onOpenChange={open => !remove.locked && setConfirmDelete(open)}>
+          <AlertDialogContent>
+            <AlertDialogTitle>Delete this task?</AlertDialogTitle>
+            <AlertDialogDescription>“{card.title}” will be removed from the Tasks board.</AlertDialogDescription>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={remove.locked}>Cancel</AlertDialogCancel>
+              <AlertDialogAction variant="destructive" disabled={remove.locked} onClick={deleteTask}>
+                {remove.state.kind === 'sending' ? 'Deleting…' : 'Delete task'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </SheetContent>
     </Sheet>
   );

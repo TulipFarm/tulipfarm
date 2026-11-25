@@ -16,8 +16,8 @@ test('a new agent shows its draft status and the steps that make it runnable, in
     ['instructions', 'done', 'The instructions are saved.', 'Edit instructions'],
     ['execution', 'todo', 'Check Enable execution, then save execution settings.', 'Go to Enable execution'],
     ['activation', 'waiting', 'Available after execution is turned on and saved in step 2.', null],
-    ['access', 'todo', 'Give yourself or one of your teams the invoke permission, then save sharing.', 'Go to Access'],
-    ['model', 'done', 'No saved preference. The runtime must supply an available model.', null],
+    ['access', 'todo', 'Grant yourself or your team run access, then save sharing.', 'Go to Access'],
+    ['model', 'done', 'Uses the workspace default model.', null],
   ]);
 });
 
@@ -119,6 +119,6 @@ test('sections appear only to people who can use them', () => {
   );
   assert.deepEqual(
     visibleTabs([...manager, 'invoke']).map(tab => tab.label),
-    ['Overview', 'Instructions', 'Access', 'Execution', 'Slack', 'Triggers', 'Evals', 'Lessons', 'Settings'],
+    ['Overview', 'Instructions', 'Access', 'Activation', 'Slack', 'Triggers', 'Evals', 'Lessons', 'Settings'],
   );
 });

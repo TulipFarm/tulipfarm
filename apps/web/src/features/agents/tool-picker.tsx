@@ -115,7 +115,7 @@ export function AgentToolPicker({
   suggestions?: boolean;
 }) {
   const [search, setSearch] = useState('');
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState(true);
   const [presetError, setPresetError] = useState(false);
   const [open, setOpen] = useState(
     () =>

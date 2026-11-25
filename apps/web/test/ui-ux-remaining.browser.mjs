@@ -427,7 +427,11 @@ try {
     await visit(`/acme/agents/${aid}`);
     await shot('readiness');
     if (!baseline) {
-      await page.getByRole('list', { name: 'Setup steps', exact: true }).waitFor();
+      const viewChecklist = page.getByRole('button', { name: 'View checklist', exact: true });
+      const setupSteps = page.getByRole('list', { name: 'Setup steps', exact: true });
+      await viewChecklist.or(setupSteps).waitFor();
+      if (await viewChecklist.isVisible()) await viewChecklist.click();
+      await setupSteps.waitFor();
       await page.getByRole('tab', { name: 'Instructions', exact: true }).click();
       await page.getByRole('heading', { name: 'Permitted actions', exact: true }).waitFor();
     }
@@ -441,7 +445,6 @@ try {
         await steps.click();
         await page.getByRole('option', { name: '2. Access', exact: true }).click();
       } else await tab.click();
-      await page.getByRole('button', { name: 'More actions', exact: true }).click();
       await page.getByRole('region', { name: 'Tables actions', exact: true }).getByRole('button').first().click();
       await page.getByRole('checkbox', { name: 'Find rows', exact: true }).waitFor();
       await page.getByRole('checkbox', { name: 'Update rows', exact: true }).waitFor();
