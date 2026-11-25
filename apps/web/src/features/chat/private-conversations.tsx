@@ -72,6 +72,18 @@ import { useConversationStream } from './use-conversation-stream';
 import { queueRendererCalls } from './layout-calls';
 import { ConversationAttachment, StagedAttachments, useConversationAttachments } from './conversation-attachments';
 import { Composer } from './composer';
+import { codeSessionApi } from '@/features/code-sessions/api';
+import { useFlag } from '@/lib/feature-flags';
+import { CodeSessionCard } from '@/features/code-sessions/CodeSessionCard';
+import {
+  buildCodeSessionStartInput,
+  CodeAgentPicker,
+  CodeSessionBar,
+  CodeSessionNotice,
+  defaultCodeSessionDraft,
+  type CodeSessionDraftConfig,
+} from '@/features/code-sessions/CodeSessionSetup';
+import type { CodeModeAvailability, TurnMode } from '@tulipfarm/agents/code-session-contracts';
 import { ConversationFileReference, ConversationGoogleFileReference, useRichFileMentions } from './file-mentions';
 import { SentSkill, SkillUse, StagedSkill, useRichSkillPicker } from './skill-picker';
 import { keywordAccounts, type RichTextEditorHandle, type RichTextValue } from '@tulipfarm/sprout/rich-text-editor';
@@ -526,7 +538,72 @@ function ConversationDetail({
   const sharedChat = draft ? draftProjectId !== null : read.state.kind === 'ready' && !!read.state.data.chat.projectId;
   const privateChat = data !== null && !sharedChat;
   const [content, setContent] = useState<ChatDraft>(emptyRichDocument);
-  const [mode, setMode] = useState<'normal' | 'plan'>('normal');
+  const [mode, setMode] = useState<TurnMode>(() => {
+    if (draft || sharedChat || compact || typeof window === 'undefined') return 'normal';
+    try {
+      const saved = window.sessionStorage.getItem(`tulipfarm.chat-turn-mode.${workspace.id}.${chatId}`);
+      if (saved === 'plan' || saved === 'code') return saved;
+    } catch {
+      // Ignore storage access failures.
+    }
+    return 'normal';
+  });
+  const manualModeForChat = useRef<string | null>(null);
+  const codeSessionsEnabled = useFlag('code-sessions');
+  const codeApi = useMemo(() => codeSessionApi(workspace.id), [workspace.id]);
+  const [codeAvailability, setCodeAvailability] = useState<CodeModeAvailability | null>(null);
+  const [codeAvailabilityLoading, setCodeAvailabilityLoading] = useState(false);
+  const [codeDraft, setCodeDraft] = useState<CodeSessionDraftConfig>(() => defaultCodeSessionDraft(null));
+  const modeRef = useRef<TurnMode>(mode);
+  modeRef.current = mode;
+  useEffect(() => {
+    if (draft || sharedChat || compact) return;
+    if (manualModeForChat.current === chatId) {
+      if (codeSessionsEnabled && modeRef.current !== 'normal') {
+        void codeApi.setTurnMode(chatId, modeRef.current).catch(() => undefined);
+      }
+      return;
+    }
+    let next: TurnMode = 'normal';
+    try {
+      const saved = window.sessionStorage.getItem(`tulipfarm.chat-turn-mode.${workspace.id}.${chatId}`);
+      if (saved === 'plan' || saved === 'code') next = saved;
+    } catch {
+      // Ignore storage access failures.
+    }
+    setMode(next);
+  }, [codeApi, codeSessionsEnabled, workspace.id, chatId, draft, sharedChat, compact]);
+  useEffect(() => {
+    if (!codeSessionsEnabled || mode !== 'code' || sharedChat || compact) return;
+    const controller = new AbortController();
+    setCodeAvailabilityLoading(true);
+    void codeApi
+      .availability(controller.signal)
+      .then(avail => {
+        setCodeAvailability(avail);
+        setCodeDraft(current => (current.repository.trim() ? current : defaultCodeSessionDraft(avail)));
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!controller.signal.aborted) setCodeAvailabilityLoading(false);
+      });
+    return () => controller.abort();
+  }, [codeApi, codeSessionsEnabled, mode, sharedChat, compact]);
+  const handleModeChange = useCallback(
+    (next: TurnMode) => {
+      manualModeForChat.current = chatId;
+      setMode(next);
+      try {
+        window.sessionStorage.setItem(`tulipfarm.chat-turn-mode.${workspace.id}.${chatId}`, next);
+      } catch {
+        // Ignore storage access failures.
+      }
+      if (codeSessionsEnabled && !draft && !sharedChat) {
+        void codeApi.setTurnMode(chatId, next).catch(() => undefined);
+      }
+    },
+    [codeApi, codeSessionsEnabled, workspace.id, chatId, draft, sharedChat],
+  );
   const contentResult = parseChatDraft(content);
   const validContent = contentResult.success ? contentResult.data : null;
   const text = validContent ? chatDocumentText(validContent) : '';
@@ -782,10 +859,13 @@ function ConversationDetail({
   const packageSend =
     !sharedChat &&
     mode !== 'plan' &&
+    mode !== 'code' &&
     !staged &&
     !!validContent &&
     !!packageInstallRequest([{ kind: 'text', text, content: validContent }], mode);
-  const sendAvailable = (models.usable && !!models.model) || packageSend;
+  const codeStartInput = mode === 'code' ? buildCodeSessionStartInput(codeDraft) : null;
+  const codeSendReady = mode === 'code' && codeStartInput !== null && !codeAvailability?.unavailableReason;
+  const sendAvailable = mode === 'code' ? codeSendReady : (models.usable && !!models.model) || packageSend;
   useEffect(() => {
     if (!draft || !prefill?.autoSend || sentPrefill.current || locked) return;
     const content = textDocument(prefill.prompt);
@@ -902,7 +982,14 @@ function ConversationDetail({
     references = mentions.references,
   ) {
     const packageRequest = !sharedChat && packageInstallRequest(parts, mode);
-    if ((!packageRequest && (!models.usable || !models.model)) || locked || posting.current) return;
+    const codePayload = mode === 'code' ? buildCodeSessionStartInput(codeDraft) : null;
+    if (
+      (!codePayload && !packageRequest && (!models.usable || !models.model)) ||
+      (mode === 'code' && !codePayload) ||
+      locked ||
+      posting.current
+    )
+      return;
     posting.current = true;
     const messageId = crypto.randomUUID();
     // Each integration chip keeps naming the account the message was sent with, even after a later switch.
@@ -951,6 +1038,7 @@ function ConversationDetail({
         parts,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         mode,
+        ...(codePayload ? { code: codePayload } : {}),
       })
       .then(() => (draft ? integrations.applyDraft(chatId).catch(() => undefined) : undefined))
       .finally(() => {
@@ -1846,7 +1934,46 @@ function ConversationDetail({
                 placeholder={
                   compact ? 'Reply…' : empty ? (composerPlaceholder ?? 'What would you like to get done?') : 'Reply…'
                 }
-                mode={!sharedChat && !compact ? { value: mode, onChange: setMode } : undefined}
+                mode={!sharedChat && !compact ? { value: mode, onChange: handleModeChange } : undefined}
+                codeHeader={
+                  !sharedChat && !compact && mode === 'code' ? (
+                    <CodeSessionBar
+                      workspaceId={workspace.id}
+                      workspaceSlug={workspaceSlug}
+                      availability={codeAvailability}
+                      draft={codeDraft}
+                      onChange={setCodeDraft}
+                      disabled={write.locked || projectArchived}
+                    />
+                  ) : undefined
+                }
+                sendDisabledReason={
+                  !sharedChat && !compact && mode === 'code'
+                    ? !codeStartInput
+                      ? 'Select a repository to start a code session'
+                      : (codeAvailability?.unavailableReason ?? undefined)
+                    : undefined
+                }
+                codeNotice={
+                  !sharedChat && !compact && mode === 'code' ? (
+                    <CodeSessionNotice
+                      workspaceSlug={workspaceSlug}
+                      availability={codeAvailability}
+                      loading={codeAvailabilityLoading}
+                      codingAgent={codeDraft.codingAgent}
+                    />
+                  ) : undefined
+                }
+                codeAgentPicker={
+                  !sharedChat && !compact && mode === 'code' ? (
+                    <CodeAgentPicker
+                      value={codeDraft.codingAgent}
+                      availability={codeAvailability}
+                      onChange={codingAgent => setCodeDraft(current => ({ ...current, codingAgent }))}
+                      disabled={write.locked || projectArchived}
+                    />
+                  ) : undefined
+                }
                 scope={draft && empty ? scope : projectSharingScope}
                 onStop={!text && !staged ? stopReply : undefined}
                 disabled={write.locked || projectArchived}
@@ -2263,6 +2390,15 @@ const ConversationEntry = memo(function ConversationEntry({
                       }
                     />
                   </MessageBubble>
+                );
+              case 'code-session':
+                return (
+                  <CodeSessionCard
+                    key={`code-session-${part.sessionId}-${index}`}
+                    workspaceId={workspace.id}
+                    workspaceSlug={slug}
+                    sessionId={part.sessionId}
+                  />
                 );
               default: {
                 const exhaustive: never = part;

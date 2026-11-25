@@ -46,6 +46,13 @@ export const featureFlags = {
     scope: 'workspace',
     env: 'FEATURE_FLAG_OPENAI_IMAGE_MODELS',
   },
+  'code-sessions': {
+    description:
+      'Code mode in chat and end-to-end coding agent sessions (brainstorm, plan, code, verify, pull request, review, merge) orchestrated through Tasks and Inbox.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_CODE_SESSIONS',
+  },
 } as const satisfies Record<string, FeatureFlagDefinition>;
 
 export type FeatureFlag = keyof typeof featureFlags;

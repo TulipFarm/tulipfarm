@@ -15,6 +15,10 @@ import { useTableChanges } from '@/features/tables/changes';
 import type { TableWorkspace } from '@/features/tables/references';
 import { ActorName } from '@/features/tables/actors';
 import { useTaskApi, useTasks } from '@/features/tasks/queries';
+import { useFeatureRead } from '@/lib/query';
+import { codeSessionApi } from '@/features/code-sessions/api';
+import { useFlag } from '@/lib/feature-flags';
+import type { CodeSessionView } from '@tulipfarm/agents/code-session-contracts';
 import { lanes, taskCards, type Lane, type TaskCard } from './api';
 import { ago, currentStep, duration, useAssignmentRun, useNow, sentence } from './live';
 import { taskShows, type TaskBoardSearch, type TaskShow } from './search';
@@ -136,6 +140,23 @@ export function TaskBoard({
   const now = useNow(visible.some(card => card.lane === 'working' || card.lane === 'queued'));
   const agentRunsRead = useTasks(useTaskApi(workspace.id), undefined, '');
   const agentRunCount = agentRunsRead.state.kind === 'ready' ? agentRunsRead.state.data.tasks.length : 0;
+  const codeSessionsEnabled = useFlag('code-sessions');
+  const codeSessionsRead = useFeatureRead({
+    key: ['code-sessions', 'workspace-board', workspace.id] as const,
+    enabled: codeSessionsEnabled,
+    load: signal => codeSessionApi(workspace.id).list({ scope: 'workspace' }, signal),
+    pollWhile: () => codeSessionsEnabled,
+    interval: 10_000,
+    maxChecks: 2000,
+  });
+  const codeSessionByRow = useMemo(() => {
+    const map = new Map<string, CodeSessionView>();
+    if (codeSessionsRead.state.kind !== 'ready') return map;
+    for (const session of codeSessionsRead.state.data.sessions) {
+      if (session.rowId && !map.has(session.rowId)) map.set(session.rowId, session);
+    }
+    return map;
+  }, [codeSessionsRead.state]);
   const boardContainer = useRef<HTMLDivElement>(null);
   const scrollToLane = (index: number) => {
     const columnsEl = boardContainer.current?.querySelectorAll<HTMLElement>(
@@ -298,9 +319,12 @@ export function TaskBoard({
                 </span>
               );
             }}
-            renderBody={card =>
-              hasCardBody(card) ? <TaskCardBody card={card} workspace={workspace} me={progress?.me} now={now} /> : null
-            }
+            renderBody={card => {
+              const codeSession = codeSessionByRow.get(card.id);
+              return hasCardBody(card) || codeSession ? (
+                <TaskCardBody card={card} codeSession={codeSession} workspace={workspace} me={progress?.me} now={now} />
+              ) : null;
+            }}
           />
         </div>
       )}
@@ -335,11 +359,13 @@ const hasCardBody = (card: TaskCard) => {
 /** What a card shows under its title: live progress, the reason it waits, who has it. */
 function TaskCardBody({
   card,
+  codeSession,
   workspace,
   me,
   now,
 }: {
   card: TaskCard;
+  codeSession?: CodeSessionView | undefined;
   workspace: TableWorkspace;
   me: string | undefined;
   now: number;
@@ -351,6 +377,13 @@ function TaskCardBody({
   const footer = hasFooter(card);
   return (
     <div className="w-full space-y-2 pt-1">
+      {codeSession && (
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <Badge variant={codeSession.stage === 'failed' ? 'destructive' : 'outline'}>{codeSession.stageLabel}</Badge>
+          <span className="truncate font-mono text-muted-foreground">{codeSession.repository}</span>
+          {codeSession.pullRequestNumber && <Badge variant="secondary">PR #{codeSession.pullRequestNumber}</Badge>}
+        </div>
+      )}
       {card.lane === 'working' && activity?.run && (
         <div className="space-y-0.5 rounded-md bg-info-subtle px-2 py-1.5 text-foreground">
           <p className="truncate font-medium" aria-live="polite">
