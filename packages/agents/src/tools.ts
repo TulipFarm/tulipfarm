@@ -3858,8 +3858,11 @@ export function createChatTools(
       const sources = privateLookup
         ? [{ kind: 'private-conversation' as const, conversationId: context.origin.conversationId }]
         : [];
+      const ownMemory = context.origin.sources.some(
+        source => source.kind === 'personal-memory' && source.membershipId === context.actor.membershipId,
+      );
       await withHuman(runtime, context.workspaceId, context.actor, 'read', tx =>
-        requireDraftSources(tx, context.actor, sources),
+        requireDraftSources(tx, context.actor, sources, undefined, undefined, false, ownMemory),
       );
       return { result, sources };
     }
