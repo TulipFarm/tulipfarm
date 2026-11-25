@@ -3798,7 +3798,7 @@ export function createChatTools(
           return { result, sources: [{ kind: 'table-rows', tableId, revision }] };
         }
         case 'tasks.get':
-          return read(async tx => {
+          return await read(async tx => {
             const task = await taskOfKey(tx, actor, call.key);
             return {
               result: await getTask(tx, actor, call.key),
