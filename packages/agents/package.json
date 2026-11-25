@@ -359,6 +359,14 @@
       "types": "./dist/coding-run-store.d.ts",
       "default": "./dist/coding-run-store.js"
     },
+    "./code-session-contracts": {
+      "types": "./dist/code-session-contracts.d.ts",
+      "default": "./dist/code-session-contracts.js"
+    },
+    "./code-session-store": {
+      "types": "./dist/code-session-store.d.ts",
+      "default": "./dist/code-session-store.js"
+    },
     "./agent-lessons": {
       "types": "./dist/agent-lessons.d.ts",
       "default": "./dist/agent-lessons.js"

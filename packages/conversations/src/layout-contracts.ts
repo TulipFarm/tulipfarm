@@ -381,11 +381,11 @@ export function textLayout(
 
 export function packageInstallRequest(
   parts: readonly z.infer<typeof inputPartSchema>[],
-  mode?: 'normal' | 'plan',
+  mode?: 'normal' | 'plan' | 'code',
   projectId?: string | null,
 ): MarketplacePackage | null {
   const part = parts[0];
-  if (projectId || mode === 'plan' || parts.length !== 1 || part?.kind !== 'text') return null;
+  if (projectId || mode === 'plan' || mode === 'code' || parts.length !== 1 || part?.kind !== 'text') return null;
   if (part.content) {
     const blocks = part.content.doc.content;
     const block = blocks[0];

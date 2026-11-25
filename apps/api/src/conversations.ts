@@ -210,6 +210,7 @@ export function registerConversations(
     events?: ConversationEventHub;
     eventTiming?: Partial<EventTiming>;
     replies?: Pick<ReplyDispatch, 'sent'>;
+    codeSessions?: { start(workspaceId: string, sessionId: string): Promise<void> };
   },
 ) {
   const { service } = dependencies;
@@ -843,7 +844,12 @@ export function registerConversations(
           'sendConversationMessageV1',
           'Persist a message and queue its reply',
           messageParams,
-          z.object({ messageId: z.uuid(), turnId: z.uuid(), sequence: z.number().int() }),
+          z.object({
+            messageId: z.uuid(),
+            turnId: z.uuid(),
+            sequence: z.number().int(),
+            sessionId: z.uuid().optional(),
+          }),
           send,
         ),
       },
@@ -867,7 +873,11 @@ export function registerConversations(
           ),
         );
         // The send has committed; a replayed send dispatches too, since the start is idempotent per turn.
-        dependencies.replies?.sent(workspaceId, chatId);
+        if (sent.sessionId) {
+          void dependencies.codeSessions?.start(workspaceId, sent.sessionId);
+        } else {
+          dependencies.replies?.sent(workspaceId, chatId);
+        }
         // Only the request that records the send publishes, so replaying it after the person deleted the file forever cannot bring the file back.
         if (recorded && dependencies.attachments && input.parts.some(part => part.kind === 'attachment')) {
           try {

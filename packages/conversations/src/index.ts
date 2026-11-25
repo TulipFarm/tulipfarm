@@ -160,6 +160,7 @@ const sentSchema = z.object({
   turnId: uuidSchema,
   sequence: z.number().int().positive(),
   timeZone: timeZoneSchema.optional(),
+  sessionId: uuidSchema.optional(),
 });
 const revisionSchema = z.object({ titleRevision: z.number().int().nonnegative() });
 const archivedSchema = z.object({ archived: z.boolean() });
@@ -323,6 +324,18 @@ export type ConversationAdmission = {
     tx: AuthorizationTransaction & { commonVersion: number },
     retry: { workspaceId: string; conversationId: string; turnId: string; actor: HumanActor },
   ) => Promise<void>;
+  /** Starts a code session in the send transaction when a message is sent in code mode. */
+  startCodeSession?: (
+    tx: AuthorizationTransaction,
+    input: {
+      workspaceId: string;
+      conversationId: string;
+      turnId: string;
+      actor: HumanActor;
+      request: string;
+      code: NonNullable<z.infer<typeof sendMessageSchema>['code']>;
+    },
+  ) => Promise<{ sessionId: string }>;
 };
 
 export function createConversations(runtime: Runtime, skills?: ChatSkills, admission: ConversationAdmission = {}) {
@@ -640,7 +653,12 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
             `INSERT INTO ${table(tx, 'tf_conversation_parts')} (conversation_id, message_id, ordinal, kind, layout_action) VALUES ($1,$2,$3,'layout-action',$4)`,
             [chatId, input.messageId, input.parts.length, JSON.stringify(action)],
           );
-        const responder = packageInstall ? 'package-install-v1' : (input.model ?? chatModel(chat.model));
+        const codeStart = input.mode === 'code' && input.code && admission.startCodeSession ? input.code : null;
+        const responder = packageInstall
+          ? 'package-install-v1'
+          : codeStart
+            ? 'code-session-v1'
+            : (input.model ?? chatModel(chat.model));
         const turnId = randomUUID();
         // Measured on this process's monotonic clock and anchored to the database clock that stamps the saved message.
         const requested = arrivedAt !== undefined && tx.commonVersion >= 3;
@@ -671,7 +689,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
           `INSERT INTO ${table(tx, 'tf_conversation_turns')} (${columns.join(', ')}) VALUES (${expressions.join(',')})`,
           values,
         );
-        if (!packageInstall && admission.pinTurn && tx.commonVersion >= turnImageModelsVersion) {
+        if (!packageInstall && !codeStart && admission.pinTurn && tx.commonVersion >= turnImageModelsVersion) {
           const pinned = await admission.pinTurn(
             tx,
             workspaceId,
@@ -683,6 +701,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
               JSON.stringify(pinned),
             ]);
         }
+        let startedSessionId: string | undefined;
         if (packageInstall) {
           const responseId = randomUUID();
           const layout = packageInstallationLayout(packageInstall, responseId);
@@ -702,13 +721,44 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
             `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='completed',response_message_id=$2 WHERE id=$1`,
             [turnId, responseId],
           );
+        } else if (codeStart && admission.startCodeSession) {
+          const requestText = input.parts
+            .flatMap(part => (part.kind === 'text' ? [part.text] : []))
+            .join('\n')
+            .trim();
+          const started = await admission.startCodeSession(tx, {
+            workspaceId,
+            conversationId: chatId,
+            turnId,
+            actor,
+            request: requestText || 'Code session',
+            code: codeStart,
+          });
+          startedSessionId = started.sessionId;
+          const responseId = randomUUID();
+          await tx.client.query(
+            `INSERT INTO ${table(tx, 'tf_conversation_messages')} (id, conversation_id, sequence, author_kind) VALUES ($1,$2,$3,'assistant')`,
+            [responseId, chatId, chat.nextSequence + 1],
+          );
+          await tx.client.query(
+            `INSERT INTO ${table(tx, 'tf_conversation_parts')} (conversation_id, message_id, ordinal, kind, code_session_id) VALUES ($1,$2,0,'code-session',$3)`,
+            [chatId, responseId, started.sessionId],
+          );
+          await tx.client.query(
+            `INSERT INTO ${table(tx, 'tf_conversation_results')} (conversation_id, turn_id, message_id, sources) VALUES ($1,$2,$3,$4)`,
+            [chatId, turnId, responseId, JSON.stringify([{ kind: 'private-conversation', conversationId: chatId }])],
+          );
+          await tx.client.query(
+            `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='completed',response_message_id=$2,code_session_id=$3 WHERE id=$1`,
+            [turnId, responseId, started.sessionId],
+          );
         } else {
           await tx.client.query(
             `INSERT INTO ${table(tx, 'tf_conversation_outbox')} (turn_id, conversation_id, generation) VALUES ($1,$2,0)`,
             [turnId, chatId],
           );
         }
-        if (!packageInstall && tx.commonVersion >= 1) {
+        if (!packageInstall && !codeStart && tx.commonVersion >= 1) {
           await tx.client.query(
             `WITH interrupted AS (
           UPDATE ${table(tx, 'tf_conversation_turns')} SET status='queued',generation=generation+1,error_code=NULL,retry_at=NULL
@@ -727,7 +777,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
             : null;
         await tx.client.query(
           `UPDATE ${table(tx, 'tf_conversations')} SET next_message_sequence = next_message_sequence + $3, activity_at = clock_timestamp(), title = COALESCE($2, title), title_revision = title_revision + CASE WHEN $2::text IS NULL THEN 0 ELSE 1 END WHERE id = $1`,
-          [chatId, title, packageInstall ? 2 : 1],
+          [chatId, title, packageInstall || codeStart ? 2 : 1],
         );
         await recordConversationActivity(tx, chatId);
         if (tx.commonVersion >= budCompatibility.minimum) {
@@ -749,6 +799,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
           turnId,
           sequence: chat.nextSequence,
           ...(input.timeZone ? { timeZone: input.timeZone } : {}),
+          ...(startedSessionId ? { sessionId: startedSessionId } : {}),
         };
       },
     );
@@ -883,7 +934,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
         () =>
           tx.client.query(
             `SELECT m.id, m.sequence, m.author_kind AS author, m.created_at AS "createdAt",
-        (SELECT jsonb_agg(CASE p.kind WHEN 'text' THEN jsonb_strip_nulls(jsonb_build_object('kind', p.kind, 'text', p.text, 'content', p.rich_content)) WHEN 'attachment' THEN jsonb_build_object('kind', p.kind, 'attachmentId', to_jsonb(p)->>'attachment_id') WHEN 'file' THEN jsonb_build_object('kind', p.kind, 'fileId', to_jsonb(p)->>'file_id') WHEN 'google-file' THEN jsonb_build_object('kind', p.kind, 'fileId', to_jsonb(p)->'google_file'->>'fileId', 'name', to_jsonb(p)->'google_file'->>'name', 'mimeType', to_jsonb(p)->'google_file'->>'mimeType') WHEN 'request' THEN jsonb_build_object('kind', p.kind, 'requestId', to_jsonb(p)->>'request_id') WHEN 'response' THEN jsonb_build_object('kind', p.kind, 'responseId', to_jsonb(p)->>'response_id') WHEN 'layout' THEN jsonb_build_object('kind', p.kind, 'text', p.text, 'layout', to_jsonb(p)->'layout') WHEN 'layout-action' THEN jsonb_build_object('kind', p.kind, 'action', to_jsonb(p)->'layout_action') WHEN 'skill' THEN ${skillReference} WHEN 'skill-use' THEN ${skillReference} ${compactionParts(tx)} ELSE jsonb_build_object('kind', p.kind, 'approvalId', to_jsonb(p)->>'approval_id') END ORDER BY p.ordinal) FROM ${table(tx, 'tf_conversation_parts')} p WHERE p.message_id = m.id) AS parts,
+        (SELECT jsonb_agg(CASE p.kind WHEN 'text' THEN jsonb_strip_nulls(jsonb_build_object('kind', p.kind, 'text', p.text, 'content', p.rich_content)) WHEN 'attachment' THEN jsonb_build_object('kind', p.kind, 'attachmentId', to_jsonb(p)->>'attachment_id') WHEN 'file' THEN jsonb_build_object('kind', p.kind, 'fileId', to_jsonb(p)->>'file_id') WHEN 'google-file' THEN jsonb_build_object('kind', p.kind, 'fileId', to_jsonb(p)->'google_file'->>'fileId', 'name', to_jsonb(p)->'google_file'->>'name', 'mimeType', to_jsonb(p)->'google_file'->>'mimeType') WHEN 'request' THEN jsonb_build_object('kind', p.kind, 'requestId', to_jsonb(p)->>'request_id') WHEN 'response' THEN jsonb_build_object('kind', p.kind, 'responseId', to_jsonb(p)->>'response_id') WHEN 'layout' THEN jsonb_build_object('kind', p.kind, 'text', p.text, 'layout', to_jsonb(p)->'layout') WHEN 'layout-action' THEN jsonb_build_object('kind', p.kind, 'action', to_jsonb(p)->'layout_action') WHEN 'code-session' THEN jsonb_build_object('kind', p.kind, 'sessionId', to_jsonb(p)->>'code_session_id') WHEN 'skill' THEN ${skillReference} WHEN 'skill-use' THEN ${skillReference} ${compactionParts(tx)} ELSE jsonb_build_object('kind', p.kind, 'approvalId', to_jsonb(p)->>'approval_id') END ORDER BY p.ordinal) FROM ${table(tx, 'tf_conversation_parts')} p WHERE p.message_id = m.id) AS parts,
         CASE WHEN t.id IS NULL THEN NULL ELSE jsonb_strip_nulls(jsonb_build_object('id', t.id, 'status', t.status, 'generation', t.generation, 'epoch', t.attempt_epoch, 'errorCode', t.error_code, 'mode', CASE WHEN (to_jsonb(t)->>'planning_mode')::boolean THEN 'plan' END, 'stats', ${turnStats}${tx.commonVersion >= turnPlanConnectionVersion ? `, 'planSwitch', ${planSwitch(tx)}` : ''})) END AS turn
         ${tx.commonVersion >= followUpsVersion ? `,(SELECT jsonb_build_object('id', f.id, 'instruction', f.instruction, 'requestedAt', to_char(f.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) FROM ${table(tx, 'tf_follow_ups')} f WHERE f.fired_message_id = m.id) AS "followUp"` : ''}
         ,(SELECT st.id FROM ${table(tx, 'tf_conversation_results')} r JOIN ${table(tx, 'tf_conversation_turns')} st ON st.id = r.turn_id WHERE r.message_id = m.id AND st.status = 'cancelled' AND m.author_kind = 'assistant') AS "stoppedTurnId"

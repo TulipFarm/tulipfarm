@@ -27,6 +27,7 @@ import { TableRequestError } from '@/features/tables/request-state';
 import { toolVisual } from '@/features/chat/tool-labels';
 import { useFeatureChanges } from '@/lib/query';
 import { taskCredits } from '@/features/tasks/api';
+import { CodeSessionTaskSection } from '@/features/code-sessions/CodeSessionTaskSection';
 import type { TaskCard } from './api';
 import { currentStep, duration, sentence, useAssignmentRun } from './live';
 import { applyTaskMove, taskMove, type TaskMove } from './moves';
@@ -170,6 +171,14 @@ export function TaskSheet({
           {card.assignee?.type === 'agent' && (
             <AgentWork card={card} table={table} workspace={workspace} me={me} now={now} refresh={refresh} />
           )}
+          <CodeSessionTaskSection
+            workspaceId={workspace.id}
+            workspaceSlug={workspace.slug}
+            tableId={table.id}
+            rowId={card.id}
+            title={card.title}
+            description={card.description}
+          />
           <section className="space-y-2" data-compact-text>
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-sm font-medium">Description</h3>
