@@ -120,7 +120,7 @@ function Logins({ workspaceId }: { workspaceId: string }) {
           { label: 'Owner', value: people.name(login.ownerMembershipId) },
           { label: 'Last used', value: login.lastUsedAt ? formatDate(login.lastUsedAt) : 'Never' },
           ...(login.status === 'needs-sign-in' && login.canManage
-            ? [{ label: 'To fix', value: 'Use it in a chat, sign in again, then hand back' }]
+            ? [{ label: 'To fix', value: 'Use it in a chat, sign in again in the browser, then tell the agent' }]
             : []),
         ]}
         renderActions={login =>

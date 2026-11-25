@@ -396,9 +396,7 @@ export function createRowAssignments(options: {
               row,
               'waiting',
               taskId,
-              handoff.rowCount
-                ? 'An agent needs you to take over its browser'
-                : 'An agent run is waiting for your approval',
+              handoff.rowCount ? 'An agent needs you in its browser' : 'An agent run is waiting for your approval',
             );
           }
           continue;

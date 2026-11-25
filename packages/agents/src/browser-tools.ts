@@ -24,7 +24,7 @@ export const browserToolDescriptions = {
   'browser.signIn':
     'Sign in to the site open in the browser with a secret the member gave you, without seeing it: TulipFarm types the username and password into the fields you point at, by their refs from the latest snapshot, and clicks the submit button if you give one. It types only into a page on one of the secret\'s hosts. Use it when no saved login works. If this chat holds no suitable secret, call secrets.request once for a username-password field (or a password field when the site asks only for a password) with placement {"kind":"browser"} and the exact host of the sign-in page, such as accounts.example.com, as its destination, then stop until the member answers. Two-factor codes, captchas and passkeys always need the member: hand off for them.',
   'browser.handoff':
-    'Hand the browser to the member when a step needs a person: a captcha, a two-factor code, a passkey, a payment, a terms or consent box you should not accept for them, or anything you are not sure they want. To sign in to a site, first hand off with signIn set to that site: the member loads a saved login or signs in themselves. When they would rather you sign in with a username and password, use browser.signIn. Say what they need to do. Then end your reply and tell them to take over in the browser panel and hand it back when done; you continue when they reply.',
+    'Hand the browser to the member when a step needs a person: a captcha, a two-factor code, a passkey, a payment, a terms or consent box you should not accept for them, or anything you are not sure they want. To sign in to a site, first hand off with signIn set to that site: the member loads a saved login or signs in themselves. When they would rather you sign in with a username and password, use browser.signIn. Say what they need to do. Then end your reply and tell them to do it in the browser panel and reply when done; you continue when they reply. The member can also click and type in the browser at any time while you work.',
 } as const;
 
 /** The same tools in an agent's run, where no one is in a chat and a hand-off pauses the run. */
@@ -36,7 +36,7 @@ export const browserTaskToolDescriptions = {
   'browser.signIn':
     'Sign in to the site open in the browser with a secret the run\'s owner gave you, without seeing it: TulipFarm types the username and password into the fields you point at, by their refs from the latest snapshot, and clicks the submit button if you give one. It types only into a page on one of the secret\'s hosts. Use it when no loaded login works. If this run holds no suitable secret, call secrets.request once for a username-password field (or a password field when the site asks only for a password) with placement {"kind":"browser"} and the exact host of the sign-in page as its destination. Two-factor codes, captchas and passkeys always need a person: hand off for them.',
   'browser.handoff':
-    'Hand the browser to a person when a step needs one: a captcha, a two-factor code, a passkey, a payment, a terms or consent box you should not accept for the owner, or anything you are not sure they want. To have a person sign in, set signIn to the site. Say what they need to do. The run then pauses: the owner is told, and anyone who can see the run may take over and hand the browser back. You continue from the page they leave when they hand it back. If no one does within 24 hours, the run fails.',
+    'Hand the browser to a person when a step needs one: a captcha, a two-factor code, a passkey, a payment, a terms or consent box you should not accept for the owner, or anything you are not sure they want. To have a person sign in, set signIn to the site. Say what they need to do. The run then waits for the owner’s reply: anyone who can see the run may do the step in the browser, and you continue from the page as it is when the owner replies. A person may also click and type in the browser at any time while you work.',
 } as const;
 
 /** Finds a secret the member holds in this chat by its reference and checks it for a page address. */
@@ -201,15 +201,11 @@ export type BrowserSessionContext = {
 };
 
 const taskRecovery: Partial<Record<BrowserHostError['code'], string>> = {
-  'person-in-control':
-    'A person has taken over this browser. Do not act. Call browser.handoff saying you are waiting for them to hand it back; the run waits for them.',
   capacity: 'No browser is free right now. Try again later in this run, or finish without the browser and say why.',
   'browser-busy': 'Wait a minute, then try again.',
   unavailable: 'The browser is not reachable right now. Try again later in this run, or finish without it and say why.',
 };
 const recovery: Partial<Record<BrowserHostError['code'], string>> = {
-  'person-in-control':
-    'A member has taken over this browser. Do not act. End your reply and say you will continue when they hand it back.',
   'ref-not-found': 'That ref is not on the page now. Take a snapshot and use a ref from it.',
   'destination-denied':
     "The page is not on one of the secret's hosts. Check the page's address; if the site signs in on another host, request a secret for that host.",
@@ -549,8 +545,8 @@ export async function runBrowserCall(browser: BrowserSessionContext, call: Brows
           status: 'waiting-for-person',
           instruction:
             browser.mode === 'task'
-              ? 'The run now waits for a person to take over and hand the browser back. Continue from the page they leave.'
-              : 'The browser panel now asks the member to take over. End your reply now: say what they need to do and that you will continue when they hand the browser back.',
+              ? "The run now waits for the owner's reply. When it comes, take a snapshot and continue from the page as it is."
+              : 'The browser panel now asks the member to do this. End your reply now: say what they need to do and that you will continue when they reply.',
         },
       };
     }

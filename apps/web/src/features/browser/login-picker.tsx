@@ -52,24 +52,20 @@ export function savedByLines(
 export const loadedLoginPrompt = (site: string) => `I’ve loaded a saved login for ${site}. Continue.`;
 
 /**
- * Shown while the agent waits for someone to sign in to a site: the saved logins the member may use for it, or
- * taking over to sign in themselves.
+ * Shown while the agent waits for someone to sign in to a site: the saved logins the member may use for it. They can
+ * also sign in themselves in the browser below and tell the agent.
  */
 export function SignInPicker({
   workspaceId,
   chatId,
   site,
   reason,
-  busy,
-  onTakeOver,
   onLoaded,
 }: {
   workspaceId: string;
   chatId: string;
   site: string;
   reason: string;
-  busy: boolean;
-  onTakeOver: () => void;
   onLoaded: (state: BrowserSessionState) => void;
 }) {
   const api = useBrowserLoginsApi(workspaceId);
@@ -104,8 +100,8 @@ export function SignInPicker({
           <p>
             {reason}{' '}
             {usable.length > 0
-              ? 'Use a saved login, or sign in yourself.'
-              : 'Sign in yourself, then you can save the login for next time.'}
+              ? 'Use a saved login, or sign in yourself in the browser below, then tell the agent.'
+              : 'Sign in yourself in the browser below, then tell the agent. You can save the login for next time.'}
           </p>
           {read.state.kind === 'loading' && <Skeleton />}
           {usable.length > 0 && (
@@ -130,7 +126,7 @@ export function SignInPicker({
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={busy || loading !== null}
+                    disabled={loading !== null}
                     aria-busy={loading === login.id}
                     aria-describedby={[
                       `browser-login-${login.id}`,
@@ -153,11 +149,6 @@ export function SignInPicker({
               {error}
             </p>
           )}
-          <div>
-            <Button size="sm" variant="outline" disabled={busy || loading !== null} onClick={onTakeOver}>
-              Sign in yourself
-            </Button>
-          </div>
         </div>
       </AlertDescription>
     </Alert>

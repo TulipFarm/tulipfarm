@@ -12,7 +12,7 @@ const origin = {
   conversationId: '0b0e7a51-3c5d-4b8e-9f21-6d2a7c4e1f00',
   actor: { kind: 'human', userId: 'u1', membershipId: '9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a' },
 };
-const state = { sessionId: 's', url: 'https://example.com/', title: 'Example', controller: 'agent', needsPerson: null };
+const state = { sessionId: 's', url: 'https://example.com/', title: 'Example', needsPerson: null };
 
 function fakeClient(overrides = {}) {
   const calls = [];
@@ -109,15 +109,15 @@ test('A sign-in handoff names the site, and a URL in its place is refused', asyn
 test('A host refusal becomes an instruction, not a failed turn', async () => {
   const { client } = fakeClient({
     act: async () => {
-      throw new BrowserHostError('person-in-control', 'A member controls this browser', 409);
+      throw new BrowserHostError('ref-not-found', 'No such ref', 404);
     },
   });
   const output = await invokeBrowser({ client, imageInput: true }, origin, {
     tool: 'browser.act',
     action: { action: 'click', ref: 'e3' },
   });
-  assert.equal(output.result.error, 'person-in-control');
-  assert.match(output.result.instruction, /hand it back/);
+  assert.equal(output.result.error, 'ref-not-found');
+  assert.match(output.result.instruction, /Take a snapshot/);
   const broken = fakeClient({
     act: async () => {
       throw new Error('bug');

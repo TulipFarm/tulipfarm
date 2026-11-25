@@ -11,7 +11,7 @@ test('a browser call refused before any browser opened is marked, including the 
 });
 
 test('errors that can follow an open browser, and other tools, are not marked', () => {
-  for (const error of ['unavailable', 'person-in-control', 'action-failed', 'invalid-request', 'session-not-found'])
+  for (const error of ['unavailable', 'ref-not-found', 'action-failed', 'invalid-request', 'session-not-found'])
     assert.deepEqual(refused('browser.act', error), {}, error);
   assert.deepEqual(refused('web.search', 'capacity'), {});
   assert.deepEqual(browserNotOpened({ tool: 'browser.act', output: { result: { url: 'https://example.com' } } }), {});

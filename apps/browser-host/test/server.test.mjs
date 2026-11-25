@@ -12,9 +12,7 @@ const state = {
   sessionId,
   url: 'about:blank',
   title: '',
-  controller: 'agent',
   needsPerson: null,
-  controlledBy: null,
   signIn: null,
   logins: [],
 };
@@ -65,7 +63,7 @@ test('actions are validated before they reach the browser', async t => {
 test('host errors keep their code and status', async t => {
   const { server, call } = await serve({
     act: async () => {
-      throw new HostError('person-in-control', 'A member has taken over.', 409);
+      throw new HostError('ref-not-found', 'No such ref.', 404);
     },
   });
   t.after(() => server.close());
@@ -73,8 +71,8 @@ test('host errors keep their code and status', async t => {
     method: 'POST',
     body: JSON.stringify({ action: 'snapshot' }),
   });
-  assert.equal(response.status, 409);
-  assert.deepEqual(await response.json(), { error: 'person-in-control', message: 'A member has taken over.' });
+  assert.equal(response.status, 404);
+  assert.deepEqual(await response.json(), { error: 'ref-not-found', message: 'No such ref.' });
 });
 
 test('a busy workspace’s open request gets its place in line, and a request that ends leaves the line', async t => {

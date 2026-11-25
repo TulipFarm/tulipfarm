@@ -607,8 +607,7 @@ export const settings: readonly Setting[] = [
     requirement: 'optional',
     secret: false,
     default: '1440',
-    description:
-      'Minutes the host keeps a browser session open while it waits for a person or a person has taken over.',
+    description: 'Minutes the host keeps a browser session open while it waits for a person.',
   },
   {
     name: 'BROWSER_HOST_ALLOW_PRIVATE_NETWORKS',

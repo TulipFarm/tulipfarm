@@ -28,7 +28,7 @@ function chatHistory() {
       turn: null,
       tools: [
         tool('4e5f6a7b-8c9d-4e0f-a1b2-c3d4e5f6a7b8', 'browser.act', 'Using the browser'),
-        tool('5f6a7b8c-9d0e-4f1a-b2c3-d4e5f6a7b8c9', 'browser.handoff', 'Asking you to take over the browser'),
+        tool('5f6a7b8c-9d0e-4f1a-b2c3-d4e5f6a7b8c9', 'browser.handoff', 'Asking you to do a step in the browser'),
       ],
       calendarResults: [],
     },
@@ -37,7 +37,7 @@ function chatHistory() {
       sequence: 2,
       author: 'assistant',
       createdAt: '2026-11-24T10:00:09.000Z',
-      parts: [{ kind: 'text', text: 'Please tick the terms box in the browser, then hand it back.' }],
+      parts: [{ kind: 'text', text: 'Please tick the terms box in the browser, then tell me.' }],
       turn: null,
       tools: [],
       calendarResults: [],
@@ -58,7 +58,8 @@ const chat = {
 
 /**
  * Opens the chat with a mocked API. `browser` is the browser's state, `started` whether it is running yet, and
- * `handle(path, method, request)` answers extra requests; return `undefined` to fall through.
+ * `handle(path, method, request)` answers extra requests; return `undefined` to fall through. The live stream sends
+ * the current state and reconnects after `retry` milliseconds.
  */
 async function openChat(
   {
@@ -69,6 +70,7 @@ async function openChat(
     history = chatHistory(),
     opens = !pagePath,
     events,
+    retry = 60000,
   },
   run,
 ) {
@@ -97,7 +99,6 @@ async function openChat(
     state: { sessionId, ...initial },
     started: startedAtOpen,
     refusedStreams: [],
-    controls: [],
     inputs: [],
     inputRequests: 0,
     stateReads: 0,
@@ -144,7 +145,7 @@ async function openChat(
         return route.fulfill({
           status: 200,
           contentType: 'text/event-stream',
-          body: `retry: 60000\n${events.join('')}`,
+          body: `retry: ${retry}\n${events.join('')}`,
         });
       }
       if (path === base && method === 'GET') {
@@ -152,19 +153,6 @@ async function openChat(
         // The browser starts while the panel is waiting for it.
         if (live.refusedStreams.length > 0) live.started = true;
         return route.fulfill({ json: { browser: live.started ? live.state : null } });
-      }
-      if (path === `${base}/control` && method === 'POST') {
-        const { controller } = request.postDataJSON();
-        live.controls.push(controller);
-        const person = controller === 'person';
-        live.state = {
-          ...live.state,
-          controller,
-          needsPerson: person ? live.state.needsPerson : null,
-          signIn: person ? live.state.signIn : null,
-          controlledBy: person ? session.user.id : null,
-        };
-        return route.fulfill({ json: { browser: live.state } });
       }
       if (path === `${base}/input` && method === 'POST') {
         live.inputRequests++;
@@ -216,26 +204,26 @@ const composerHas = (page, text) =>
   );
 
 test(
-  'the live browser opens when the agent asks for a person, waits for the browser to start, and lets the member take over and hand back',
+  'the live browser opens when the agent asks for a person, waits for the browser to start, and takes the member’s clicks and keys at once',
   { timeout: 120000 },
   async () => {
     const browser = {
       url: 'https://orchid.example/join',
       title: 'Orchid Club sign up',
-      controller: 'agent',
       needsPerson: 'Tick the terms box to accept the Orchid Club terms.',
-      controlledBy: null,
       signIn: null,
       logins: [],
     };
     await openChat({ browser, started: false }, async ({ page, live }) => {
       assert.ok(live.refusedStreams.length >= 1, 'the panel opened before the browser had started');
       await page.getByText('The agent needs you').waitFor();
-      await page.getByText('Tick the terms box to accept the Orchid Club terms.').waitFor();
-
-      await page.getByRole('button', { name: 'Take over' }).click();
-      await page.getByText('You’re in control. The agent waits until you hand back.').waitFor();
-      assert.equal(await page.getByText('The agent needs you').count(), 0, 'the alert hides while the member acts');
+      await page
+        .getByText(
+          'Tick the terms box to accept the Orchid Club terms. Do it in the browser below, then tell the agent in chat.',
+        )
+        .waitFor();
+      for (const name of ['Take over', 'Hand back to the agent'])
+        assert.equal(await page.getByRole('button', { name }).count(), 0, `no ${name} button`);
       const screen = page.getByRole('application', { name: 'Browser screen. Click and type to use the page.' });
       await screen.waitFor();
 
@@ -256,11 +244,6 @@ test(
       assert.equal(typed.map(input => input.text).join(''), 'orchids are lovely');
       assert.ok(live.inputRequests < 12, `typing took ${live.inputRequests} requests`);
       assert.equal(await page.getByText('Couldn’t reach the browser. Check your connection.').count(), 0);
-
-      await page.getByRole('button', { name: 'Hand back to the agent' }).click();
-      await page.getByRole('button', { name: 'Take over' }).waitFor();
-      await composerHas(page, 'I’ve finished in the browser. Continue.');
-      assert.deepEqual(live.controls, ['person', 'agent']);
       assert.equal(await page.getByRole('dialog').count(), 0, 'no save prompt without a sign-in');
     });
   },
@@ -269,10 +252,8 @@ test(
 const signInBrowser = {
   url: 'https://shop.example/sign-in',
   title: 'Sign in to Orchid Shop',
-  controller: 'agent',
-  needsPerson: 'Sign in to Orchid Shop, then hand the browser back.',
+  needsPerson: 'Sign in to Orchid Shop, then tell me.',
   signIn: 'shop.example',
-  controlledBy: null,
   logins: [],
 };
 const savedLogin = {
@@ -321,7 +302,7 @@ test(
           }
         },
       },
-      async ({ page, live }) => {
+      async ({ page }) => {
         await page.getByText('Sign in to shop.example').waitFor();
         const logins = page.getByRole('list', { name: 'Saved logins for shop.example' });
         await logins.getByText('Orchid Shop team').waitFor();
@@ -332,9 +313,7 @@ test(
         await page.getByRole('button', { name: 'Use this login' }).click();
         await composerHas(page, 'shop.example');
         assert.deepEqual(loaded, [savedLogin.id]);
-        assert.deepEqual(live.controls, [], 'loading a login needs no take over');
-        await page.getByRole('button', { name: 'Take over' }).waitFor();
-        assert.equal(await page.getByRole('button', { name: 'Use this login' }).count(), 0);
+        await page.getByRole('button', { name: 'Use this login' }).waitFor({ state: 'detached' });
       },
     );
   },
@@ -461,9 +440,7 @@ for (const running of ['browser.act', 'browser.handoff'])
       const browser = {
         url: 'https://orchid.example/hours',
         title: 'Orchid Club hours',
-        controller: 'agent',
         needsPerson: null,
-        controlledBy: null,
         signIn: null,
         logins: [],
       };
@@ -498,22 +475,20 @@ test(
       tool: 'browser.handoff',
       sequence: 1,
       status: 'completed',
-      presentation: { label: 'Asking you to take over the browser', brand: null },
+      presentation: { label: 'Asking you to do a step in the browser', brand: null },
     };
     const history = chatHistory().slice(1);
     const browser = {
       url: 'https://orchid.example/join',
       title: 'Orchid Club sign up',
-      controller: 'agent',
       needsPerson: 'Tick the terms box to accept the Orchid Club terms.',
-      controlledBy: null,
       signIn: null,
       logins: [],
     };
     await openChat(
       { browser, started: false, history, opens: false, events: `event: tool\ndata: ${JSON.stringify(handoff)}\n\n` },
       async ({ page, live }) => {
-        await page.getByText('Please tick the terms box in the browser, then hand it back.').waitFor();
+        await page.getByText('Please tick the terms box in the browser, then tell me.').waitFor();
         await new Promise(resolve => setTimeout(resolve, 4000));
         assert.ok(live.stateReads >= 2, `the chat checked for an open browser (${live.stateReads})`);
         assert.equal(live.refusedStreams.length, 0, 'the panel did not open');
@@ -525,38 +500,55 @@ test(
   },
 );
 
-test('a member who signs in themselves is offered to save the login on hand back', { timeout: 120000 }, async () => {
-  const saved = [];
-  await openChat(
-    {
-      browser: signInBrowser,
-      handle: (path, method, request) => {
-        if (path === '/browser-logins' && method === 'GET') return { json: { enabled: true, logins: [] } };
-        if (path === `/conversations/${chatId}/browser/logins` && method === 'POST') {
-          saved.push(request.postDataJSON());
-          return { json: { ...savedLogin, name: request.postDataJSON().name } };
-        }
+test(
+  'a member who signs in themselves is offered to save the login once the agent moves on',
+  { timeout: 120000 },
+  async () => {
+    const saved = [];
+    await openChat(
+      {
+        browser: signInBrowser,
+        retry: 300,
+        handle: (path, method, request) => {
+          if (path === '/browser-logins' && method === 'GET') return { json: { enabled: true, logins: [] } };
+          if (path === `/conversations/${chatId}/browser/logins` && method === 'POST') {
+            saved.push(request.postDataJSON());
+            return { json: { ...savedLogin, name: request.postDataJSON().name } };
+          }
+        },
       },
-    },
-    async ({ page, live }) => {
-      await page.getByText('Sign in to shop.example').waitFor();
-      await page.getByRole('button', { name: 'Sign in yourself' }).click();
-      await page.getByText('You’re in control. The agent waits until you hand back.').waitFor();
-      live.state = { ...live.state, url: 'https://shop.example/account', title: 'Your account' };
+      async ({ page, live }) => {
+        await page
+          .getByText(
+            'Sign in yourself in the browser below, then tell the agent. You can save the login for next time.',
+          )
+          .waitFor();
+        assert.equal(await page.getByRole('button', { name: 'Sign in yourself' }).count(), 0);
+        const screen = page.getByRole('application', { name: 'Browser screen. Click and type to use the page.' });
+        const box = await screen.boundingBox();
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        await expectInputs(live.inputs, 2);
+        assert.equal(await page.getByRole('dialog').count(), 0, 'no save prompt while the sign-in is still asked for');
 
-      await page.getByRole('button', { name: 'Hand back to the agent' }).click();
-      const dialog = page.getByRole('dialog', { name: 'Save login' });
-      await dialog.waitFor();
-      assert.equal(await dialog.getByRole('textbox', { name: 'Site' }).inputValue(), 'shop.example');
-      await dialog.getByRole('textbox', { name: 'Name' }).fill('Orchid Shop team');
-      await dialog.getByRole('button', { name: 'Save login' }).click();
-      await dialog.waitFor({ state: 'detached' });
-      assert.deepEqual(saved, [{ name: 'Orchid Shop team', site: 'shop.example' }]);
-      assert.deepEqual(live.controls, ['person', 'agent']);
-      await composerHas(page, 'I’ve finished in the browser. Continue.');
-    },
-  );
-});
+        // The agent sees the member signed in and moves on.
+        live.state = {
+          ...live.state,
+          url: 'https://shop.example/account',
+          title: 'Your account',
+          needsPerson: null,
+          signIn: null,
+        };
+        const dialog = page.getByRole('dialog', { name: 'Save login' });
+        await dialog.waitFor();
+        assert.equal(await dialog.getByRole('textbox', { name: 'Site' }).inputValue(), 'shop.example');
+        await dialog.getByRole('textbox', { name: 'Name' }).fill('Orchid Shop team');
+        await dialog.getByRole('button', { name: 'Save login' }).click();
+        await dialog.waitFor({ state: 'detached' });
+        assert.deepEqual(saved, [{ name: 'Orchid Shop team', site: 'shop.example' }]);
+      },
+    );
+  },
+);
 
 test('the browser logins settings page lists, renames and deletes logins', { timeout: 120000 }, async () => {
   const changes = [];

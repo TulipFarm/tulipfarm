@@ -188,8 +188,6 @@ export type TaskBrowser = {
     | ((input: { workspaceId: string; actor: HumanActor; sessionId: string; loginId: string }) => Promise<void>)
     | undefined;
 };
-/** How long a run's browser waits for a person after the agent hands off. */
-export const browserHandoffWaitMs = 24 * 60 * 60 * 1000;
 /** A task run's secret forms, the secrets it holds and the operator's private hosts. */
 export type TaskSecretsAccess = {
   tools: TaskSecretTools;
@@ -287,8 +285,8 @@ export function createAgentExecutor(options: Options) {
   }
 
   /**
-   * Runs a task's `browser.*` call in the task's own session. A hand-off leaves the call waiting until a person hands the
-   * browser back, or fails the task once its deadline passes; each later execution checks the session again.
+   * Runs a task's `browser.*` call in the task's own session. A hand-off completes at once and leaves the task needing
+   * the owner's answer, with the agent's request as its message; their reply continues the run.
    */
   async function runTaskBrowser(
     ids: ExecutionIds,
@@ -298,13 +296,18 @@ export function createAgentExecutor(options: Options) {
       taskId: string;
       settings: AgentBrowserSettings | undefined;
       waitingUntil: string | undefined;
-      handedBackAt: string | undefined;
     },
   ): Promise<ExecutionStatus> {
     const browser = options.browser;
     const sessionId = browserSessionId(ids.workspaceId, { runId: task.taskId });
     const meter = browser?.meter?.({ workspaceId: ids.workspaceId, taskId: task.taskId, sessionId });
-    const settle = (status: 'completed' | 'waiting', result: unknown, waitingUntil?: string, failure?: string) =>
+    const settle = (
+      status: 'completed' | 'waiting',
+      result: unknown,
+      waitingUntil?: string,
+      failure?: string,
+      ask?: string,
+    ) =>
       executionTransaction(ids, async tx => {
         await taskOutputAllowed(tx, ids.workspaceId, ids.runId, true);
         const changed = await tx.client.query(
@@ -319,6 +322,17 @@ export function createAgentExecutor(options: Options) {
           ids.runId,
           status === 'waiting' ? 'waiting' : 'running',
         ]);
+        if (ask && changed.rowCount) {
+          const asked = await tx.client.query(
+            `UPDATE ${relation(tx, 'tf_agent_tasks')} SET status='waiting-clarification',pause_reason=NULL WHERE id=$1 AND status IN ('pending','waiting-approval')`,
+            [task.taskId],
+          );
+          if (asked.rowCount)
+            await tx.client.query(
+              `INSERT INTO ${relation(tx, 'tf_agent_task_messages')} (task_id,sequence,generation,role,text,sources) SELECT t.id,COALESCE((SELECT max(sequence)+1 FROM ${relation(tx, 'tf_agent_task_messages')} WHERE task_id=t.id),0),t.generation,'agent',$2,'[]'::jsonb FROM ${relation(tx, 'tf_agent_tasks')} t WHERE t.id=$1`,
+              [task.taskId, ask],
+            );
+        }
         if (failure && changed.rowCount) {
           const failed = await tx.client.query(
             `UPDATE ${relation(tx, 'tf_agent_tasks')} SET status='failed',pause_reason=NULL WHERE id=$1 AND status IN ('pending','waiting-approval')`,
@@ -339,40 +353,17 @@ export function createAgentExecutor(options: Options) {
         error: 'browser-unavailable',
         instruction: 'Browser use is not available here. Finish without the browser and say why.',
       });
+    // A hand-off made before a reply could continue the run still waits for a hand back, until its deadline.
     if (call.tool === 'browser.handoff' && task.waitingUntil) {
-      const deadline = Date.parse(task.waitingUntil);
-      // A hand back the API recorded counts only if it came before the deadline; the deadline never waits for the host.
-      const handedBack = task.handedBackAt !== undefined && Date.parse(task.handedBackAt) <= deadline;
-      const stop = async (failure: string) => {
-        await browser.client.close(sessionId).catch(() => undefined);
-        await meter?.end();
-        return settle(
-          'completed',
-          { error: 'needs-a-person', instruction: 'No person handed the browser back in time.' },
-          undefined,
-          failure,
-        );
-      };
-      if (!handedBack && deadline <= Date.now())
-        return stop('No one handed the browser back within 24 hours, so the run stopped and its browser closed.');
-      let state;
-      try {
-        state = await browser.client.state(sessionId);
-      } catch {
-        // The host is unreachable: keep waiting, and check again on the next wake.
-        if (!handedBack) return 'waiting';
-      }
-      if (state) await meter?.record(state);
-      if (handedBack || (state && state.controller === 'agent' && !state.needsPerson))
-        return settle('completed', {
-          status: 'handed-back',
-          ...(state ? { url: state.url, title: state.title } : {}),
-          instruction: state
-            ? 'A person handed the browser back. Take a snapshot and continue from this page.'
-            : 'A person handed the browser back. Take a snapshot to see where the browser is now.',
-        });
-      if (state === null) return stop('The browser closed before anyone handed it back, so the run stopped.');
-      return 'waiting';
+      if (Date.parse(task.waitingUntil) > Date.now()) return 'waiting';
+      await browser.client.close(sessionId).catch(() => undefined);
+      await meter?.end();
+      return settle(
+        'completed',
+        { error: 'needs-a-person', instruction: 'No person did the step in time.' },
+        undefined,
+        'No one did the browser step within 24 hours, so the run stopped and its browser closed.',
+      );
     }
     const holder = browser.secrets;
     const files = browser.files;
@@ -407,7 +398,13 @@ export function createAgentExecutor(options: Options) {
     const handedOff =
       call.tool === 'browser.handoff' && (step.result as { status?: unknown } | null)?.status === 'waiting-for-person';
     return handedOff
-      ? settle('waiting', step.result, new Date(Date.now() + browserHandoffWaitMs).toISOString())
+      ? settle(
+          'completed',
+          step.result,
+          undefined,
+          undefined,
+          `${call.reason} Do this in the browser below, then reply here to continue.`,
+        )
       : settle('completed', step.result);
   }
 
@@ -1108,7 +1105,6 @@ export function createAgentExecutor(options: Options) {
                       taskId: binding.task_id,
                       settings: definition.browser,
                       waitingUntil: waiting?.success ? waiting.data.waitingUntil : undefined,
-                      handedBackAt: waiting?.success ? waiting.data.handedBackAt : undefined,
                     },
                   };
                 }

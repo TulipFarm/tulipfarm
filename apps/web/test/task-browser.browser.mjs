@@ -8,7 +8,7 @@ import { startBuiltApp, captureBuilderScreenshot, captureBrowserFailure } from '
 import { serveWorkspaceShellEvent, workspaceShellReads } from './workspace.fixture.mjs';
 
 test(
-  'a run waiting for a person shows its live browser, which they take over and hand back',
+  'a run asking for a browser step shows its live browser, which the member uses before replying',
   { timeout: 120000 },
   async t => {
     const server = await startBuiltApp();
@@ -31,8 +31,8 @@ test(
       parentTaskId: null,
       delegationDepth: 0,
       generation: 0,
-      status: 'waiting-approval',
-      waitingOn: 'browser',
+      status: 'waiting-clarification',
+      waitingOn: null,
       skills: [],
       scope: [],
       limits: { toolCalls: 100, activeMilliseconds: 300000, credits: 100 },
@@ -45,25 +45,25 @@ test(
         {
           id: randomUUID(),
           tool: 'browser.handoff',
-          status: 'waiting',
-          presentation: { label: 'Asking you to take over the browser', brand: null },
+          status: 'completed',
+          presentation: { label: 'Asking you to do a step in the browser', brand: null },
         },
       ],
     });
     const request = 'Renew the Orchid Club membership.';
+    const ask = 'Tick the terms box. Do this in the browser below, then reply here to continue.';
     const base = `/v1/workspaces/${fixture.workspace.id}`;
     const browserBase = `${base}/agent-tasks/${task.id}/browser`;
     const state = {
       sessionId: randomUUID(),
       url: 'https://orchid.example/renew',
       title: 'Renew your membership',
-      controller: 'agent',
       needsPerson: 'Tick the terms box.',
       signIn: null,
       logins: [],
-      controlledBy: null,
     };
-    const controls = [];
+    const inputs = [],
+      replies = [];
     const shell = new Map([
       ...workspaceShellReads(fixture.workspace.id),
       ['/v1/feature-flags', {}],
@@ -96,11 +96,13 @@ test(
           contentType: 'text/event-stream',
           body: `retry: 60000\nevent: state\ndata: ${JSON.stringify(state)}\n\nevent: frame\ndata: ${JSON.stringify({ data: pixel, width: 1280, height: 800 })}\n\n`,
         });
-      if (path === `${browserBase}/control` && req.method() === 'POST') {
-        const { controller } = req.postDataJSON();
-        controls.push(controller);
-        Object.assign(state, { controller, needsPerson: controller === 'agent' ? null : state.needsPerson });
-        return send({ browser: state });
+      if (path === `${browserBase}/input` && req.method() === 'POST') {
+        inputs.push(...[req.postDataJSON()].flat());
+        return send({ ok: true });
+      }
+      if (path === `${base}/agent-tasks/${task.id}/continue` && req.method() === 'POST') {
+        replies.push(req.postDataJSON().text);
+        return send({ id: task.id, generation: 0, status: 'pending' });
       }
       if (path === browserBase) return send({ browser: state });
       if (path === `${base}/agent-tasks`) return send({ tasks: [task], nextCursor: null });
@@ -109,6 +111,7 @@ test(
         return send({
           messages: [
             { sequence: 0, generation: 0, role: 'owner', text: request, sources: [], createdAt: task.createdAt },
+            { sequence: 1, generation: 0, role: 'agent', text: ask, sources: [], createdAt: task.createdAt },
           ],
           nextCursor: null,
         });
@@ -134,24 +137,28 @@ test(
       await page.goto(`${server.origin}/${fixture.workspace.slug}/agent-tasks/${task.id}`);
       await page.getByText('The agent needs you', { exact: true }).waitFor();
       await page.getByRole('img', { name: 'Live view of Renew your membership' }).waitFor();
-      // A run waiting on its browser asks for a hand back, not a review.
-      await page.getByText('Needs you in the browser', { exact: true }).first().waitFor();
-      await page
-        .getByText(
-          'The agent is waiting for someone to finish a step in its browser. Take over, finish it, then hand back. If no one does, the run stops after 24 hours.',
-        )
-        .waitFor();
-      assert.equal(await page.getByText('Needs your review').count(), 0);
+      // The agent's request is a question the member answers once they have done the step.
+      await page.getByText('Needs your answer', { exact: true }).first().waitFor();
+      await page.getByText(ask, { exact: true }).first().waitFor();
+      await page.getByText('Tick the terms box. Do it in the browser below, then reply to the run.').waitFor();
+      assert.equal(await page.getByText('Needs you in the browser').count(), 0);
       // Saving and loading logins belong to chats; a run's logins come from its agent.
       assert.equal(await page.getByRole('button', { name: 'Save login' }).count(), 0);
-      await page.getByRole('button', { name: 'Take over', exact: true }).click();
-      await page.getByText('You’re in control. The agent waits until you hand back.').waitFor();
-      await captureBuilderScreenshot(page, 'task-browser-taken-over');
-      await page.getByRole('button', { name: 'Hand back to the agent', exact: true }).click();
-      await page.getByRole('button', { name: 'Take over', exact: true }).waitFor();
-      assert.deepEqual(controls, ['person', 'agent']);
-      // Handing a run's browser back wakes the run on the server; nothing is sent as a follow-up.
-      assert.equal(await page.getByRole('textbox', { name: 'Follow up on this task' }).count(), 0);
+      for (const name of ['Take over', 'Hand back to the agent'])
+        assert.equal(await page.getByRole('button', { name, exact: true }).count(), 0, `no ${name} button`);
+      const screen = page.getByRole('application', { name: 'Browser screen. Click and type to use the page.' });
+      const box = await screen.boundingBox();
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      for (let n = 0; n < 50 && inputs.length < 2; n++) await new Promise(resolve => setTimeout(resolve, 100));
+      assert.deepEqual(
+        inputs.map(input => input.event),
+        ['mousePressed', 'mouseReleased'],
+      );
+      await captureBuilderScreenshot(page, 'task-browser-shared');
+      await page.getByLabel('Your answer or continuation').fill('Done, I ticked it.');
+      await page.getByRole('button', { name: 'Send answer' }).click();
+      for (let n = 0; n < 50 && replies.length < 1; n++) await new Promise(resolve => setTimeout(resolve, 100));
+      assert.deepEqual(replies, ['Done, I ticked it.']);
       assert.deepEqual(unexpected, []);
       assert.deepEqual(errors, []);
     } catch (error) {

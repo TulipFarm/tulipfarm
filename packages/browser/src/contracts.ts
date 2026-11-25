@@ -58,10 +58,6 @@ export const browserTypeSecretSchema = z
   .refine(input => new Set(input.fields.map(field => field.ref)).size === input.fields.length, 'Use a field once');
 export type BrowserTypeSecret = z.infer<typeof browserTypeSecretSchema>;
 
-/** Who drives the browser: the agent, or a member who took over. */
-export const browserControllerSchema = z.enum(['agent', 'person']);
-export type BrowserController = z.infer<typeof browserControllerSchema>;
-
 export const browserSessionIdSchema = z.uuid();
 
 const hostPattern = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$/;
@@ -153,15 +149,13 @@ export type BrowserLoadLogin = z.infer<typeof browserLoadLoginSchema>;
 
 export const browserSiteStateRequestSchema = z.strictObject({ site: browserSiteSchema });
 
-export const browserSessionStateSchema = z.strictObject({
+/** Unknown fields are dropped, so a host and an API from neighbouring releases still read each other's state. */
+export const browserSessionStateSchema = z.object({
   sessionId: browserSessionIdSchema,
   url: z.string(),
   title: z.string(),
-  controller: browserControllerSchema,
   /** Why the agent handed the session to a person, while it waits for one. */
   needsPerson: z.string().nullable(),
-  /** The member who took over, while one has control. */
-  controlledBy: z.string().nullable(),
   /** The site the agent asked a person to sign in to, while it waits for one. */
   signIn: z.string().nullable(),
   /** The browser logins loaded into the session. */
@@ -211,12 +205,6 @@ export const browserActionResultSchema = z.strictObject({
 });
 export type BrowserActionResult = z.infer<typeof browserActionResultSchema>;
 
-export const browserControlSchema = z.discriminatedUnion('controller', [
-  z.strictObject({ controller: z.literal('agent') }),
-  z.strictObject({ controller: z.literal('person'), memberId: z.string().min(1).max(200) }),
-]);
-export type BrowserControl = z.infer<typeof browserControlSchema>;
-
 export const browserNeedsPersonSchema = z.strictObject({
   reason: z.string().trim().min(1).max(500),
   signIn: browserSiteSchema.optional(),
@@ -226,7 +214,7 @@ export type BrowserNeedsPerson = z.infer<typeof browserNeedsPersonSchema>;
 const coordinate = z.number().min(0).max(4096);
 const modifiers = z.int().min(0).max(15).default(0);
 
-/** One input event from a member who took over, in viewport CSS pixels. */
+/** One input event from a person using the live browser, in viewport CSS pixels. */
 export const browserInputSchema = z.discriminatedUnion('type', [
   z.strictObject({
     type: z.literal('mouse'),
@@ -272,8 +260,6 @@ export type BrowserFrame = z.infer<typeof browserFrameSchema>;
 
 export const browserHostErrorCodeSchema = z.enum([
   'session-not-found',
-  'person-in-control',
-  'agent-in-control',
   'address-denied',
   'destination-denied',
   'field-refused',
