@@ -1,5 +1,6 @@
 import { Runtime } from '@temporalio/worker';
 import { createRowAssignments } from '@tulipfarm/agents/row-assignments';
+import { createTaskUpkeep } from '@tulipfarm/agents/task-reminders';
 import type { createAgentTasks } from '@tulipfarm/agents/tasks';
 import { createBackgroundJob } from '@tulipfarm/observability';
 import { workspaceSchemaPending } from '@tulipfarm/workspace-storage/runtime';
@@ -21,10 +22,14 @@ export function createRowAssignmentComposition(options: {
     },
     wake: options.wake,
   });
+  const upkeep = createTaskUpkeep(options.runtime);
   const job = createBackgroundJob('row-assignments', 15);
   let running: Promise<void> | undefined;
+  let sweeps = 0;
 
   async function sweep() {
+    // Welcome tasks and reminders need minute precision, so they run on every tenth sweep, about every 30 seconds.
+    const upkeepDue = sweeps++ % 10 === 0;
     const failures: unknown[] = [];
     let after: string | null = null;
     for (;;) {
@@ -32,6 +37,7 @@ export function createRowAssignmentComposition(options: {
       for (const workspaceId of workspaces) {
         try {
           await engine.step(workspaceId);
+          if (upkeepDue) await upkeep.step(workspaceId);
         } catch (error) {
           if (!workspaceSchemaPending(error)) failures.push(error);
         }

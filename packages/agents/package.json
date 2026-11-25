@@ -199,6 +199,10 @@
       "types": "./dist/inbox-slack.d.ts",
       "default": "./dist/inbox-slack.js"
     },
+    "./task-reminders": {
+      "types": "./dist/task-reminders.d.ts",
+      "default": "./dist/task-reminders.js"
+    },
     "./tasks": {
       "types": "./dist/tasks.d.ts",
       "default": "./dist/tasks.js"
