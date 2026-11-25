@@ -31,3 +31,6 @@ apps/*/version.json
 
 # Local mock-data manifest written by pnpm seed
 .seed/
+
+# Local planning notes
+docs/plans/
