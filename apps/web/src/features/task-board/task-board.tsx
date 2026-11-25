@@ -49,7 +49,7 @@ export function TaskBoard({
 }) {
   const navigate = useNavigate();
   const api = useMemo(() => tableApi(workspace.id), [workspace.id]);
-  const { detail, table, canCreate, canUpdate, canChangeFields } = useTasksTable(api, tableId);
+  const { detail, table, canCreate, canUpdate } = useTasksTable(api, tableId);
   const rows = useTaskRows(api, table);
   const activity = useTaskActivity(workspace.id);
   const progress = activity.state.kind === 'ready' ? activity.state.data : undefined;
@@ -170,7 +170,7 @@ export function TaskBoard({
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <TaskFieldsMenu workspace={workspace} table={table} canChange={canChangeFields} />
+            <TaskFieldsMenu table={table} />
             <Button
               variant="outline"
               nativeButton={false}

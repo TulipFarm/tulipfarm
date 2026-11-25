@@ -1,4 +1,3 @@
-import { useNavigate } from '@tanstack/react-router';
 import { LockIcon, SlidersIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import {
@@ -11,7 +10,6 @@ import {
   DropdownMenuTrigger,
 } from '@tulipfarm/sprout/dropdown-menu';
 import type { TableDefinition } from '@/features/tables/api';
-import type { TableWorkspace } from '@/features/tables/references';
 import { customTaskFields } from './task-composer';
 
 const kindLabels: Record<string, string> = {
@@ -27,17 +25,8 @@ const kindLabels: Record<string, string> = {
   actor: 'Person or agent',
 };
 
-/** The task fields: the six built-in ones, which can't change, and the workspace's own, changed in chat. */
-export function TaskFieldsMenu({
-  workspace,
-  table,
-  canChange,
-}: {
-  workspace: TableWorkspace;
-  table: TableDefinition;
-  canChange: boolean;
-}) {
-  const navigate = useNavigate();
+/** Lists the task fields: the built-in ones, which are locked, and the workspace's own. */
+export function TaskFieldsMenu({ table }: { table: TableDefinition }) {
   const custom = customTaskFields(table);
   const builtIn = table.definition.fields.filter(field => !custom.includes(field));
   return (
@@ -74,24 +63,6 @@ export function TaskFieldsMenu({
             ))
           )}
         </DropdownMenuGroup>
-        {canChange && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuItem
-                onClick={() =>
-                  void navigate({
-                    to: '/$workspaceSlug',
-                    params: { workspaceSlug: workspace.slug },
-                    search: { intent: 'edit-table', tableId: table.id },
-                  })
-                }
-              >
-                Add or change fields in chat
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-          </>
-        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

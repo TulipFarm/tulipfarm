@@ -30,7 +30,6 @@ export function useTasksTable(api: TableApi, tableId: string) {
     canCreate: open && Boolean(state?.rowPermissions.create),
     canUpdate: open && Boolean(state?.rowPermissions.update),
     canDelete: open && Boolean(state?.rowPermissions.delete),
-    canChangeFields: open,
   };
 }
 
