@@ -20,6 +20,7 @@ import type { TableWorkspace } from '@/features/tables/references';
 import { ActorName } from '@/features/tables/actors';
 import { useTaskApi, useTasks } from '@/features/tasks/queries';
 import { codeSessionApi } from '@/features/code-sessions/api';
+import { useFlag } from '@/lib/feature-flags';
 import type { CodeSessionView } from '@tulipfarm/agents/code-session-contracts';
 import { lanes, readTaskActivity, readTaskRows, taskCards, type Lane, type TaskActivity, type TaskCard } from './api';
 import { ago, currentStep, duration, useAssignmentRun, useNow, sentence } from './live';
@@ -130,10 +131,12 @@ export function TaskBoard({
   const canDelete = Boolean(state?.rowPermissions.delete) && !state?.archived;
   const agentRunsRead = useTasks(useTaskApi(workspace.id), undefined, '');
   const agentRunCount = agentRunsRead.state.kind === 'ready' ? agentRunsRead.state.data.tasks.length : 0;
+  const codeSessionsEnabled = useFlag('code-sessions');
   const codeSessionsRead = useFeatureRead({
     key: ['code-sessions', 'workspace-board', workspace.id] as const,
+    enabled: codeSessionsEnabled,
     load: signal => codeSessionApi(workspace.id).list({ scope: 'workspace' }, signal),
-    pollWhile: () => true,
+    pollWhile: () => codeSessionsEnabled,
     interval: 10_000,
     maxChecks: 2000,
   });

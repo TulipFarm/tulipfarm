@@ -73,6 +73,7 @@ import { queueRendererCalls } from './layout-calls';
 import { ConversationAttachment, StagedAttachments, useConversationAttachments } from './conversation-attachments';
 import { Composer } from './composer';
 import { codeSessionApi } from '@/features/code-sessions/api';
+import { useFlag } from '@/lib/feature-flags';
 import { CodeSessionCard } from '@/features/code-sessions/CodeSessionCard';
 import {
   buildCodeSessionStartInput,
@@ -539,12 +540,13 @@ function ConversationDetail({
   const [content, setContent] = useState<ChatDraft>(emptyRichDocument);
   const [mode, setMode] = useState<TurnMode>('normal');
   const manualModeForChat = useRef<string | null>(null);
+  const codeSessionsEnabled = useFlag('code-sessions');
   const codeApi = useMemo(() => codeSessionApi(workspace.id), [workspace.id]);
   const [codeAvailability, setCodeAvailability] = useState<CodeModeAvailability | null>(null);
   const [codeAvailabilityLoading, setCodeAvailabilityLoading] = useState(false);
   const [codeDraft, setCodeDraft] = useState<CodeSessionDraftConfig>(() => defaultCodeSessionDraft(null));
   useEffect(() => {
-    if (draft || sharedChat || compact) return;
+    if (!codeSessionsEnabled || draft || sharedChat || compact) return;
     if (manualModeForChat.current === chatId) {
       void codeApi.setTurnMode(chatId, mode).catch(() => undefined);
       return;
@@ -557,9 +559,9 @@ function ConversationDetail({
       })
       .catch(() => undefined);
     return () => controller.abort();
-  }, [codeApi, chatId, draft, sharedChat, compact, mode]);
+  }, [codeApi, codeSessionsEnabled, chatId, draft, sharedChat, compact, mode]);
   useEffect(() => {
-    if (mode !== 'code' || sharedChat || compact) return;
+    if (!codeSessionsEnabled || mode !== 'code' || sharedChat || compact) return;
     const controller = new AbortController();
     setCodeAvailabilityLoading(true);
     void codeApi
@@ -573,16 +575,16 @@ function ConversationDetail({
         if (!controller.signal.aborted) setCodeAvailabilityLoading(false);
       });
     return () => controller.abort();
-  }, [codeApi, mode, sharedChat, compact]);
+  }, [codeApi, codeSessionsEnabled, mode, sharedChat, compact]);
   const handleModeChange = useCallback(
     (next: TurnMode) => {
       manualModeForChat.current = chatId;
       setMode(next);
-      if (!draft && !sharedChat) {
+      if (codeSessionsEnabled && !draft && !sharedChat) {
         void codeApi.setTurnMode(chatId, next).catch(() => undefined);
       }
     },
-    [codeApi, chatId, draft, sharedChat],
+    [codeApi, codeSessionsEnabled, chatId, draft, sharedChat],
   );
   const contentResult = parseChatDraft(content);
   const validContent = contentResult.success ? contentResult.data : null;

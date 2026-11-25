@@ -270,6 +270,16 @@ test('a snapshot uses evaluateMany once per scope; false decides, missing and fa
     ['workspace', 'workspace'],
   );
   for (const [flags, scope] of batches) for (const name of flags) assert.equal(featureFlags[name].scope, scope);
-  assert.deepEqual(snapshot, { 'openai-models': false, 'anthropic-models': true, 'openai-image-models': true });
-  assert.deepEqual(failed, { 'openai-models': false, 'anthropic-models': false, 'openai-image-models': true });
+  assert.deepEqual(snapshot, {
+    'openai-models': false,
+    'anthropic-models': true,
+    'openai-image-models': true,
+    'code-sessions': false,
+  });
+  assert.deepEqual(failed, {
+    'openai-models': false,
+    'anthropic-models': false,
+    'openai-image-models': true,
+    'code-sessions': false,
+  });
 });

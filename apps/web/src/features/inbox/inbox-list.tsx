@@ -7,6 +7,7 @@ import { TableRequestError } from '@/features/tables/request-state';
 import { tableApi } from '@/features/tables/api';
 import { useRowTitles } from '@/features/tables/hooks';
 import { codeSessionApi, type OpenCodeSessionRequestItem } from '@/features/code-sessions/api';
+import { useFlag } from '@/lib/feature-flags';
 import { CodeSessionRequestCard } from '@/features/code-sessions/CodeSessionRequestCard';
 import { markDone, useInbox, type Inbox } from './inbox';
 
@@ -41,6 +42,7 @@ function RowTitles({
 /** Rows that need you: assigned to you, waiting for your answer, finished by an agent you sponsor, or mentions. */
 export function InboxList({ workspaceId, workspaceSlug }: { workspaceId: string; workspaceSlug: string }) {
   const read = useInbox(workspaceId);
+  const codeSessionsEnabled = useFlag('code-sessions');
   const codeApi = useMemo(() => codeSessionApi(workspaceId), [workspaceId]);
   const [codeRequests, setCodeRequests] = useState<OpenCodeSessionRequestItem[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -59,6 +61,7 @@ export function InboxList({ workspaceId, workspaceSlug }: { workspaceId: string;
     [codeApi],
   );
   useEffect(() => {
+    if (!codeSessionsEnabled) return;
     const controller = new AbortController();
     void refreshCodeRequests(controller.signal);
     const timer = window.setInterval(() => {
@@ -71,7 +74,7 @@ export function InboxList({ workspaceId, workspaceSlug }: { workspaceId: string;
       window.removeEventListener('focus', onFocus);
       controller.abort();
     };
-  }, [refreshCodeRequests]);
+  }, [codeSessionsEnabled, refreshCodeRequests]);
   const tables = useMemo(() => {
     const byTable = new Map<string, string[]>();
     if (read.state.kind === 'ready')

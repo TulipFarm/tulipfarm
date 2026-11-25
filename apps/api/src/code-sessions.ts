@@ -8,6 +8,7 @@ import { codingAgentLabels, codingAgents } from '@tulipfarm/agents/coding-run-co
 import {
   codeModeAvailabilitySchema,
   codeSessionRequestAnswerSchema,
+  codeSessionRequestViewSchema,
   codeSessionStartInputSchema,
   codeSessionViewSchema,
   codeTerminalChunkSchema,
@@ -512,11 +513,23 @@ export function registerCodeSessions(
       },
     );
 
+    const sessionRequestPairSchema = z.strictObject({
+      session: codeSessionViewSchema,
+      request: codeSessionRequestViewSchema,
+    });
+    const openRequestsResponse = z.strictObject({
+      items: z.array(sessionRequestPairSchema),
+    });
+    const sessionsListResponse = z.strictObject({
+      sessions: z.array(codeSessionViewSchema),
+    });
+
     routes.get(
       '/workspaces/:workspaceId/code-sessions/open-requests',
       {
         schema: {
           params: validation.json(workspaceParams),
+          response: { 200: validation.json(openRequestsResponse) },
         },
       },
       request => {
@@ -530,6 +543,7 @@ export function registerCodeSessions(
       {
         schema: {
           params: validation.json(workspaceParams),
+          response: { 200: validation.json(sessionsListResponse) },
         },
       },
       request => {
@@ -599,6 +613,7 @@ export function registerCodeSessions(
         schema: {
           params: validation.json(requestParams),
           body: validation.json(answerBody),
+          response: { 200: validation.json(sessionRequestPairSchema) },
         },
       },
       request => {
@@ -637,6 +652,12 @@ export function registerCodeSessions(
         logLevel: 'silent',
         schema: {
           params: validation.json(sessionParams),
+          response: {
+            200: {
+              description: 'Live terminal output stream',
+              content: { 'text/event-stream': { schema: { type: 'string' } } },
+            },
+          },
         },
       },
       async (request, reply) => {

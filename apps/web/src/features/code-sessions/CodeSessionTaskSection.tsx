@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from '@tulipfarm/sprout/toast';
 import { useFeatureRead } from '@/lib/query';
 import { codeSessionApi } from './api';
+import { useFlag } from '@/lib/feature-flags';
 
 const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
@@ -28,19 +29,24 @@ export function CodeSessionTaskSection({
   title: string;
   description: string | null | undefined;
 }) {
+  const codeSessionsEnabled = useFlag('code-sessions');
   const api = useMemo(() => codeSessionApi(workspaceId), [workspaceId]);
   const availability = useFeatureRead({
     key: ['code-mode', 'availability', workspaceId] as const,
+    enabled: codeSessionsEnabled,
     load: signal => api.availability(signal),
   });
   const repos = useFeatureRead({
     key: ['code-mode', 'repositories', workspaceId] as const,
+    enabled: codeSessionsEnabled,
     load: signal => api.repositories(signal),
   });
   const sessions = useFeatureRead({
     key: ['code-sessions', 'row', workspaceId, rowId] as const,
+    enabled: codeSessionsEnabled,
     load: signal => api.list({ rowId }, signal),
-    pollWhile: data => data.sessions.some(session => !['merged', 'stopped', 'failed'].includes(session.stage)),
+    pollWhile: data =>
+      codeSessionsEnabled && data.sessions.some(session => !['merged', 'stopped', 'failed'].includes(session.stage)),
     interval: 4000,
     maxChecks: 300,
   });
@@ -56,7 +62,7 @@ export function CodeSessionTaskSection({
   const activeSession = rowSessions.find(session => !['merged', 'stopped', 'failed'].includes(session.stage));
   const latestSession = activeSession ?? rowSessions[0] ?? null;
 
-  if (avail && !avail.enabled) return null;
+  if (!codeSessionsEnabled || (avail && !avail.enabled)) return null;
 
   const effectiveRepo = repository.trim() || repoItems[0]?.fullName || '';
   const selectedAgent = avail?.agents.find(item => item.agent === agent);
