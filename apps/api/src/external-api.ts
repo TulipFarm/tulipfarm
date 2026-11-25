@@ -34,7 +34,8 @@ export const runAgentSchema = z.strictObject({ text: z.string().trim().min(1).ma
 
 /**
  * A stable UUID for one part of one client request. Retrying with the same idempotency key gives the same request
- * IDs, and so the same receipts, and also the same row IDs for rows the client did not name.
+ * IDs, and so the same receipts, and also the same row IDs for rows the client did not name. IDs that outlive the
+ * request (rows, files, tasks) include the member, so two members who happen to pick the same key never collide.
  */
 export function derivedId(...parts: string[]) {
   const hex = createHash('sha256')
@@ -207,7 +208,7 @@ export function createExternalApi(dependencies: {
       const results = [];
       for (const [index, row] of rows.entries()) {
         const requestId = derivedId('create', id, idempotencyKey, String(index));
-        const recordId = row.id ?? derivedId('row', id, idempotencyKey, String(index));
+        const recordId = row.id ?? derivedId('row', principal.userId, id, idempotencyKey, String(index));
         try {
           const result = await recordRequests.mutate(principal.workspaceId, principal.userId, {
             requestId,
@@ -311,7 +312,7 @@ export function createExternalApi(dependencies: {
       scope(principal, 'files:write');
       if (bytes.length === 0)
         throw new ExternalApiError(400, 'empty-file', 'The file is empty. Send 1 byte to 10 MiB.');
-      const fileId = derivedId('file', idempotencyKeySchema.parse(key));
+      const fileId = derivedId('file', principal.userId, idempotencyKeySchema.parse(key));
       return files().upload(
         principal.workspaceId,
         principal.userId,
@@ -338,7 +339,7 @@ export function createExternalApi(dependencies: {
       const { text } = runAgentSchema.parse(input);
       const id = rowIdSchema.parse(agentId);
       const receipt = await tasks.start(principal.workspaceId, principal.userId, {
-        requestId: derivedId('task', id, idempotencyKeySchema.parse(key)),
+        requestId: derivedId('task', principal.userId, id, idempotencyKeySchema.parse(key)),
         agentId: id,
         text,
       });

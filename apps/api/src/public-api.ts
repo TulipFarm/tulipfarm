@@ -113,6 +113,7 @@ const errors = Object.fromEntries(
 const json = (description: string) => ({ description, type: 'object', additionalProperties: true });
 const tags = ['Public API'];
 const uuid = { type: 'string', format: 'uuid' };
+const integer = (minimum: number, maximum: number) => ({ type: 'integer', minimum, maximum });
 const params = (...names: string[]) => ({
   type: 'object',
   properties: Object.fromEntries(['workspaceId', ...names].map(name => [name, uuid])),
@@ -186,7 +187,7 @@ export function registerPublicApi(
             properties: {
               after: { type: 'string', maxLength: 40 },
               search: { type: 'string', maxLength: 255 },
-              limit: { type: 'integer', minimum: 1, maximum: 100 },
+              limit: integer(1, 100),
             },
           },
           response: { 200: json('Tables and the next cursor'), ...errors },
@@ -236,7 +237,7 @@ export function registerPublicApi(
           params: params('tableId'),
           querystring: {
             type: 'object',
-            properties: { after: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 100 } },
+            properties: { after: { type: 'string' }, limit: integer(1, 100) },
           },
           response: { 200: rowsPageJson, ...errors },
         }),
@@ -313,7 +314,7 @@ export function registerPublicApi(
               properties: {
                 key: { type: 'string', minLength: 1, maxLength: 255 },
                 kind: { type: 'string', enum: ['create', 'update', 'delete'] },
-                index: { type: 'integer', minimum: 0, maximum: 99 },
+                index: integer(0, 99),
               },
               required: ['key', 'kind'],
             },
@@ -480,7 +481,7 @@ export function registerPublicApi(
           'Read a task’s status and latest reply. `wait` (0–60 s) waits while it is still pending',
           {
             params: params('taskId'),
-            querystring: { type: 'object', properties: { wait: { type: 'integer', minimum: 0, maximum: 60 } } },
+            querystring: { type: 'object', properties: { wait: integer(0, 60) } },
             response: { 200: json('The task status and latest reply'), ...errors },
           },
         ),
