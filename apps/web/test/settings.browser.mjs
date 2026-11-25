@@ -704,7 +704,7 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 36
       await page.getByRole('heading', { name: 'workspace settings unavailable', exact: true }).waitFor();
       assert.equal(await page.getByLabel('Workspace name', { exact: true }).count(), 0);
       assert.equal(await page.getByLabel('Workspace ID', { exact: true }).count(), 0);
-      assert.equal(await nav(page).getByRole('link').count(), 7);
+      assert.equal(await nav(page).getByRole('link').count(), 8);
       f.settingsStatus = 200;
       await page.getByRole('button', { name: 'Reload workspace settings' }).click();
       await page.getByLabel('Workspace name', { exact: true }).waitFor();
