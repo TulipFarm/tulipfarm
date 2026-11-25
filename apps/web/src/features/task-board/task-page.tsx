@@ -20,14 +20,12 @@ import {
 } from '@tulipfarm/sprout/dropdown-menu';
 import { MessageResponse } from '@tulipfarm/sprout/message-response';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
-import { Status } from '@tulipfarm/sprout/status';
+import { Status, type StatusState } from '@tulipfarm/sprout/status';
 import { toast } from '@tulipfarm/sprout/toast';
 import { BareText } from '@/components/ui/bare-text';
 import { useFeatureChanges, useFeatureRead } from '@/lib/query';
 import { tableApi, type TableApi, type TableDataRow, type TableDefinition } from '@/features/tables/api';
-import { ActorPicker, type Actor } from '@/features/tables/actors';
 import { FieldInput } from '@/features/tables/field-input';
 import { RecordMutationFeedback, useRecordMutation } from '@/features/tables/record-mutation';
 import { changedValues, rejectionMessage, validateRowDraft } from '@/features/tables/record-validation';
@@ -42,16 +40,9 @@ import { TaskReminders } from './reminders';
 import type { TaskBoardSearch } from './search';
 import { readTask, taskDetailKey, useTaskKeys, type TaskDetail } from './task-api';
 import { cardStatus } from './task-board';
+import { ActorMenu, ChipMenu, ParentMenu, type MenuChoice } from './task-chips';
 import { customTaskFields, TaskComposer } from './task-composer';
-import {
-  keysByRow,
-  optionLabel,
-  taskOptions,
-  useTaskActivity,
-  useTaskRows,
-  useTasksTable,
-  type TaskOption,
-} from './task-data';
+import { keysByRow, taskOptions, useTaskActivity, useTaskRows, useTasksTable } from './task-data';
 
 /** A task's own page: its words and conversation on the left, everything about it on the right. */
 export function TaskView({
@@ -250,48 +241,51 @@ function TaskLoaded({
             />
           </section>
         </div>
-        <aside aria-label="Properties" className="shrink-0 space-y-5 lg:w-80 lg:border-l lg:pl-6">
-          <StatusProperty
-            workspaceId={workspace.id}
-            card={card}
-            tableId={task.tableId}
-            canEdit={task.canEdit}
-            refresh={refreshAll}
-          />
-          <Property label="Assignee">
-            <ActorPicker
+        <aside aria-label="Properties" className="shrink-0 space-y-5 lg:w-72 lg:border-l lg:pl-5">
+          <div className="space-y-0.5">
+            <StatusProperty
               workspaceId={workspace.id}
-              value={card.assignee}
-              disabled={!editable}
-              change={(actor: Actor | null) => save({ [taskFields.assignee]: actor ? { kind: 'actor', actor } : null })}
-              label="Assignee"
-              size="sm"
+              card={card}
+              tableId={task.tableId}
+              canEdit={task.canEdit}
+              refresh={refreshAll}
             />
-          </Property>
-          <Property label="Reporter">
-            <ActorPicker
-              workspaceId={workspace.id}
-              value={card.reporter}
-              disabled={!editable}
-              change={(actor: Actor | null) => save({ [taskFields.reporter]: actor ? { kind: 'actor', actor } : null })}
-              label="Reporter"
-              size="sm"
-            />
-          </Property>
-          <Property label="Parent task">
-            <ParentPicker
-              task={task}
-              options={options.filter(option => option.id !== task.rowId)}
-              disabled={!editable}
-              change={parent =>
-                save({
-                  [taskFields.parent]: parent
-                    ? { kind: 'relationship', tableId: task.tableId, recordIds: [parent] }
-                    : null,
-                })
-              }
-            />
-          </Property>
+            <PropertyRow label="Assignee">
+              <ActorMenu
+                workspaceId={workspace.id}
+                look="property"
+                name="Assignee"
+                value={card.assignee}
+                disabled={!editable}
+                change={actor => save({ [taskFields.assignee]: actor ? { kind: 'actor', actor } : null })}
+              />
+            </PropertyRow>
+            <PropertyRow label="Reporter">
+              <ActorMenu
+                workspaceId={workspace.id}
+                look="property"
+                name="Reporter"
+                value={card.reporter}
+                disabled={!editable}
+                change={actor => save({ [taskFields.reporter]: actor ? { kind: 'actor', actor } : null })}
+              />
+            </PropertyRow>
+            <PropertyRow label="Parent">
+              <ParentMenu
+                look="property"
+                tasks={options.filter(option => option.id !== task.rowId)}
+                value={parentOf(task)}
+                disabled={!editable}
+                change={parent =>
+                  save({
+                    [taskFields.parent]: parent
+                      ? { kind: 'relationship', tableId: task.tableId, recordIds: [parent] }
+                      : null,
+                  })
+                }
+              />
+            </PropertyRow>
+          </div>
           <Property label="Subtasks">
             <div className="space-y-1">
               {subtasks.length === 0 && <p className="text-sm text-muted-foreground">No subtasks.</p>}
@@ -383,11 +377,26 @@ function TaskLoaded({
 
 function Property({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <section className="space-y-1.5" aria-label={label}>
+    <section className="space-y-1.5 border-t pt-4" aria-label={label}>
       <h2 className="text-xs font-medium text-muted-foreground">{label}</h2>
       {children}
     </section>
   );
+}
+
+/** One Linear-style property: a muted label beside a value that opens its menu. */
+function PropertyRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex min-h-8 items-center gap-2">
+      <span className="w-20 shrink-0 text-xs text-muted-foreground">{label}</span>
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
+function parentOf(task: TaskDetail): string | null {
+  const value = task.record.values[taskFields.parent];
+  return value?.kind === 'relationship' ? (value.recordIds[0] ?? null) : null;
 }
 
 /** A title edited where it is shown; it saves when focus leaves or on Enter, and Escape puts it back. */
@@ -524,49 +533,35 @@ function StatusProperty({
     await refresh().catch(() => undefined);
     setMoving(false);
   };
+  const current = card.state ? stateLabels[card.state] : 'To do';
+  const icon = (state: StatusState) => <Status state={state} size="sm" aria-hidden="true" tooltip={false} />;
+  const choices: MenuChoice[] =
+    move === 'reopen'
+      ? [
+          { value: 'reopen', label: 'To do', icon: icon('pending') },
+          { value: '', label: current, icon: icon(cardStatus(card)) },
+        ]
+      : [
+          { value: '', label: current, icon: icon(cardStatus(card)) },
+          ...(move ? [{ value: move, label: 'Done', icon: icon('success') }] : []),
+        ];
   return (
-    <Property label="Status">
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <Status state={cardStatus(card)} size="sm" aria-hidden="true" tooltip={false} />
-        <span className="flex-1">{card.state ? stateLabels[card.state] : 'To do'}</span>
-        {canEdit && move && (
-          <Button size="sm" variant="outline" disabled={moving} onClick={() => void act(move)}>
-            {move === 'done' ? 'Mark done' : 'Reopen'}
-          </Button>
-        )}
-      </div>
-    </Property>
-  );
-}
-
-function ParentPicker({
-  task,
-  options,
-  disabled,
-  change,
-}: {
-  task: TaskDetail;
-  options: readonly TaskOption[];
-  disabled: boolean;
-  change: (parent: string | null) => void;
-}) {
-  const value = task.record.values[taskFields.parent];
-  const parent = value?.kind === 'relationship' ? (value.recordIds[0] ?? null) : null;
-  const chosen = options.find(option => option.id === parent);
-  return (
-    <Select value={parent ?? ''} disabled={disabled} onValueChange={next => change(next || null)}>
-      <SelectTrigger width="full" size="sm" aria-label="Parent task">
-        <SelectValue>{chosen ? optionLabel(chosen) : parent ? 'Older task' : 'No parent task'}</SelectValue>
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="">No parent task</SelectItem>
-        {options.map(option => (
-          <SelectItem key={option.id} value={option.id}>
-            {optionLabel(option)}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <PropertyRow label="Status">
+      <ChipMenu
+        look="property"
+        name="Status"
+        icon={icon(cardStatus(card))}
+        text={current}
+        placeholder={false}
+        disabled={!canEdit || !move || moving}
+        searchable={false}
+        choices={choices}
+        value=""
+        pick={next => {
+          if (next === 'done' || next === 'reopen') void act(next);
+        }}
+      />
+    </PropertyRow>
   );
 }
 
@@ -626,7 +621,7 @@ function CustomFields({
   const dirty = Object.keys(changes).length > 0;
   const errors = validated ? validateRowDraft(table.definition, draft, values, 'tasks') : {};
   return (
-    <section className="space-y-3" aria-label="Fields">
+    <section className="space-y-3 border-t pt-4" aria-label="Fields">
       <h2 className="text-xs font-medium text-muted-foreground">Fields</h2>
       {fields.map(field => (
         <FieldInput

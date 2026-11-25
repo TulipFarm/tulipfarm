@@ -1,7 +1,7 @@
-import { useId, useState, type KeyboardEvent } from 'react';
+import { useState, type KeyboardEvent } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { taskFields } from '@tulipfarm/tables/tasks-table';
-import { AlarmClockIcon, CloseIcon, MaximizeIcon, MinimizeIcon, MoreIcon } from '@tulipfarm/icons';
+import { AlarmClockIcon, ChevronRightIcon, CloseIcon, MaximizeIcon, MinimizeIcon, MoreIcon } from '@tulipfarm/icons';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,17 +12,15 @@ import {
   AlertDialogTitle,
 } from '@tulipfarm/sprout/alert-dialog';
 import { Button } from '@tulipfarm/sprout/button';
-import { Dialog, DialogContent, DialogTitle } from '@tulipfarm/sprout/dialog';
-import { Kbd, KbdGroup } from '@tulipfarm/sprout/kbd';
+import { Dialog, DialogTitle } from '@tulipfarm/sprout/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@tulipfarm/sprout/popover';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
-import { Switch } from '@tulipfarm/sprout/switch';
-import { Label } from '@tulipfarm/sprout/label';
 import { toast } from '@tulipfarm/sprout/toast';
 import { BareText } from '@/components/ui/bare-text';
+import { Chip } from '@/components/ui/chip';
+import { CompactButton, ComposerDialogContent, InlineSwitch, KeyTag } from '@/components/ui/composer-dialog';
 import { useFeatureChanges } from '@/lib/query';
 import type { TableApi, TableDefinition } from '@/features/tables/api';
-import { ActorPicker, type Actor } from '@/features/tables/actors';
+import type { Actor } from '@/features/tables/actors';
 import { FieldInput } from '@/features/tables/field-input';
 import { RecordMutationFeedback, useRecordMutation } from '@/features/tables/record-mutation';
 import { rejectionMessage, validateRowDraft } from '@/features/tables/record-validation';
@@ -38,7 +36,8 @@ import {
   type ScheduleDraft,
 } from './reminders';
 import { browserTimeZone, readTaskKeys, reminderApi, taskKeysKey } from './task-api';
-import { optionLabel, type TaskOption } from './task-data';
+import { ActorMenu, ChipMenu, ParentMenu, statusIcon } from './task-chips';
+import type { TaskOption } from './task-data';
 
 const lockedFields = new Set<string>(Object.values(taskFields));
 
@@ -81,7 +80,6 @@ export function TaskComposer({
   const [reminding, setReminding] = useState(false);
   const [custom, setCustom] = useState<TableValues>({});
   const [createMore, setCreateMore] = useState(false);
-  const createMoreId = useId();
   const [reminderOpen, setReminderOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [validated, setValidated] = useState(false);
@@ -177,7 +175,6 @@ export function TaskComposer({
     }
   };
 
-  const parentOption = tasks.find(task => task.id === parent);
   const required = fields.filter(field => field.required);
   const optional = fields.filter(field => !field.required);
   const errorList = Object.entries(errors).filter(([fieldId]) => fieldId !== taskFields.title);
@@ -195,34 +192,31 @@ export function TaskComposer({
     />
   );
 
+  const reminderText = reminderFor && reminding ? draftText(reminder) : 'Reminder';
   return (
     <Dialog open onOpenChange={open => !open && requestClose()}>
-      <DialogContent size={expanded ? 'split' : 'form'} showCloseButton={false} aria-describedby={undefined}>
+      <ComposerDialogContent expanded={expanded} aria-describedby={undefined}>
         <div className="flex min-h-0 flex-col" onKeyDown={shortcut}>
-          <div className="flex items-center gap-2 px-4 pt-3">
-            <span className="text-xs font-medium text-muted-foreground">TUL</span>
-            <span aria-hidden="true" className="text-xs text-muted-foreground">
-              ›
-            </span>
-            <div className="min-w-0 flex-1 text-sm">
-              <DialogTitle>New task</DialogTitle>
+          <div className="flex items-center gap-1.5 py-2.5 pr-2.5 pl-4 text-sm">
+            <KeyTag>TUL</KeyTag>
+            <ChevronRightIcon size="xs" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <DialogTitle render={<h2 className="text-sm font-normal text-foreground" />}>New task</DialogTitle>
             </div>
             <Button
-              size="icon-sm"
+              size="icon-xs"
               variant="ghost"
               aria-label={expanded ? 'Make smaller' : 'Make larger'}
               aria-pressed={expanded}
               onClick={() => setExpanded(value => !value)}
             >
-              {expanded ? <MinimizeIcon size="sm" aria-hidden="true" /> : <MaximizeIcon size="sm" aria-hidden="true" />}
+              {expanded ? <MinimizeIcon size="xs" aria-hidden="true" /> : <MaximizeIcon size="xs" aria-hidden="true" />}
             </Button>
-            <Button size="icon-sm" variant="ghost" aria-label="Close" disabled={busy} onClick={requestClose}>
-              <CloseIcon size="sm" aria-hidden="true" />
+            <Button size="icon-xs" variant="ghost" aria-label="Close" disabled={busy} onClick={requestClose}>
+              <CloseIcon size="xs" aria-hidden="true" />
             </Button>
           </div>
-          <div
-            className={`min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pt-3 pb-2 ${expanded ? 'min-h-96' : 'min-h-40'}`}
-          >
+          <div className={`min-h-0 flex-1 space-y-2 overflow-y-auto px-4 pt-1 pb-3 ${expanded ? 'min-h-80' : ''}`}>
             <BareText
               look="title"
               autoFocus
@@ -237,7 +231,7 @@ export function TaskComposer({
               }}
             />
             {errors[taskFields.title] && (
-              <p role="alert" className="text-sm text-destructive">
+              <p role="alert" className="text-xs text-destructive">
                 Write a title for the task.
               </p>
             )}
@@ -250,117 +244,113 @@ export function TaskComposer({
             />
           </div>
           <div className="flex flex-wrap items-center gap-1.5 px-4 pb-3">
-            <Select value={done ? 'done' : 'todo'} disabled={busy} onValueChange={next => setDone(next === 'done')}>
-              <SelectTrigger width="fit" size="sm" aria-label="Status">
-                <SelectValue>{done ? 'Done' : 'To do'}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todo">To do</SelectItem>
-                <SelectItem value="done">Done</SelectItem>
-              </SelectContent>
-            </Select>
-            <ActorPicker
+            <ChipMenu
+              look="chip"
+              name="Status"
+              icon={statusIcon(done ? 'success' : 'pending')}
+              text={done ? 'Done' : 'Todo'}
+              placeholder={false}
+              disabled={busy}
+              searchable={false}
+              choices={[
+                { value: 'todo', label: 'Todo', icon: statusIcon('pending') },
+                { value: 'done', label: 'Done', icon: statusIcon('success') },
+              ]}
+              value={done ? 'done' : 'todo'}
+              pick={next => setDone(next === 'done')}
+            />
+            <ActorMenu
               workspaceId={workspace.id}
+              look="chip"
+              name="Assignee"
               value={assignee}
-              disabled={busy}
               change={setAssignee}
-              label="Assignee"
-              empty="Assignee"
-              size="sm"
-              width="fit"
-            />
-            <ActorPicker
-              workspaceId={workspace.id}
-              value={reporter}
               disabled={busy}
-              change={setReporter}
-              label="Reporter"
-              empty="Reporter"
-              size="sm"
-              width="fit"
             />
-            <Select value={parent ?? ''} disabled={busy} onValueChange={next => setParent(next || null)}>
-              <SelectTrigger width="fit" size="sm" aria-label="Parent task">
-                <SelectValue>{parentOption ? optionLabel(parentOption) : 'Parent task'}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">No parent task</SelectItem>
-                {tasks.map(task => (
-                  <SelectItem key={task.id} value={task.id}>
-                    {optionLabel(task)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <ActorMenu
+              workspaceId={workspace.id}
+              look="chip"
+              name="Reporter"
+              value={reporter}
+              change={setReporter}
+              disabled={busy}
+            />
+            <ParentMenu look="chip" tasks={tasks} value={parent} change={setParent} disabled={busy} />
             <Popover open={reminderOpen} onOpenChange={setReminderOpen}>
               <PopoverTrigger
                 render={
-                  <Button
-                    variant={reminderFor && reminding ? 'secondary' : 'outline'}
-                    size="sm"
-                    disabled={busy || !reminderFor}
-                    title={reminderFor ? undefined : 'Assign the task to a person to set a reminder'}
+                  <Chip
+                    icon={<AlarmClockIcon size="sm" aria-hidden="true" />}
+                    placeholder={!(reminderFor && reminding)}
+                    disabled={busy}
+                    title="Reminder"
+                    aria-label={`Reminder: ${reminderText}`}
                   />
                 }
               >
-                <AlarmClockIcon size="sm" aria-hidden="true" />
-                {reminderFor && reminding ? draftText(reminder) : 'Reminder'}
+                {reminderText}
               </PopoverTrigger>
-              <PopoverContent size="panel" align="start">
-                <div className="space-y-3 p-3">
-                  <p className="text-sm font-medium">Remind the assignee</p>
-                  <ScheduleFields draft={reminder} change={setReminder} disabled={busy} />
-                  {reminding ? (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => {
-                        setReminding(false);
-                        setReminderOpen(false);
-                      }}
-                    >
-                      Remove reminder
-                    </Button>
-                  ) : (
-                    <Button
-                      size="sm"
-                      disabled={!draftSchedule(reminder)}
-                      onClick={() => {
-                        setReminding(true);
-                        setReminderOpen(false);
-                      }}
-                    >
-                      Set reminder
-                    </Button>
-                  )}
-                </div>
+              <PopoverContent size="picker" align="start" sideOffset={4}>
+                {reminderFor ? (
+                  <div className="space-y-3 p-3">
+                    <p className="text-sm font-medium">Remind the assignee</p>
+                    <ScheduleFields draft={reminder} change={setReminder} disabled={busy} />
+                    <div className="flex justify-end gap-2">
+                      {reminding && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            setReminding(false);
+                            setReminderOpen(false);
+                          }}
+                        >
+                          Remove
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        disabled={!draftSchedule(reminder)}
+                        onClick={() => {
+                          setReminding(true);
+                          setReminderOpen(false);
+                        }}
+                      >
+                        {reminding ? 'Update reminder' : 'Set reminder'}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="p-3 text-sm text-muted-foreground">
+                    Reminders go to the assignee. Assign the task to a person first.
+                  </p>
+                )}
               </PopoverContent>
             </Popover>
             {required.map(field => (
               <Popover key={field.id}>
                 <PopoverTrigger
                   render={
-                    <Button
-                      variant={custom[field.id] ? 'secondary' : errors[field.id] ? 'destructive' : 'outline'}
-                      size="sm"
+                    <Chip
+                      placeholder={!custom[field.id]}
                       disabled={busy}
+                      aria-invalid={Boolean(errors[field.id])}
+                      title={field.label}
                     />
                   }
                 >
                   {field.label}
                 </PopoverTrigger>
-                <PopoverContent size="panel" align="start">
+                <PopoverContent size="picker" align="start" sideOffset={4}>
                   <div className="p-3">{fieldInput(field)}</div>
                 </PopoverContent>
               </Popover>
             ))}
             <Popover>
-              <PopoverTrigger
-                render={<Button variant="outline" size="icon-sm" aria-label="More fields" disabled={busy} />}
-              >
+              <PopoverTrigger render={<Chip square aria-label="More fields" title="More fields" disabled={busy} />}>
                 <MoreIcon size="sm" aria-hidden="true" />
               </PopoverTrigger>
-              <PopoverContent size="panel" align="start">
+              <PopoverContent size="picker" align="start" sideOffset={4}>
                 {optional.length === 0 ? (
                   <p className="p-3 text-sm text-muted-foreground">
                     This workspace has no other task fields. Add them from Fields on the Tasks page.
@@ -374,31 +364,22 @@ export function TaskComposer({
           {(errorList.length > 0 || create.state.kind === 'rejected' || create.state.kind === 'uncertain') && (
             <div className="space-y-2 px-4 pb-3">
               {errorList.map(([fieldId, message]) => (
-                <p key={fieldId} role="alert" className="text-sm text-destructive">
+                <p key={fieldId} role="alert" className="text-xs text-destructive">
                   {fields.find(field => field.id === fieldId)?.label ?? 'Field'}: {message}
                 </p>
               ))}
               <RecordMutationFeedback mutation={create} />
             </div>
           )}
-          <div className="flex flex-wrap items-center justify-end gap-3 border-t px-4 py-3">
-            <div className="flex items-center gap-2">
-              <Switch
-                id={createMoreId}
-                size="sm"
-                checked={createMore}
-                onCheckedChange={setCreateMore}
-                disabled={busy}
-              />
-              <Label htmlFor={createMoreId}>Create more</Label>
-            </div>
-            <Button disabled={busy} onClick={() => void submit()}>
+          <div className="flex items-center justify-end gap-3 border-t px-4 py-2.5">
+            <InlineSwitch label="Create more" checked={createMore} change={setCreateMore} disabled={busy} />
+            <CompactButton
+              disabled={busy}
+              title={`Create task (${isMac ? '⌘' : 'Ctrl'}+Enter)`}
+              onClick={() => void submit()}
+            >
               {create.state.kind === 'sending' || finishing ? 'Creating…' : 'Create task'}
-              <KbdGroup>
-                <Kbd>{isMac ? '⌘' : 'Ctrl'}</Kbd>
-                <Kbd>↵</Kbd>
-              </KbdGroup>
-            </Button>
+            </CompactButton>
           </div>
         </div>
         <AlertDialog open={confirmClose} onOpenChange={setConfirmClose}>
@@ -413,7 +394,7 @@ export function TaskComposer({
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-      </DialogContent>
+      </ComposerDialogContent>
     </Dialog>
   );
 }
