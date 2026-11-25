@@ -11,7 +11,7 @@ import { ChevronDownIcon, DatabaseIcon } from '@tulipfarm/icons';
 import { useConfirmation } from '@/features/access/confirm';
 import { useMemberDirectory } from '@/features/secrets/queries';
 import { tableApi } from '@/features/tables/api';
-import { useTablePicker } from '@/features/tables/hooks';
+import { choosableTables, useTablePicker } from '@/features/tables/hooks';
 import { TableRequestError } from '@/features/tables/request-state';
 import { useFeatureScope } from '@/lib/query';
 import { workspaceRoute } from '@/router';
@@ -79,7 +79,7 @@ function DataAccess({ app }: { app: AppDetail }) {
   const changes = useAppChanges();
   const [creating, setCreating] = useState(false);
 
-  const readableTables = tables.state.kind === 'ready' ? tables.state.data : [];
+  const readableTables = tables.state.kind === 'ready' ? choosableTables(tables.state.data) : [];
   const members = directory.state.kind === 'ready' ? directory.state.data : [];
   const nameOf = (membershipId: string | null) =>
     members.find(member => member.id === membershipId)?.name ?? 'A former member';

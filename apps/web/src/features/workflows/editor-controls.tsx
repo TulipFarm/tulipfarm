@@ -11,7 +11,7 @@ import {
   type valueSchema,
 } from '@tulipfarm/workflows/contracts';
 import { tableApi, type TableDefinition } from '@/features/tables/api';
-import { useTablePicker } from '@/features/tables/hooks';
+import { choosableTables, useTablePicker } from '@/features/tables/hooks';
 import { Button } from '@tulipfarm/sprout/button';
 import { Input } from '@tulipfarm/sprout/input';
 import { Label } from '@tulipfarm/sprout/label';
@@ -812,7 +812,9 @@ function RecordDate({
   const [pendingTable, setPendingTable] = useState('');
   const [amountText, setAmountText] = useState<string | null>(null);
   const tables =
-    read.state.kind === 'ready' ? read.state.data.filter(item => item.definition.fields.some(dateLike)) : [];
+    read.state.kind === 'ready'
+      ? choosableTables(read.state.data, trigger?.tableId ?? '').filter(item => item.definition.fields.some(dateLike))
+      : [];
   const tableId = trigger?.tableId ?? pendingTable;
   const table = tables.find(item => item.id === tableId);
   const fields = table?.definition.fields.filter(dateLike) ?? [];
@@ -1135,7 +1137,7 @@ function RowChange({
         </Button>
       </StatePanel>
     );
-  const tables = read.state.data;
+  const tables = choosableTables(read.state.data, trigger?.tableId ?? '');
   if (!tables.length)
     return (
       <p className="text-sm text-muted-foreground">

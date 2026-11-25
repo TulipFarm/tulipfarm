@@ -50,7 +50,7 @@ export async function loadRecentItems(
   if (section === 'tables') {
     const { tableApi } = await import('@/features/tables/api');
     return (
-      await tableApi(workspaceId).list(undefined, bounded, undefined, false, { by: 'changed', direction: 'desc' })
+      await tableApi(workspaceId).list(undefined, bounded, undefined, false, { by: 'changed', direction: 'desc' }, true)
     ).tables
       .slice(0, 3)
       .map(table => ({ id: table.id, name: table.definition.label }));

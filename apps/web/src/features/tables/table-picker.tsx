@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { tableApi } from './api';
-import { useTablePicker } from './hooks';
+import { choosableTables, useTablePicker } from './hooks';
 import { Button } from '@tulipfarm/sprout/button';
 import { Field } from '@tulipfarm/sprout/field';
 import { Input } from '@tulipfarm/sprout/input';
@@ -30,7 +30,7 @@ export function TablePicker({
   const api = useMemo(() => tableApi(workspaceId), [workspaceId]);
   const [search, setSearch] = useState('');
   const read = useTablePicker(api);
-  const tables = read.state.kind === 'ready' ? read.state.data : [];
+  const tables = read.state.kind === 'ready' ? choosableTables(read.state.data, value) : [];
   const matches = (name: string) => name.toLowerCase().includes(search.toLowerCase());
   const tableLabel = (item: (typeof tables)[number]) =>
     `${item.definition.label} · ${teams.find(team => team.id === item.definition.owningTeamId)?.name ?? `Team ${item.definition.owningTeamId.slice(0, 8)}`} · ${item.id.slice(0, 8)}`;

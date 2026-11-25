@@ -142,9 +142,16 @@ export const tableQueries = {
       }
     },
   }),
-  list: (api: TableApi, after?: string, search?: string, sort?: TableListSort, archived = false) => ({
-    key: tableKeys.list(after, search, sort, archived),
-    load: (signal: AbortSignal) => api.list(after, signal, search, archived, sort),
+  list: (
+    api: TableApi,
+    after?: string,
+    search?: string,
+    sort?: TableListSort,
+    archived = false,
+    hideTasks = false,
+  ) => ({
+    key: [...tableKeys.list(after, search, sort, archived), ...(hideTasks ? ['hide-tasks'] : [])],
+    load: (signal: AbortSignal) => api.list(after, signal, search, archived, sort, hideTasks),
   }),
   detail: (api: TableApi, id: string) => ({
     key: tableKeys.definition(id),

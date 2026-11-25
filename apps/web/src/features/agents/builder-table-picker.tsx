@@ -3,7 +3,7 @@ import { Button } from '@tulipfarm/sprout/button';
 import { ChoiceGroup } from '@tulipfarm/sprout/field';
 import { SearchField } from '@tulipfarm/sprout/search-field';
 import { tableApi } from '@/features/tables/api';
-import { useTablePicker } from '@/features/tables/hooks';
+import { choosableTables, useTablePicker } from '@/features/tables/hooks';
 
 export function BuilderTablePicker({
   workspaceId,
@@ -40,7 +40,7 @@ export function BuilderTablePicker({
         </Button>
       </div>
     );
-  const tables = read.state.data;
+  const tables = choosableTables(read.state.data, value);
   const shown = tables.filter(table => table.definition.label.toLowerCase().includes(search.trim().toLowerCase()));
   return (
     <div className="grid min-w-0 gap-3">

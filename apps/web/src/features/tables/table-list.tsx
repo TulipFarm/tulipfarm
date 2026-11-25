@@ -48,7 +48,7 @@ export function TableList({
   const sort = order === 'name' ? byName : listSort(order);
   const pages = useCursorPages(JSON.stringify([query, archived, order]));
   const [draft, setDraft] = useUrlDraft(search.q ?? '', q => changeSearch({ q: q || undefined }));
-  const read = useTableList(api, pages.after, query || undefined, sort, archived);
+  const read = useTableList(api, pages.after, query || undefined, sort, archived, true);
   const open = useNavigate();
   const shelf = archived ? 'archived' : 'active';
   return (

@@ -366,10 +366,12 @@ export function tableApi(workspaceId: string) {
     search?: string,
     archived = false,
     sort?: TableListSort,
+    /** Leaves out the built-in Tasks table, which people see as Tasks, never as a table. */
+    hideTasks = false,
   ) {
     return tableListSchema.parse(
       await request(
-        `?limit=50${after ? `&after=${encodeURIComponent(after)}` : ''}${search ? `&search=${encodeURIComponent(search)}` : ''}${archived ? '&archived=true' : ''}${sort ? `&sort=${sort.by}&direction=${sort.direction}` : ''}`,
+        `?limit=50${after ? `&after=${encodeURIComponent(after)}` : ''}${search ? `&search=${encodeURIComponent(search)}` : ''}${archived ? '&archived=true' : ''}${sort ? `&sort=${sort.by}&direction=${sort.direction}` : ''}${hideTasks ? '&excludeSystem=tasks' : ''}`,
         signal,
       ),
     );
