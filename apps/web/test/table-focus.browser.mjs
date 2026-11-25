@@ -219,10 +219,14 @@ test('row panels restore keyboard focus through refreshes and missing controls',
       await focus(edit(first));
       await edit(first).click();
       records.delete(first);
+      await changed();
+      await edit(first).waitFor({ state: 'detached' });
       await close('Escape');
       await focus(edit(second));
       await edit(second).click();
       records.clear();
+      await changed();
+      await edit(second).waitFor({ state: 'detached' });
       await close('Escape');
       await focus(page.getByRole('region', { name: 'Customers', exact: true }));
       await page.goto(`${server.resolvedUrls.local[0]}acme/tables/${tableId}?q=Matching`);

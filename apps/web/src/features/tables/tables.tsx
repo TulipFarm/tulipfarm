@@ -402,7 +402,8 @@ export function Records({
       same ??
       edit(rowId) ??
       (rowId
-        ? controls.find(control => control.dataset.rowId === nearest[Math.min(index, nearest.length - 1)])
+        ? (edit(nearest[Math.min(index, nearest.length - 1)] ?? null) ??
+          controls.find(control => control.dataset.rowId === nearest[Math.min(index, nearest.length - 1)]))
         : add) ??
       region.current
     );
