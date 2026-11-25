@@ -308,10 +308,17 @@ export function TriggerList({
             <DropdownMenuContent align="end">
               <DropdownMenuGroup>
                 {addOrder.map(kind => (
-                  <DropdownMenuItem key={kind} onClick={() => add(kind)}>
+                  <DropdownMenuItem
+                    key={kind}
+                    aria-label={triggerKindNames[kind]}
+                    aria-describedby={`trigger-kind-desc-${kind}`}
+                    onClick={() => add(kind)}
+                  >
                     <span className="flex flex-col gap-0.5">
                       <span>{triggerKindNames[kind]}</span>
-                      <span className="text-xs text-muted-foreground">{triggerKindDescriptions[kind]}</span>
+                      <span id={`trigger-kind-desc-${kind}`} className="text-xs text-muted-foreground">
+                        {triggerKindDescriptions[kind]}
+                      </span>
                     </span>
                   </DropdownMenuItem>
                 ))}

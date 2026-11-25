@@ -108,14 +108,7 @@ export function ProjectScopeSelect({
         }
       >
         <Icon size={16} aria-hidden="true" />
-        {privateBadge ? (
-          <>
-            <span className="sm:hidden">Personal</span>
-            <span className="hidden truncate sm:inline">Personal chat</span>
-          </>
-        ) : (
-          <span className="truncate">{name}</span>
-        )}
+        <span className="truncate">{privateBadge ? 'Personal chat' : name}</span>
         <ChevronDownIcon size="xs" aria-hidden="true" />
       </PopoverTrigger>
       <PopoverContent size="picker" side={badge ? 'top' : 'bottom'} align="start" sideOffset={8}>
