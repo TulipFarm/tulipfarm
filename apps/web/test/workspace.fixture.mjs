@@ -34,6 +34,7 @@ export function workspaceShellReads(workspaceId) {
     // The sidebar's Recents section reads pinned chats and recent agents.
     [`${base}/conversations/pinned`, { chats: [] }],
     [`${base}/agents/recent`, []],
+    [`${base}/inbox`, { items: [], open: 0 }],
     [
       `${base}/bud`,
       {

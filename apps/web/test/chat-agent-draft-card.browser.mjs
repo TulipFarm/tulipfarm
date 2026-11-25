@@ -151,6 +151,7 @@ test(
             if (method === 'GET') return route.fulfill({ json: [] });
           }
           if (path === '/v1/feature-flags') return route.fulfill({ json: {} });
+          if (path.endsWith('/inbox')) return route.fulfill({ json: { items: [], open: 0 } });
           if (path.endsWith('/integrations')) return route.fulfill({ json: { integrations: [] } });
           if (path.endsWith('/github/accounts')) return route.fulfill({ json: { configured: true, accounts: [] } });
           if (path.endsWith(`/github/chats/${chatId}/selection`))

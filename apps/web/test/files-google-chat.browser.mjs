@@ -283,6 +283,7 @@ test(
             return route.fulfill({ json: { requests: [] } });
           if (path === `${base}/agent-tasks/${memo.id}`) return route.fulfill({ json: memo });
           if (method === 'GET' && path === '/v1/feature-flags') return route.fulfill({ json: {} });
+          if (method === 'GET' && path.endsWith('/inbox')) return route.fulfill({ json: { items: [], open: 0 } });
           if (path.endsWith('/last-used')) return route.fulfill({ status: 204 });
           if (path.endsWith('/bud'))
             return route.fulfill({

@@ -82,6 +82,7 @@ test('the integrations directory lists every app with one action per row', { tim
     else if (path === `${base}/workspace-mcp/capabilities`)
       json = { enabled: true, canManageShared: true, integrationsEnabled: true, dispatchEnabled: false };
     else if (path === `${base}/chatgpt/connection`) json = { connections: [] };
+    else if (path === `${base}/claude/connection`) json = { connections: [], deviceSignIn: false };
     else if (path === `${base}/workspace-mcp/integrations`) json = { integrations: [] };
     else if (path === `${base}/workspace-mcp/catalog`) {
       catalogSearches.push(url.searchParams.get('search'));

@@ -142,6 +142,7 @@ test(
           if (method === 'GET') return route.fulfill({ json: [] });
         }
         if (path === '/v1/feature-flags') return route.fulfill({ json: {} });
+        if (path.endsWith('/inbox')) return route.fulfill({ json: { items: [], open: 0 } });
         throw new Error(`Unexpected API request ${method} ${path}`);
       });
 

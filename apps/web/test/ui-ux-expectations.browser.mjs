@@ -76,6 +76,7 @@ function fixture(state) {
     if (p.endsWith('/events')) return send({ error: 'unavailable' }, 503);
     if (p.endsWith('/conversations')) return send({ chats: [], nextCursor: null });
     if (p.endsWith('/agent-tasks')) return send({ tasks: [], nextCursor: null });
+    if (p.endsWith('/inbox')) return send({ items: [], open: 0 });
     if (p.endsWith('/files')) return send({ items: url.searchParams.has('query') ? [file] : [] });
     if (p.endsWith('/files/suggestions')) return send({ items: [file], next: null });
     if (p.endsWith('/workflows')) return send([]);
@@ -145,19 +146,11 @@ async function evidence(page, name, check) {
   }
 }
 
-test('a direct inbox link explains where waiting work lives today', async () => {
+test('a direct inbox link opens an empty Inbox', async () => {
   const { page, errors, close } = await open('/acme/inbox');
   await evidence(page, 'a18-inbox', async () => {
-    await page.getByRole('heading', { level: 1, name: 'Inbox isn’t available yet' }).waitFor();
-    await page.getByText(/no single inbox yet/).waitFor();
-    for (const [name, href] of [
-      ['Open tasks', '/acme/agent-tasks'],
-      ['Open workflows', '/acme/workflows'],
-      ['Open chats', '/acme/chat'],
-    ]) {
-      // Sprout Button with nativeButton={false} keeps the link role (pages/workspace.tsx:394-396).
-      assert.equal(await page.getByRole('link', { name, exact: true }).getAttribute('href'), href);
-    }
+    await page.getByRole('heading', { level: 1, name: 'Inbox', exact: true }).waitFor();
+    await page.getByText('Nothing needs you', { exact: true }).waitFor();
   });
   assert.deepEqual(errors, []);
   await close();
@@ -173,8 +166,14 @@ test('the inbox keeps its own title while the next page is still loading', async
     await held;
     await route.continue();
   });
-  await page.getByRole('heading', { level: 1, name: 'Inbox isn’t available yet' }).waitFor();
-  await page.getByRole('link', { name: 'Open tasks', exact: true }).click();
+  await page.getByRole('heading', { level: 1, name: 'Inbox', exact: true }).waitFor();
+  await page
+    .locator('[data-sprout-sidebar]')
+    .getByRole('button', { name: /^Search/ })
+    .click();
+  const search = page.getByRole('dialog', { name: 'Search workspace', exact: true });
+  await search.getByPlaceholder('Search chats, tables, agents, pages…').fill('My agent tasks');
+  await search.getByRole('option', { name: /^My agent tasks/ }).click();
   await page.waitForURL(`${origin}/acme/agent-tasks`);
   await evidence(page, 'a18-inbox-leaving', async () => {
     // The lazy page shows the router's pending state, which has no page title (cloud 5e16bb45 #346, router.tsx:487-488).
@@ -187,14 +186,13 @@ test('the inbox keeps its own title while the next page is still loading', async
     await delay(100);
   }
   assert.deepEqual(
-    headings.filter(text => text !== 'Inbox isn’t available yet'),
+    headings.filter(text => text !== 'Inbox'),
     [],
     'no other page name appears in the inbox panel while the next page loads',
   );
   release();
   await evidence(page, 'a18-inbox-destination', async () => {
     await page.getByRole('heading', { level: 1, name: 'Agent runs', exact: true }).waitFor();
-    assert.equal(await page.getByText(/isn’t available yet/).count(), 0);
   });
   assert.deepEqual(errors, []);
   await close();
