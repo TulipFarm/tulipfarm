@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BrowserHostError } from '@tulipfarm/browser';
 import { SecretError } from '@tulipfarm/secrets';
-import { invokeBrowser, runBrowserCall } from '../src/browser-tools.ts';
+import { findBrowserFolder, invokeBrowser, runBrowserCall } from '../src/browser-tools.ts';
 import { withBrowserGrant } from '../src/tool-capabilities.ts';
 import { outboundRefusal } from '../src/mcp-catalog-egress.ts';
 import { discoverToolNames, isExternalTool } from '../src/tools.ts';
@@ -517,4 +517,77 @@ test('A step queued behind busy browsers tells the agent its place and to wait',
     action: { action: 'snapshot' },
   });
   assert.deepEqual(output.result, { error: 'browser-busy', message, instruction: 'Wait a minute, then try again.' });
+});
+
+test('A run saves downloads to the folder its task names, and leaves them in the browser when no one folder matches', async () => {
+  const downloads = [{ id: '1d2c3b4a-5e6f-4a7b-8c9d-0e1f2a3b4c5d', name: 'report.csv', size: 4 }];
+  let taken = 0;
+  const { client } = fakeClient({
+    state: async () => state,
+    act: async () => ({ state, snapshot: '', truncated: false, downloads }),
+    download: async () => (taken++, { name: 'report.csv', bytes: new TextEncoder().encode('a,b\n') }),
+  });
+  const folderId = '7e6d5c4b-3a2f-4e1d-9c8b-7a6f5e4d3c2b';
+  const { files, calls: fileCalls } = fakeFiles(() => ({ error: 'file-not-allowed' }));
+  const lookups = [];
+  files.folder = async name => (
+    lookups.push(name),
+    name === 'Invoices' ? { id: folderId } : { error: 'folder-not-found', instruction: 'No such folder.' }
+  );
+  const run = { client, sessionId: 'run-session', mode: 'task', imageInput: false, files };
+  const act = extra => runBrowserCall(run, { tool: 'browser.act', action: { action: 'click', ref: 'e4' }, ...extra });
+
+  const named = await act({ folderName: 'Invoices' });
+  assert.deepEqual(
+    named.result.files.map(file => file.name),
+    ['report.csv'],
+  );
+  assert.equal(fileCalls.find(call => call[0] === 'save')[2], folderId);
+
+  const missing = await act({ folderName: 'Receipts' });
+  assert.deepEqual(missing.result.downloadsNotSaved, [
+    { name: 'report.csv', error: 'folder-not-found', instruction: 'No such folder.' },
+  ]);
+  assert.equal(taken, 1, 'a download with no folder stays on the host for a later step');
+
+  await act({ folderId, folderName: 'Receipts' });
+  assert.deepEqual(lookups, ['Invoices', 'Receipts'], 'an id wins over a name');
+});
+
+test('A folder name must pick out one folder the run owner can add to', async () => {
+  const folders = [
+    { id: 'a', kind: 'folder', name: 'Invoices', role: 'manager', parentName: null },
+    { id: 'b', kind: 'folder', name: 'Invoices 2026', role: 'manager', parentName: null },
+    { id: 'c', kind: 'folder', name: 'Team', role: 'viewer', parentName: null },
+    { id: 'd', kind: 'folder', name: 'team', role: 'viewer', parentName: 'Shared' },
+    { id: 'e', kind: 'file', name: 'Shared', role: 'editor', parentName: null },
+    { id: 'f', kind: 'folder', name: 'Shared', role: 'editor', parentName: 'Ops' },
+    { id: 'g', kind: 'folder', name: 'Shared', role: 'manager', parentName: null },
+  ];
+  const queries = [];
+  const library = {
+    library: async (_workspaceId, _userId, query) => (
+      queries.push(query),
+      {
+        items:
+          query.section === 'mine'
+            ? folders.filter(item => item.name.toLowerCase().includes(query.query.toLowerCase()))
+            : [],
+      }
+    ),
+  };
+  const find = name => findBrowserFolder(library, 'w', 'u', name);
+  assert.deepEqual(await find(' invoices '), { id: 'a' });
+  assert.deepEqual(
+    queries.slice(0, 2).map(query => [query.section, query.query, query.filters.type]),
+    [
+      ['mine', 'invoices', 'folder'],
+      ['shared', 'invoices', 'folder'],
+    ],
+  );
+  assert.equal((await find('Team')).error, 'folder-read-only');
+  assert.equal((await find('Receipts')).error, 'folder-not-found');
+  const several = await find('Shared');
+  assert.equal(several.error, 'folder-ambiguous');
+  assert.match(several.instruction, /f \(in Ops\), g\./);
 });

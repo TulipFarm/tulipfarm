@@ -11,7 +11,16 @@ export const browserCallSchemas = [
       .uuid()
       .optional()
       .describe(
-        "The Files folder for files this step downloads. In a chat, omit it to save them to the person's files. In a run, set it to a folder the run's owner can add to whenever the step may download a file; without it, downloads are not saved.",
+        "The Files folder for files this step downloads. In a chat, omit it to save them to the person's files. In a run, set it or folderName to a folder the run's owner can add to whenever the step may download a file; without either, downloads are not saved.",
+      ),
+    folderName: z
+      .string()
+      .trim()
+      .min(1)
+      .max(255)
+      .optional()
+      .describe(
+        "In a run, the name of the Files folder for files this step downloads, as the task names it, when you do not have its id. It must name exactly one folder the run's owner can add to. Ignored when folderId is set.",
       ),
   }),
   z.strictObject({

@@ -96,8 +96,10 @@ import { withBrowserGrant } from './tool-capabilities.ts';
 import { browserSessionId, type BrowserHostClient } from '@tulipfarm/browser';
 import {
   runBrowserCall,
+  findBrowserFolder,
   saveBrowserDownload,
   type BrowserFiles,
+  type FolderLibrary,
   type BrowserMeter,
   type BrowserSecrets,
 } from './browser-tools.ts';
@@ -180,7 +182,7 @@ export type TaskBrowser = {
    * Files, where downloads are saved to the folder a call names and from which `browser.upload` reads the files
    * attached to the run or saved by it, as the run's owner. Without it, runs neither save downloads nor upload.
    */
-  files?: FileOutputStore | undefined;
+  files?: (FileOutputStore & FolderLibrary) | undefined;
   /** Loads a browser login into a session; throws when the run's owner may not use it. */
   loadLogin?:
     | ((input: { workspaceId: string; actor: HumanActor; sessionId: string; loginId: string }) => Promise<void>)
@@ -410,7 +412,7 @@ export function createAgentExecutor(options: Options) {
    * the owner, only a file attached to the task or saved by one of its own calls.
    */
   function taskBrowserFiles(
-    files: FileOutputStore,
+    files: FileOutputStore & FolderLibrary,
     ids: ExecutionIds,
     actor: HumanActor,
     taskId: string,
@@ -457,6 +459,7 @@ export function createAgentExecutor(options: Options) {
           download,
           folderId,
         ),
+      folder: name => findBrowserFolder(files, workspaceId, actor.userId, name),
     };
   }
 
