@@ -104,7 +104,7 @@ const refreshTokens = n => ({
   refresh_token: `refresh-${n}`,
   refresh_token_expires_in: 15811200,
 });
-async function setup(t, mcpSlots, { refreshable = false, read } = {}) {
+async function setup(t, mcpSlots, { refreshable = false, read, tools = [] } = {}) {
   const f = await githubFixture();
   if (refreshable)
     f.setBehavior(async (url, init) =>
@@ -119,7 +119,13 @@ async function setup(t, mcpSlots, { refreshable = false, read } = {}) {
     actor.userId,
     actor.membershipId,
     [],
-    ['github.personal.account', 'github.personal.read', 'github.personal.propose', 'github.personal.download'],
+    [
+      'github.personal.account',
+      'github.personal.read',
+      'github.personal.propose',
+      'github.personal.download',
+      ...tools,
+    ],
     mcpSlots,
   );
   await createAgentExecutor({ runtime: f.runtime }).configure(
@@ -282,6 +288,38 @@ test('task account is explicitly selected and exact GitHub batch survives a resu
   assert.equal(f.effects[0].title, 'Task issue');
   assert.equal(await f.executor.execute(proposal), 'completed');
   assert.equal(f.effects.length, 1);
+});
+
+test('a GitHub read waits instead of being denied when a parallel batch call settles the shared reservation', async t => {
+  const f = await setup(t, undefined, { tools: ['skills.read'] });
+  await f.select();
+  const skill = await f.queue({ tool: 'skills.read', skillId: 'agent-authoring' });
+  const read = await f.queue(repositoryRead);
+  const skillCompleted = async () => {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const row = await f.db.platform.query(`SELECT status FROM ${f.table('tf_agent_tool_calls')} WHERE id=$1`, [
+        skill.callId,
+      ]);
+      if (row.rows[0].status === 'completed') return;
+      await delay(25);
+    }
+    throw new Error('skills.read did not finish');
+  };
+  const executor = createAgentExecutor({
+    runtime: f.runtime,
+    github: runtime => {
+      const tools = createGitHubTaskTools({ ...f.options, runtime, accounts: f.makeService({ runtime }) });
+      return {
+        execute: async input => {
+          await skillCompleted();
+          return tools.execute(input);
+        },
+      };
+    },
+  });
+  assert.deepEqual(await executor.executeBatch([skill, read]), ['completed', 'waiting']);
+  assert.equal(await executor.execute(read), 'completed');
+  assert.equal((await executor.readResult(read, f.actor)).result.data.data.name, 'private');
 });
 
 test('task cancellation, changed account generation, and cross-origin access reject pending batches', async t => {
