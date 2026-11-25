@@ -1268,26 +1268,26 @@ try {
   await page.getByRole('option', { name: 'Open', exact: true }).click();
   await page.getByRole('checkbox', { name: 'Urgent', exact: true }).click();
   await page.getByLabel('Reported at', { exact: true }).fill('2026-10-02T12:30');
-  await page.getByLabel('Search rows for Customer', { exact: true }).fill('glob');
+  const customer = page.getByRole('combobox', { name: 'Choose or search customer', exact: true });
+  await customer.fill('glob');
   await delay(400);
-  await page.getByRole('combobox', { name: 'Choose customer', exact: true }).click();
   await page.getByRole('option', { name: 'Globex (row 1 on this page)', exact: true }).waitFor();
   await page.getByRole('option', { name: 'Globex (row 2 on this page)', exact: true }).waitFor();
-  await page.keyboard.press('Escape');
   assert.ok(
     customerReads.some(query => query.get('search') === 'glob'),
     'Row search runs on the server',
   );
-  await page.getByLabel('Search rows for Customer', { exact: true }).fill('nobody');
+  await customer.fill('nobody');
   await page.getByText('No rows match “nobody”.', { exact: true }).waitFor();
-  await page.getByLabel('Search rows for Customer', { exact: true }).fill('');
+  await customer.fill('');
   await delay(400);
-  await page.getByRole('combobox', { name: 'Choose customer', exact: true }).click();
   await page.getByRole('option', { name: 'Acme customer', exact: true }).click();
-  await page
-    .getByRole('list', { name: 'Rows linked from Customer', exact: true })
-    .getByText('Acme customer', { exact: true })
-    .waitFor();
+  assert.equal(await customer.inputValue(), 'Acme customer', 'One picker shows the chosen row');
+  assert.equal(
+    await page.getByLabel('Search rows for Customer', { exact: true }).count(),
+    0,
+    'A one-row link has no separate search box',
+  );
   await page
     .getByRole('list', { name: 'Recent files', exact: true })
     .getByText('contract.pdf', { exact: true })
@@ -1661,7 +1661,7 @@ try {
   fileReads.length = 0;
   await tableChange();
   await page.getByRole('cell', { name: 'File unavailable', exact: true }).waitFor();
-  await page.getByRole('cell', { name: 'Row unavailable', exact: true }).waitFor();
+  await page.getByRole('cell', { name: 'Row unavailable Edit Customer', exact: true }).waitFor();
   assert.equal(
     (await page.getByText(hiddenFileId).count()) + (await page.getByText(missingCustomerId).count()),
     0,
@@ -1695,13 +1695,12 @@ try {
   await rowAction('Edit row');
   const evidence = page.getByRole('list', { name: 'Files attached to Evidence', exact: true });
   await evidence.getByText('File unavailable', { exact: true }).waitFor();
-  await page
-    .getByRole('list', { name: 'Rows linked from Customer', exact: true })
-    .getByText('Row unavailable', { exact: true })
-    .waitFor();
+  const unavailableCustomer = page.getByRole('combobox', { name: 'Choose or search customer', exact: true });
+  assert.equal(await unavailableCustomer.inputValue(), 'Row unavailable', 'The picker names an unavailable row');
   await page.getByRole('button', { name: 'Remove file 1 from Evidence', exact: true }).click();
   await page.getByText('No files attached.', { exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Remove linked row 1 from Customer', exact: true }).click();
+  await unavailableCustomer.click();
+  await page.getByRole('option', { name: 'Not set', exact: true }).click();
   await page.getByRole('button', { name: 'Save row', exact: true }).click();
   await page.getByRole('dialog', { name: 'Edit row', exact: true }).waitFor({ state: 'detached' });
   assert.deepEqual(

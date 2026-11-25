@@ -40,6 +40,7 @@ import {
 } from './hooks';
 import { RecordMutationFeedback, useRecordMutation } from './record-mutation';
 import { RecordHistory } from './record-history';
+import { InlineCell } from './inline-cell';
 import { fileIdsOf, ReferenceRetry, TableValueView, useFileNames, type TableWorkspace } from './references';
 import { TableMore, UnarchiveTable, useWideTableHeader } from './table-more';
 import { tableApi, type RowPermissions, type TableDataRow, type TableDefinition, type TableApi } from './api';
@@ -376,7 +377,6 @@ export function Records({
     refreshing ||
     exporting ||
     read.state.kind !== 'ready' ||
-    !!read.state.error ||
     read.state.refreshing ||
     data?.mode === 'invalid';
   const finalFocus = () => {
@@ -683,18 +683,31 @@ export function Records({
                 </TableCell>
                 {gridColumns.map(field => (
                   <TableCell key={field.id}>
-                    <TableValueView
-                      compact
-                      withPhoto={photoInName}
+                    <InlineCell
+                      field={field}
                       record={record}
-                      systemKind={systemKind}
-                      value={record.values[field.id]}
-                      definition={table.definition}
-                      fieldId={field.id}
-                      linked={linked.state}
-                      files={files.state}
-                      unavailableFileIds={record.unavailableFileIds}
+                      table={table}
+                      api={api}
                       workspace={workspace}
+
+                      disabled={!permissions.update || locked || editing}
+                      openFull={element => select({ kind: 'edit', record }, element)}
+                      saved={setNotice}
+                      valueView={
+                        <TableValueView
+                          compact
+                          withPhoto={photoInName}
+                          record={record}
+                          systemKind={systemKind}
+                          value={record.values[field.id]}
+                          definition={table.definition}
+                          fieldId={field.id}
+                          linked={linked.state}
+                          files={files.state}
+                          unavailableFileIds={record.unavailableFileIds}
+                          workspace={workspace}
+                        />
+                      }
                     />
                   </TableCell>
                 ))}
