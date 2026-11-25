@@ -23,6 +23,7 @@ const systemActorLabels = {
   'workspace-member-profile': 'TulipFarm profile sync',
   'workspace-member-access': 'Workspace access update',
   'row-assignment': 'Assignment run',
+  'welcome-task': 'TulipFarm',
 } as const;
 
 const actorSchema = z.discriminatedUnion('kind', [
@@ -30,7 +31,7 @@ const actorSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('agent'), agentId: z.string() }),
   z.object({
     kind: z.literal('system'),
-    operation: z.enum(['workspace-member-profile', 'workspace-member-access', 'row-assignment']),
+    operation: z.enum(['workspace-member-profile', 'workspace-member-access', 'row-assignment', 'welcome-task']),
   }),
 ]);
 /** Each column reads the field id; the cells look up current, historical and restored values. */

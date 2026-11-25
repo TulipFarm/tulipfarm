@@ -9,11 +9,14 @@ const inboxSchema = z.object({
   items: z.array(
     z.object({
       id: z.uuid(),
-      kind: z.enum(['assigned', 'waiting', 'finished', 'mention']),
+      kind: z.enum(['assigned', 'waiting', 'finished', 'mention', 'reminder']),
       tableId: z.uuid(),
       tableName: z.string(),
       rowId: z.uuid(),
       taskId: z.uuid().optional(),
+      reminderId: z.uuid().optional(),
+      /** The task's key, such as TUL-007, for items about a task. */
+      taskKey: z.string().optional(),
       summary: z.string().nullable(),
       createdAt: z.string(),
     }),

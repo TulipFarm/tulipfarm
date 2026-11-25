@@ -77,7 +77,23 @@ import { createSkillImports, skillImportSummary } from './skill-imports.ts';
 import type { SkillExecutionFactory } from './skill-execution.ts';
 import { skillImportInputSchema, skillImportSelectionSchema } from './skill-import-contracts.ts';
 import { SkillPackageError } from './skill-package-contracts.ts';
-import { currentActivation, relation, type AgentStorage } from './store.ts';
+import { agentCompatibility, currentActivation, relation, type AgentStorage, type AgentTransaction } from './store.ts';
+import { createRowWork } from './row-work.ts';
+import { TaskReminderError, tasksTableId } from './task-reminders.ts';
+import {
+  getTask,
+  listTasks,
+  readableTasks,
+  taskOfKey,
+  taskReadTools,
+  taskToolCallSchemas,
+  taskToolDescriptions,
+  taskToolNames,
+  TaskToolError,
+  taskValues,
+  tasksTableRefusal,
+  type TaskToolCall,
+} from './task-tools.ts';
 import { fetchPublicText, searchPublicWeb } from './web-fetch.ts';
 import { inspectMarketplacePackage } from './package-inspection.ts';
 import { listSkills, readSkill } from './skills.ts';
@@ -134,7 +150,9 @@ import { chatTableDefinitions, guessedChatTable } from './chat-table-lookup.ts';
 import { createTableService } from '@tulipfarm/tables/service';
 import { TableError } from '@tulipfarm/tables/service-contracts';
 import { TableValidationError } from '@tulipfarm/tables/definition';
-import { GenerationError } from '@tulipfarm/tables/store';
+import { GenerationError, readRecord } from '@tulipfarm/tables/store';
+import { formatTaskKey, taskNumberOf } from '@tulipfarm/tables/task-keys';
+import { taskFields } from '@tulipfarm/tables/tasks-table';
 import { WorkspaceMemberError, type workspaceMemberErrorCodeSchema } from '@tulipfarm/tables/workspace-members';
 import { executionCompatibility } from '@tulipfarm/tables/execution';
 import {
@@ -595,6 +613,7 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
   scheduleFollowUpCallSchema,
   listFollowUpsCallSchema,
   cancelFollowUpCallSchema,
+  ...taskToolCallSchemas,
   ...appToolCallSchemas,
   ...appPageToolCallSchemas,
 ]);
@@ -686,6 +705,7 @@ export const readOnlyTools: ReadonlySet<ToolName> = new Set([
   'integrations.list',
   'plans.read',
   'followups.list',
+  ...taskReadTools,
   'apps.status',
   'apps.files.list',
   'apps.files.read',
@@ -752,6 +772,7 @@ export const conversationPlanning: ConversationPlanning = {
       : null,
 };
 const descriptions: Record<ToolName, string> = {
+  ...taskToolDescriptions,
   ...appToolDescriptions,
   ...browserToolDescriptions,
   ...appPageToolDescriptions,
@@ -1065,6 +1086,7 @@ function admittedToolSchemas(access: ToolAccess) {
         const kind = appToolKinds.get(schema.shape.tool.value);
         return !kind || (access.kind === 'chat' && access.apps === kind);
       })
+      .filter(schema => !taskToolNames.has(schema.shape.tool.value) || access.kind === 'chat')
       // Follow-ups belong to the chat or Slack thread a person asked in, so only a chat reply offers them.
       .filter(schema => !schema.shape.tool.value.startsWith('followups.') || access.kind === 'chat')
       // Projects belong to the person in this chat; saved agent runs cannot cite project sources.
@@ -3186,7 +3208,14 @@ export function createChatTools(
       case 'browser.handoff':
       case 'browser.signIn':
       case 'browser.upload':
-        // Sub-agents and the browser run outside a transaction through invokeWithSources.
+      case 'tasks.list':
+      case 'tasks.get':
+      case 'tasks.create':
+      case 'tasks.update':
+      case 'tasks.assign':
+      case 'tasks.comment':
+      case 'tasks.remind':
+        // Sub-agents, the browser and Tasks run outside a transaction through invokeWithSources.
         throw new AccessDenied();
       default:
         return registry.invoke(context, call);
@@ -3728,6 +3757,189 @@ export function createChatTools(
     return { result, sources };
   }
 
+  /** The Tasks table's ID when chat must use the tasks.* tools for it, or null. */
+  async function chatTasksTable(context: Parameters<typeof invoke>[0]) {
+    if (!context.origin) return null;
+    return withHuman(runtime, context.workspaceId, context.actor, 'read', tx => tasksTableId(tx));
+  }
+  async function invokeTasks(
+    context: Parameters<typeof invoke>[0],
+    call: TaskToolCall,
+  ): Promise<{ result: unknown; sources: SourceDependency[] }> {
+    const { workspaceId, actor } = context;
+    if (!context.origin)
+      return {
+        result: { error: 'tasks-unavailable', instruction: 'Tasks tools are not available here. Nothing was changed.' },
+        sources: [],
+      };
+    const origin = context.origin;
+    const rowWork = createRowWork(runtime, agentCompatibility);
+    const read = <T>(operation: (tx: AgentTransaction) => Promise<T>) =>
+      withHuman(runtime, workspaceId, actor, 'read', tx => operation(tx));
+    const failure = (error: unknown) => {
+      if (error instanceof TaskToolError) return { result: error.result, sources: [] };
+      if (error instanceof TaskReminderError)
+        return {
+          result: {
+            error: error.code,
+            instruction: taskReminderInstructions[error.code] ?? 'The reminder was not changed.',
+          },
+          sources: [],
+        };
+      throw error;
+    };
+    const untrusted = async () =>
+      usedUntrustedContent([...origin.sources, ...(origin.files ?? [])], actor) ||
+      (await importedSkillPackages(workspaceId, actor, origin.conversationId));
+    try {
+      switch (call.tool) {
+        case 'tasks.list': {
+          const { tableId, revision, ...result } = await read(tx => listTasks(tx, actor, call));
+          return { result, sources: [{ kind: 'table-rows', tableId, revision }] };
+        }
+        case 'tasks.get':
+          return await read(async tx => {
+            const task = await taskOfKey(tx, actor, call.key);
+            return {
+              result: await getTask(tx, actor, call.key),
+              sources: [{ kind: 'table-rows', tableId: task.tableId, revision: task.generation.revision }],
+            };
+          });
+        case 'tasks.create':
+        case 'tasks.update':
+        case 'tasks.assign': {
+          const target = await read(async tx => {
+            const task = call.tool === 'tasks.create' ? null : await taskOfKey(tx, actor, call.key);
+            const tasks = task ?? (await readableTasks(tx, actor));
+            return {
+              tableId: tasks.tableId,
+              revision: tasks.generation.revision,
+              record: task?.record ?? null,
+              values: await taskValues(tx, tasks.tableId, call),
+            };
+          });
+          if (call.tool === 'tasks.update' && !Object.keys(target.values).length)
+            throw new TaskToolError('nothing-to-change', 'Name at least one thing to change.');
+          const parsed = frameworkCallSchema.safeParse(
+            target.record
+              ? {
+                  tool: 'rows.update',
+                  tableId: target.tableId,
+                  expectedAppliedRevision: target.revision,
+                  recordId: target.record.id,
+                  expectedToken: target.record.token,
+                  values: target.values,
+                }
+              : {
+                  tool: 'rows.create',
+                  tableId: target.tableId,
+                  expectedAppliedRevision: target.revision,
+                  values: target.values,
+                },
+          );
+          if (!parsed.success)
+            throw new TaskToolError(
+              'invalid-values',
+              `The task values are not valid: ${z.prettifyError(parsed.error)}. Use field IDs and value shapes from tasks.get.`,
+            );
+          taskRowCalls.add(parsed.data);
+          const written = await invokeWithSources(context, parsed.data);
+          const rowId = target.record?.id ?? context.callId;
+          const key = await read(async tx => {
+            const tasks = await readableTasks(tx, actor);
+            const number = await taskNumberOf(tx, tasks.tableId, rowId);
+            return number !== null && (await readRecord(tx, tasks.generation, rowId)) ? formatTaskKey(number) : null;
+          });
+          const result: Record<string, unknown> = {
+            ...(written.result && typeof written.result === 'object' ? written.result : { result: written.result }),
+            ...(key && { key }),
+          };
+          if (call.tool === 'tasks.create' && call.reminder) {
+            const assignee = call.assignee?.startsWith('member:') ? call.assignee.slice('member:'.length) : null;
+            if (!key)
+              result.reminder = {
+                error: 'reminder-not-set',
+                instruction: 'Set the reminder with tasks.remind once the task exists.',
+              };
+            else if (!assignee)
+              result.reminder = { error: 'reminder-target', instruction: 'A reminder needs a person assignee.' };
+            else
+              result.reminder = await rowWork
+                .createReminder(workspaceId, actor.userId, target.tableId, rowId, {
+                  membershipId: assignee,
+                  ...call.reminder,
+                })
+                .then(
+                  reminders => ({ set: true, reminders: reminders.reminders.filter(item => item.status === 'active') }),
+                  error => failure(error).result,
+                );
+          }
+          return { result, sources: written.sources };
+        }
+        case 'tasks.comment':
+        case 'tasks.remind': {
+          const task = await read(async tx => {
+            const found = await taskOfKey(tx, actor, call.key);
+            return {
+              tableId: found.tableId,
+              rowId: found.record.id,
+              key: found.key,
+              revision: found.generation.revision,
+              assignee: (() => {
+                const value = found.record.values[taskFields.assignee];
+                return value?.kind === 'actor' && value.actor.type === 'member' ? value.actor.id : null;
+              })(),
+            };
+          });
+          const sources: SourceDependency[] = [{ kind: 'table-rows', tableId: task.tableId, revision: task.revision }];
+          if (await untrusted())
+            return {
+              result: {
+                error: 'review-unavailable',
+                instruction:
+                  'Nothing was changed. This chat used outside content, so task comments and reminders are unavailable here. Ask the person to make the change on the task.',
+              },
+              sources: [],
+            };
+          if (call.tool === 'tasks.comment') {
+            await rowWork.comment(workspaceId, actor.userId, task.tableId, task.rowId, {
+              body: call.body,
+              mentions: call.mentions ?? [],
+            });
+            return { result: { key: task.key, posted: true }, sources };
+          }
+          if (call.action === 'cancel') {
+            if (!call.reminderId)
+              throw new TaskToolError('reminder-required', 'Give the reminderId from tasks.get to cancel.');
+            await rowWork.cancelReminder(workspaceId, actor.userId, task.tableId, task.rowId, call.reminderId);
+            return { result: { key: task.key, cancelled: call.reminderId }, sources };
+          }
+          const membershipId = call.membershipId ?? task.assignee;
+          if (!membershipId || !call.schedule)
+            throw new TaskToolError(
+              'reminder-input',
+              'Give a schedule, and a membershipId when the task has no person assignee.',
+            );
+          const reminders = await rowWork.createReminder(workspaceId, actor.userId, task.tableId, task.rowId, {
+            membershipId,
+            schedule: call.schedule,
+            ...(call.timeZone && { timeZone: call.timeZone }),
+          });
+          return {
+            result: {
+              key: task.key,
+              set: true,
+              reminders: reminders.reminders.filter(item => item.status === 'active'),
+            },
+            sources,
+          };
+        }
+      }
+    } catch (error) {
+      return failure(error);
+    }
+  }
+
   async function invokeWithSources(context: Parameters<typeof invoke>[0], call: FrameworkCall) {
     if (context.origin)
       await withHuman(runtime, context.workspaceId, context.actor, 'read', tx =>
@@ -3735,6 +3947,16 @@ export function createChatTools(
       );
     if (call.tool === 'followups.schedule' || call.tool === 'followups.list' || call.tool === 'followups.cancel')
       return invokeFollowUp(context, call);
+    if (taskToolNames.has(call.tool)) return invokeTasks(context, call as TaskToolCall);
+    if (
+      context.origin &&
+      tasksRefusedTools.has(call.tool) &&
+      !taskRowCalls.has(call) &&
+      'tableId' in call &&
+      typeof call.tableId === 'string' &&
+      call.tableId.toLowerCase() === (await chatTasksTable(context))
+    )
+      return { result: tasksTableRefusal, sources: [] };
     if (call.tool === 'agents.delegate') {
       if (!subagents || !context.origin || telemetryRuntime !== 'chat') throw new AccessDenied();
       return subagents({ ...context, origin: context.origin }, delegateCallSchema.parse(call));
@@ -3972,6 +4194,12 @@ export function createChatTools(
         };
       }
       throw error;
+    }
+    if (context.origin && (call.tool === 'tables.list' || call.tool === 'tables.definitions')) {
+      const tasksTable = await chatTasksTable(context);
+      const listed = z.looseObject({ tables: z.array(z.looseObject({ id: z.string() })) }).safeParse(result);
+      if (tasksTable && listed.success)
+        result = { ...listed.data, tables: listed.data.tables.filter(table => table.id !== tasksTable) };
     }
     if (context.origin && call.tool === 'tables.definitions')
       result = await chatTableDefinitions(
@@ -4327,6 +4555,18 @@ const tableIdTools = new Set([
   'rows.reverse',
   'rows.get',
 ]);
+/** Chat refuses these for the Tasks table and points to the tasks.* tools. */
+const tasksRefusedTools: ReadonlySet<string> = new Set([...tableIdTools, 'rows.page', 'schema.context']);
+/** Row calls a tasks.* tool made itself, which may write the Tasks table. */
+const taskRowCalls = new WeakSet<object>();
+const taskReminderInstructions: Partial<Record<string, string>> = {
+  'reminder-target': 'Only the person assignee or a member mentioned in a comment on the task can be reminded.',
+  'reminder-limit': 'This task already has 5 active reminders. Cancel one first.',
+  'reminder-in-past': 'A one-time reminder must be in the future.',
+  'unknown-time-zone': 'Use an IANA time zone such as Europe/London.',
+  'tasks-upgrading': 'Tasks are being upgraded. Tell the person and try again later.',
+  'not-a-task': 'This row is not a task.',
+};
 const tableImportTools = new Set([
   'tables.import.attachments',
   'tables.import.file',

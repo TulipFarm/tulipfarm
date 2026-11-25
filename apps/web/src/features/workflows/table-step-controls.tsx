@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { Definition, TableStep } from '@tulipfarm/workflows/contracts';
 import { tableApi, type TableDefinition } from '@/features/tables/api';
-import { useTablePicker } from '@/features/tables/hooks';
+import { choosableTables, useTablePicker } from '@/features/tables/hooks';
 import { Button } from '@tulipfarm/sprout/button';
 import { Field } from '@tulipfarm/sprout/field';
 import { Input } from '@tulipfarm/sprout/input';
@@ -155,7 +155,7 @@ export function TableStepControls({
 }) {
   const api = useMemo(() => tableApi(workspaceId), [workspaceId]);
   const read = useTablePicker(api);
-  const tables = read.state.kind === 'ready' ? read.state.data : [];
+  const tables = read.state.kind === 'ready' ? choosableTables(read.state.data, step.tableId) : [];
   const table = tables.find(item => item.id === step.tableId);
   const fields = table?.definition.fields ?? [];
   const changeTable = (tableId: string) => {

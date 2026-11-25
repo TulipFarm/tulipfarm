@@ -1,13 +1,15 @@
 import { ChatIcon } from '@tulipfarm/icons';
-import { Link } from '@tanstack/react-router';
+import { Link, Navigate } from '@tanstack/react-router';
 import { z } from 'zod';
-import { tableDetailRoute, tableEditRoute, tasksRoute, workspaceRoute } from '@/router';
+import { tableDetailRoute, tableEditRoute, taskRoute, tasksRoute, workspaceRoute } from '@/router';
 import { Button } from '@tulipfarm/sprout/button';
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { CreateInChatSample, StatePanel } from '@tulipfarm/sprout/state-panel';
 import { TableDetail } from '@/features/tables/tables';
 import { TaskBoard } from '@/features/task-board/task-board';
+import { canonicalTaskKey } from '@/features/task-board/task-api';
+import { TaskView } from '@/features/task-board/task-page';
 import { TableRequestError } from '@/features/tables/request-state';
 import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson, responseError } from '@/lib/http';
@@ -18,6 +20,18 @@ export function TableDetailPage() {
   const { workspace, sessionId } = workspaceRoute.useRouteContext();
   const search = tableDetailRoute.useSearch();
   const navigate = tableDetailRoute.useNavigate();
+  const tasks = useTasksTableId(workspace.id);
+  if (tasks.kind === 'loading') return null;
+  // Tasks never show as a table; its rows open as tasks.
+  if (tasks.kind === 'ready' && tasks.data === tableId)
+    return (
+      <Navigate
+        to="/$workspaceSlug/tasks"
+        params={{ workspaceSlug: workspace.slug }}
+        search={search.row ? { task: search.row } : {}}
+        replace
+      />
+    );
   return (
     <PageContent>
       <TableDetail
@@ -49,16 +63,25 @@ async function readTasksTable(workspaceId: string, signal: AbortSignal) {
   return tasksTableSchema.parse(value).tableId;
 }
 
-/** The workspace's built-in Tasks table as a live board of who is doing what. */
+const useTasksRead = (workspaceId: string) =>
+  useFeatureRead({
+    key: ['tasks-table', workspaceId] as const,
+    load: signal => readTasksTable(workspaceId, signal),
+    staleTime: 5 * 60_000,
+  });
+
+/** The Tasks table ID, or `missing` when it can't be read, so table pages still open. */
+function useTasksTableId(workspaceId: string) {
+  const state = useTasksRead(workspaceId).state;
+  return state.kind === 'error' ? ({ kind: 'missing' } as const) : state;
+}
+
+/** The workspace's built-in Tasks as a live board of who is doing what. */
 export function TasksPage() {
   const { workspace, sessionId } = workspaceRoute.useRouteContext();
   const search = tasksRoute.useSearch();
   const navigate = tasksRoute.useNavigate();
-  const read = useFeatureRead({
-    key: ['tasks-table', workspace.id] as const,
-    load: signal => readTasksTable(workspace.id, signal),
-    staleTime: 5 * 60_000,
-  });
+  const read = useTasksRead(workspace.id);
   const state = read.state;
   return (
     <PageContent data-task-page="">
@@ -100,11 +123,43 @@ export function TasksPage() {
   );
 }
 
+/** One task on its own page, addressed by its key, such as TUL-123. */
+export function TaskPage() {
+  const { key } = taskRoute.useParams();
+  const { workspace, sessionId } = workspaceRoute.useRouteContext();
+  const search = taskRoute.useSearch();
+  const canonical = canonicalTaskKey(key);
+  if (canonical && canonical !== key)
+    return (
+      <Navigate
+        to="/$workspaceSlug/tasks/$key"
+        params={{ workspaceSlug: workspace.slug, key: canonical }}
+        search={search}
+        replace
+      />
+    );
+  return (
+    <PageContent data-task-page="">
+      <TaskView
+        key={`${workspace.id}/${key}`}
+        workspace={{ id: workspace.id, slug: workspace.slug, sessionId }}
+        taskKey={key}
+        back={search}
+      />
+    </PageContent>
+  );
+}
+
 export function NewTablePage() {
   return <SchemaInChat />;
 }
 export function EditTablePage() {
   const { tableId } = tableEditRoute.useParams();
+  const { workspace } = workspaceRoute.useRouteContext();
+  const tasks = useTasksTableId(workspace.id);
+  if (tasks.kind === 'loading') return null;
+  if (tasks.kind === 'ready' && tasks.data === tableId)
+    return <Navigate to="/$workspaceSlug/tasks" params={{ workspaceSlug: workspace.slug }} replace />;
   return <SchemaInChat tableId={tableId} />;
 }
 

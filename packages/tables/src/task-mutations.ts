@@ -13,6 +13,7 @@ import {
   type TasksRegistration,
 } from './tasks-table.ts';
 import { relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
+import { allocateTaskKey, taskKeysReady } from './task-keys.ts';
 
 type Tx = AuthorizationTransaction;
 const relation = (tx: Tx, name: string) => qualified(tx.schema, name);
@@ -191,9 +192,21 @@ export async function finishTaskWrite(tx: Tx, input: TaskWrite, plan: TaskPlan) 
       `UPDATE ${relation(tx, 'tf_inbox_items')} SET resolved_at=clock_timestamp() WHERE table_id=$1 AND row_id=$2 AND resolved_at IS NULL`,
       [input.tableId, input.recordId],
     );
+    if (plan.tasks && (await taskKeysReady(tx)))
+      await tx.client.query(
+        `UPDATE ${relation(tx, 'tf_task_reminders')} SET status='stopped',stop_reason='deleted',stopped_at=clock_timestamp(),next_fire_at=NULL WHERE table_id=$1 AND row_id=$2 AND status='active'`,
+        [input.tableId, input.recordId],
+      );
     return;
   }
+  if (plan.tasks && (input.operation === 'create' || input.operation === 'restore'))
+    await allocateTaskKey(tx, input.tableId, input.recordId);
   if (sameActor(previous, next)) return;
+  if (plan.tasks && previous?.type === 'member' && (await taskKeysReady(tx)))
+    await tx.client.query(
+      `UPDATE ${relation(tx, 'tf_task_reminders')} SET status='stopped',stop_reason='reassigned',stopped_at=clock_timestamp(),next_fire_at=NULL WHERE table_id=$1 AND row_id=$2 AND membership_id=$3 AND status='active'`,
+      [input.tableId, input.recordId, previous.id],
+    );
   if (next?.type === 'agent') {
     await tx.client.query(
       `INSERT INTO ${relation(tx, 'tf_row_assignments')} AS a(table_id,row_id,agent_id,sponsor_membership_id,generation,run_state,queued_at,pending_wakes)

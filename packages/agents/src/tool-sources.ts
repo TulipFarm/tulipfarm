@@ -518,6 +518,14 @@ export async function resultSources(
     case 'browser.handoff':
     case 'browser.signIn':
     case 'browser.upload':
+    // Tasks tools record their own sources through invokeWithSources.
+    case 'tasks.list':
+    case 'tasks.get':
+    case 'tasks.create':
+    case 'tasks.update':
+    case 'tasks.assign':
+    case 'tasks.comment':
+    case 'tasks.remind':
       throw new AccessDenied();
     default: {
       const exhaustive: never = call;

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { ChatIcon, TasksIcon } from '@tulipfarm/icons';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Board, type BoardColumn } from '@tulipfarm/sprout/board';
@@ -10,20 +10,19 @@ import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Status, type StatusState } from '@tulipfarm/sprout/status';
 import { toast } from '@tulipfarm/sprout/toast';
 import { ToggleGroup, ToggleGroupItem } from '@tulipfarm/sprout/toggle-group';
-import { useFeatureRead } from '@/lib/query';
-import { tableApi, type TableDefinition } from '@/features/tables/api';
+import { tableApi } from '@/features/tables/api';
 import { useTableChanges } from '@/features/tables/changes';
-import { useTableDetail } from '@/features/tables/hooks';
-import { tableKeys } from '@/features/tables/queries';
-import { RecordEditor } from '@/features/tables/record-editor';
 import type { TableWorkspace } from '@/features/tables/references';
 import { ActorName } from '@/features/tables/actors';
 import { useTaskApi, useTasks } from '@/features/tasks/queries';
-import { lanes, readTaskActivity, readTaskRows, taskCards, type Lane, type TaskActivity, type TaskCard } from './api';
+import { lanes, taskCards, type Lane, type TaskCard } from './api';
 import { ago, currentStep, duration, useAssignmentRun, useNow, sentence } from './live';
 import { taskShows, type TaskBoardSearch, type TaskShow } from './search';
 import { applyTaskMove, moveHints, taskMove } from './moves';
-import { TaskSheet } from './task-panel';
+import { TaskFieldsMenu } from './fields-menu';
+import { canonicalTaskKey, useTaskKeys } from './task-api';
+import { TaskComposer } from './task-composer';
+import { keysByRow, taskOptions, useRefreshOnReturn, useTaskActivity, useTaskRows, useTasksTable } from './task-data';
 
 const showLabels: Record<TaskShow, string> = { all: 'All', mine: 'Assigned to me', agents: 'Agents' };
 
@@ -36,8 +35,25 @@ export const laneStatus: Record<Lane, StatusState> = {
 };
 export const cardStatus = (card: TaskCard): StatusState => (card.state === 'failed' ? 'error' : laneStatus[card.lane]);
 
-const live = (activity: TaskActivity | undefined) =>
-  Boolean(activity?.tasks.some(task => task.runState === 'queued' || task.runState === 'working'));
+/**
+ * A column's mark. Working is a still, half-filled ring like Linear's In progress, so a column header never spins;
+ * a card's own mark still shows its run moving.
+ */
+function LaneIcon({ lane }: { lane: Lane }) {
+  if (lane !== 'working') return <Status state={laneStatus[lane]} size="sm" aria-hidden="true" tooltip={false} />;
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      className="size-3 shrink-0 text-info"
+      fill="none"
+      aria-hidden="true"
+      data-lane-icon="working"
+    >
+      <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="2" />
+      <path d="M10 5a5 5 0 0 1 0 10Z" fill="currentColor" />
+    </svg>
+  );
+}
 
 /** The built-in Tasks table as a live board: who is doing what, and how far each agent has got. */
 export function TaskBoard({
@@ -51,41 +67,20 @@ export function TaskBoard({
   search: TaskBoardSearch;
   changeSearch: (next: Partial<TaskBoardSearch>) => void;
 }) {
+  const navigate = useNavigate();
   const api = useMemo(() => tableApi(workspace.id), [workspace.id]);
-  const detail = useTableDetail(api, tableId);
-  const state = detail.state.kind === 'ready' ? detail.state.data : null;
-  const table = useMemo<TableDefinition | null>(
-    () =>
-      state?.applied
-        ? {
-            id: state.id,
-            revision: state.applied.revision,
-            definition: state.applied.definition,
-            systemKind: state.systemKind,
-          }
-        : null,
-    [state],
-  );
-  const rows = useFeatureRead({
-    key: [...tableKeys.records(tableId), 'task-board', table?.revision ?? null] as const,
-    enabled: table !== null,
-    load: signal => readTaskRows(api, table!, signal),
-  });
-  const busy = useRef(false);
-  const activity = useFeatureRead({
-    key: ['task-board', 'activity', workspace.id] as const,
-    load: async signal => {
-      const data = await readTaskActivity(workspace.id, signal);
-      busy.current = live(data);
-      return data;
-    },
-    // Busy agents are checked every 2 seconds; otherwise every 10, so work others start still appears.
-    pollWhile: () => true,
-    interval: () => (busy.current ? 2000 : 10_000),
-    maxChecks: 2000,
-  });
+  const { detail, table, canCreate, canUpdate } = useTasksTable(api, tableId);
+  const rows = useTaskRows(api, table);
+  const activity = useTaskActivity(workspace.id);
   const progress = activity.state.kind === 'ready' ? activity.state.data : undefined;
+  const keys = useTaskKeys(workspace.id);
+  const keyOf = useMemo(() => keysByRow(keys.state.kind === 'ready' ? keys.state.data : undefined), [keys.state]);
   const changes = useTableChanges();
+  useRefreshOnReturn(() => {
+    void rows.refresh();
+    void activity.refresh();
+    void keys.refresh();
+  });
   const seen = useRef<string | null>(null);
   const signature = progress?.tasks.map(task => `${task.rowId}:${task.runState}:${task.updatedAt}`).join('|') ?? null;
   useEffect(() => {
@@ -94,14 +89,22 @@ export function TaskBoard({
     seen.current = signature;
   }, [signature, tableId, changes]);
   const [creating, setCreating] = useState(false);
-  // The editor's unsaved-changes guard blocks navigation while it is mounted, so open the new task after it closes.
-  const [created, setCreated] = useState<string | null>(null);
+  const openTask = (key: string) =>
+    void navigate({
+      to: '/$workspaceSlug/tasks/$key',
+      params: { workspaceSlug: workspace.slug, key },
+      search: { show: search.show, q: search.q },
+    });
+  // Old links name a task by row ID; send them to the task's own page.
+  const legacy = search.task ? keyOf.get(search.task) : undefined;
   useEffect(() => {
-    if (!creating && created) {
-      setCreated(null);
-      changeSearch({ task: created });
-    }
-  }, [creating, created, changeSearch]);
+    if (legacy)
+      void navigate({
+        to: '/$workspaceSlug/tasks/$key',
+        params: { workspaceSlug: workspace.slug, key: legacy },
+        replace: true,
+      });
+  }, [legacy, navigate, workspace.slug]);
   const records = rows.state.kind === 'ready' ? rows.state.data.records : [];
   // Shows a dropped card in its new column until the board has reread it.
   const [moved, setMoved] = useState<{ id: string; lane: Lane } | null>(null);
@@ -109,23 +112,28 @@ export function TaskBoard({
     () => taskCards(records, progress).map(card => (moved?.id === card.id ? { ...card, lane: moved.lane } : card)),
     [records, progress, moved],
   );
+  // Someone else's new task has no key here yet, so reread the keys once when one is missing.
+  const keyless = keys.state.kind === 'ready' && cards.some(card => !keyOf.has(card.id));
+  const rereadKeys = keys.refresh;
+  useEffect(() => {
+    if (keyless) void rereadKeys();
+  }, [keyless, rereadKeys]);
   const show = search.show ?? 'all';
   const query = (search.q ?? '').trim().toLowerCase();
+  const queryKey = canonicalTaskKey(query);
   const visible = cards.filter(
     card =>
       (show === 'all' ||
         (show === 'agents' && card.assignee?.type === 'agent') ||
         (show === 'mine' && card.assignee?.type === 'member' && card.assignee.id === progress?.me)) &&
-      (!query || card.title.toLowerCase().includes(query)),
+      (!query ||
+        card.title.toLowerCase().includes(query) ||
+        (queryKey ? keyOf.get(card.id) === queryKey : keyOf.get(card.id)?.toLowerCase().includes(query))),
   );
-  const open = search.task ? cards.find(card => card.id === search.task) : undefined;
   const filtered = show !== 'all' || query.length > 0;
   const working = visible.filter(card => card.lane === 'working').length;
   const needsYou = visible.filter(card => card.lane === 'needs-you').length;
   const now = useNow(visible.some(card => card.lane === 'working' || card.lane === 'queued'));
-  const canCreate = Boolean(state?.rowPermissions.create) && !state?.archived;
-  const canUpdate = Boolean(state?.rowPermissions.update) && !state?.archived;
-  const canDelete = Boolean(state?.rowPermissions.delete) && !state?.archived;
   const agentRunsRead = useTasks(useTaskApi(workspace.id), undefined, '');
   const agentRunCount = agentRunsRead.state.kind === 'ready' ? agentRunsRead.state.data.tasks.length : 0;
   const boardContainer = useRef<HTMLDivElement>(null);
@@ -140,7 +148,7 @@ export function TaskBoard({
       lanes.map(lane => ({
         id: lane.id,
         title: lane.title,
-        icon: <Status state={laneStatus[lane.id]} size="sm" aria-hidden="true" tooltip={false} />,
+        icon: <LaneIcon lane={lane.id} />,
       })),
     [],
   );
@@ -187,6 +195,7 @@ export function TaskBoard({
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <TaskFieldsMenu table={table} />
             <Button
               variant="outline"
               nativeButton={false}
@@ -230,7 +239,7 @@ export function TaskBoard({
         </div>
         {rows.state.data.more && (
           <span className="text-xs text-muted-foreground">
-            Showing the newest tasks. Open the Tasks table for older ones.
+            Showing the newest tasks. Search by key, such as TUL-042, to open an older one.
           </span>
         )}
       </div>
@@ -250,7 +259,7 @@ export function TaskBoard({
               const laneCount = visible.filter(card => card.lane === lane.id).length;
               return (
                 <Button key={lane.id} variant="outline" size="sm" onClick={() => scrollToLane(index)}>
-                  <Status state={laneStatus[lane.id]} size="sm" aria-hidden="true" tooltip={false} />
+                  <LaneIcon lane={lane.id} />
                   {lane.title} ({laneCount})
                 </Button>
               );
@@ -276,41 +285,33 @@ export function TaskBoard({
                   }
                 : undefined
             }
-            onItemOpen={card => changeSearch({ task: card.id })}
+            onItemOpen={card => {
+              const key = keyOf.get(card.id);
+              if (key) openTask(key);
+            }}
+            renderTitle={card => {
+              const key = keyOf.get(card.id);
+              return (
+                <span>
+                  {key && <span className="mr-1.5 text-xs font-normal text-muted-foreground tabular-nums">{key}</span>}
+                  {card.title}
+                </span>
+              );
+            }}
             renderBody={card =>
               hasCardBody(card) ? <TaskCardBody card={card} workspace={workspace} me={progress?.me} now={now} /> : null
             }
           />
         </div>
       )}
-      {open && (
-        <TaskSheet
-          card={open}
-          table={table}
-          api={api}
-          workspace={workspace}
-          me={progress?.me}
-          now={now}
-          canUpdate={canUpdate}
-          canDelete={canDelete}
-          close={() => changeSearch({ task: undefined })}
-          refresh={refresh}
-        />
-      )}
       {creating && (
-        <RecordEditor
-          record={null}
+        <TaskComposer
+          workspace={workspace}
           table={table}
           api={api}
-          workspace={workspace}
-          disabled={false}
+          me={progress?.me}
+          tasks={taskOptions(cards, keyOf)}
           close={() => setCreating(false)}
-          saved={recordId => {
-            setCreated(recordId);
-            setCreating(false);
-            void refresh();
-          }}
-          refresh={refresh}
         />
       )}
     </div>

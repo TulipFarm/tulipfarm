@@ -65,6 +65,10 @@
       "types": "./dist/workspace-member-id.d.ts",
       "default": "./dist/workspace-member-id.js"
     },
+    "./task-keys": {
+      "types": "./dist/task-keys.d.ts",
+      "default": "./dist/task-keys.js"
+    },
     "./tasks-table": {
       "types": "./dist/tasks-table.d.ts",
       "default": "./dist/tasks-table.js"

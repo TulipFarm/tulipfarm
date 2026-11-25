@@ -590,6 +590,7 @@ export function createWorkspaceMembersMock(scenario?: string) {
     if (path === '/v1/workspaces/members-table-mock/last-used' && method === 'PUT')
       return new Response(null, { status: 204 });
     if (method === 'GET') {
+      if (path === `${root}/tasks-table`) return Response.json({ tableId: null });
       if (path === `${root}/personal-memory/files`)
         return Response.json({
           files: [

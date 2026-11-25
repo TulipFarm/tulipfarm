@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { z } from 'zod';
 import { filesSearchSchema, viewerSearchSchema } from '@/features/files/search';
 import { tableListSearchSchema, tableRowsSearchSchema } from '@/features/tables/table-search';
-import { taskBoardSearchSchema } from '@/features/task-board/search';
+import { taskBoardSearchSchema, taskPageSearchSchema } from '@/features/task-board/search';
 import { googleFileIdSchema, googleFilesSearchSchema } from '@/features/files/google-search';
 import {
   createRootRoute,
@@ -109,6 +109,7 @@ const TeamDetailPage = lazyRouteComponent(routePage('governance'), 'TeamDetailPa
 const TablesPage = lazyRouteComponent(routePage('tableList'), 'TablesPage');
 const TableDetailPage = lazyRouteComponent(routePage('tables'), 'TableDetailPage');
 const TasksPage = lazyRouteComponent(routePage('tables'), 'TasksPage');
+const TaskPage = lazyRouteComponent(routePage('tables'), 'TaskPage');
 const NewTablePage = lazyRouteComponent(routePage('tables'), 'NewTablePage');
 const EditTablePage = lazyRouteComponent(routePage('tables'), 'EditTablePage');
 const AgentsPage = lazyRouteComponent(routePage('agents'), 'AgentsPage');
@@ -1007,6 +1008,12 @@ export const tasksRoute = createRoute({
   validateSearch: search => taskBoardSearchSchema.parse(search),
   component: TasksPage,
 });
+export const taskRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'tasks/$key',
+  validateSearch: search => taskPageSearchSchema.parse(search),
+  component: TaskPage,
+});
 export const tableEditRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'tables/$tableId/edit',
@@ -1169,6 +1176,7 @@ export const router = createRouter({
       newTableRoute,
       tableDetailRoute,
       tasksRoute,
+      taskRoute,
       tableEditRoute,
       appsRoute,
       newAppRoute,

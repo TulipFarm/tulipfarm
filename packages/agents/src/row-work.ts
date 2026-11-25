@@ -8,9 +8,29 @@ import {
   lockAndResolveHuman,
   requireTablePermission,
 } from '@tulipfarm/access';
-import { writeRunState } from '@tulipfarm/tables/store';
-import { TaskTableError } from '@tulipfarm/tables/tasks-table';
+import { valuesSchema } from '@tulipfarm/tables/definition';
+import { activeGeneration, readRecord, writeRunState } from '@tulipfarm/tables/store';
+import {
+  allTaskKeys,
+  formatTaskKey,
+  parseTaskKey,
+  rowOfTaskNumber,
+  taskKeysOf,
+  taskKeysReady,
+  taskNumberOf,
+} from '@tulipfarm/tables/task-keys';
+import { runStateOf, TaskTableError, taskFields } from '@tulipfarm/tables/tasks-table';
 import { deliverComment, rowExists, wakeRow } from './row-assignments.ts';
+import {
+  cancelReminder,
+  createReminder,
+  listReminders,
+  reminderSchema,
+  remindersSchema,
+  stopReminders,
+  tasksTableId,
+  TaskReminderError,
+} from './task-reminders.ts';
 import { relation, type AgentTransaction } from './store.ts';
 
 const runStateSchema = z.enum(['queued', 'working', 'waiting', 'done', 'failed', 'stopped']);
@@ -89,6 +109,30 @@ export const taskActivitySchema = z.object({
 });
 export type TaskActivity = z.infer<typeof taskActivitySchema>;
 
+/** A task, found by its key, with everything its page shows. */
+export const taskDetailSchema = z.object({
+  key: z.string(),
+  number: z.number().int().nonnegative(),
+  tableId: z.uuid(),
+  rowId: z.uuid(),
+  record: z.object({ id: z.uuid(), token: z.uuid(), values: valuesSchema }),
+  runState: z.enum(['queued', 'working', 'waiting', 'done', 'failed']).nullable(),
+  canEdit: z.boolean(),
+  thread: rowThreadSchema,
+  reminders: remindersSchema,
+});
+export type TaskDetail = z.infer<typeof taskDetailSchema>;
+
+/** Each task's key, so lists and boards can show it. */
+export const taskKeysSchema = z.object({
+  tableId: z.uuid().nullable(),
+  keys: z.array(z.object({ rowId: z.uuid(), key: z.string(), number: z.number().int().nonnegative() })),
+});
+export type TaskKeys = z.infer<typeof taskKeysSchema>;
+
+export { reminderSchema, remindersSchema, TaskReminderError };
+export { reminderInputSchema } from './task-reminders.ts';
+
 export const commentInputSchema = z.strictObject({
   body: z.string().trim().min(1).max(20000),
   mentions: z.array(z.uuid()).max(50).default([]),
@@ -98,12 +142,16 @@ export const inboxSchema = z.object({
   items: z.array(
     z.object({
       id: z.uuid(),
-      kind: z.enum(['assigned', 'waiting', 'finished', 'mention']),
+      kind: z.enum(['assigned', 'waiting', 'finished', 'mention', 'reminder']),
       tableId: z.uuid(),
       tableName: z.string(),
       rowId: z.uuid(),
       /** The agent run a waiting item is about. */
       taskId: z.uuid().optional(),
+      /** The reminder a reminder item is about. */
+      reminderId: z.uuid().optional(),
+      /** The task's key, such as TUL-007, for items about a task. */
+      taskKey: z.string().optional(),
       summary: z.string().nullable(),
       createdAt: z.string(),
     }),
@@ -127,7 +175,7 @@ export const assignmentLimitsSchema = z.object({
     }),
   ),
 });
-const inboxKinds = ['assigned', 'waiting', 'finished', 'mention'] as const;
+const inboxKinds = ['assigned', 'waiting', 'finished', 'mention', 'reminder'] as const;
 export const inboxSlackSchema = z.object({
   connected: z.boolean(),
   kinds: z.object(
@@ -138,7 +186,10 @@ export const inboxSlackSchema = z.object({
   ),
 });
 export type InboxSlack = z.infer<typeof inboxSlackSchema>;
-export const inboxSlackInputSchema = z.strictObject({ kinds: inboxSlackSchema.shape.kinds.strict() });
+/** Kinds left out keep their saved setting, so an older web app that doesn't know about reminders can't reset them. */
+export const inboxSlackInputSchema = z.strictObject({
+  kinds: inboxSlackSchema.shape.kinds.extend({ reminder: z.boolean().optional() }).strict(),
+});
 
 /** What admins send. Fields left out keep their saved values, so an older web app can't clear the newer caps. */
 export const assignmentLimitsInputSchema = z.strictObject({
@@ -383,6 +434,48 @@ export function createRowWork(runtime: Runtime, compatibility: unknown) {
         return taskActivitySchema.parse({ tableId, tasks, comments, me: actor.membershipId });
       }),
 
+    /** Every task's key in the workspace's Tasks table. */
+    taskKeys: (workspaceId: string, userId: string) =>
+      as(workspaceId, userId, async (tx, actor) => {
+        const tableId = await tasksTableId(tx);
+        if (!tableId) return taskKeysSchema.parse({ tableId: null, keys: [] });
+        await requireTablePermission(tx, actor, tableId, 'table.row.read');
+        return taskKeysSchema.parse({ tableId, keys: await allTaskKeys(tx, tableId) });
+      }),
+
+    /** A task by its key, such as TUL-7 or tul-007. Unknown keys, deleted tasks and unreadable tasks are not found. */
+    taskByKey: (workspaceId: string, userId: string, key: string) =>
+      as(workspaceId, userId, async (tx, actor) => {
+        const number = parseTaskKey(key);
+        const tableId = await tasksTableId(tx);
+        if (number === null || !tableId) throw new AccessDenied();
+        if (!(await taskKeysReady(tx))) throw new TaskReminderError('tasks-upgrading');
+        await requireTablePermission(tx, actor, tableId, 'table.row.read');
+        const rowId = await rowOfTaskNumber(tx, tableId, number);
+        if (!rowId) throw new AccessDenied();
+        return readTaskDetail(tx, actor, tableId, rowId);
+      }),
+
+    reminders: (workspaceId: string, userId: string, tableId: string, rowId: string) =>
+      as(workspaceId, userId, async (tx, actor) => {
+        await requireRow(tx, actor, tableId, rowId);
+        return listReminders(tx, actor, tableId, rowId);
+      }),
+
+    createReminder: (workspaceId: string, userId: string, tableId: string, rowId: string, value: unknown) =>
+      as(workspaceId, userId, async (tx, actor) => {
+        await requireRow(tx, actor, tableId, rowId);
+        await createReminder(tx, actor, tableId, rowId, value);
+        return listReminders(tx, actor, tableId, rowId);
+      }),
+
+    cancelReminder: (workspaceId: string, userId: string, tableId: string, rowId: string, reminderId: string) =>
+      as(workspaceId, userId, async (tx, actor) => {
+        await requireRow(tx, actor, tableId, rowId);
+        await cancelReminder(tx, actor, tableId, rowId, reminderId);
+        return listReminders(tx, actor, tableId, rowId);
+      }),
+
     thread: (workspaceId: string, userId: string, tableId: string, rowId: string) =>
       as(workspaceId, userId, async (tx, actor) => {
         await requireRow(tx, actor, tableId, rowId);
@@ -400,6 +493,7 @@ export function createRowWork(runtime: Runtime, compatibility: unknown) {
         );
         await notifyMentions(tx, actor, tableId, rowId, id, input.mentions);
         await deliverComment(tx, tableId, rowId, actor.membershipId, input.body);
+        await stopReminders(tx, tableId, rowId, 'commented', actor.membershipId);
         return readThread(tx, actor, tableId, rowId);
       }),
 
@@ -486,6 +580,7 @@ export function createRowWork(runtime: Runtime, compatibility: unknown) {
           [tableId, rowId],
         );
         await threadEvent(tx, actor, tableId, rowId, 'marked-done');
+        await stopReminders(tx, tableId, rowId, 'done');
         return readThread(tx, actor, tableId, rowId);
       }),
 
@@ -516,6 +611,15 @@ export function createRowWork(runtime: Runtime, compatibility: unknown) {
             [actor.membershipId],
           )
         ).rows;
+        const keys = new Map<string, string>();
+        const tasksId = await tasksTableId(tx);
+        if (tasksId)
+          for (const [rowId, key] of await taskKeysOf(
+            tx,
+            tasksId,
+            rows.filter(row => row.table_id === tasksId).map(row => String(row.row_id)),
+          ))
+            keys.set(rowId, key);
         const items = [];
         for (const row of rows) {
           // Behavior 60: never show an item for a row the member can no longer read.
@@ -531,6 +635,8 @@ export function createRowWork(runtime: Runtime, compatibility: unknown) {
             tableName: row.table_name,
             rowId: row.row_id,
             ...(row.kind === 'waiting' ? { taskId: row.source_id } : {}),
+            ...(row.kind === 'reminder' ? { reminderId: row.source_id } : {}),
+            ...(row.table_id === tasksId && keys.has(row.row_id) ? { taskKey: keys.get(row.row_id) } : {}),
             summary: row.summary,
             createdAt: iso(row.created_at),
           });
@@ -553,10 +659,13 @@ export function createRowWork(runtime: Runtime, compatibility: unknown) {
     setSlackPreferences: (workspaceId: string, userId: string, value: unknown) =>
       as(workspaceId, userId, async (tx, actor) => {
         const { kinds } = inboxSlackInputSchema.parse(value);
-        await tx.client.query(`DELETE FROM ${relation(tx, 'tf_inbox_slack_muted')} WHERE membership_id=$1`, [
-          actor.membershipId,
-        ]);
-        const muted = inboxKinds.filter(kind => !kinds[kind]);
+        const taskKeys = await taskKeysReady(tx);
+        const known = inboxKinds.filter(kind => kind !== 'reminder' || (kinds.reminder !== undefined && taskKeys));
+        await tx.client.query(
+          `DELETE FROM ${relation(tx, 'tf_inbox_slack_muted')} WHERE membership_id=$1 AND kind=ANY($2::text[])`,
+          [actor.membershipId, known],
+        );
+        const muted = known.filter(kind => kinds[kind] === false);
         if (muted.length)
           await tx.client.query(
             `INSERT INTO ${relation(tx, 'tf_inbox_slack_muted')}(membership_id,kind) SELECT $1,unnest($2::text[])`,
@@ -604,6 +713,32 @@ export function createRowWork(runtime: Runtime, compatibility: unknown) {
         return readLimits(tx);
       }),
   };
+}
+
+/** A task's record, key, thread and reminders. The caller has checked that the actor can read the row. */
+export async function readTaskDetail(
+  tx: AgentTransaction,
+  actor: HumanActor,
+  tableId: string,
+  rowId: string,
+): Promise<TaskDetail> {
+  const generation = await activeGeneration(tx, tableId);
+  const record = await readRecord(tx, generation, rowId);
+  if (!record) throw new AccessDenied();
+  const number = await taskNumberOf(tx, tableId, rowId);
+  if (number === null) throw new AccessDenied();
+  const state = record.values[taskFields.runState];
+  return taskDetailSchema.parse({
+    key: formatTaskKey(number),
+    number,
+    tableId,
+    rowId,
+    record: { id: record.id, token: record.token, values: record.values },
+    runState: runStateOf(state?.kind === 'single-select' ? state.optionId : undefined),
+    canEdit: await canEditRow(tx, actor, tableId),
+    thread: await readThread(tx, actor, tableId, rowId),
+    reminders: await listReminders(tx, actor, tableId, rowId),
+  });
 }
 
 async function readLimits(tx: AgentTransaction): Promise<AssignmentLimits> {
