@@ -103,7 +103,7 @@ export const toolActivityLabels = {
   'web.fetch': 'Reading a web page',
   'api.request': 'Calling an API',
   'browser.act': 'Using the browser',
-  'browser.handoff': 'Asking you to take over the browser',
+  'browser.handoff': 'Asking you to do a step in the browser',
   'browser.signIn': 'Signing in to a site',
   'browser.upload': 'Uploading a file in the browser',
   'packages.inspect': 'Inspecting a system package',

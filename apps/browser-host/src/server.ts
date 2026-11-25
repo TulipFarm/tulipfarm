@@ -6,7 +6,6 @@ import {
   browserActionSchema,
   browserFileBytes,
   browserUploadSchema,
-  browserControlSchema,
   browserInputsSchema,
   browserNeedsPersonSchema,
   browserOpenSchema,
@@ -131,8 +130,6 @@ export function createBrowserHostServer(host: BrowserHost, token: string): Serve
         if (!bytes.length) throw new HostError('invalid-request', 'The file is empty.', 400);
         return send(response, 200, await host.upload(sessionId, upload, bytes));
       }
-      case 'POST control':
-        return send(response, 200, await host.control(sessionId, parse(browserControlSchema, await readJson(request))));
       case 'POST needs-person':
         return send(
           response,

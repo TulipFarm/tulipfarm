@@ -304,10 +304,6 @@ test('the agent fills a form and the person takes over to tick a box', async t =
   const waiting = await host.needsPerson(sessionId, { reason: 'Tick the terms box' });
   assert.equal(waiting.needsPerson, 'Tick the terms box');
 
-  await assert.rejects(host.input(sessionId, { type: 'text', text: 'x' }), { code: 'agent-in-control' });
-  await host.control(sessionId, { controller: 'person', memberId: 'member-1' });
-  await assert.rejects(host.act(sessionId, { action: 'snapshot' }), { code: 'person-in-control' });
-
   const events = [];
   const unsubscribe = await host.subscribe(sessionId, event => events.push(event.type));
   // The person clicks the terms label through the live view, in viewport pixels.
@@ -330,10 +326,13 @@ test('the agent fills a form and the person takes over to tick a box', async t =
   assert.ok(events.includes('state'));
   assert.ok(events.includes('frame'));
 
-  const handed = await host.control(sessionId, { controller: 'agent' });
-  assert.equal(handed.needsPerson, null);
+  // The agent's next step ends the wait and learns a person used the page.
   result = await host.act(sessionId, { action: 'snapshot' });
+  assert.equal(result.state.needsPerson, null);
+  assert.match(result.notice, /A person clicked or typed in this browser/);
   assert.match(result.snapshot, /checkbox "I agree to the terms" \[checked\]/);
+  result = await host.act(sessionId, { action: 'snapshot' });
+  assert.doesNotMatch(result.notice ?? '', /A person clicked/, 'the notice is given once');
   result = await host.act(sessionId, { action: 'click', ref: ref(result.snapshot, /button "Sign up"/) });
   assert.equal(result.state.title, 'Welcome');
   assert.match(result.snapshot, /email=a@b.co terms=on plan=Team/);
@@ -436,16 +435,23 @@ test('a redirect to a blocked address is refused at every hop', async t => {
   assert.doesNotMatch(result.snapshot, /internal secret/);
 });
 
-test('taking over waits for the agent action already running', async t => {
+test('a person’s input waits for the agent action already running', async t => {
   const host = await createBrowserHost({ ...options, allowPrivateNetworks: true });
   t.after(() => host.shutdown());
   await host.open(sessionId);
   const page = await host.act(sessionId, { action: 'navigate', url: `${origin}/slow` });
   const clicking = host.act(sessionId, { action: 'click', ref: ref(page.snapshot, /button "Continue"/) });
   await new Promise(resolve => setTimeout(resolve, 100));
-  const state = await host.control(sessionId, { controller: 'person', memberId: 'member-1' });
-  assert.equal(state.title, 'Clicked');
-  assert.equal(state.controller, 'person');
+  await host.input(sessionId, {
+    type: 'mouse',
+    event: 'mouseMoved',
+    x: 10,
+    y: 10,
+    button: 'none',
+    clickCount: 0,
+    modifiers: 0,
+  });
+  assert.equal((await host.state(sessionId)).title, 'Clicked');
   await clicking;
 });
 
@@ -561,14 +567,19 @@ test('a saved login carries a site’s cookies and storage into a new session', 
   const exported = await host.siteState(next, site);
   assert.deepEqual(exported.origins[0].localStorage, [{ name: 'cart', value: '3 items' }], 'the load marker stays out');
 
-  // Asked to sign in again, the loaded login has signed out until a person hands back.
+  // Asked to sign in again, the loaded login has signed out until a person uses the browser.
   let state = await host.needsPerson(next, { reason: 'Sign in again to continue.', signIn: site });
   assert.equal(state.signIn, site);
   assert.deepEqual(state.logins, [{ id: login, site, signedOut: true }]);
-  await host.control(next, { controller: 'person', memberId: 'member-1' });
-  state = await host.control(next, { controller: 'agent' });
-  assert.equal(state.signIn, null);
-  assert.deepEqual(state.logins, [{ id: login, site, signedOut: false }]);
+  // An agent step with no one using the browser ends the wait, but the login stays signed out.
+  result = await host.act(next, { action: 'snapshot' });
+  assert.equal(result.state.signIn, null);
+  assert.deepEqual(result.state.logins, [{ id: login, site, signedOut: true }]);
+  await host.needsPerson(next, { reason: 'Sign in again to continue.', signIn: site });
+  await host.input(next, { type: 'text', text: 'x' });
+  result = await host.act(next, { action: 'snapshot' });
+  assert.equal(result.state.signIn, null);
+  assert.deepEqual(result.state.logins, [{ id: login, site, signedOut: false }]);
 });
 
 test('loading another login for a site replaces the sign-in, and reloading one applies its newer storage', async t => {
@@ -781,12 +792,6 @@ test('the agent uploads a file only into a file input', async t => {
     Buffer.from('smile'),
   );
   assert.match(result.snapshot, /photo: photo.txt text\/plain smile/);
-
-  await host.control(sessionId, { controller: 'person', memberId: 'member-1' });
-  await assert.rejects(
-    host.upload(sessionId, { ...file, ref: ref(result.snapshot, /button "Invoice"/) }, Buffer.from('x')),
-    { code: 'person-in-control' },
-  );
 });
 
 test('a download is stopped while it transfers once it passes the size limit', async t => {

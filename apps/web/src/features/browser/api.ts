@@ -15,8 +15,6 @@ export { browserFrameSchema, browserSessionStateSchema };
 const messages: Record<string, string> = {
   'browser-not-found': 'This browser has closed. Ask the agent to open it again.',
   'browser-unavailable': 'The browser isn’t reachable right now. Try again in a moment.',
-  'agent-in-control': 'Take over the browser before using it.',
-  'person-in-control': 'Someone else has taken over this browser.',
   'conversation-not-found': 'This chat is no longer available to you.',
   'task-not-found': 'This run is no longer available to you.',
 };
@@ -49,9 +47,6 @@ export function browserApi(workspaceId: string, target: BrowserTarget) {
   return {
     liveUrl: `${base}/live`,
     state: async (signal: AbortSignal) => stateResponse.parse(await request(base, signal)).browser,
-    control: async (controller: 'person' | 'agent') =>
-      stateResponse.parse(await request(`${base}/control`, AbortSignal.timeout(15_000), 'POST', { controller }))
-        .browser,
     input: async (inputs: BrowserInput[]) => {
       await request(`${base}/input`, AbortSignal.timeout(10_000), 'POST', inputs);
     },

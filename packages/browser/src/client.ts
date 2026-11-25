@@ -4,7 +4,6 @@ import {
   browserSessionStateSchema,
   type BrowserAction,
   type BrowserActionResult,
-  type BrowserControl,
   type BrowserHostErrorCode,
   type BrowserInputs,
   type BrowserLoadLogin,
@@ -162,9 +161,6 @@ export function createBrowserHostClient(connection: BrowserHostConnection, fetch
         throw new BrowserHostError('unavailable', `The download could not be read: ${(error as Error).message}`);
       }
       return { name: decodeURIComponent(response.headers.get('x-download-name') ?? 'download'), bytes };
-    },
-    async control(sessionId: string, control: BrowserControl): Promise<BrowserSessionState> {
-      return browserSessionStateSchema.parse(await call('POST', `${session(sessionId)}/control`, control));
     },
     async needsPerson(sessionId: string, request: BrowserNeedsPerson): Promise<BrowserSessionState> {
       return browserSessionStateSchema.parse(await call('POST', `${session(sessionId)}/needs-person`, request));

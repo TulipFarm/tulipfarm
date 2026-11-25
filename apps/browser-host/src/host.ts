@@ -19,7 +19,6 @@ import {
   browserViewport,
   type BrowserAction,
   type BrowserActionResult,
-  type BrowserControl,
   type BrowserFrame,
   type BrowserHostErrorCode,
   type BrowserInput,
@@ -122,8 +121,8 @@ class Session {
   readonly openedAt: number;
   readonly context: BrowserContext;
   page: Page;
-  controller: 'agent' | 'person' = 'agent';
-  controlledBy: string | null = null;
+  /** Whether a person clicked or typed in the browser since the agent's last step. */
+  personUsed = false;
   needsPerson: string | null = null;
   signIn: string | null = null;
   readonly logins = new Map<string, BrowserLoadedLogin>();
@@ -173,12 +172,12 @@ class Session {
     this.limits = limits;
   }
 
-  /** How long the session stays open unused: longer while it waits for a person or one has taken over. */
+  /** How long the session stays open unused: longer while it waits for a person. */
   get idleLimit() {
-    return this.needsPerson || this.controller === 'person' ? this.limits.holdMs : this.limits.idleMs;
+    return this.needsPerson ? this.limits.holdMs : this.limits.idleMs;
   }
 
-  /** Agent actions, a person's input and control changes run one at a time, so a takeover waits for the agent's action. */
+  /** Agent actions and a person's input take turns, so a click lands between the agent's steps, never inside one. */
   run<T>(work: () => Promise<T>): Promise<T> {
     const next = this.queue.then(work, work);
     this.queue = next.catch(() => undefined);
@@ -265,9 +264,7 @@ class Session {
       sessionId: this.id,
       url: this.redact(this.page.url()),
       title: this.redact(this.title),
-      controller: this.controller,
       needsPerson: this.needsPerson,
-      controlledBy: this.controlledBy,
       signIn: this.signIn,
       logins: [...this.logins.values()],
       openedAt: new Date(this.openedAt).toISOString(),
@@ -1012,6 +1009,8 @@ export async function createBrowserHost(options: HostOptions) {
     await session.refreshTitle();
     expireDownloads(session);
     const notices = [
+      session.personUsed &&
+        'A person clicked or typed in this browser during or since your last step. Changes on the page that you did not make are theirs; keep them and check the page before you act.',
       session.notice && session.redact(session.notice),
       withheld &&
         'Screenshots are off in this browser after a sign-in with a secret. The accessibility snapshot still works.',
@@ -1020,6 +1019,7 @@ export async function createBrowserHost(options: HostOptions) {
         'A download is still in progress. Take a snapshot later to save it when it finishes.',
     ].filter(Boolean);
     session.notice = undefined;
+    session.personUsed = false;
     session.downloadNotices = [];
     snapshot = session.redact(snapshot);
     const downloads = [...session.downloads.values()].map(({ id, name, size }) => ({ id, name, size }));
@@ -1038,15 +1038,20 @@ export async function createBrowserHost(options: HostOptions) {
     return session.run(() => perform(session, action));
   }
 
-  async function perform(session: Session, action: BrowserAction): Promise<BrowserActionResult> {
-    if (session.controller === 'person')
-      throw new HostError(
-        'person-in-control',
-        'A member has taken over this browser. Wait until they hand it back before acting.',
-        409,
-      );
+  /**
+   * Starts an agent's step: it ends any wait for a person. A person who used the browser while it waited for a sign-in
+   * has signed in again, so the site's logins are current.
+   */
+  function agentStep(session: Session) {
+    if (session.signIn && session.personUsed)
+      for (const login of session.logins.values())
+        if (sitesOverlap(login.site, session.signIn)) login.signedOut = false;
     session.needsPerson = null;
     session.signIn = null;
+  }
+
+  async function perform(session: Session, action: BrowserAction): Promise<BrowserActionResult> {
+    agentStep(session);
     const page = session.page;
     const element = (ref: string) => page.locator(`aria-ref=${ref}`);
     if (
@@ -1115,14 +1120,7 @@ export async function createBrowserHost(options: HostOptions) {
   async function typeSecret(sessionId: string, input: BrowserTypeSecret): Promise<BrowserActionResult> {
     const session = get(sessionId);
     return session.run(async () => {
-      if (session.controller === 'person')
-        throw new HostError(
-          'person-in-control',
-          'A member has taken over this browser. Wait until they hand it back before acting.',
-          409,
-        );
-      session.needsPerson = null;
-      session.signIn = null;
+      agentStep(session);
       const page = session.page;
       const hosts = new Set(input.hosts.map(host => host.toLowerCase()));
       if (!onHosts(page.url(), hosts))
@@ -1231,14 +1229,7 @@ export async function createBrowserHost(options: HostOptions) {
   async function upload(sessionId: string, input: BrowserUpload, bytes: Buffer): Promise<BrowserActionResult> {
     const session = get(sessionId);
     return session.run(async () => {
-      if (session.controller === 'person')
-        throw new HostError(
-          'person-in-control',
-          'A member has taken over this browser. Wait until they hand it back before acting.',
-          409,
-        );
-      session.needsPerson = null;
-      session.signIn = null;
+      agentStep(session);
       const page = session.page;
       const handle = await page
         .locator(`aria-ref=${input.ref}`)
@@ -1299,27 +1290,6 @@ export async function createBrowserHost(options: HostOptions) {
       read: () => held.download.createReadStream(),
       done: () => held.download.delete().catch(() => undefined),
     };
-  }
-
-  async function control(sessionId: string, input: BrowserControl): Promise<BrowserSessionState> {
-    const session = get(sessionId);
-    return session.run(async () => {
-      if (input.controller === 'person') {
-        session.controller = 'person';
-        session.controlledBy = input.memberId;
-      } else {
-        // A person who hands back after a sign-in request has signed in again, so the site's logins are current.
-        if (session.signIn)
-          for (const login of session.logins.values())
-            if (sitesOverlap(login.site, session.signIn)) login.signedOut = false;
-        session.controller = 'agent';
-        session.controlledBy = null;
-        session.needsPerson = null;
-        session.signIn = null;
-      }
-      await session.emitState();
-      return session.state();
-    });
   }
 
   async function needsPerson(sessionId: string, request: BrowserNeedsPerson): Promise<BrowserSessionState> {
@@ -1414,8 +1384,7 @@ export async function createBrowserHost(options: HostOptions) {
   }
 
   async function dispatch(session: Session, event: BrowserInput): Promise<void> {
-    if (session.controller !== 'person')
-      throw new HostError('agent-in-control', 'Take over the browser before using it.', 409);
+    session.personUsed = true;
     const cdp = await session.session();
     switch (event.type) {
       case 'mouse':
@@ -1498,7 +1467,6 @@ export async function createBrowserHost(options: HostOptions) {
     typeSecret,
     upload,
     takeDownload,
-    control,
     needsPerson,
     loadLogin,
     siteState,

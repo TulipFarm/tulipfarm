@@ -21,8 +21,6 @@ import { siteOfPage } from './logins';
 const startingMs = 60_000;
 const maxRefusals = 5;
 
-export const handBackPrompt = 'I’ve finished in the browser. Continue.';
-
 type Live =
   | { kind: 'connecting' }
   | { kind: 'closed' }
@@ -32,17 +30,17 @@ type Live =
 const buttons = ['left', 'middle', 'right'] as const;
 
 /**
- * The live screen of a chat's or a run's browser. The member can take over to act on the page, then hand back.
- * Handing back a chat's browser sends the agent a prompt; handing back a run's browser wakes the run on the server.
+ * The live screen of a chat's or a run's browser. Whoever watches can click and type in it at any time, even while the
+ * agent works. When the agent asks for a step, the member does it here and replies in the chat or run.
  */
 export function LiveBrowserCanvas({
   workspaceId,
   target,
-  onHandBack,
+  onPrompt,
 }: {
   workspaceId: string;
   target: BrowserTarget;
-  onHandBack?: (prompt: string) => void;
+  onPrompt?: (prompt: string) => void;
 }) {
   const kind = target.kind;
   const ownerId = target.kind === 'chat' ? target.chatId : target.taskId;
@@ -54,11 +52,10 @@ export function LiveBrowserCanvas({
   const chatId = target.kind === 'chat' ? target.chatId : null;
   const [live, setLive] = useState<Live>({ kind: 'connecting' });
   const [frame, setFrame] = useState<{ data: string; width: number; height: number } | null>(null);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
   const [saving, setSaving] = useState<string | null>(null);
-  // The site a member took over to sign in to, so they can save the login when they hand back.
+  // The site a member signed in to themselves, so they can save the login once the agent moves on.
   const signingIn = useRef<string | null>(null);
   // The panel can open while the agent's first browser action is still starting the browser.
   const opening = useRef({ since: 0, seen: false, refused: 0 });
@@ -117,29 +114,13 @@ export function LiveBrowserCanvas({
   }, [api, attempt]);
 
   const state = live.kind === 'open' ? live.state : null;
-  const inControl = state?.controller === 'person';
-
-  const decide = async (controller: 'person' | 'agent') => {
-    setBusy(true);
-    setError('');
-    try {
-      const signIn = state?.signIn ?? null;
-      const next = await api.control(controller);
-      if (next) setLive({ kind: 'open', state: next });
-      if (controller === 'person') signingIn.current = signIn;
-      if (controller === 'agent') {
-        onHandBack?.(handBackPrompt);
-        if (!chatId) return;
-        const site = signingIn.current;
-        signingIn.current = null;
-        if (site && !state?.logins.some(login => login.site === site)) setSaving(site);
-      }
-    } catch (failure) {
-      setError(browserErrorMessage(failure));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const signIn = state?.signIn ?? null;
+  useEffect(() => {
+    if (signIn || !chatId) return;
+    const site = signingIn.current;
+    signingIn.current = null;
+    if (site && !state?.logins.some(login => login.site === site)) setSaving(site);
+  }, [signIn, chatId, state?.logins]);
 
   // Inputs go in order, one request at a time, so a click lands before the keys typed after it. Inputs made while a
   // request is out go together in the next one: a request per key would soon pass the API's rate limit.
@@ -150,6 +131,7 @@ export function LiveBrowserCanvas({
   });
   const send = useCallback(
     (input: BrowserInput) => {
+      if (signIn) signingIn.current = signIn;
       const queue = pending.current;
       if (queue.api !== api) pending.current = { api, inputs: [], sending: false };
       pending.current.inputs.push(input);
@@ -169,14 +151,14 @@ export function LiveBrowserCanvas({
         current.sending = false;
       })();
     },
-    [api],
+    [api, signIn],
   );
 
   const screen = useRef<HTMLDivElement>(null);
   const size = frame ?? browserViewport;
   useEffect(() => {
     const element = screen.current;
-    if (!element || !inControl) return;
+    if (!element) return;
     let pending: { x: number; y: number; deltaX: number; deltaY: number } | null = null;
     const wheel = (event: WheelEvent) => {
       event.preventDefault();
@@ -196,13 +178,12 @@ export function LiveBrowserCanvas({
     };
     element.addEventListener('wheel', wheel, { passive: false });
     return () => element.removeEventListener('wheel', wheel);
-  }, [inControl, send, size]);
+  }, [send, size]);
 
   const pointer = (event: React.PointerEvent<HTMLDivElement>, type: 'mousePressed' | 'mouseReleased') => {
-    if (!inControl) return;
     event.preventDefault();
-    if (type === 'mousePressed') event.currentTarget.focus();
     const point = viewportPoint(event.currentTarget.getBoundingClientRect(), event.clientX, event.clientY, size);
+    if (type === 'mousePressed') event.currentTarget.focus({ preventScroll: true });
     send({
       type: 'mouse',
       event: type,
@@ -213,7 +194,7 @@ export function LiveBrowserCanvas({
     });
   };
   const key = (event: React.KeyboardEvent<HTMLDivElement>, type: 'keyDown' | 'keyUp') => {
-    if (!inControl || event.key.length > 64) return;
+    if (event.key.length > 64) return;
     // Let the person paste with the usual shortcut; the paste event sends the text.
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'v') return;
     event.preventDefault();
@@ -272,52 +253,40 @@ export function LiveBrowserCanvas({
       title={page.title || 'Browser'}
       meta={page.url}
       actions={
-        <>
-          {chatId && siteOfPage(page.url) && (
-            <Button variant="ghost" size="sm" disabled={busy} onClick={() => setSaving(siteOfPage(page.url))}>
-              Save login
-            </Button>
-          )}
-          {inControl ? (
-            <Button size="sm" disabled={busy} onClick={() => void decide('agent')}>
-              Hand back to the agent
-            </Button>
-          ) : (
-            <Button variant="outline" size="sm" disabled={busy} onClick={() => void decide('person')}>
-              Take over
-            </Button>
-          )}
-        </>
+        chatId &&
+        siteOfPage(page.url) && (
+          <Button variant="ghost" size="sm" onClick={() => setSaving(siteOfPage(page.url))}>
+            Save login
+          </Button>
+        )
       }
     >
       <div className="flex flex-col gap-3">
         {chatId && saving !== null && (
           <SaveLoginDialog workspaceId={workspaceId} chatId={chatId} site={saving} close={() => setSaving(null)} />
         )}
-        {chatId && page.signIn && page.needsPerson && !inControl && (
+        {chatId && page.signIn && page.needsPerson && (
           <SignInPicker
             workspaceId={workspaceId}
             chatId={chatId}
             site={page.signIn}
             reason={page.needsPerson}
-            busy={busy}
-            onTakeOver={() => void decide('person')}
             onLoaded={next => {
               setLive({ kind: 'open', state: next });
-              onHandBack?.(loadedLoginPrompt(page.signIn ?? ''));
+              onPrompt?.(loadedLoginPrompt(page.signIn ?? ''));
             }}
           />
         )}
-        {page.needsPerson && !(chatId && page.signIn) && !inControl && (
+        {page.needsPerson && !(chatId && page.signIn) && (
           <Alert>
             <AlertTitle>The agent needs you</AlertTitle>
-            <AlertDescription>{page.needsPerson} Take over, finish this step, then hand back.</AlertDescription>
+            <AlertDescription>
+              {page.needsPerson}{' '}
+              {chatId
+                ? 'Do it in the browser below, then tell the agent in chat.'
+                : 'Do it in the browser below, then reply to the run.'}
+            </AlertDescription>
           </Alert>
-        )}
-        {inControl && (
-          <p role="status" className="text-xs text-muted-foreground">
-            You’re in control. The agent waits until you hand back.
-          </p>
         )}
         {error && (
           <p role="alert" className="text-xs text-destructive">
@@ -327,34 +296,27 @@ export function LiveBrowserCanvas({
         <div
           ref={screen}
           role="application"
-          aria-label={inControl ? 'Browser screen. Click and type to use the page.' : 'Browser screen'}
+          aria-label="Browser screen. Click and type to use the page."
           aria-roledescription="remote browser"
-          tabIndex={inControl ? 0 : -1}
+          tabIndex={0}
           onPointerDown={event => pointer(event, 'mousePressed')}
           onPointerUp={event => pointer(event, 'mouseReleased')}
-          onContextMenu={event => inControl && event.preventDefault()}
+          onContextMenu={event => event.preventDefault()}
           onKeyDown={event => key(event, 'keyDown')}
           onKeyUp={event => key(event, 'keyUp')}
           onPaste={event => {
-            if (!inControl) return;
             event.preventDefault();
             const text = event.clipboardData.getData('text/plain').slice(0, 2000);
             if (text) send({ type: 'text', text });
           }}
-          className={
-            inControl
-              ? 'overflow-hidden rounded-md border border-ring bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring'
-              : 'overflow-hidden rounded-md border border-border bg-muted'
-          }
+          className="overflow-hidden rounded-md border border-border bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {frame ? (
             <img
               src={`data:image/jpeg;base64,${frame.data}`}
               alt={`Live view of ${page.title || page.url}`}
               draggable={false}
-              className={
-                inControl ? 'block h-auto w-full cursor-pointer select-none' : 'block h-auto w-full select-none'
-              }
+              className="block h-auto w-full cursor-pointer select-none"
             />
           ) : (
             <Skeleton shape="panel" />

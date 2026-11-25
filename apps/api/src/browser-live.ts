@@ -24,7 +24,6 @@ import { requestBoundaryError } from './security.ts';
 const chatParams = z.strictObject({ workspaceId: z.uuid(), chatId: z.uuid() });
 const taskParams = z.strictObject({ workspaceId: z.uuid(), taskId: z.uuid() });
 const stateResponse = z.strictObject({ browser: browserSessionStateSchema.nullable() });
-const controlBody = z.strictObject({ controller: z.enum(['agent', 'person']) });
 const okResponse = z.strictObject({ ok: z.literal(true) });
 const errorSchema = {
   type: 'object',
@@ -53,8 +52,6 @@ type Owner = {
   /** Throws `AccessDenied` unless the member may see the chat or run. */
   read(workspaceId: string, userId: string, id: string): Promise<unknown>;
   sessionId(workspaceId: string, id: string): string;
-  /** Runs after a member hands the browser back; throws when nothing will resume the owner. */
-  handedBack?(workspaceId: string, id: string, log: (error: unknown) => void): Promise<void>;
 };
 
 /** Records that a person used or watched a browser session, so its open time is charged. Never throws. */
@@ -113,7 +110,6 @@ function registerLiveRoutes(
       401: errorSchema,
       403: errorSchema,
       404: errorSchema,
-      409: errorSchema,
       503: errorSchema,
     },
   });
@@ -126,8 +122,6 @@ function registerLiveRoutes(
       if (error instanceof StorageUnavailableError) return reply.code(503).send({ error: owner.unavailable });
       if (error instanceof BrowserHostError) {
         if (error.code === 'session-not-found') return reply.code(404).send({ error: 'browser-not-found' });
-        if (error.code === 'person-in-control' || error.code === 'agent-in-control')
-          return reply.code(409).send({ error: error.code });
         if (error.code === 'invalid-request') return reply.code(400).send({ error: 'invalid-request' });
         request.log.warn(errorAttributes(error), 'browser_host_failed');
         return reply.code(503).send({ error: 'browser-unavailable' });
@@ -159,33 +153,6 @@ function registerLiveRoutes(
         const sessionId = owner.sessionId(workspaceId, id);
         const browser = await client.state(sessionId);
         if (browser) await usage?.(workspaceId, sessionId, browser);
-        return { browser };
-      },
-    );
-
-    routes.post(
-      `${owner.base}/control`,
-      {
-        schema: schema(
-          `control${owner.operation}BrowserV1`,
-          `Take over a ${owner.noun}'s browser or hand it back`,
-          stateResponse,
-          controlBody,
-        ),
-      },
-      async request => {
-        const userId = user(request);
-        const { client, sessionId, workspaceId, id } = await session(request.params, userId);
-        const { controller } = controlBody.parse(request.body);
-        const browser = await client.control(
-          sessionId,
-          controller === 'person' ? { controller, memberId: userId } : { controller },
-        );
-        await usage?.(workspaceId, sessionId, browser);
-        if (controller === 'agent')
-          await owner.handedBack?.(workspaceId, id, error =>
-            request.log.warn(errorAttributes(error), 'browser_hand_back_wake_failed'),
-          );
         return { browser };
       },
     );
@@ -278,9 +245,9 @@ function registerLiveRoutes(
 }
 
 /**
- * The live view of a chat's or an agent run's cloud browser. Whoever can read the chat or see the run can watch it,
- * take it over, use it while in control and hand it back. The session is derived from the chat or run, so no other
- * browser is reachable. Handing a run's browser back wakes the run.
+ * The live view of a chat's or an agent run's cloud browser. Whoever can read the chat or see the run can watch it and
+ * click and type in it, even while the agent works. The session is derived from the chat or run, so no other browser
+ * is reachable.
  */
 export function registerBrowserLive(
   app: FastifyInstance,
@@ -289,9 +256,6 @@ export function registerBrowserLive(
     chats: { read(workspaceId: string, userId: string, chatId: string): Promise<unknown> };
     tasks?: {
       read(workspaceId: string, userId: string, taskId: string): Promise<unknown>;
-      /** Records the hand back on the run, so the minutely recovery resumes it even if the wake is lost. */
-      handBack(workspaceId: string, taskId: string): Promise<unknown>;
-      wake(workspaceId: string, taskId: string): Promise<void>;
     };
     client: BrowserHostClient | undefined;
     /** Records a person's use of a browser for its charge; absent when resources are not metered. */
@@ -339,18 +303,6 @@ export function registerBrowserLive(
         unavailable: 'task-operation-unavailable',
         read: tasks.read,
         sessionId: (workspaceId, taskId) => browserSessionId(workspaceId, { runId: taskId }),
-        // Either a recorded hand back or a delivered wake resumes the run; with neither, the member must try again.
-        handedBack: async (workspaceId, taskId, log) => {
-          const recorded = await tasks.handBack(workspaceId, taskId).then(
-            () => true,
-            error => (log(error), false),
-          );
-          const woken = await tasks.wake(workspaceId, taskId).then(
-            () => true,
-            error => (log(error), false),
-          );
-          if (!recorded && !woken) throw new Error('run-not-resumed');
-        },
       },
       usage,
     );

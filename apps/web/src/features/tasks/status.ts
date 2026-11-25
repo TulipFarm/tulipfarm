@@ -101,7 +101,7 @@ type TaskState = Pick<TaskSummary, 'status' | 'pauseReason'> &
 const browserGuidance = {
   label: 'Needs you in the browser',
   recovery:
-    'The agent is waiting for someone to finish a step in its browser. Take over, finish it, then hand back. If no one does, the run stops after 24 hours.',
+    'The agent is waiting for someone to finish a step in its browser. This wait started before browsers became shared, so it can’t be resumed; the run stops after 24 hours. Start a new task to try again.',
 };
 
 function guidance(task: TaskState) {

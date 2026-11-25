@@ -21,10 +21,10 @@ const client = fetchImpl =>
   createBrowserHostClient({ endpoint: 'http://host.test', headers: { authorization: 'Bearer t' } }, fetchImpl);
 
 test('host errors keep their code, and a missing session reads as none', async () => {
-  const busy = client(respond(409, { error: 'person-in-control', message: 'A member controls this browser' }));
+  const busy = client(respond(409, { error: 'browser-busy', message: 'The browser is busy' }));
   await assert.rejects(busy.act('s', { action: 'snapshot' }), error => {
     assert.ok(error instanceof BrowserHostError);
-    assert.equal(error.code, 'person-in-control');
+    assert.equal(error.code, 'browser-busy');
     assert.equal(error.status, 409);
     return true;
   });

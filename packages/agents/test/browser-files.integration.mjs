@@ -16,7 +16,6 @@ const page = {
   sessionId: 's',
   url: 'https://forms.example.com/',
   title: 'Upload',
-  controller: 'agent',
   needsPerson: null,
 };
 
