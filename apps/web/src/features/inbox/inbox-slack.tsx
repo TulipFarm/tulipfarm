@@ -10,11 +10,18 @@ const kinds = [
   { kind: 'waiting', label: 'Waiting for you', description: 'An agent needs your answer or approval.' },
   { kind: 'finished', label: 'Agent finished', description: 'An agent finishes a task you’re following.' },
   { kind: 'mention', label: 'Mentioned you', description: 'Someone mentions you in a task.' },
+  { kind: 'reminder', label: 'Reminders', description: 'A reminder you or a teammate set on a task comes due.' },
 ] as const;
 type Kind = (typeof kinds)[number]['kind'];
 const preferencesSchema = z.object({
   connected: z.boolean(),
-  kinds: z.object({ assigned: z.boolean(), waiting: z.boolean(), finished: z.boolean(), mention: z.boolean() }),
+  kinds: z.object({
+    assigned: z.boolean(),
+    waiting: z.boolean(),
+    finished: z.boolean(),
+    mention: z.boolean(),
+    reminder: z.boolean(),
+  }),
 });
 type Preferences = z.infer<typeof preferencesSchema>;
 

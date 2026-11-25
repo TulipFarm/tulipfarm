@@ -13,6 +13,7 @@ const kindLabels: Record<Inbox['items'][number]['kind'], string> = {
   waiting: 'Waiting for you',
   finished: 'Agent finished',
   mention: 'Mentioned you',
+  reminder: 'Reminder',
 };
 
 /** Loads the titles of one table's Inbox rows the member can read and reports them by row id. */
@@ -96,7 +97,7 @@ export function InboxList({ workspaceId, workspaceSlug }: { workspaceId: string;
               <div className="min-w-0 space-y-1">
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   <Badge variant={item.kind === 'waiting' ? 'warning' : 'secondary'}>{kindLabels[item.kind]}</Badge>
-                  <span className="text-muted-foreground">{item.tableName}</span>
+                  <span className="text-muted-foreground">{item.taskKey ?? item.tableName}</span>
                   <span className="text-muted-foreground">
                     {new Date(item.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
                   </span>
@@ -110,14 +111,18 @@ export function InboxList({ workspaceId, workspaceSlug }: { workspaceId: string;
                   variant="outline"
                   nativeButton={false}
                   render={
-                    <Link
-                      to="/$workspaceSlug/tables/$tableId"
-                      params={{ workspaceSlug, tableId: item.tableId }}
-                      search={{ row: item.rowId }}
-                    />
+                    item.taskKey ? (
+                      <Link to="/$workspaceSlug/tasks/$key" params={{ workspaceSlug, key: item.taskKey }} />
+                    ) : (
+                      <Link
+                        to="/$workspaceSlug/tables/$tableId"
+                        params={{ workspaceSlug, tableId: item.tableId }}
+                        search={{ row: item.rowId }}
+                      />
+                    )
                   }
                 >
-                  {item.tableName.toLowerCase() === 'tasks' ? 'Open task' : 'Open record'}
+                  {item.taskKey ? 'Open task' : 'Open record'}
                 </Button>
                 {item.taskId && (
                   <Button
