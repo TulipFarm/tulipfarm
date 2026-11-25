@@ -3,6 +3,7 @@ import { readReviewPolicy, shouldAsk, type ReviewAction } from '@tulipfarm/works
 import { relation, type AgentStorage, type AgentTransaction } from './store.ts';
 import { withHuman } from './saved-policy.ts';
 import { digestJson } from '@tulipfarm/tables/canonical';
+import { creationRequested } from './decisions.ts';
 
 type Context = {
   workspaceId: string;
@@ -134,7 +135,8 @@ export async function policyWrite(
     }
     if (shouldAsk(policy, action)) return { review: true };
     if (!row) {
-      if (!explicitCreation(turn.text, action.slice(7))) return null;
+      const kind = action.slice(7);
+      if (!((await creationRequested(workspaceId, turn.text, kind)) ?? explicitCreation(turn.text, kind))) return null;
       if (
         (
           await protectedSourceClosure(tx, [

@@ -53,6 +53,27 @@ export const featureFlags = {
     scope: 'workspace',
     env: 'FEATURE_FLAG_CODE_SESSIONS',
   },
+  'decisions-tool-preload': {
+    description:
+      'With TYPESAFE_API_KEY set, the Jev decision model predicts which deferred tool groups a chat request needs and offers them from the first round, saving a tools_search round.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_DECISIONS_TOOL_PRELOAD',
+  },
+  'decisions-completion-check': {
+    description:
+      'With TYPESAFE_API_KEY set, the Jev decision model accepts a clearly finished chat reply without the model completion check. Unsure or unfinished replies still get the model check.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_DECISIONS_COMPLETION_CHECK',
+  },
+  'decisions-creation-review': {
+    description:
+      'With TYPESAFE_API_KEY set, the Jev decision model decides whether a message directly asks to create a table, agent, skill or workflow, so workspace review mode may save it without a card. Off uses the keyword check.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_DECISIONS_CREATION_REVIEW',
+  },
 } as const satisfies Record<string, FeatureFlagDefinition>;
 
 export type FeatureFlag = keyof typeof featureFlags;

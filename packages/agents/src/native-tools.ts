@@ -378,6 +378,22 @@ export function nativeChatTools(
   };
 }
 
+/** Schema sizes of a chat's deferred tools and of the core tools every round sends, for choosing what to preload. */
+export function chatToolSizes(
+  earlierMessages = false,
+  chatFiles = false,
+  codingRuns = false,
+  apps?: AppKind,
+  browser = false,
+): { deferred: { name: string; bytes: number }[]; coreBytes: number } {
+  const full = nativeTools({ kind: 'chat', earlierMessages, chatFiles, codingRuns, apps, browser }, chatCallSchema);
+  const deferred = full.tools.filter(tool => !coreChatTools.has(tool.name) && !tool.name.startsWith('mcp_'));
+  return {
+    deferred: deferred.map(tool => ({ name: tool.name, bytes: schemaBytes(tool) })),
+    coreBytes: full.tools.filter(tool => !deferred.includes(tool)).reduce((sum, tool) => sum + schemaBytes(tool), 0),
+  };
+}
+
 /** Builds a saved agent's native catalog from only the tools in its immutable definition. */
 export function nativeAgentTools(tools: readonly ToolName[], mcp?: McpModelCatalog, task = false): NativeCatalog {
   return nativeTools({ kind: 'agent', tools, mcp, task }, frameworkCallSchema);

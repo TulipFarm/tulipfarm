@@ -1180,6 +1180,16 @@ export const settings: readonly Setting[] = [
     selfHost: { section: 'models', commented: true },
   },
   {
+    name: 'TYPESAFE_API_KEY',
+    group: 'Models',
+    services: apps,
+    requirement: 'optional',
+    secret: true,
+    description:
+      'TypeSafe API key for the Jev decision model. When set, workspaces with the `decisions-*` feature flags on use Jev to preload likely chat tools, accept clearly finished replies without a model check, and recognise direct creation requests; without it the existing checks run.',
+    selfHost: { section: 'models', commented: true },
+  },
+  {
     name: 'ANTHROPIC_BASE_URL',
     group: 'Models',
     services: apps,
