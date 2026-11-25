@@ -9,7 +9,7 @@ import {
   Position,
   ReactFlow,
   useReactFlow,
-  useStore,
+  useViewportStore,
   type Edge,
   type EdgeProps,
   type Node,
@@ -316,8 +316,8 @@ function FlowPath({
 
 // Resizing refits the diagram until the person pans or zooms it; after that it keeps their view and only recenters.
 function WorkflowViewport({ adjusted }: { adjusted: RefObject<boolean> }) {
-  const width = useStore(state => state.width),
-    height = useStore(state => state.height);
+  const width = useViewportStore(state => state.width),
+    height = useViewportStore(state => state.height);
   const flow = useReactFlow();
   const fitted = useRef<{ width: number; height: number } | null>(null);
   useEffect(() => {
