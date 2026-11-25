@@ -68,6 +68,7 @@ import { configuredSkillClient } from '@tulipfarm/workflow-snippets/client';
 import { createSkillExecutionFactory } from '@tulipfarm/agents/skill-execution';
 import { createChatExecution, type ChatExecution } from '@tulipfarm/agents/chat-execution';
 import { codingRunsFactory, createCodingRunActivities, createCodingRunDispatcher } from './coding-runs.ts';
+import { createCodeSessionActivities } from './code-sessions.ts';
 import { createWorkflowCodingActivities, createWorkflowCodingDispatcher } from './workflow-coding-steps.ts';
 import { slackActionsFromEnvironment } from '@tulipfarm/agents/slack-environment';
 import { createRecommendationComposition } from './recommendation-activities.ts';
@@ -512,6 +513,7 @@ async function run() {
                     chatObjects ? createFiles(coreResources.runtime, chatObjects) : undefined,
                   )
                 : {}),
+              ...(coreResources ? createCodeSessionActivities(coreResources.runtime, coding ?? undefined) : {}),
               ...(coreResources && coding
                 ? createWorkflowCodingActivities(coreResources.runtime, coding.backend, coding.configuration)
                 : {}),

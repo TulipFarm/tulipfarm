@@ -163,7 +163,8 @@
                 "enum": [
                   "openai-models",
                   "anthropic-models",
-                  "openai-image-models"
+                  "openai-image-models",
+                  "code-sessions"
                 ]
               },
               {
@@ -511,7 +512,8 @@
                 "enum": [
                   "openai-models",
                   "anthropic-models",
-                  "openai-image-models"
+                  "openai-image-models",
+                  "code-sessions"
                 ]
               },
               {

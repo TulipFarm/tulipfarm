@@ -38,6 +38,7 @@ import {
   SidebarLeftIcon,
   SunIcon,
   TasksIcon,
+  TerminalIcon,
   UserCircleIcon,
   UserIcon,
   UsersIcon,
@@ -126,6 +127,7 @@ export type WorkspacePath =
   | '/$workspaceSlug/settings/account'
   | '/$workspaceSlug/settings/secrets'
   | '/$workspaceSlug/settings/browser-logins'
+  | '/$workspaceSlug/settings/code'
   | '/$workspaceSlug/settings/models'
   | '/$workspaceSlug/settings/usage'
   | '/$workspaceSlug/teams'
@@ -338,6 +340,13 @@ function usePreloadSidebarCode(slug: string) {
     };
   }, [slug]);
 }
+const codeSettingsPage: Page = {
+  label: 'Code',
+  to: '/$workspaceSlug/settings/code',
+  icon: TerminalIcon,
+  detail: 'Branch prefix, pull request defaults, and code reviewers',
+  keywords: ['code', 'coding', 'pr', 'git', 'claude', 'codex', 'copilot'],
+};
 const models: Page = {
   label: 'Models',
   to: '/$workspaceSlug/settings/models',
@@ -372,6 +381,7 @@ const settingsPages: Page[] = [
   membersAndTeams,
   tableAccess,
   models,
+  codeSettingsPage,
   usage,
   soul,
 ];
@@ -392,6 +402,7 @@ const pages = [
   account,
   secrets,
   browserLogins,
+  codeSettingsPage,
   models,
   usage,
   soul,
@@ -410,6 +421,7 @@ export const searchPages = [
   settings,
   ...administrationPages,
   models,
+  codeSettingsPage,
   usage,
   account,
   secrets,

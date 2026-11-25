@@ -14,6 +14,7 @@ import {
   SlidersIcon,
   SparkleIcon,
   StopIcon,
+  TerminalIcon,
 } from '@tulipfarm/icons';
 import {
   Command,
@@ -84,7 +85,11 @@ type ComposerProps = {
     agents: readonly Agent[];
     onChange: (persona: Persona | null) => void;
   };
-  mode?: { value: 'normal' | 'plan'; onChange: (mode: 'normal' | 'plan') => void } | undefined;
+  mode?: { value: ChatMode; onChange: (mode: ChatMode) => void } | undefined;
+  codeHeader?: ReactNode;
+  codeNotice?: ReactNode;
+  codeAgentPicker?: ReactNode;
+  sendDisabledReason?: string | undefined;
   scope?: ((disabled: boolean) => ReactNode) | undefined;
   /** Offers the three things a file can become here, so a person knows before choosing whether this chat reads it. */
   extensions?: Extensions;
@@ -129,6 +134,10 @@ export function Composer({
   planAccount,
   persona,
   mode,
+  codeHeader,
+  codeNotice,
+  codeAgentPicker,
+  sendDisabledReason,
   scope,
   extensions,
   integrations,
@@ -219,112 +228,137 @@ export function Composer({
         )}
         <InputGroup
           variant={questionPending ? 'question-composer' : 'composer'}
-          data-mode={mode?.value === 'plan' ? 'plan' : undefined}
+          data-mode={mode?.value === 'plan' ? 'plan' : mode?.value === 'code' ? 'code' : undefined}
         >
+          {codeHeader && mode?.value === 'code' && <div className="code-mode-header-slot w-full">{codeHeader}</div>}
+          {codeNotice && mode?.value === 'code' && <div className="w-full">{codeNotice}</div>}
           {attachments && <InputGroupAddon align="block-start">{attachments}</InputGroupAddon>}
-          <RichTextEditor
-            key={compact ? 'compact' : 'full'}
-            size={compact ? 'sm' : 'md'}
-            condensed={condensed}
-            minRows={minRows}
-            ref={inputRef}
-            placeholder={
-              questionPending
-                ? 'Send a separate message…'
-                : persona?.value?.kind === 'agent'
-                  ? `Ask ${persona.value.agent.label} anything…`
-                  : (placeholder ?? 'Ask anything…')
+          <div
+            className={
+              mode?.value === 'code' ? 'code-mode-editor-row flex w-full items-start' : 'flex w-full items-start'
             }
-            value={editorValue}
-            disabled={disabled || sending}
-            ariaInvalid={!!validation}
-            ariaDescribedBy={validation ? errorId : undefined}
-            ariaExpanded={panelOpen}
-            ariaControls={compact ? undefined : picker?.id}
-            ariaActiveDescendant={compact ? undefined : picker?.activeId}
-            extensions={editorExtensions}
-            keywords={integrations?.keywords}
-            onKeywordConnect={integrations?.onConnect}
-            onKeywordAccountChange={integrations?.onAccountChange}
-            onChange={doc => onContentChange({ version: 1, doc })}
-            onSend={send}
-            toolbarAddon={
-              <div className="flex min-h-7 min-w-0 flex-1 items-center justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-0.5">
-                  {!compact && !condensed && (
-                    <>
-                      <AddMenu disabled={disabled || sending} upload={() => fileInput.current?.click()} />
-                      {mode && <ModeMenu value={mode.value} onChange={mode.onChange} disabled={disabled || sending} />}
-                      {persona && (
-                        <PersonaPicker
-                          value={persona.value}
-                          onChange={persona.onChange}
-                          modes={persona.modes}
-                          agents={persona.agents}
-                          disabled={disabled || sending}
-                        />
-                      )}
-                      {scope && (
+          >
+            {mode?.value === 'code' && (
+              <span className="code-mode-prompt select-none" aria-hidden="true">
+                ❯
+              </span>
+            )}
+            <div className="min-w-0 flex-1">
+              <RichTextEditor
+                key={compact ? 'compact' : 'full'}
+                size={compact ? 'sm' : 'md'}
+                condensed={condensed}
+                minRows={minRows}
+                ref={inputRef}
+                placeholder={
+                  questionPending
+                    ? 'Send a separate message…'
+                    : mode?.value === 'code'
+                      ? 'Describe what to build, fix, or refactor…'
+                      : persona?.value?.kind === 'agent'
+                        ? `Ask ${persona.value.agent.label} anything…`
+                        : (placeholder ?? 'Ask anything…')
+                }
+                value={editorValue}
+                disabled={disabled || sending}
+                ariaInvalid={!!validation}
+                ariaDescribedBy={validation ? errorId : undefined}
+                ariaExpanded={panelOpen}
+                ariaControls={compact ? undefined : picker?.id}
+                ariaActiveDescendant={compact ? undefined : picker?.activeId}
+                extensions={editorExtensions}
+                keywords={integrations?.keywords}
+                onKeywordConnect={integrations?.onConnect}
+                onKeywordAccountChange={integrations?.onAccountChange}
+                onChange={doc => onContentChange({ version: 1, doc })}
+                onSend={send}
+                toolbarAddon={
+                  <div className="flex min-h-7 min-w-0 flex-1 items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-0.5">
+                      {!compact && !condensed && (
                         <>
-                          <span aria-hidden="true" className="mx-1.5 h-5 w-px shrink-0 self-center bg-border" />
-                          <div className="flex min-w-0 items-center *:min-w-0 *:shrink">
-                            {scope(disabled || sending)}
-                          </div>
+                          <AddMenu disabled={disabled || sending} upload={() => fileInput.current?.click()} />
+                          {mode && (
+                            <ModeMenu value={mode.value} onChange={mode.onChange} disabled={disabled || sending} />
+                          )}
+                          {persona && (
+                            <PersonaPicker
+                              value={persona.value}
+                              onChange={persona.onChange}
+                              modes={persona.modes}
+                              agents={persona.agents}
+                              disabled={disabled || sending}
+                            />
+                          )}
+                          {scope && (
+                            <>
+                              <span aria-hidden="true" className="mx-1.5 h-5 w-px shrink-0 self-center bg-border" />
+                              <div className="flex min-w-0 items-center *:min-w-0 *:shrink">
+                                {scope(disabled || sending)}
+                              </div>
+                            </>
+                          )}
                         </>
                       )}
-                    </>
-                  )}
-                </div>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  {!compact && !condensed && (
-                    <ModelPicker
-                      model={model}
-                      models={models}
-                      onModelChange={onModelChange}
-                      account={planAccount}
-                      disabled={disabled || sending}
-                    />
-                  )}
-                  {onStop ? (
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <InputGroupButton
-                            size="icon"
-                            variant="default"
-                            aria-label="Stop reply"
-                            disabled={disabled}
-                            onClick={onStop}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {!compact &&
+                        !condensed &&
+                        (mode?.value === 'code' && codeAgentPicker ? (
+                          codeAgentPicker
+                        ) : (
+                          <ModelPicker
+                            model={model}
+                            models={models}
+                            onModelChange={onModelChange}
+                            account={planAccount}
+                            disabled={disabled || sending}
                           />
-                        }
-                      >
-                        <StopIcon size="md" aria-hidden="true" />
-                      </TooltipTrigger>
-                      <TooltipContent>Stop reply</TooltipContent>
-                    </Tooltip>
-                  ) : (
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <InputGroupButton
-                            type="submit"
-                            size="icon"
-                            variant={canSend ? 'default' : 'secondary'}
-                            aria-label="Send message"
-                            aria-busy={sending}
-                            disabled={disabled || sending || !canSend}
-                          />
-                        }
-                      >
-                        <ArrowUpIcon size="md" aria-hidden="true" />
-                      </TooltipTrigger>
-                      <TooltipContent>Send · Enter</TooltipContent>
-                    </Tooltip>
-                  )}
-                </div>
-              </div>
-            }
-          />
+                        ))}
+                      {onStop ? (
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <InputGroupButton
+                                size="icon"
+                                variant="default"
+                                aria-label="Stop reply"
+                                disabled={disabled}
+                                onClick={onStop}
+                              />
+                            }
+                          >
+                            <StopIcon size="md" aria-hidden="true" />
+                          </TooltipTrigger>
+                          <TooltipContent>Stop reply</TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <InputGroupButton
+                                type="submit"
+                                size="icon"
+                                variant={canSend ? 'default' : 'secondary'}
+                                aria-label="Send message"
+                                aria-busy={sending}
+                                disabled={disabled || sending || !canSend}
+                              />
+                            }
+                          >
+                            <ArrowUpIcon size="md" aria-hidden="true" />
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {!canSend && sendDisabledReason ? sendDisabledReason : 'Send · Enter'}
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
+                    </div>
+                  </div>
+                }
+              />
+            </div>
+          </div>
         </InputGroup>
         {!compact && picker?.panel && (
           <div
@@ -455,9 +489,9 @@ function AddMenu({ disabled, upload }: { disabled: boolean; upload: () => void }
   );
 }
 
-type ChatMode = 'normal' | 'plan';
+type ChatMode = 'normal' | 'plan' | 'code';
 
-/** Plan is the one mode today; the menu leaves room for more, and an active mode shows as a removable chip. */
+/** Modes control how a turn executes; an active non-default mode shows as a removable chip. */
 function ModeMenu({
   value,
   onChange,
@@ -467,6 +501,7 @@ function ModeMenu({
   onChange: (mode: ChatMode) => void;
   disabled: boolean;
 }) {
+  const modeLabel = value === 'plan' ? 'Plan' : value === 'code' ? 'Code' : 'Default';
   return (
     <>
       <DropdownMenu>
@@ -475,12 +510,7 @@ function ModeMenu({
             render={
               <DropdownMenuTrigger
                 render={
-                  <InputGroupButton
-                    size="icon"
-                    variant="ghost"
-                    aria-label={`Mode: ${value === 'plan' ? 'Plan' : 'Default'}`}
-                    disabled={disabled}
-                  />
+                  <InputGroupButton size="icon" variant="ghost" aria-label={`Mode: ${modeLabel}`} disabled={disabled} />
                 }
               />
             }
@@ -492,7 +522,10 @@ function ModeMenu({
         <DropdownMenuContent size="menu" side="top" align="start">
           <DropdownMenuGroup>
             <DropdownMenuLabel>Mode</DropdownMenuLabel>
-            <DropdownMenuRadioGroup value={value} onValueChange={next => onChange(next === 'plan' ? 'plan' : 'normal')}>
+            <DropdownMenuRadioGroup
+              value={value}
+              onValueChange={next => onChange(next === 'plan' ? 'plan' : next === 'code' ? 'code' : 'normal')}
+            >
               <DropdownMenuRadioItem value="normal" closeOnClick>
                 <span className="flex items-start gap-2 py-0.5">
                   <span className="mt-0.5 flex shrink-0">
@@ -512,6 +545,17 @@ function ModeMenu({
                   <span className="flex min-w-0 flex-col gap-0.5">
                     <span>Plan</span>
                     <span className="text-xs text-muted-foreground">Proposes steps before it acts</span>
+                  </span>
+                </span>
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="code" closeOnClick>
+                <span className="flex items-start gap-2 py-0.5">
+                  <span className="mt-0.5 flex shrink-0 text-primary">
+                    <TerminalIcon size="md" aria-hidden="true" />
+                  </span>
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span>Code</span>
+                    <span className="text-xs text-muted-foreground">Orchestrates a coding agent end to end</span>
                   </span>
                 </span>
               </DropdownMenuRadioItem>
@@ -540,6 +584,29 @@ function ModeMenu({
             <CloseIcon size="xs" aria-hidden="true" />
           </TooltipTrigger>
           <TooltipContent>Plan proposes steps before it acts. Select to turn off.</TooltipContent>
+        </Tooltip>
+      )}
+      {value === 'code' && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <InputGroupButton
+                size="md"
+                variant="secondary"
+                data-mode-chip=""
+                aria-label="Turn off Code"
+                disabled={disabled}
+                onClick={() => onChange('normal')}
+              />
+            }
+          >
+            <span className="flex">
+              <TerminalIcon size="md" aria-hidden="true" />
+            </span>
+            <span className="hidden sm:inline">Code</span>
+            <CloseIcon size="xs" aria-hidden="true" />
+          </TooltipTrigger>
+          <TooltipContent>Code starts a coding agent session. Select to turn off.</TooltipContent>
         </Tooltip>
       )}
     </>

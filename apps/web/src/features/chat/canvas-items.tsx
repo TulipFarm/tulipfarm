@@ -11,6 +11,7 @@ import {
   GlobeIcon,
   SparkleIcon,
   TasksIcon,
+  TerminalIcon,
   UsersIcon,
 } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
@@ -28,6 +29,7 @@ import { PlanCanvas } from './plans';
 import { workspaceRoute } from '@/router';
 import { ActivityResultDetails } from './activity-result-card';
 import { LiveBrowserCanvas } from '@/features/browser/live-browser';
+import { LiveTerminalCanvas } from '@/features/code-sessions/LiveTerminalCanvas';
 
 import { lazyCard } from '@/components/lazy-card';
 
@@ -78,6 +80,7 @@ const icons: Record<CanvasContent['kind'], ComponentType<{ size?: number }>> = {
   code: CodeIcon,
   browser: GlobeIcon,
   'live-browser': GlobeIcon,
+  'live-terminal': TerminalIcon,
   file: DocumentTextIcon,
   'workspace-file': DocumentTextIcon,
   'calendar-read': CalendarIcon,
@@ -303,6 +306,8 @@ export function CanvasItemView({
       );
     case 'live-browser':
       return <LiveBrowserItem workspaceId={content.workspaceId} chatId={content.chatId} />;
+    case 'live-terminal':
+      return <LiveTerminalCanvas workspaceId={content.workspaceId} sessionId={content.sessionId} />;
     case 'browser':
       return (
         <CanvasSection

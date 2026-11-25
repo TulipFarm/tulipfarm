@@ -32,6 +32,7 @@ import { changedValues, rejectionMessage, validateRowDraft } from '@/features/ta
 import type { TableWorkspace } from '@/features/tables/references';
 import type { TableValues } from '@/features/tables/review-contracts';
 import { RowThreadPanel } from '@/features/tables/row-thread';
+import { CodeSessionTaskSection } from '@/features/code-sessions/CodeSessionTaskSection';
 import { taskCards, type TaskCard } from './api';
 import { AgentWork, stateLabels } from './agent-work';
 import { useNow } from './live';
@@ -243,6 +244,14 @@ function TaskLoaded({
             />
             <RecordMutationFeedback mutation={update} />
           </div>
+          <CodeSessionTaskSection
+            workspaceId={workspace.id}
+            workspaceSlug={workspace.slug}
+            tableId={task.tableId}
+            rowId={task.rowId}
+            title={card.title}
+            description={card.description}
+          />
           <section aria-label="Activity" className="space-y-2 border-t pt-4">
             <h2 className="text-sm font-medium">Activity</h2>
             <RowThreadPanel

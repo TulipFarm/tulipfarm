@@ -205,6 +205,7 @@ export function buildApp(
             ? { attachSlack: slack.channels.attachSetup, inspectSlack: slack.channels.inspectSetup }
             : undefined,
           defaultKnowledge,
+          devPlans ? (workspaceId, userId) => devPlans.ensure(workspaceId, userId) : undefined,
         );
         if (runtime)
           registerModelCatalog(business, {

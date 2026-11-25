@@ -15,6 +15,11 @@ import { registerRecommendationEvents } from './recommendation-events.ts';
 import { recommendationEligibility } from '@tulipfarm/recommendations/configuration';
 import { createApiCallReviews, registerApiCalls } from './api-calls.ts';
 import { createCodingRunReviews, registerCodingRuns } from './coding-runs.ts';
+import {
+  createCodeSessionService,
+  createCodeSessionWorkflowController,
+  registerCodeSessions,
+} from './code-sessions.ts';
 import { registerIntegrations } from './integrations.ts';
 import { integrationCredentialKeyring, createIntegrationService } from '@tulipfarm/integrations';
 import type { registerAuth } from './auth.ts';
@@ -102,6 +107,7 @@ export function registerStorageComposition(
   modelFamilyEligibility?: ModelFamilyEligibility,
   configuredAgentSetup?: AgentSetupOptions,
   defaultKnowledge?: ReturnType<typeof defaultKnowledgeStarter>,
+  ensureDevPlans?: (workspaceId: string, userId: string) => Promise<void>,
 ) {
   if (!runtime) {
     registerWorkspaceMcp(app, dependencies.auth, null);
@@ -269,6 +275,16 @@ export function registerStorageComposition(
       wakeChat: replies.sent,
     }),
   );
+  const codeSessionWorkflows = createCodeSessionWorkflowController(
+    temporal,
+    process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm',
+  );
+  const codeSessions = createCodeSessionService({
+    runtime,
+    workflows: codeSessionWorkflows,
+    ...(ensureDevPlans ? { ensureDevPlans } : {}),
+  });
+  registerCodeSessions(app, dependencies.auth, codeSessions);
   registerFollowUps(app, { auth: dependencies.auth, followUps });
   registerConversations(app, {
     auth: dependencies.auth,
@@ -279,6 +295,7 @@ export function registerStorageComposition(
     identity: dependencies.pool,
     events,
     replies,
+    codeSessions: codeSessionWorkflows,
   });
   const browserHost = browserHostConfiguration();
   const browserClient = browserHost ? createBrowserHostClient(browserHost) : undefined;

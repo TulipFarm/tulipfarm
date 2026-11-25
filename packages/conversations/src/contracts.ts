@@ -113,7 +113,38 @@ export const sendMessageSchema = z.strictObject({
    * accounts on for chats, then plans shared with them, answer when it is unavailable or out of usage.
    */
   planConnectionId: uuidSchema.optional(),
-  mode: z.enum(['normal', 'plan']).optional(),
+  mode: z.enum(['normal', 'plan', 'code']).optional(),
+  code: z
+    .strictObject({
+      agent: z.enum(['claude-code', 'codex', 'copilot']),
+      repository: z
+        .string()
+        .trim()
+        .min(3)
+        .max(200)
+        .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, 'Repository must be in owner/repo format'),
+      baseBranch: z
+        .string()
+        .trim()
+        .min(1)
+        .max(200)
+        .refine(
+          value => !/\s|\.\./.test(value) && !value.startsWith('/') && !value.endsWith('/'),
+          'Invalid git branch name',
+        ),
+      githubAccount: z.string().trim().min(1).max(120).optional(),
+      reviewers: z
+        .array(
+          z.strictObject({
+            agent: z.enum(['claude-code', 'codex', 'copilot']),
+            model: z.string().trim().min(1).max(120).optional(),
+          }),
+        )
+        .max(5)
+        .optional(),
+      budgetMinutes: z.number().int().min(15).max(1440).optional(),
+    })
+    .optional(),
   timeZone: timeZoneSchema.optional(),
   parts: z
     .array(inputPartSchema)
@@ -338,6 +369,8 @@ export const displayPartSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('layout'), text: z.string(), layout: layoutSchema }),
   /** A person's message sent by a button in an assistant layout, beside the text part with its words. */
   z.strictObject({ kind: z.literal('layout-action'), action: layoutActionSchema }),
+  /** Live card in chat linking to a code session started from this conversation. */
+  z.strictObject({ kind: z.literal('code-session'), sessionId: uuidSchema }),
 ]);
 export const imageReceiptSchema = z.array(
   z.object({

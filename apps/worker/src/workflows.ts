@@ -18,6 +18,7 @@ export { skillImport } from './skill-workflows.ts';
 export { agentEvalRun } from './eval-workflows.ts';
 export { workspaceMcpDiscovery } from './workspace-mcp-workflows.ts';
 export { codingRun } from './coding-run-workflows.ts';
+export { codeSession } from './code-session-workflows.ts';
 export { workflowCodingStepV1 } from './workflow-coding-step-workflows.ts';
 export {
   appBuild,

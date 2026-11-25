@@ -12,6 +12,7 @@ import { rowChangeSchema, rowViewSchema } from '@tulipfarm/conversations/row-vie
 import { transcriptOrder } from '@tulipfarm/conversations/transcript-order';
 import { calendarHistoryResultSchema } from '@tulipfarm/google-workspace/calendar-events';
 import { draftViewSchema, draftOutcomeSchema, type draftDecisionSchema } from '@tulipfarm/agents/draft-contracts';
+import type { CodeSessionStartInput } from '@tulipfarm/agents/code-session-contracts';
 import { chatDocumentSchema } from '@tulipfarm/conversations/rich-content';
 import { layoutActionResultSchema, type LayoutActionRequest } from '@tulipfarm/conversations/layout-contracts';
 import {
@@ -104,6 +105,7 @@ const partSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('response'), responseId: z.uuid() }),
   z.object({ kind: z.literal('approval'), approvalId: z.uuid() }),
   z.object({ kind: z.literal('approval-resolution'), approvalId: z.uuid() }),
+  z.object({ kind: z.literal('code-session'), sessionId: z.uuid() }),
   z.object({ kind: z.literal('skill'), ...skillReference }),
   z.object({ kind: z.literal('skill-use'), ...skillReference }),
   compactCommandPartSchema,
@@ -263,7 +265,8 @@ export type ConversationCommand =
       planConnectionId?: string;
       parts: ConversationPart[];
       timeZone?: string;
-      mode?: 'normal' | 'plan';
+      mode?: 'normal' | 'plan' | 'code';
+      code?: CodeSessionStartInput;
     }
   | ({ kind: 'layout-action'; chatId: string; commandId: string; replyId: string } & Omit<
       LayoutActionRequest,
@@ -559,16 +562,24 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
             }),
           );
         case 'send':
-          return z.object({ messageId: z.uuid(), turnId: z.uuid(), sequence: z.number().int() }).parse(
-            await request(`${path}/messages/${command.messageId}`, 'PUT', signal, {
-              commandId,
-              model: command.model,
-              ...(command.planConnectionId ? { planConnectionId: command.planConnectionId } : {}),
-              parts: command.parts,
-              timeZone: command.timeZone,
-              mode: command.mode,
-            }),
-          );
+          return z
+            .object({
+              messageId: z.uuid(),
+              turnId: z.uuid(),
+              sequence: z.number().int(),
+              sessionId: z.uuid().optional(),
+            })
+            .parse(
+              await request(`${path}/messages/${command.messageId}`, 'PUT', signal, {
+                commandId,
+                model: command.model,
+                ...(command.planConnectionId ? { planConnectionId: command.planConnectionId } : {}),
+                parts: command.parts,
+                timeZone: command.timeZone,
+                mode: command.mode,
+                ...(command.code ? { code: command.code } : {}),
+              }),
+            );
         case 'layout-action': {
           const { kind: _kind, chatId: _chatId, replyId, ...body } = command;
           return layoutActionResultSchema.parse(

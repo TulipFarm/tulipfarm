@@ -6,6 +6,9 @@ import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { TableRequestError } from '@/features/tables/request-state';
 import { tableApi } from '@/features/tables/api';
 import { useRowTitles } from '@/features/tables/hooks';
+import { codeSessionApi, type OpenCodeSessionRequestItem } from '@/features/code-sessions/api';
+import { useFlag } from '@/lib/feature-flags';
+import { CodeSessionRequestCard } from '@/features/code-sessions/CodeSessionRequestCard';
 import { markDone, useInbox, type Inbox } from './inbox';
 
 const kindLabels: Record<Inbox['items'][number]['kind'], string> = {
@@ -40,10 +43,39 @@ function RowTitles({
 /** Rows that need you: assigned to you, waiting for your answer, finished by an agent you sponsor, or mentions. */
 export function InboxList({ workspaceId, workspaceSlug }: { workspaceId: string; workspaceSlug: string }) {
   const read = useInbox(workspaceId);
+  const codeSessionsEnabled = useFlag('code-sessions');
+  const codeApi = useMemo(() => codeSessionApi(workspaceId), [workspaceId]);
+  const [codeRequests, setCodeRequests] = useState<OpenCodeSessionRequestItem[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [titles, setTitles] = useState<Record<string, string>>({});
   const report = useCallback((found: Record<string, string>) => setTitles(current => ({ ...current, ...found })), []);
+  const refreshCodeRequests = useCallback(
+    async (signal?: AbortSignal) => {
+      try {
+        const result = await codeApi.openRequests(signal);
+        setCodeRequests(result.items);
+      } catch {
+        // Code session requests are additive; keep regular Inbox working if unavailable.
+      }
+    },
+    [codeApi],
+  );
+  useEffect(() => {
+    if (!codeSessionsEnabled) return;
+    const controller = new AbortController();
+    void refreshCodeRequests(controller.signal);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refreshCodeRequests(controller.signal);
+    }, 4000);
+    const onFocus = () => void refreshCodeRequests(controller.signal);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+      controller.abort();
+    };
+  }, [codeSessionsEnabled, refreshCodeRequests]);
   const tables = useMemo(() => {
     const byTable = new Map<string, string[]>();
     if (read.state.kind === 'ready')
@@ -84,7 +116,35 @@ export function InboxList({ workspaceId, workspaceSlug }: { workspaceId: string;
           {error}
         </p>
       )}
-      {items.length === 0 ? (
+      {codeRequests.length > 0 && (
+        <ul className="divide-y rounded-md border">
+          {codeRequests.map(item => (
+            <CodeSessionRequestCard
+              key={item.request.id}
+              item={item}
+              busy={busy === item.request.id}
+              onAnswer={async answer => {
+                setBusy(item.request.id);
+                setError(null);
+                try {
+                  await codeApi.answerRequest(
+                    item.session.id,
+                    item.request.id,
+                    answer,
+                    item.request.decisionDigest ?? undefined,
+                  );
+                  await refreshCodeRequests();
+                } catch (failure: unknown) {
+                  setError(failure instanceof Error ? failure.message : 'Could not submit response.');
+                } finally {
+                  setBusy(null);
+                }
+              }}
+            />
+          ))}
+        </ul>
+      )}
+      {items.length === 0 && codeRequests.length === 0 ? (
         <StatePanel
           kind="empty"
           title="Nothing needs you"

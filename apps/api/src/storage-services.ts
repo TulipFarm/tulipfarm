@@ -4,6 +4,7 @@ import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import { createWorkspaceTableConfirmation } from '@tulipfarm/workspaces/table-confirmation';
 import { chatObjectStore } from '@tulipfarm/workspaces/chat-objects';
 import { integrationCredentialKeyring } from '@tulipfarm/integrations';
+import { createCodeSessionInTx } from '@tulipfarm/agents/code-session-store';
 import { createConversations } from '@tulipfarm/conversations';
 import { createAttachments } from '@tulipfarm/conversations/attachments';
 import { pinTurnImageModels, recognitionAvailability } from '@tulipfarm/agents/image-settings';
@@ -117,6 +118,16 @@ export function createStorageServices(app: FastifyInstance, dependencies: Storag
   const conversations = createConversations(runtime, chatSkills, {
     pinTurn: (tx, _workspaceId, familyId) => pinTurnImageModels(tx, familyId),
     retryTurn: resumeOwnerEndedPlans,
+    startCodeSession: async (tx, input) => {
+      const session = await createCodeSessionInTx(tx, {
+        ownerMembershipId: input.actor.membershipId,
+        originConversationId: input.conversationId,
+        originTurnId: input.turnId,
+        request: input.request,
+        start: input.code,
+      });
+      return { sessionId: session.id };
+    },
   });
   return {
     wake,

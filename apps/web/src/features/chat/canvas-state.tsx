@@ -49,6 +49,7 @@ export type CanvasContent =
   | { kind: 'code'; code: string; language: string; filename?: string }
   | { kind: 'browser'; url: string }
   | { kind: 'live-browser'; workspaceId: string; chatId: string }
+  | { kind: 'live-terminal'; workspaceId: string; sessionId: string }
   | { kind: 'file'; file: ViewableFile }
   | { kind: 'workspace-file'; workspaceId: string; fileId: string; name: string; mediaType: string };
 
