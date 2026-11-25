@@ -800,7 +800,7 @@ const descriptions: Record<ToolName, string> = {
   'rows.page':
     'Read typed rows from one active table revision when a compact page is sufficient. Returns rows ordered by ID, at most 1–100 (default 25), and a cursor; pass after for the next page. Results omit inaccessible rows and do not search or sort—use rows.list for the applied-revision query interface. To find a person or linked row by name, use rows.resolveReference instead of paging.',
   'tables.propose':
-    'Prepare a table/schema review from JSON, including archiving or restoring a table; it never creates or changes tables. First read skills.read(table-authoring), then submit its exact proposal shape. The result is a human-review draft; correct invalid arguments and submit a new draft rather than treating it as a safe retry of a write.',
+    'Prepare a table/schema review from JSON, including archiving or restoring a table; a new table may be queued under workspace policy. First read skills.read(table-authoring), then submit its exact proposal shape. Only a pending result requires approval; correct invalid arguments and submit a new draft rather than treating it as a safe retry of a write.',
   'slack.resolve':
     'Resolve a Slack person, channel, or conversation name before any Slack action; use exact returned destination IDs. Results contain matches or ambiguity, not message content and not a send permission. It has no paging. When more than one destination matches, ask the human to choose; when none matches, ask for the exact name. Never drop a requested Slack action.',
   'slack.message.send':
@@ -873,7 +873,7 @@ const descriptions: Record<ToolName, string> = {
   'agents.context':
     'Discover choices to create an agent: Soul revision, own membership, eligible placement/sharing teams, bundled skills, tools/runtime support and the models the agent may prefer. Supply agentId for current policy, activation versions, its linked Workflow (revision, generation and triggers) and older trigger Workflows; channels for checked Slack attachments/readiness; triggers (Workflow triggers) to validate them and list their next runs. Use skills.workspace for reviewed skills, tables.list/schema.inspect for resources and slack.resolve for real destinations. This grants no authority.',
   'agents.draft':
-    'Prepare one immutable Basics/Skills/Access/Triggers setup for human review. Include setup with explicit policy, enrollment, scope/limits, Slack attachment expected versions and triggers, plus expectedPolicyVersion/expectedActivationIds from context. Include expectedWorkflowRevision/expectedWorkflowGeneration from context too. setup.prompt is the one instruction the agent runs for every trigger (required when there are triggers) and setup.runLimits optionally caps each run. Each setup.triggers item (0–20) is {id: a UUID (reuse setupId from context to keep an existing trigger), optional label, trigger: a Workflow trigger without id (cron, interval, once, webhook, event, record, row, provider, github)}; a github trigger has repositories (a list of repositoryId values, or {organizationId, includeFuture: true}) and events ({event, optional actions}). Activating saves them all to the one linked Workflow of the agent, which passes the trigger that fired and its data (new row, issue, webhook body) to the agent. Leave triggers empty for an agent people only call in chat or Slack. Agents get no schedules of their own. Definition-only historical inputs remain save-only. The human chooses Save draft or Create and activate and explicitly consents to channel replacement on the exact card; activating runs unattended triggers with their access. Never use model prose as consent; this tool saves or activates nothing. When agents.context reports evals.available, add evalCases (3–5 starter test cases); the card shows them and the person adds them to Evals after saving.',
+    'Prepare one immutable Basics/Skills/Access/Triggers setup for human review. Include setup with explicit policy, enrollment, scope/limits, Slack attachment expected versions and triggers, plus expectedPolicyVersion/expectedActivationIds from context. Include expectedWorkflowRevision/expectedWorkflowGeneration from context too. setup.prompt is the one instruction the agent runs for every trigger (required when there are triggers) and setup.runLimits optionally caps each run. Each setup.triggers item (0–20) is {id: a UUID (reuse setupId from context to keep an existing trigger), optional label, trigger: a Workflow trigger without id (cron, interval, once, webhook, event, record, row, provider, github)}; a github trigger has repositories (a list of repositoryId values, or {organizationId, includeFuture: true}) and events ({event, optional actions}). Activating saves them all to the one linked Workflow of the agent, which passes the trigger that fired and its data (new row, issue, webhook body) to the agent. Leave triggers empty for an agent people only call in chat or Slack. Agents get no schedules of their own. Definition-only historical inputs remain save-only. The human chooses Save draft or Create and activate and explicitly consents to channel replacement on the exact card; activating runs unattended triggers with their access. A workspace-policy result queues the private inactive save; do not send the person through the wizard again. Never use model prose as consent. When agents.context reports evals.available, add evalCases (3–5 starter test cases); the card shows them and the person adds them to Evals after saving.',
   'agents.task.start':
     "Start bounded work with an activated saved agent; use agents.task.read for its status. Returns a task ID and status, not the result. The owner keeps all approval authority, and delegation is bounded by the saved agent's limits.",
   'agents.delegate':
@@ -893,7 +893,7 @@ const descriptions: Record<ToolName, string> = {
   'agents.task.read':
     'Read the status and completed result of one task you own or directly delegated. Returns status, and the result once completed. It changes nothing; use agents.task.start to begin new work.',
   'skills.draft':
-    'Prepare a complete skill package for AI safety and human review. New skills use skillId:new and expectedVersion:0. File changes preserve untouched files on edits; null deletes a file. Only the human can save and enable.',
+    'Prepare a complete skill package for AI safety and human review. New skills use skillId:new and expectedVersion:0. File changes preserve untouched files on edits; null deletes a file. A policy save keeps a new authored skill inactive. Only the human can install and enable a package.',
   'skills.archive':
     'Prepare an archive review for 1–20 workspace skills the human manages, using IDs from skills.workspace or skills.workspace.read. Archived skills leave the skill list and cannot be newly added to agents; agents already using them keep working, and skills.restore brings them back. Returns one draft card and archives nothing until the human approves it. Never treat chat text as approval.',
   'skills.restore':
@@ -927,7 +927,7 @@ const descriptions: Record<ToolName, string> = {
   'workflows.providers':
     'List enabled, authorized workflow trigger sources you may use for provider triggers and HTTP credentials. Returns safe source configuration, never credentials. Only Sheets supports updated events; all support created events. Also returns githubRepositories: the connected GitHub repositories a github trigger may name. List their repositoryId values in repositories, or use {organizationId: ownerId, includeFuture: true} for every repository of that account. It does not list chat connections: an empty result never means Slack or GitHub is disconnected, and Slack message steps resolve their channel with slack.resolve instead. Missing trigger sources must be set up outside chat.',
   'workflows.draft':
-    'Prepare a workflow create/edit or enable/disable review for human approval; first read skills.read(workflow-authoring). Omit workflowId and revision to create a new workflow; pass them only when the human clearly asks to change that existing workflow. Reuse workspaceInventory for an existing ID and revision; call workflows.list only for absent inventory, missing summary details, or a stale response. Returns a draft and changes no workflow. A stale/error response requires rereading; do not treat an uncertain draft as an active workflow.',
+    'Prepare a workflow create/edit or enable/disable review for human approval; first read skills.read(workflow-authoring). Omit workflowId and revision to create a new workflow; pass them only when the human clearly asks to change that existing workflow. Reuse workspaceInventory for an existing ID and revision; call workflows.list only for absent inventory, missing summary details, or a stale response. A saved result means the new workflow is off; only a pending card needs review. A stale/error response requires rereading; do not treat an uncertain draft as an active workflow.',
   'workflows.archive':
     'Prepare an archive review for 1–20 workflows the human manages, using IDs and revisions from workspaceInventory or workflows.list. Archiving stops triggers and blocks unfinished runs; run history stays readable, and workflows.restore can bring it back disabled. Returns one draft card and archives nothing until the human approves it. Never treat chat text as approval.',
   'workflows.restore':
@@ -1955,7 +1955,7 @@ export function createChatTools(
           models: {
             choices: models,
             instruction:
-              'Unless the person chose another model, use the workspace default chat model marked default. Save its id as definition.modelFamilyId; leave it unset if no default choice is available. The person can edit it in the builder.',
+              'Use the requested model and plan from choices. If no choice matches, explain that before saving a substitute. Otherwise use the workspace default when no model was requested. A model plan is not a CLI runtime: check the tools and their supported runtimes. Do not replace a requested coding CLI with GitHub tools without asking.',
           },
           triggers: {
             linkedWorkflow: linked
@@ -2034,18 +2034,7 @@ export function createChatTools(
             : { targetId: call.agent.id, input: { ...input, expectedSavedRevision: call.agent.savedRevision } }),
         };
         const setup = input.setup;
-        if (
-          call.agent === 'new' &&
-          input.owningTeamId === null &&
-          (!setup ||
-            (!setup.enrollment.length &&
-              !setup.scope.length &&
-              !setup.limits.length &&
-              !setup.policy.grants.length &&
-              !setup.policy.personGrants.length &&
-              !setup.triggers.length &&
-              !setup.slackChannels.length))
-        ) {
+        if (call.agent === 'new' && input.owningTeamId === null) {
           const applied = await policyWrite(
             runtime,
             privateBud,
@@ -2056,25 +2045,45 @@ export function createChatTools(
               const url = await privateBud!.link(workspaceId, 'agents', proposal.targetId);
               if (!url) return null;
               const draft = await createAuthoringDrafts(bound).propose(workspaceId, actor, callId, origin, proposal);
-              const receipt = await createAgentAuthoring(bound, privateBud!.eligible).save(
-                workspaceId,
-                actor,
-                proposal.targetId,
-                {
+              const coordinator = createAgentSetup(bound, privateBud!.eligible, agentSetup);
+              const setupDraft =
+                setup &&
+                (await coordinator.saveDraft(workspaceId, actor, proposal.targetId, {
                   requestId: callId,
+                  expectedVersion: 0,
                   expectedSavedRevision: null,
                   expectedSoulRevision: input.expectedSoulRevision,
-                  owningTeamId: null,
-                  definition: input.definition,
-                },
-              );
+                  expectedPolicyVersion: input.expectedPolicyVersion,
+                  expectedActivationIds: input.expectedActivationIds,
+                  expectedWorkflowRevision: input.expectedWorkflowRevision ?? null,
+                  expectedWorkflowGeneration: input.expectedWorkflowGeneration ?? null,
+                  setup: { ...setup, definition: input.definition, owningTeamId: null },
+                }));
+              const setupReceipt =
+                setupDraft &&
+                (await coordinator.publish(workspaceId, actor, proposal.targetId, {
+                  requestId: callId,
+                  version: setupDraft.version,
+                  digest: setupDraft.digest,
+                  decision: 'save',
+                  consent: { replaceChannels: [] },
+                }));
+              const receipt = setupReceipt
+                ? await coordinator.definitionCommand(workspaceId, actor, setupReceipt.commandId)
+                : await createAgentAuthoring(bound, privateBud!.eligible).save(workspaceId, actor, proposal.targetId, {
+                    requestId: callId,
+                    expectedSavedRevision: null,
+                    expectedSoulRevision: input.expectedSoulRevision,
+                    owningTeamId: null,
+                    definition: input.definition,
+                  });
               await tx.client.query(
                 `INSERT INTO ${relation(tx, 'tf_chat_authoring_decisions')} (draft_id,membership_id,command_id,input,outcome) VALUES ($1,$2,$1,$3,$4)`,
                 [
                   callId,
                   actor.membershipId,
                   { decision: 'workspace-policy', revision, digest: draft.digest },
-                  { kind: 'agent', receipt },
+                  { kind: 'agent', receipt, ...(setupReceipt && { setupReceipt }) },
                 ],
               );
               return {
@@ -2084,7 +2093,7 @@ export function createChatTools(
                 status: 'saving',
                 decision: 'workspace-policy',
                 instruction:
-                  'The private, inactive agent is being saved. Link to the agent; do not claim it is active.',
+                  'The private agent is being saved. Link to it; do not ask the person to create it again. It is inactive: no access, triggers or sharing have been applied. Review setup separately before activation.',
               };
             },
           );
