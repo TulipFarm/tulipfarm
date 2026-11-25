@@ -223,13 +223,15 @@ function RemoveEntry({
   );
 }
 
-function FilePicker({ workspaceId, onSelect }: { workspaceId: string; onSelect: (file: FileSummary) => void }) {
+/** Lists the Files you can read, most recently changed first or matching a search, and returns the one chosen. */
+export function FilePicker({ workspaceId, onSelect }: { workspaceId: string; onSelect: (file: FileSummary) => void }) {
   const api = useMemo(() => filesApi(workspaceId), [workspaceId]);
   const [query, setQuery] = useState('');
   const [after, setAfter] = useState<string>();
+  const search = query.trim();
   const read = useFeatureRead({
-    key: ['files', 'knowledge-picker', query, after],
-    load: signal => api.suggestions(query, signal, after),
+    key: ['files', 'knowledge-picker', search, after],
+    load: signal => (search ? api.suggestions(search, signal, after) : api.recent(signal, after)),
   });
   return (
     <div className="space-y-4">
@@ -237,12 +239,18 @@ function FilePicker({ workspaceId, onSelect }: { workspaceId: string; onSelect: 
       <Input
         id="knowledge-file-query"
         maxLength={255}
+        aria-describedby="knowledge-file-query-help"
         value={query}
         onChange={event => {
           setQuery(event.target.value);
           setAfter(undefined);
         }}
       />
+      <p id="knowledge-file-query-help" className="text-sm text-muted-foreground">
+        {search
+          ? 'Files whose names contain your search.'
+          : 'Your most recently changed files. Search to find others by name.'}
+      </p>
       <ReadResult state={read.state} label="files" retry={read.refresh}>
         {data => (
           <>
@@ -259,7 +267,7 @@ function FilePicker({ workspaceId, onSelect }: { workspaceId: string; onSelect: 
                   ))}
               </ul>
             ) : (
-              <p>No matching files. Upload a file in Files first.</p>
+              <p>{search ? 'No matching files.' : 'No files yet. Upload a file in Files first.'}</p>
             )}
             {data.next && (
               <Button variant="outline" onClick={() => setAfter(data.next!)}>

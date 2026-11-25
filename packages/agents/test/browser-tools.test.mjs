@@ -362,10 +362,10 @@ test('A step saves what the page downloaded to Files and says so', async () => {
   assert.match(output.result.downloadInstruction, /saved them to Files/);
   const saves = fileCalls.filter(call => call[0] === 'save');
   assert.deepEqual(
-    saves.map(call => [call[1].id, call[1].name, call[2]]),
+    saves.map(call => [call[1].name, call[2]]),
     [
-      [downloads[0].id, 'report.csv', folderId],
-      [downloads[1].id, 'big_.._.._.bin', folderId],
+      ['report.csv', folderId],
+      ['big_.._.._.bin', folderId],
     ],
   );
   assert.deepEqual(saves[0][1].bytes, new Uint8Array([1, 2, 3, 4]));
@@ -381,10 +381,9 @@ test('A step saves what the page downloaded to Files and says so', async () => {
   );
 });
 
-test('A run is not offered uploads, and its downloads are reported as not saved', async () => {
+test('A run is offered uploads; without Files its downloads are not saved and uploads are refused', async () => {
   const runTools = discoverToolNames({ kind: 'agent', task: true, tools: withBrowserGrant(['browser.act']) });
-  assert.ok(runTools.includes('browser.act') && runTools.includes('browser.signIn'));
-  assert.equal(runTools.includes('browser.upload'), false);
+  assert.ok(['browser.act', 'browser.signIn', 'browser.upload'].every(tool => runTools.includes(tool)));
 
   const downloads = [{ id: '1d2c3b4a-5e6f-4a7b-8c9d-0e1f2a3b4c5d', name: 'report.csv', size: 4 }];
   const { client, calls } = fakeClient({ act: async () => ({ state, snapshot: '', truncated: false, downloads }) });
@@ -400,6 +399,33 @@ test('A run is not offered uploads, and its downloads are reported as not saved'
   );
   assert.equal(
     calls.some(call => call[0] === 'upload' || call[0] === 'download'),
+    false,
+  );
+});
+
+test('A run with Files saves downloads to its named folder and refuses files outside the run', async () => {
+  const downloads = [{ id: '1d2c3b4a-5e6f-4a7b-8c9d-0e1f2a3b4c5d', name: 'report.csv', size: 4 }];
+  const { client, calls } = fakeClient({
+    state: async () => state,
+    act: async () => ({ state, snapshot: '', truncated: false, downloads }),
+    download: async () => ({ name: 'report.csv', bytes: new TextEncoder().encode('a,b\n') }),
+  });
+  const { files, calls: fileCalls } = fakeFiles(() => ({ error: 'file-not-allowed' }));
+  const run = { client, sessionId: 'run-session', mode: 'task', imageInput: false, files };
+  const folderId = '7e6d5c4b-3a2f-4e1d-9c8b-7a6f5e4d3c2b';
+  const step = await runBrowserCall(run, { tool: 'browser.act', action: { action: 'click', ref: 'e4' }, folderId });
+  assert.deepEqual(
+    step.result.files.map(file => file.name),
+    ['report.csv'],
+  );
+  assert.match(step.result.downloadInstruction, /saved them to the Files folder you named/);
+  assert.equal(fileCalls.find(call => call[0] === 'save')[2], folderId);
+
+  const refused = await runBrowserCall(run, { tool: 'browser.upload', file: fileSource, ref: 'e2' });
+  assert.equal(refused.result.error, 'file-not-allowed');
+  assert.match(refused.result.instruction, /^Runs upload only the files attached to the run or saved by it\./);
+  assert.equal(
+    calls.some(call => call[0] === 'upload'),
     false,
   );
 });

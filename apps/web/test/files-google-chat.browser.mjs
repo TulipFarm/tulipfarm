@@ -440,7 +440,7 @@ test(
             .getByRole('button', { name: /Draft the launch checklist/ })
             .click();
           await page.waitForURL(new RegExp(`/agent-tasks/${memo.id}$`));
-          const taskFiles = page.getByRole('region', { name: 'Files to read' });
+          const taskFiles = page.getByRole('region', { name: 'Attached files' });
           await taskFiles.getByText(doc.name, { exact: true }).waitFor();
           await taskFiles.getByText('Google Drive', { exact: true }).waitFor();
           await taskFiles.getByText('the task pauses until you add the file again').waitFor();

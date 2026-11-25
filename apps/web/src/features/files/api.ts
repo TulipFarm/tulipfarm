@@ -149,6 +149,11 @@ export function filesApi(workspaceId: string) {
       if (after) search.set('after', after);
       return fileSuggestionsPageSchema.parse(await readJson(await send(`${base}/suggestions?${search}`, { signal })));
     },
+    /** Readable files, most recently changed first. */
+    recent: async (signal: AbortSignal, after?: string) =>
+      fileSuggestionsPageSchema.parse(
+        await readJson(await send(`${base}/recent${after ? `?${new URLSearchParams({ after })}` : ''}`, { signal })),
+      ),
     // eslint-disable-next-line tulipfarm/product-copy -- Stable API identifiers are not user-facing copy.
     recordRecentUse: async (id: string) => {
       await send(`${item(id)}/recent-use`, { method: 'POST' });

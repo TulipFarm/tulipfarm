@@ -150,7 +150,7 @@ export function modelNativeTools(input: ModelInput) {
   if (!input.task || !input.browser)
     allowed.splice(0, allowed.length, ...allowed.filter(tool => tool !== 'browser.act'));
   else if (allowed.includes('browser.act'))
-    allowed.push('browser.handoff', ...(input.taskSecrets ? (['browser.signIn'] as const) : []));
+    allowed.push('browser.handoff', 'browser.upload', ...(input.taskSecrets ? (['browser.signIn'] as const) : []));
   if (
     (input.definition.skills?.length ?? 0) > 0 &&
     !allowed.includes('skills.read') &&

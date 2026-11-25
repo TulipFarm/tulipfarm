@@ -103,7 +103,8 @@ async function environment(t, { entries = [], enabled = true, otherMember = fals
     else if (path === `${base}/agents/recent`) response = answer([]);
     else if (path === `${base}/knowledge/defaults`) response = answer({ enabled, items: [] });
     else if (/\/knowledge\/(github|google|slack|atlassian)\/sources$/.test(path)) response = answer({ items: [] });
-    else if (path === `${base}/files/suggestions`) response = answer({ items: [file], next: null });
+    else if (path === `${base}/files/suggestions` || path === `${base}/files/recent`)
+      response = answer({ items: [file], next: null });
     else if (path === `${base}/knowledge/documents`) {
       listReads++;
       const visible = otherMember ? [] : entries;
