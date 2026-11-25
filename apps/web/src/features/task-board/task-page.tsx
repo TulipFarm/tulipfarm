@@ -38,11 +38,11 @@ import { useNow } from './live';
 import { applyTaskMove, taskMove, type TaskMove } from './moves';
 import { TaskReminders } from './reminders';
 import type { TaskBoardSearch } from './search';
-import { readTask, taskDetailKey, useTaskKeys, type TaskDetail } from './task-api';
+import { readTask, taskDetailKey, taskPolling, useTaskKeys, type TaskDetail } from './task-api';
 import { cardStatus } from './task-board';
 import { ActorMenu, ChipMenu, ParentMenu, type MenuChoice } from './task-chips';
 import { customTaskFields, TaskComposer } from './task-composer';
-import { keysByRow, taskOptions, useTaskActivity, useTaskRows, useTasksTable } from './task-data';
+import { keysByRow, taskOptions, useRefreshOnReturn, useTaskActivity, useTaskRows, useTasksTable } from './task-data';
 
 /** A task's own page: its words and conversation on the left, everything about it on the right. */
 export function TaskView({
@@ -58,6 +58,7 @@ export function TaskView({
   const read = useFeatureRead({
     key: taskDetailKey(workspace.id, taskKey),
     load: signal => readTask(workspace.id, taskKey, signal),
+    ...taskPolling,
   });
   const backLink = <Link to="/$workspaceSlug/tasks" params={{ workspaceSlug: workspace.slug }} search={back} />;
   if (read.state.kind === 'loading') return <p className="text-sm text-muted-foreground">Loading task…</p>;
@@ -128,6 +129,21 @@ function TaskLoaded({
     return parent?.kind === 'relationship' && parent.recordIds.includes(task.rowId);
   });
   const { change: changed } = useFeatureChanges();
+  useRefreshOnReturn(() => {
+    void refresh();
+    void rows.refresh();
+    void activity.refresh();
+    void keys.refresh();
+  });
+  // The polled task carries its thread; when someone comments or a run moves, reread the thread panel's own copy.
+  const lastItem = task.thread.items.at(-1);
+  const threadSignature = `${task.thread.items.length}:${lastItem?.id ?? ''}:${task.thread.assignment?.runState ?? ''}`;
+  const threadSeen = useRef(threadSignature);
+  useEffect(() => {
+    if (threadSeen.current === threadSignature) return;
+    threadSeen.current = threadSignature;
+    void changed({ keys: [['tables', 'row-thread', workspace.id, task.tableId, task.rowId]] });
+  }, [threadSignature, changed, workspace.id, task.tableId, task.rowId]);
   // Agent progress moves the row and its thread, so reread both when the activity feed sees this task change.
   const signature = card.activity ? `${card.activity.runState}:${card.activity.updatedAt}` : null;
   const seen = useRef(signature);
@@ -212,7 +228,6 @@ function TaskLoaded({
         <div className="min-w-0 flex-1 space-y-6">
           <div className="space-y-4">
             <InlineText
-              key={card.title}
               look="title"
               label="Title"
               value={card.title === 'Untitled task' ? '' : card.title}
@@ -222,7 +237,6 @@ function TaskLoaded({
               save={value => save({ [taskFields.title]: { kind: 'text', value } })}
             />
             <Description
-              key={card.description}
               value={card.description}
               disabled={!editable}
               save={value => save({ [taskFields.description]: value ? { kind: 'text', value } : null })}
@@ -322,7 +336,6 @@ function TaskLoaded({
           </Property>
           {table && customTaskFields(table).length > 0 && (
             <CustomFields
-              key={task.record.token}
               table={table}
               api={api}
               workspace={workspace}
@@ -399,7 +412,10 @@ function parentOf(task: TaskDetail): string | null {
   return value?.kind === 'relationship' ? (value.recordIds[0] ?? null) : null;
 }
 
-/** A title edited where it is shown; it saves when focus leaves or on Enter, and Escape puts it back. */
+/**
+ * A title edited where it is shown; it saves when focus leaves or on Enter, and Escape puts it back.
+ * A newer saved title shows when it arrives, except while the person is typing or their own save is in flight.
+ */
 function InlineText({
   value,
   save,
@@ -418,7 +434,14 @@ function InlineText({
   required?: boolean;
 }) {
   const [draft, setDraft] = useState(value);
+  const [shown, setShown] = useState(value);
+  const [focused, setFocused] = useState(false);
+  if (value !== shown && !focused && !disabled) {
+    setShown(value);
+    setDraft(value);
+  }
   const commit = () => {
+    setFocused(false);
     const next = draft.trim();
     if (next === value.trim()) return;
     if (required && !next) setDraft(value);
@@ -432,6 +455,7 @@ function InlineText({
       value={draft}
       readOnly={disabled}
       onChange={event => setDraft(event.target.value)}
+      onFocus={() => setFocused(true)}
       onBlur={commit}
       onKeyDown={event => {
         if (event.key === 'Enter' && look === 'title') {
@@ -451,6 +475,12 @@ function InlineText({
 function Description({ value, disabled, save }: { value: string; disabled: boolean; save: (value: string) => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
+  const [shown, setShown] = useState(value);
+  // A newer saved description replaces the draft only while the person isn't writing one.
+  if (value !== shown && !editing && !disabled) {
+    setShown(value);
+    setDraft(value);
+  }
   if (editing)
     return (
       <div className="space-y-2 rounded-md border p-3">
@@ -616,10 +646,16 @@ function CustomFields({
 }) {
   const fields = customTaskFields(table);
   const [draft, setDraft] = useState<TableValues>(values);
+  const [base, setBase] = useState<TableValues>(values);
   const [validated, setValidated] = useState(false);
-  const changes = changedValues(draft, values);
+  const changes = changedValues(draft, base);
   const dirty = Object.keys(changes).length > 0;
-  const errors = validated ? validateRowDraft(table.definition, draft, values, 'tasks') : {};
+  // Newer saved values replace the fields while nothing here is being changed, or once they include the change.
+  if (values !== base && (!dirty || Object.keys(changedValues(draft, values)).length === 0)) {
+    setBase(values);
+    setDraft(values);
+  }
+  const errors = validated ? validateRowDraft(table.definition, draft, base, 'tasks') : {};
   return (
     <section className="space-y-3 border-t pt-4" aria-label="Fields">
       <h2 className="text-xs font-medium text-muted-foreground">Fields</h2>
@@ -640,14 +676,14 @@ function CustomFields({
       ))}
       {dirty && !disabled && (
         <div className="flex justify-end gap-2">
-          <Button size="sm" variant="ghost" onClick={() => setDraft(values)}>
+          <Button size="sm" variant="ghost" onClick={() => setDraft(base)}>
             Cancel
           </Button>
           <Button
             size="sm"
             onClick={() => {
               setValidated(true);
-              if (Object.keys(validateRowDraft(table.definition, draft, values, 'tasks')).length) return;
+              if (Object.keys(validateRowDraft(table.definition, draft, base, 'tasks')).length) return;
               save(changes);
             }}
           >

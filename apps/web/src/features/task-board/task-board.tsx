@@ -22,7 +22,7 @@ import { applyTaskMove, moveHints, taskMove } from './moves';
 import { TaskFieldsMenu } from './fields-menu';
 import { canonicalTaskKey, useTaskKeys } from './task-api';
 import { TaskComposer } from './task-composer';
-import { keysByRow, taskOptions, useTaskActivity, useTaskRows, useTasksTable } from './task-data';
+import { keysByRow, taskOptions, useRefreshOnReturn, useTaskActivity, useTaskRows, useTasksTable } from './task-data';
 
 const showLabels: Record<TaskShow, string> = { all: 'All', mine: 'Assigned to me', agents: 'Agents' };
 
@@ -34,6 +34,26 @@ export const laneStatus: Record<Lane, StatusState> = {
   done: 'success',
 };
 export const cardStatus = (card: TaskCard): StatusState => (card.state === 'failed' ? 'error' : laneStatus[card.lane]);
+
+/**
+ * A column's mark. Working is a still, half-filled ring like Linear's In progress, so a column header never spins;
+ * a card's own mark still shows its run moving.
+ */
+function LaneIcon({ lane }: { lane: Lane }) {
+  if (lane !== 'working') return <Status state={laneStatus[lane]} size="sm" aria-hidden="true" tooltip={false} />;
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      className="size-3 shrink-0 text-info"
+      fill="none"
+      aria-hidden="true"
+      data-lane-icon="working"
+    >
+      <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="2" />
+      <path d="M10 5a5 5 0 0 1 0 10Z" fill="currentColor" />
+    </svg>
+  );
+}
 
 /** The built-in Tasks table as a live board: who is doing what, and how far each agent has got. */
 export function TaskBoard({
@@ -56,6 +76,11 @@ export function TaskBoard({
   const keys = useTaskKeys(workspace.id);
   const keyOf = useMemo(() => keysByRow(keys.state.kind === 'ready' ? keys.state.data : undefined), [keys.state]);
   const changes = useTableChanges();
+  useRefreshOnReturn(() => {
+    void rows.refresh();
+    void activity.refresh();
+    void keys.refresh();
+  });
   const seen = useRef<string | null>(null);
   const signature = progress?.tasks.map(task => `${task.rowId}:${task.runState}:${task.updatedAt}`).join('|') ?? null;
   useEffect(() => {
@@ -123,7 +148,7 @@ export function TaskBoard({
       lanes.map(lane => ({
         id: lane.id,
         title: lane.title,
-        icon: <Status state={laneStatus[lane.id]} size="sm" aria-hidden="true" tooltip={false} />,
+        icon: <LaneIcon lane={lane.id} />,
       })),
     [],
   );
@@ -234,7 +259,7 @@ export function TaskBoard({
               const laneCount = visible.filter(card => card.lane === lane.id).length;
               return (
                 <Button key={lane.id} variant="outline" size="sm" onClick={() => scrollToLane(index)}>
-                  <Status state={laneStatus[lane.id]} size="sm" aria-hidden="true" tooltip={false} />
+                  <LaneIcon lane={lane.id} />
                   {lane.title} ({laneCount})
                 </Button>
               );

@@ -1,10 +1,10 @@
-import { useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useFeatureRead } from '@/lib/query';
 import type { TableApi, TableDefinition } from '@/features/tables/api';
 import { useTableDetail } from '@/features/tables/hooks';
 import { tableKeys } from '@/features/tables/queries';
 import { readTaskActivity, readTaskRows, type TaskActivity, type TaskCard } from './api';
-import type { TaskKeys } from './task-api';
+import { taskPolling, type TaskKeys } from './task-api';
 
 /** The Tasks table's definition and what the person may do with its rows. */
 export function useTasksTable(api: TableApi, tableId: string) {
@@ -39,15 +39,35 @@ export function useTaskRows(api: TableApi, table: TableDefinition | null) {
     key: [...tableKeys.records(table?.id ?? ''), 'task-board', table?.revision ?? null] as const,
     enabled: table !== null,
     load: signal => readTaskRows(api, table!, signal),
+    ...taskPolling,
   });
+}
+
+/** Rereads at once when the person comes back to the tab or window, instead of waiting for the next poll. */
+export function useRefreshOnReturn(refresh: () => void) {
+  const latest = useRef(refresh);
+  latest.current = refresh;
+  useEffect(() => {
+    const back = () => {
+      if (document.visibilityState === 'visible') latest.current();
+    };
+    window.addEventListener('focus', back);
+    document.addEventListener('visibilitychange', back);
+    return () => {
+      window.removeEventListener('focus', back);
+      document.removeEventListener('visibilitychange', back);
+    };
+  }, []);
 }
 
 const live = (activity: TaskActivity | undefined) =>
   Boolean(activity?.tasks.some(task => task.runState === 'queued' || task.runState === 'working'));
 
-/** Agent progress on tasks, checked every 2 seconds while an agent is busy and every 10 otherwise. */
+/** Agent progress on tasks, checked every 2 seconds while an agent is busy and every 5 otherwise. */
 export function useTaskActivity(workspaceId: string) {
   const busy = useRef(false);
+  // A stable interval: a new function on each render would restart the poll timer before it fires.
+  const interval = useCallback(() => (busy.current ? 2000 : 5000), []);
   return useFeatureRead({
     key: ['task-board', 'activity', workspaceId] as const,
     load: async signal => {
@@ -56,8 +76,8 @@ export function useTaskActivity(workspaceId: string) {
       return data;
     },
     pollWhile: () => true,
-    interval: () => (busy.current ? 2000 : 10_000),
-    maxChecks: 2000,
+    interval,
+    maxChecks: Infinity,
   });
 }
 

@@ -47,9 +47,17 @@ export async function readTaskKeys(workspaceId: string, signal: AbortSignal) {
 
 export const taskKeysKey = (workspaceId: string) => ['tasks', 'keys', workspaceId] as const;
 
-/** Every task's key by row id. Keys never change, so the list is only reread when tasks change. */
+/** How open task views keep up with other people and agents: a reread every 5 seconds while the tab is visible. */
+export const taskPolling = { pollWhile: () => true, interval: 5000, maxChecks: Infinity } as const;
+
+/** Every task's key by row id, reread with the board so new tasks get their keys. */
 export function useTaskKeys(workspaceId: string, enabled = true) {
-  return useFeatureRead({ key: taskKeysKey(workspaceId), enabled, load: signal => readTaskKeys(workspaceId, signal) });
+  return useFeatureRead({
+    key: taskKeysKey(workspaceId),
+    enabled,
+    load: signal => readTaskKeys(workspaceId, signal),
+    ...taskPolling,
+  });
 }
 
 const timeOfDaySchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
