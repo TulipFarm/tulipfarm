@@ -271,6 +271,7 @@ test('a snapshot uses evaluateMany once per scope; false decides, missing and fa
   );
   for (const [flags, scope] of batches) for (const name of flags) assert.equal(featureFlags[name].scope, scope);
   assert.deepEqual(snapshot, {
+    'external-access': false,
     'openai-models': false,
     'anthropic-models': true,
     'openai-image-models': true,
@@ -291,6 +292,7 @@ test('a snapshot uses evaluateMany once per scope; false decides, missing and fa
     'chat-onboarding': false,
   });
   assert.deepEqual(failed, {
+    'external-access': false,
     'openai-models': false,
     'anthropic-models': false,
     'openai-image-models': true,
