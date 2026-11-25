@@ -20,8 +20,26 @@ function useTableQuery<T>(options: FeatureReadOptions<T>) {
   return useFeatureRead(options);
 }
 
-export function useTableList(api: TableApi, after?: string, search?: string, sort?: TableListSort, archived = false) {
-  return useTableQuery(tableQueries.list(api, after, search, sort, archived));
+export function useTableList(
+  api: TableApi,
+  after?: string,
+  search?: string,
+  sort?: TableListSort,
+  archived = false,
+  hideTasks = false,
+) {
+  return useTableQuery(tableQueries.list(api, after, search, sort, archived, hideTasks));
+}
+/**
+ * Tables a person may newly choose. Tasks is never offered as a table, but a choice that already points at it stays,
+ * so existing workflows, agents and links keep working.
+ */
+export function choosableTables<T extends { id: string; systemKind?: string | undefined }>(
+  tables: readonly T[],
+  keep: string | readonly string[] = [],
+) {
+  const kept = typeof keep === 'string' ? [keep] : keep;
+  return tables.filter(table => table.systemKind !== 'tasks' || kept.includes(table.id));
 }
 export function useTableNames(api: TableApi, enabled = true) {
   const read = useTableQuery({ ...tableQueries.picker(api), enabled });

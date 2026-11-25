@@ -520,7 +520,7 @@ test(
           await shot('task-destination');
           await tasks.getByRole('button', { name: /Draft the Q3 pricing memo/ }).click();
           await page.waitForURL(new RegExp(`/agent-tasks/${memo.id}$`));
-          const taskFiles = page.getByRole('region', { name: 'Files to read' });
+          const taskFiles = page.getByRole('region', { name: 'Attached files' });
           await taskFiles.getByText(notes.name, { exact: true }).waitFor();
           await page.reload();
           await taskFiles.getByText(notes.name, { exact: true }).waitFor();

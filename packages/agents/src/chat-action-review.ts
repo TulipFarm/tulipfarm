@@ -21,28 +21,35 @@ export type PrivateBudReview = {
   link(workspaceId: string, kind: string, id: string): Promise<string | undefined>;
 };
 
+const previewOnlyPhrase =
+  /\b(?:preview|dry[\s-]run|mock[\s-]?up|prototype|hypothetical|imaginary|in[\s-]chat|would\s+look\s+like|(?:don't|don’t|do\s+not|never|without)\s+(?:creat(?:e|ing)|sav(?:e|ing)|mak(?:e|ing)|build(?:ing)?|apply(?:ing)?|commit(?:ting)?|persist(?:ing)?|publish(?:ing)?|writ(?:e|ing))|(?:just|only)\s+(?:a\s+)?(?:draft|preview|proposal|example|plan|sketch|outline|show)|(?:show|explain|describe|outline|sketch|illustrate)\s+(?:me|us)|for\s+(?:my|our|your)\s+(?:review|approval|confirmation)|(?:let\s+me|wait\s+for\s+me\s+to|ask\s+me\s+(?:to|before)|confirm\s+with\s+me|check\s+with\s+me)|(?:review|approve|confirm)\s+(?:it|this|that)\s+(?:first|before)|before\s+(?:creating|saving|building|making|applying))\b|\bfor\s+(?:review|approval|confirmation)(?:\s+first\b|\s*[.,!]|$)/i;
+
+const previewModifier =
+  /^(?:draft|preview|example|sample|mock|mockup|prototype|sketch|hypothetical|imaginary|dry-?run)$/i;
+
+const trustedPrivateCreationSourceKinds: ReadonlySet<string> = new Set([
+  'private-conversation',
+  'table',
+  'table-schema',
+  'table-rows',
+  'agent-definition',
+  'workflow-definition',
+  'workflow-provider',
+  'workspace-skill',
+  'creation-team',
+]);
+
 export function explicitCreation(text: string, kind: string) {
-  // A subscription is not a request for a plan; a version number is not a sentence break.
-  text = text
-    .trim()
-    .replace(/\b(Copilot|Claude|ChatGPT) plan\b/gi, '$1 subscription')
-    .replace(/(?<=\d)\.(?=\d)/g, '-');
-  // Accept a single imperative only. Questions, qualifications and previews keep their card.
-  if (
-    /[?;\n]/.test(text) ||
-    /[.!]\s+\S/.test(text) ||
-    /\b(?:and|then|or)\s+(?:please\s+)?(?:create|build|make|set up|activate|enable|share|send|publish|delete|run)\b/i.test(
-      text,
-    ) ||
-    /\b(?:not|no|never|don't|don’t|without|before|after|if|unless|until|first|later|only|just|instead|but|preview\w*|example|draft\w*|review\w*|mock\w*|simulat\w*|plan|propos\w*|approv\w*|confirm\w*|wait|hold|show|explain|hypothetical|imaginary|illustrat\w*|sketch|diagram|representation|prototype|dry.run|in.chat)\b/i.test(
-      text,
-    )
-  )
-    return false;
-  return new RegExp(
-    `^(?:please\\s+)?(?:create|build|make|set up)\\s+(?:(?:me|a|an|new|private|inactive)\\s+)*(?:(?!(?:of|for|to|the|how|in|on|or|and)\\b)[\\w-]+\\s+){0,3}${kind}(?:\\s+(?:named|called|for|to|with|that)\\s+[\\w '"’,-]+)?[.!]?$`,
+  const normalized = text.trim();
+  if (!normalized || normalized.includes('?') || previewOnlyPhrase.test(normalized)) return false;
+  const escapedKind = kind.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = new RegExp(
+    `^(?:please\\s+)?(?:create|build|make|set\\s+up|add)\\s+(?:(?:me|a|an|my|our|one|new|private|inactive)\\s+)*((?:[\\w'&-]+\\s+){0,6})${escapedKind}(?:$|\\s|[.,:;!()\\/-])`,
     'i',
-  ).test(text.trim());
+  ).exec(normalized);
+  if (!match) return false;
+  const modifiers = match[1]?.trim().split(/\s+/).filter(Boolean) ?? [];
+  return !modifiers.some(word => previewModifier.test(word));
 }
 
 async function pending(tx: AgentTransaction, chat: string, action: ReviewAction, callId: string) {
@@ -85,17 +92,11 @@ export async function policyWrite(
   const { actor, origin, workspaceId, callId } = context;
   if (!privateBud || !origin) return null;
   const row = action.endsWith('-row');
-  const untrusted = (source: SourceDependency) =>
-    ![
-      'private-conversation',
-      'table',
-      'table-schema',
-      'table-rows',
-      'agent-definition',
-      'workspace-skill',
-      'creation-team',
-    ].includes(source.kind) ||
-    (source.kind === 'private-conversation' && source.conversationId !== origin.conversationId);
+  const untrusted = (source: SourceDependency) => {
+    if (source.kind === 'personal-memory') return source.membershipId !== actor.membershipId;
+    if (source.kind === 'private-conversation') return source.conversationId !== origin.conversationId;
+    return !trustedPrivateCreationSourceKinds.has(source.kind);
+  };
   if (!row && (origin.files?.length || origin.sources.some(untrusted))) return null;
   return withHuman(runtime, workspaceId, actor, 'write', async tx => {
     if (tx.commonVersion < 113) return null;

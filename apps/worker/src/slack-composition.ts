@@ -134,11 +134,18 @@ export async function createSlackPromptComposition(
         reply: (guard, slack) => meteredReply(runtime, { externalContext: guard, slack, compactor, workspaceSlug }),
       })
     : undefined;
+  const taskLink = async (workspaceId: string, key: string) => {
+    const slug = await workspaceSlug(workspaceId);
+    return slug
+      ? new URL(`/${encodeURIComponent(slug)}/tasks/${encodeURIComponent(key)}`, settings.webOrigin).href
+      : undefined;
+  };
   const inboxSlack = createInboxSlackNotifier({
     runtime,
     appId: settings.config.appId,
     cipher: settings.cipher,
     rowLink,
+    taskLink,
   });
   const replies = createConversationExecutor(runtime);
   const installations = createSlackInstallationDiscovery(pool, runtime, settings.config.appId);

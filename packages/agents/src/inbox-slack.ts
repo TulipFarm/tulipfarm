@@ -1,7 +1,9 @@
 import { z } from 'zod';
 import { AccessDenied, requireTablePermission, type HumanActor } from '@tulipfarm/access';
 import { openBotDirectMessage, postBotMessage, type slackCredentialCipher } from '@tulipfarm/slack';
+import { formatTaskKey, taskNumberOf } from '@tulipfarm/tables/task-keys';
 import { rowTitle } from './row-assignments.ts';
+import { tasksTableId } from './task-reminders.ts';
 import { agentCompatibility, relation, type AgentStorage } from './store.ts';
 
 const kindText: Record<string, string> = {
@@ -9,6 +11,7 @@ const kindText: Record<string, string> = {
   waiting: 'Waiting for you',
   finished: 'Agent finished',
   mention: 'You were mentioned',
+  reminder: 'Reminder',
 };
 
 const claimedSchema = z.object({
@@ -37,11 +40,13 @@ export function createInboxSlackNotifier(options: {
   appId: string;
   cipher: ReturnType<typeof slackCredentialCipher>;
   rowLink: (workspaceId: string, tableId: string, rowId: string) => Promise<string | undefined>;
+  /** The web address of a task's page, such as /acme/tasks/TUL-007. */
+  taskLink?: (workspaceId: string, key: string) => Promise<string | undefined>;
   fetcher?: typeof fetch;
 }) {
   const { runtime } = options;
 
-  async function claim(workspaceId: string) {
+  async function claim(workspaceId: string, taskKeys: boolean) {
     return runtime.transaction(workspaceId, agentCompatibility, async tx => {
       if (
         !(await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS ok', [relation(tx, 'tf_inbox_slack_muted')]))
@@ -89,6 +94,7 @@ export function createInboxSlackNotifier(options: {
         ).rows,
       );
       const messages = [];
+      const tasksId = taskKeys ? await tasksTableId(tx) : null;
       for (const item of items) {
         const actor: HumanActor = { kind: 'human', userId: item.user_id, membershipId: item.membership_id };
         // Behavior 60: a message names only a row the member can still read.
@@ -100,7 +106,8 @@ export function createInboxSlackNotifier(options: {
           },
         );
         const row = readable ? await rowTitle(tx, item.table_id, item.row_id) : null;
-        if (row) messages.push({ item, row });
+        const number = row && item.table_id === tasksId ? await taskNumberOf(tx, item.table_id, item.row_id) : null;
+        if (row) messages.push({ item, row, key: number === null ? null : formatTaskKey(number) });
       }
       return { installed, messages };
     });
@@ -114,7 +121,7 @@ export function createInboxSlackNotifier(options: {
 
   /** Sends what is due in one workspace and returns how many messages went out. */
   async function notify(workspaceId: string) {
-    const claimed = await claim(workspaceId);
+    const claimed = await claim(workspaceId, Boolean(options.taskLink));
     if (!claimed?.messages.length) return 0;
     // A credential that no longer decrypts drops this batch, which was already marked, instead of retrying forever.
     const token = options.cipher.decrypt(
@@ -122,10 +129,13 @@ export function createInboxSlackNotifier(options: {
       claimed.installed.bot_credential,
     );
     let sent = 0;
-    for (const { item, row } of claimed.messages) {
+    for (const { item, row, key } of claimed.messages) {
       try {
-        const link = await options.rowLink(workspaceId, item.table_id, item.row_id);
-        const name = plain(row.title ?? 'Untitled row');
+        const link =
+          key && options.taskLink
+            ? await options.taskLink(workspaceId, key)
+            : await options.rowLink(workspaceId, item.table_id, item.row_id);
+        const name = plain(key ? `${key} ${row.title ?? 'Untitled task'}` : (row.title ?? 'Untitled row'));
         const text = [
           `*${kindText[item.kind] ?? 'Inbox'}*: ${plain(item.summary ?? '')}`.replace(/: $/, ''),
           `${link ? `[${name}](${link})` : name} in ${plain(row.table)}`,

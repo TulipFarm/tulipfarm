@@ -628,6 +628,36 @@ for (const format of formats)
     assert.match(result.output, /^Untrusted tool result for tables\.definitions: .*Invoices/);
   });
 
+test('tasks tools are offered only in chat, and only tasks.list and tasks.get are reads', () => {
+  const tasks = [
+    'tasks.list',
+    'tasks.get',
+    'tasks.create',
+    'tasks.update',
+    'tasks.assign',
+    'tasks.comment',
+    'tasks.remind',
+  ];
+  const chat = discoverToolNames({ kind: 'chat' });
+  assert.ok(tasks.every(tool => chat.includes(tool)));
+  assert.ok(!discoverToolNames({ kind: 'agent', tools: tasks, task: true }).some(tool => tasks.includes(tool)));
+  assert.deepEqual(parseToolCall({ tool: 'tasks.get', key: 'tul-7' }, { kind: 'chat' }), {
+    tool: 'tasks.get',
+    key: 'tul-7',
+  });
+  assert.throws(() => parseToolCall({ tool: 'tasks.get', key: 'ENG-7' }, { kind: 'chat' }));
+  assert.throws(() =>
+    parseToolCall(
+      { tool: 'tasks.remind', key: 'TUL-7', action: 'set', schedule: { kind: 'weekly', time: '09:00', weekday: 7 } },
+      { kind: 'chat' },
+    ),
+  );
+  assert.deepEqual(
+    tasks.filter(tool => readOnlyCall({ tool })),
+    ['tasks.list', 'tasks.get'],
+  );
+});
+
 test('api.request is offered in every chat and task, never to other agent runs, and only reads are repeatable', () => {
   assert.ok(discoverToolNames({ kind: 'chat' }).includes('api.request'));
   assert.ok(discoverToolNames({ kind: 'agent', tools: [], task: true }).includes('api.request'));

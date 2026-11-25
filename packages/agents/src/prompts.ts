@@ -372,6 +372,13 @@ export function runtimeReminder(context: ContextInput, timeZone: string | null =
       },
       agents: { discoveryTool: has('agents.list') ? 'agents.list' : null },
       resources: { discoveryTool: has('tables.list') ? 'tables.list' : null },
+      ...(has('tasks.list') && {
+        tasks: {
+          discoveryTool: 'tasks.list',
+          instruction:
+            'Workspace tasks have keys such as TUL-042. Read and change them only with the tasks.* tools, never rows.* or schema tools, and name tasks by key.',
+        },
+      }),
       skills: has('skills.read') ? listSkills(context.kind === 'tools' ? 'chat' : 'agent') : null,
     },
   };

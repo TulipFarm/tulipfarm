@@ -37,7 +37,7 @@ const taskOnlyTools = [
   'knowledge.read',
   'knowledge.retrieve',
   'images.generate',
-  // Grants browser.handoff and browser.signIn with it.
+  // Grants browser.handoff, browser.signIn and browser.upload with it.
   'browser.act',
 ] as const;
 
@@ -84,6 +84,10 @@ export function agentToolRuntimeDescription(tool: string) {
 }
 
 /** Granting `browser.act` grants the other browser tools with it. */
-export function withBrowserGrant<T extends string>(tools: readonly T[]): (T | 'browser.handoff' | 'browser.signIn')[] {
-  return tools.includes('browser.act' as T) ? [...tools, 'browser.handoff', 'browser.signIn'] : [...tools];
+export function withBrowserGrant<T extends string>(
+  tools: readonly T[],
+): (T | 'browser.handoff' | 'browser.signIn' | 'browser.upload')[] {
+  return tools.includes('browser.act' as T)
+    ? [...tools, 'browser.handoff', 'browser.signIn', 'browser.upload']
+    : [...tools];
 }

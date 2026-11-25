@@ -5,7 +5,8 @@ import { memoryAdapter } from 'better-auth/adapters/memory';
 import { fromNodeHeaders, toNodeHandler } from 'better-auth/node';
 import { magicLink } from 'better-auth/plugins';
 import { createServer } from 'vite';
-import { chromium } from 'playwright';
+import { chromium, firefox } from 'playwright';
+import { startBuiltApp } from './built-app.fixture.mjs';
 
 const destination = '/acme/tables?view=mine#rows';
 const message = 'This sign-in link did not work. It may have expired or already been used. Request a new link.';
@@ -271,5 +272,47 @@ test('email links continue automatically and invalid links offer recovery', { ti
   } finally {
     await browser.close();
     await server.close();
+  }
+});
+
+// Runs against the production build (`VITE_API_URL= pnpm --filter @tulipfarm/web build`): only it reports
+// failed chunk loads. Firefox aborts in-flight chunk loads when a navigation starts.
+test('an email link verifies once while page code is still loading', { timeout: 120000 }, async () => {
+  const app = await startBuiltApp();
+  const browser = await firefox.launch({ headless: true });
+  try {
+    const context = await browser.newContext({ serviceWorkers: 'block' });
+    const page = await context.newPage();
+    page.setDefaultTimeout(15000);
+    const destination = `${app.origin}/acme/settings`;
+    const verifications = [];
+    let verificationStarted;
+    const started = new Promise(resolve => (verificationStarted = resolve));
+    await context.route('**/*', async route => {
+      const url = new URL(route.request().url());
+      if (url.pathname.endsWith('/get-session')) return route.fulfill({ json: null });
+      if (url.pathname === '/v1/auth/options')
+        return route.fulfill({ json: { turnstileSiteKey: null, google: true, magicLink: true } });
+      if (url.pathname === '/v1/auth/magic-link/verify') {
+        verifications.push(url);
+        verificationStarted();
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const location =
+          verifications.length === 1
+            ? url.searchParams.get('newUserCallbackURL')
+            : `${url.searchParams.get('errorCallbackURL')}&error=INVALID_TOKEN`;
+        return route.fulfill({ status: 302, headers: { location } }).catch(() => {});
+      }
+      if (url.origin !== app.origin) return route.abort();
+      if (url.pathname.startsWith('/assets/agent-activity-')) await started;
+      return route.continue().catch(() => {});
+    });
+    await page.goto(`${app.origin}/verify-email?token=new-user&callbackURL=${encodeURIComponent(destination)}`);
+    await page.waitForURL(url => url.pathname !== '/verify-email');
+    assert.equal(verifications.length, 1, 'The one-use token must be redeemed once');
+    await context.close();
+  } finally {
+    await browser.close();
+    await app.close();
   }
 });

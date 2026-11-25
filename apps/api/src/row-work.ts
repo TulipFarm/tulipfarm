@@ -11,8 +11,13 @@ import {
   inboxSchema,
   inboxSlackInputSchema,
   inboxSlackSchema,
+  reminderInputSchema,
+  remindersSchema,
   rowThreadSchema,
   taskActivitySchema,
+  taskDetailSchema,
+  taskKeysSchema,
+  TaskReminderError,
   tasksTableSchema,
 } from '@tulipfarm/agents/row-work';
 import { commonCompatibility, StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
@@ -34,12 +39,14 @@ export function registerRowWork(
   const row = workspace.extend({ tableId: z.uuid(), rowId: z.uuid() });
   const comment = row.extend({ itemId: z.uuid() });
   const inboxItem = workspace.extend({ itemId: z.uuid() });
+  const taskKey = workspace.extend({ key: z.string().regex(/^tul-\d{1,10}$/i) });
+  const reminder = row.extend({ reminderId: z.uuid() });
   const validation = routeValidation({
     missing: 'Missing row work validator',
     invalid: () => new Error('invalid-request'),
   });
   const errors = Object.fromEntries(
-    [400, 401, 404, 503].map(status => [status, validation.json(z.object({ error: z.string() }))]),
+    [400, 401, 404, 409, 503].map(status => [status, validation.json(z.object({ error: z.string() }))]),
   );
 
   app.register(async routes => {
@@ -51,6 +58,7 @@ export function registerRowWork(
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'not-found' });
       if (error instanceof AssignmentLimitsError) return reply.code(400).send({ error: error.code });
       if (error instanceof TaskTableError) return reply.code(error.status).send({ error: error.code });
+      if (error instanceof TaskReminderError) return reply.code(error.status).send({ error: error.code });
       if (error instanceof StorageUnavailableError) return reply.code(503).send({ error: 'workspace-unavailable' });
       if (error instanceof z.ZodError || (typeof error === 'object' && error !== null && 'validation' in error))
         return reply.code(400).send({ error: 'invalid-request' });
@@ -165,6 +173,68 @@ export function registerRowWork(
       request => {
         const p = workspace.parse(request.params);
         return service.taskActivity(p.workspaceId, user(request));
+      },
+    );
+    const reminders = { 200: validation.json(remindersSchema), ...errors };
+    routes.get(
+      `${base}/reminders`,
+      { schema: { operationId: 'taskReminders', params: validation.json(row), response: reminders } },
+      async request => {
+        const p = row.parse(request.params);
+        return service.reminders(p.workspaceId, user(request), p.tableId, p.rowId);
+      },
+    );
+    routes.post(
+      `${base}/reminders`,
+      {
+        schema: {
+          operationId: 'taskReminderCreate',
+          params: validation.json(row),
+          body: validation.json(reminderInputSchema),
+          response: reminders,
+        },
+      },
+      async request => {
+        const p = row.parse(request.params);
+        return service.createReminder(p.workspaceId, user(request), p.tableId, p.rowId, request.body);
+      },
+    );
+    routes.delete(
+      `${base}/reminders/:reminderId`,
+      { schema: { operationId: 'taskReminderCancel', params: validation.json(reminder), response: reminders } },
+      async request => {
+        const p = reminder.parse(request.params);
+        return service.cancelReminder(p.workspaceId, user(request), p.tableId, p.rowId, p.reminderId);
+      },
+    );
+    routes.get(
+      '/workspaces/:workspaceId/tasks/keys',
+      {
+        logLevel: 'silent',
+        schema: {
+          operationId: 'workspaceTaskKeys',
+          params: validation.json(workspace),
+          response: { 200: validation.json(taskKeysSchema), ...errors },
+        },
+      },
+      async request => {
+        const p = workspace.parse(request.params);
+        return service.taskKeys(p.workspaceId, user(request));
+      },
+    );
+    routes.get(
+      '/workspaces/:workspaceId/tasks/:key',
+      {
+        logLevel: 'silent',
+        schema: {
+          operationId: 'workspaceTaskByKey',
+          params: validation.json(taskKey),
+          response: { 200: validation.json(taskDetailSchema), ...errors },
+        },
+      },
+      async request => {
+        const p = taskKey.parse(request.params);
+        return service.taskByKey(p.workspaceId, user(request), p.key);
       },
     );
     routes.get(

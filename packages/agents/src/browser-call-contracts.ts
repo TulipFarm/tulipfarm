@@ -10,7 +10,18 @@ export const browserCallSchemas = [
     folderId: z
       .uuid()
       .optional()
-      .describe("In a chat, the Files folder for files this step downloads. Omit to save them to the person's files."),
+      .describe(
+        "The Files folder for files this step downloads. In a chat, omit it to save them to the person's files. In a run, set it or folderName to a folder the run's owner can add to whenever the step may download a file; without either, downloads are not saved.",
+      ),
+    folderName: z
+      .string()
+      .trim()
+      .min(1)
+      .max(255)
+      .optional()
+      .describe(
+        "In a run, the name of the Files folder for files this step downloads, as the task names it, when you do not have its id. It must name exactly one folder the run's owner can add to. Ignored when folderId is set.",
+      ),
   }),
   z.strictObject({
     tool: z.literal('browser.handoff'),
@@ -48,7 +59,7 @@ export const browserCallSchemas = [
       .describe('The ref of the sign-in button to click after typing, from the latest snapshot.'),
   }),
 ] as const;
-/** Chat only: a run has no Files to upload from. */
+/** In a run, only the files attached to the run or saved by it may be uploaded. */
 export const browserUploadCallSchema = z.strictObject({
   tool: z.literal('browser.upload'),
   file: z
@@ -56,7 +67,7 @@ export const browserUploadCallSchema = z.strictObject({
     .min(1)
     .max(200)
     .describe(
-      'The file to upload: an attachment-id or file-id from a file block of this chat, the source of an api.request response file, or a file ID from files.list.',
+      'The file to upload. In a chat: an attachment-id or file-id from a file block of this chat, the source of an api.request response file, or a file ID from files.list. In a run: the file ID of a file attached to the run, or of a file this run saved, such as a browser download or a generated image.',
     ),
   ref: browserRefSchema.describe(
     "The ref of the page's file input or upload button, from the latest snapshot. A file input shows as a button.",

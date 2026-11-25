@@ -1,132 +1,15 @@
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { runStateOptions, taskFields } from '@tulipfarm/tables/tasks-table';
-import { membership, credits } from './chat-query.fixture.mjs';
 import { startBuiltApp, builderBrowserOptions, captureBrowserFailure } from './built-app.fixture.mjs';
+import { rowId, tasksApi, until } from './tasks.fixture.mjs';
 
-// The Tasks page shows the Tasks table as a board by status. Dragging a card marks it done, reopens it or runs
-// its agent; drops that would mean nothing are refused, and opening a card shows its details.
+// The Tasks page shows tasks as a board by status, each card with its key. Dragging a card marks it done, reopens it
+// or runs its agent; drops that would mean nothing are refused, and opening a card shows the task's own page. The board
+// keeps up on its own: new tasks and run changes appear without a reload, and no column header spins.
 const server = await startBuiltApp();
 const { origin } = server;
-const workspace = {
-  id: '11111111-1111-4111-8111-111111111111',
-  slug: 'acme',
-  name: 'Acme',
-  status: 'ready',
-  createdAt: '2026-10-01T00:00:00Z',
-  soulCommit: 'a'.repeat(40),
-};
-const base = `/v1/workspaces/${workspace.id}`;
-const tableId = '55555555-5555-4555-8555-555555555555';
-const agentId = '66666666-6666-4666-8666-666666666666';
-const revision = 'a'.repeat(40);
-const options = Object.entries(runStateOptions).map(([state, id]) => ({ id, label: state, retired: false }));
-const definition = {
-  formatVersion: 2,
-  id: tableId,
-  owningTeamId: '33333333-3333-4333-8333-333333333333',
-  label: 'Tasks',
-  fields: [
-    { id: taskFields.title, label: 'Title', kind: 'text', required: true, maxLength: 500 },
-    {
-      id: taskFields.description,
-      label: 'Description',
-      kind: 'text',
-      required: false,
-      maxLength: 100000,
-      markdown: true,
-    },
-    { id: taskFields.assignee, label: 'Assignee', kind: 'actor', required: false, assignee: true },
-    { id: taskFields.reporter, label: 'Reporter', kind: 'actor', required: false, assignee: false },
-    { id: taskFields.runState, label: 'Run state', kind: 'single-select', required: false, options },
-  ],
-  uniqueKeys: [],
-};
-const rowId = n => `77777777-7777-4777-8777-${String(n).padStart(12, '0')}`;
-const rows = new Map(
-  [
-    [rowId(1), 'Order new labels', null, null],
-    [rowId(2), 'Write the pricing FAQ', null, 'done'],
-    [rowId(3), 'Draft the launch note', agentId, 'waiting'],
-  ].map(([id, title, agent, state]) => [id, { id, title, agent, state }]),
-);
-const record = row => ({
-  id: row.id,
-  token: '88888888-8888-4888-8888-888888888888',
-  values: {
-    [taskFields.title]: { kind: 'text', value: row.title },
-    ...(row.agent && { [taskFields.assignee]: { kind: 'actor', actor: { type: 'agent', id: row.agent } } }),
-    ...(row.state && { [taskFields.runState]: { kind: 'single-select', optionId: runStateOptions[row.state] } }),
-  },
-});
-const activity = () => ({
-  tableId,
-  tasks: [...rows.values()]
-    .filter(row => row.agent)
-    .map(row => ({
-      rowId: row.id,
-      agentId: row.agent,
-      sponsorMembershipId: membership.membershipId,
-      runState: row.state,
-      reason: row.state === 'waiting' ? 'Which launch date should the note use?' : null,
-      wakeAt: null,
-      updatedAt: '2026-11-21T10:00:00.000Z',
-      run: null,
-      note: null,
-    })),
-  comments: [],
-  me: '99999999-9999-4999-8999-999999999999',
-});
-const moves = [];
-
-async function routeApi(page) {
-  await page.route('**/v1/**', async route => {
-    const request = route.request();
-    const path = new URL(request.url()).pathname;
-    const json = (value, status = 200) => route.fulfill({ status, json: value });
-    if (path === '/v1/auth/get-session')
-      return json({
-        session: { id: 'fixture-session', userId: 'ada' },
-        user: { id: 'ada', name: 'Ada', email: 'ada@example.com', lastModelFamilyId: null },
-      });
-    if (path === '/v1/feature-flags') return json({});
-    if (path === '/v1/workspaces') return json([workspace]);
-    if (path === '/v1/workspaces/acme') return json(workspace);
-    if (path === `${base}/governance/me`) return json(membership);
-    if (path === `${base}/credits`) return json(credits);
-    if (path === `${base}/tasks-table`) return json({ tableId });
-    if (path === `${base}/tasks/activity`) return json(activity());
-    if (path === `${base}/tables/${tableId}`)
-      return json({
-        id: tableId,
-        saved: null,
-        applied: { revision, definition, appliedAt: workspace.createdAt },
-        rowPermissions: { create: true, update: true, delete: true },
-        canArchive: false,
-        archived: false,
-      });
-    if (path === `${base}/tables/${tableId}/rows/page`)
-      return json({ records: [...rows.values()].map(record), total: String(rows.size), nextCursor: null });
-    const done = path.match(/\/rows\/([^/]+)\/(done|run-now)$/);
-    if (done) {
-      const row = rows.get(done[1]);
-      const move = done[2] === 'run-now' ? 'run' : request.method() === 'POST' ? 'done' : 'reopen';
-      moves.push([row.title, move]);
-      row.state = move === 'run' ? 'queued' : move === 'done' ? 'done' : null;
-      return json({ items: [], assignment: null, runs: [] });
-    }
-    if (path.endsWith('/thread')) return json({ items: [], assignment: null, runs: [] });
-    return json({ error: 'unavailable' }, 404);
-  });
-}
-
-async function until(check, message) {
-  const deadline = Date.now() + 10_000;
-  while (!(await check())) {
-    if (Date.now() > deadline) assert.fail(message);
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
-}
+const api = tasksApi();
+const moves = api.writes;
 
 let browser;
 let page;
@@ -136,7 +19,7 @@ try {
   page.setDefaultTimeout(10_000);
   const errors = [];
   page.on('pageerror', error => errors.push(String(error)));
-  await routeApi(page);
+  await api.route(page);
 
   await page.goto(`${origin}/acme/tasks`);
   const board = page.getByRole('region', { name: 'Tasks by status', exact: true });
@@ -180,9 +63,9 @@ try {
   assert.deepEqual(await drag('Draft the launch note', 'Queued'), ['allowed', 'Drop to run the agent']);
   await until(async () => (await lane('Draft the launch note')) === 'Queued', 'The agent is queued to run again');
   assert.deepEqual(moves, [
-    ['Order new labels', 'done'],
-    ['Write the pricing FAQ', 'reopen'],
-    ['Draft the launch note', 'run'],
+    ['done', 'Order new labels'],
+    ['reopen', 'Write the pricing FAQ'],
+    ['run', 'Draft the launch note'],
   ]);
 
   assert.deepEqual(await drag('Write the pricing FAQ', 'Working'), ['blocked']);
@@ -190,19 +73,37 @@ try {
   assert.equal(await lane('Write the pricing FAQ'), 'To do', 'A task without an agent has nothing to run');
   assert.equal(moves.length, 3, 'Refused drops change nothing');
 
-  // The board ignores the first click straight after a drag ends, so click until the details open.
-  const details = page.getByRole('dialog', { name: 'Order new labels' });
+  // Someone else adds a task and an agent starts work; the board picks both up by itself.
+  const headers = page.locator('[data-task-board] .sprout-board-column-header');
+  await until(async () => (await headers.count()) === columns.length, 'Every column has a header');
+  assert.equal(await headers.locator('.sprout-status-spin').count(), 0, 'No column header spins');
+  api.rows.set(rowId(4), { id: rowId(4), number: 4, title: 'Ship the samples', agent: null, state: null, values: {} });
+  api.rows.get(rowId(3)).state = 'working';
+  await card('Ship the samples').getByText('TUL-004').waitFor({ timeout: 15_000 });
+  await until(async () => (await lane('Ship the samples')) === 'To do', 'The new task lands in To do');
+  await until(async () => (await lane('Draft the launch note')) === 'Working', 'The run moves the card to Working');
+  const working = headers.nth(columns.indexOf('Working'));
+  await working.locator('[data-lane-icon="working"]').waitFor();
+  assert.equal(await working.locator('.sprout-status-spin, [data-state="running"]').count(), 0, 'Working is still');
+  assert.equal(await headers.locator('.sprout-status-spin').count(), 0, 'No column header spins with work under way');
+
+  await card('Order new labels').getByText('TUL-001').waitFor();
+  await card('Draft the launch note').getByText('TUL-003').waitFor();
+  // The board ignores the first click straight after a drag ends, so click until the task's page opens.
   await until(async () => {
-    if (await details.isVisible()) return true;
+    if (page.url().endsWith('/acme/tasks/TUL-001')) return true;
     await card('Order new labels').click();
-    return details.waitFor({ timeout: 2000 }).then(
+    return page.waitForURL('**/acme/tasks/TUL-001', { timeout: 2000 }).then(
       () => true,
       () => false,
     );
-  }, 'Opening a card shows its details');
+  }, 'Opening a card shows the task on its own page');
+  await page.getByRole('heading', { name: 'TUL-001' }).or(page.getByText('TUL-001').first()).waitFor();
+  assert.equal(await page.getByRole('textbox', { name: 'Title' }).inputValue(), 'Order new labels');
   assert.deepEqual(errors, [], 'No browser runtime errors');
   console.log('Tasks board moves cards by meaning and refuses the rest.');
 } catch (error) {
+  console.error('Unmocked API requests:', api.unhandled);
   await captureBrowserFailure(page, 'task-board');
   throw error;
 } finally {

@@ -2352,7 +2352,16 @@ export function createConversationExecutor(
           name === 'secrets.list' ||
           name === 'agents.delegate' ||
           name === 'followups.schedule' ||
-          ['rows.list', 'rows.create', 'rows.create.batch', 'rows.update', 'rows.update.batch'].includes(name) ||
+          [
+            'rows.list',
+            'rows.create',
+            'rows.create.batch',
+            'rows.update',
+            'rows.update.batch',
+            'tasks.create',
+            'tasks.update',
+            'tasks.assign',
+          ].includes(name) ||
           (interactiveChat &&
             (isCalendarReadCall(name, call) ||
               name === 'web.fetch' ||

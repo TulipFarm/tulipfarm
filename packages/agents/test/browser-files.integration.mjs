@@ -9,7 +9,8 @@ import { withFileSources } from '../../conversations/src/file-references.ts';
 import { createConversationExecutor } from '../../conversations/src/runtime.ts';
 import { fixture } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createChatTools, isExternalTool } from '../src/tools.ts';
-import { createFiles } from '../../files/src/index.ts';
+import { createFiles } from '@tulipfarm/files';
+import { findBrowserFolder, saveBrowserDownload } from '../src/browser-tools.ts';
 
 const page = {
   sessionId: 's',
@@ -130,4 +131,42 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   ).rows;
   assert.deepEqual(row, { name: 'statement.csv', parentId: null });
   assert.equal(Buffer.from((await files.download(w.id, w.userId, saved.id)).bytes).toString(), 'paid,12\n\n');
+
+  const callId = randomUUID();
+  const context = {
+    workspaceId: w.id,
+    actor: { kind: 'human', userId: w.userId, membershipId: w.membershipId },
+    autonomous: false,
+    callId,
+    inputs: [],
+  };
+  const save = text => saveBrowserDownload(files, context, { name: 'retry.csv', bytes: Buffer.from(text) });
+  const first = await save('a,1\n');
+  const replayed = await save('a,1\n');
+  assert.equal(replayed.file.id, first.file.id, 'a retried call reuses the file it saved');
+  // Another same-named download of the call, with other bytes, is its own file.
+  const other = await save('a,2\n');
+  assert.notEqual(other.file.id, first.file.id, 'the other download is saved, not swapped for the first');
+  assert.equal((await save('a,2\n')).file.id, other.file.id, 'and a further retry reuses it');
+  const copies = await db.platform.query(`SELECT id FROM ${table('tf_files')} WHERE name='retry.csv'`);
+  assert.equal(copies.rows.length, 2);
+  assert.equal(Buffer.from((await files.download(w.id, w.userId, other.file.id)).bytes).toString(), 'a,2\n');
+  await files.trash(w.id, w.userId, first.file.id, true);
+  assert.equal((await save('a,1\n')).error, 'conflict', 'a retry never saves a file the person trashed again');
+
+  const folder = async (userId, name, parentId = null) => {
+    const id = randomUUID();
+    await files.createFolder(w.id, userId, id, { name, parentId });
+    return id;
+  };
+  const statements = await folder(w.userId, 'Statements');
+  await folder('person-1', 'Payroll');
+  const find = name => findBrowserFolder(files, w.id, w.userId, name);
+  assert.deepEqual(await find('  statements '), { id: statements }, 'a name finds its folder, ignoring case');
+  assert.equal((await find('Statement')).error, 'folder-not-found', 'a partial name is not a match');
+  assert.equal((await find('Payroll')).error, 'folder-not-found', "another member's folder is not seen");
+  const nested = await folder(w.userId, 'statements', await folder(w.userId, 'Archive'));
+  const twice = await find('Statements');
+  assert.equal(twice.error, 'folder-ambiguous');
+  assert.ok(twice.instruction.includes(statements) && twice.instruction.includes(`${nested} (in Archive)`));
 });

@@ -61,6 +61,7 @@ export function createTaskComposition(
         client: createBrowserHostClient(browserHost),
         secrets: taskBrowserSecrets(secrets),
         meter: taskBrowserMeter(runtime),
+        files: files ?? undefined,
         loadLogin: async ({ workspaceId, actor, sessionId, loginId }) => {
           const login = await browserLogins.use(workspaceId, actor, loginId);
           await browser!.client.loadLogin(sessionId, { id: login.id, site: login.site, state: login.state });

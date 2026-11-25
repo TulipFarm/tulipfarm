@@ -308,3 +308,58 @@ test('Slack sends classify requester denials with actionable codes before persis
     await f.close();
   }
 });
+
+test('Slack lookup works in a chat that read the requester’s own memory', async () => {
+  const f = await outboundFixture();
+  try {
+    const factory = runtime => createSlackActions({ ...f.settings, runtime });
+    const chatId = randomUUID();
+    await f.store.create(f.workspace.id, f.alice.userId, { chatId, commandId: randomUUID() });
+    let replySources = [],
+      lookups = [];
+    const engine = createConversationExecutor(
+      f.runtime,
+      async ({ executeTool }) => {
+        lookups = [];
+        for (const call of [
+          { tool: 'slack.resolve', kind: 'user', name: '@Bob' },
+          { tool: 'slack.resolve', kind: 'channel', name: '#missing' },
+        ])
+          lookups.push(
+            (
+              await executeTool('slack.resolve', false, context =>
+                createChatTools(context.runtime, { slack: factory }).invokeWithSources(context, call),
+              )
+            ).result,
+          );
+        return { text: 'Looked up', sources: replySources };
+      },
+      undefined,
+      factory(f.runtime).resumeConversation,
+    );
+    const turn = async text => {
+      const sent = await f.store.send(f.workspace.id, f.alice.userId, chatId, {
+        commandId: randomUUID(),
+        messageId: randomUUID(),
+        parts: [{ kind: 'text', text }],
+      });
+      assert.equal(
+        await engine.process({
+          workspaceId: f.workspace.id,
+          conversationId: chatId,
+          turnId: sent.turnId,
+          generation: 0,
+        }),
+        'completed',
+      );
+    };
+    replySources = [{ kind: 'personal-memory', membershipId: f.alice.membershipId }];
+    await turn('What do you remember about me?');
+    replySources = [];
+    await turn('Find Bob and #missing on Slack');
+    assert.deepEqual(lookups[0].matches, [{ id: 'UBOB', name: 'Bob' }]);
+    assert.equal(lookups[1].status, 'not-found');
+  } finally {
+    await f.close();
+  }
+});

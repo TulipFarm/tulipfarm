@@ -261,10 +261,14 @@ export function useWorkspaceContentSearch({
 
       const loadTables = async (): Promise<WorkspaceSearchResult[]> => {
         if (!shouldSearchTables) return [];
-        const result = await tableApi(workspaceId).list(undefined, signal, trimmed || undefined, false, {
-          by: 'changed',
-          direction: 'desc',
-        });
+        const result = await tableApi(workspaceId).list(
+          undefined,
+          signal,
+          trimmed || undefined,
+          false,
+          { by: 'changed', direction: 'desc' },
+          true,
+        );
         return result.tables.slice(0, limit).map(table => {
           const fieldLabels = table.definition.fields.slice(0, 4).map(field => field.label);
           const extraFields = table.definition.fields.length - fieldLabels.length;

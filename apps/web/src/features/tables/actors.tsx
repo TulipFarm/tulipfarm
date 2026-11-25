@@ -110,6 +110,9 @@ export function ActorPicker({
   change,
   label = 'Person or agent',
   size,
+  width = 'full',
+  empty = 'Not set',
+  peopleOnly = false,
 }: {
   workspaceId: string;
   value: Actor | null;
@@ -117,21 +120,25 @@ export function ActorPicker({
   change: (actor: Actor | null) => void;
   label?: string;
   size?: 'sm' | 'md';
+  width?: 'fit' | 'full';
+  /** What the closed picker shows when nobody is chosen, such as the field name. */
+  empty?: string;
+  peopleOnly?: boolean;
 }) {
   const directory = useActorDirectory(workspaceId);
   const data = directory.state.kind === 'ready' ? directory.state.data : undefined;
   const current = value ? actorKey(value) : '';
   const members = data?.members.filter(member => member.current) ?? [];
-  const agents = data?.agents.filter(agent => agent.available) ?? [];
+  const agents = peopleOnly ? [] : (data?.agents.filter(agent => agent.available) ?? []);
   return (
     <Select
       value={current}
       disabled={disabled || !data}
       onValueChange={next => change(next ? parseActorKey(next) : null)}
     >
-      <SelectTrigger width="full" size={size ?? 'md'} aria-label={label}>
+      <SelectTrigger width={width} size={size ?? 'md'} aria-label={label}>
         <SelectValue>
-          {value ? actorLabel(data, value) : directory.state.kind === 'ready' ? 'Not set' : 'Loading…'}
+          {value ? actorLabel(data, value) : directory.state.kind === 'ready' ? empty : 'Loading…'}
         </SelectValue>
       </SelectTrigger>
       <SelectContent>

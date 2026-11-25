@@ -82,6 +82,7 @@ const agents = [
   ]),
 ];
 const unreachableId = uuid('d');
+const fileId = uuid('f');
 agents.push({
   ...agentFixture(unreachableId, 'Customer reader without team access', [
     { id: activationId, revision: 'b'.repeat(64), scope },
@@ -151,6 +152,23 @@ async function open(device, holdTables = false, tableResult = 'ready') {
         capabilities: { manageGovernance: false, canLeave: true },
       });
     if (path.endsWith('/model-catalog')) return send({ families });
+    if (path.endsWith('/files/suggestions') || path.endsWith('/files/recent'))
+      return send({
+        items: [
+          {
+            id: fileId,
+            kind: 'file',
+            name: 'invoice.pdf',
+            parentId: null,
+            creatorMembershipId: mid,
+            mediaType: 'application/pdf',
+            size: 2048,
+            trashed: false,
+            role: 'manager',
+          },
+        ],
+        next: null,
+      });
     if (path.endsWith('/tables')) {
       await tableGate;
       if (tableResult === 'missing') return send({ tables: [], nextCursor: null });
@@ -296,6 +314,12 @@ try {
 
   await message.fill('Review customers needing follow-up this week.');
   assert.equal(await region.getByText('Write what the agent should do.', { exact: true }).count(), 0);
+  await region.getByRole('button', { name: 'Add from Files', exact: true }).click();
+  const picker = page.getByRole('dialog', { name: 'Add a file from Files', exact: true });
+  await picker.getByRole('button', { name: 'invoice.pdf', exact: true }).click();
+  await picker.waitFor({ state: 'detached' });
+  await region.getByRole('button', { name: 'Remove invoice.pdf', exact: true }).waitFor();
+  await region.getByText('4 of 5 files left.', { exact: true }).waitFor();
   const limitsToggle = region.getByRole('button', { name: 'Task limits', exact: true });
   await limitsToggle.click();
   const credits = region.getByRole('spinbutton', { name: 'Credit limit', exact: true });
@@ -323,7 +347,7 @@ try {
   assert.deepEqual(body, {
     agentId: aid,
     text: 'Review customers needing follow-up this week.',
-    sources: [],
+    sources: [{ kind: 'file', fileId }],
     scope,
     limits: { toolCalls: 100, activeMilliseconds: 300000, credits: 250 },
   });
@@ -513,7 +537,7 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log(
-    'PASS task composer: inline message and limit errors with focus, limits reopen, one command per double click, reply minimums, blocked reasons with focus, newest activation data without a scope choice, responsive sections.',
+    'PASS task composer: a file from Files starts the task as a source, inline message and limit errors with focus, limits reopen, one command per double click, reply minimums, blocked reasons with focus, newest activation data without a scope choice, responsive sections.',
   );
 } catch (error) {
   console.error(
