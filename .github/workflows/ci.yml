@@ -162,8 +162,11 @@ jobs:
           restore-keys: |
             playwright-${{ runner.os }}-${{ runner.arch }}-
       # The runner image already has Chrome's system libraries, so skip the slower apt step of --with-deps.
-      - name: Install Chromium
-        run: pnpm --filter @tulipfarm/web exec playwright install chromium
+      # Firefox runs the email-link test: only it aborts chunk loads when a navigation starts.
+      - name: Install Chromium and Firefox
+        run: |
+          pnpm --filter @tulipfarm/web exec playwright install chromium
+          pnpm --filter @tulipfarm/web exec playwright install --with-deps firefox
       - name: Create the local database roles
         run: psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/postgres/init.sql
       - name: Build the web app and the API and worker code the tests run
