@@ -1,19 +1,23 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { AccessDenied, WorkspaceMembershipDenied } from '@tulipfarm/access';
-import { AgentTaskError } from '@tulipfarm/agents/task-contracts';
-import { FileError } from '@tulipfarm/files';
-import { TableValidationError } from '@tulipfarm/tables/definition';
-import { TableError } from '@tulipfarm/tables/service-contracts';
-import { GenerationError } from '@tulipfarm/tables/store';
 import { attachmentLimit } from '@tulipfarm/conversations/attachments';
-import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { bearerValue } from './access-token-secret.ts';
 import type { AccessTokens, TokenPrincipal } from './access-tokens.ts';
 import { createWindows } from './app-data-windows.ts';
-import { ExternalApiError, type ExternalApi } from './external-api.ts';
-import { fileErrorStatus } from './files.ts';
-import { requestBoundaryError } from './security.ts';
+import type { ExternalApi } from './external-api.ts';
+import { ExternalApiError, problem, publicError, sendProblem, type Problem } from './public-errors.ts';
+import {
+  binaryBody,
+  createRowsBody,
+  createRowsResultJson,
+  deleteRowBody,
+  queryRowsBody,
+  rowsPageJson,
+  runAgentBody,
+  updateRowBody,
+} from './public-schemas.ts';
+
+export { problem, publicError };
 
 const principals = new WeakMap<FastifyRequest, TokenPrincipal>();
 
@@ -24,82 +28,72 @@ export function principalOf(request: FastifyRequest) {
   return principal;
 }
 
+/** One request budget per token, shared by the REST API and the MCP server. */
+export function createTokenLimiter(perMinute = 120) {
+  return { perMinute, windows: createWindows({ max: perMinute, windowMs: 60_000 }) };
+}
+export type TokenLimiter = ReturnType<typeof createTokenLimiter>;
+
+const authorizationHeaders = (request: FastifyRequest) => {
+  let seen = 0;
+  for (let index = 0; index < request.raw.rawHeaders.length; index += 2)
+    if (request.raw.rawHeaders[index]!.toLowerCase() === 'authorization') seen++;
+  return seen;
+};
+
 /**
  * Admits a request only with a live TulipFarm access token in `Authorization: Bearer`. Cookies are never read here, and
  * a request that sends both is refused, so a browser session cannot be used through these routes and a token cannot
- * reach a session route. Each token may make `perMinute` requests a minute in this process.
+ * reach a session route. Each token shares one budget of `limiter.perMinute` requests a minute in this process.
  */
 export function admitAccessTokens(
   routes: FastifyInstance,
   tokens: Pick<AccessTokens, 'authenticate'>,
-  limits: { perMinute?: number } = {},
+  limiter: TokenLimiter,
+  refuse: (reply: FastifyReply, status: number, body: Problem) => unknown = (reply, status, body) =>
+    reply.code(status).send(body),
 ) {
-  const windows = createWindows({ max: limits.perMinute ?? 120, windowMs: 60_000 });
   routes.addHook('onRequest', async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
     if (request.method === 'OPTIONS') return;
     const presented = bearerValue(request.headers.authorization);
+    if (authorizationHeaders(request) > 1)
+      return refuse(reply, 400, problem('ambiguous-credentials', 'Send one Authorization header.'));
     if (request.headers.cookie && presented)
-      return reply
-        .code(400)
-        .send(problem('ambiguous-credentials', 'Send either a token or a session cookie, not both.'));
-    if (!presented)
-      return reply
-        .code(401)
-        .header('WWW-Authenticate', 'Bearer realm="tulipfarm"')
-        .send(problem('invalid-token', 'Send a TulipFarm access token as "Authorization: Bearer tfp_…".'));
+      return refuse(reply, 400, problem('ambiguous-credentials', 'Send either a token or a session cookie, not both.'));
+    if (!presented) {
+      reply.header('WWW-Authenticate', 'Bearer realm="tulipfarm"');
+      return refuse(
+        reply,
+        401,
+        problem('invalid-token', 'Send a TulipFarm access token as "Authorization: Bearer tfp_…".'),
+      );
+    }
     const principal = await tokens.authenticate(presented);
-    if (!principal)
-      return reply
-        .code(401)
-        .header('WWW-Authenticate', 'Bearer realm="tulipfarm", error="invalid_token"')
-        .send(problem('invalid-token', 'This token is not valid, has expired or was revoked.'));
-    const wait = windows.spend(principal.tokenId);
-    if (wait > 0)
-      return reply
-        .code(429)
-        .header('Retry-After', String(Math.ceil(wait / 1000)))
-        .send(problem('rate-limit-exceeded'));
+    if (!principal) {
+      reply.header('WWW-Authenticate', 'Bearer realm="tulipfarm", error="invalid_token"');
+      return refuse(reply, 401, problem('invalid-token', 'This token is not valid, has expired or was revoked.'));
+    }
+    const wait = limiter.windows.spend(principal.tokenId);
+    if (wait > 0) {
+      const seconds = Math.ceil(wait / 1000);
+      reply.header('Retry-After', String(seconds));
+      return refuse(
+        reply,
+        429,
+        problem(
+          'rate-limit-exceeded',
+          `Each token may make ${limiter.perMinute} requests a minute across the REST API and MCP. ` +
+            `Retry in ${seconds} s.`,
+        ),
+      );
+    }
     const params = request.params as { workspaceId?: unknown } | undefined;
     // A token for one workspace sees nothing of another, not even that it exists.
     if (typeof params?.workspaceId === 'string' && params.workspaceId.toLowerCase() !== principal.workspaceId)
-      return reply.code(404).send(problem('not-found'));
+      return refuse(reply, 404, problem('not-found', 'This token belongs to a different workspace.'));
     principals.set(request, principal);
   });
-}
-
-export function problem(code: string, message?: string) {
-  return { error: { code, ...(message ? { message } : {}) } };
-}
-
-/** The public API's single error envelope, `{ error: { code, message? } }`, for every domain error it can raise. */
-export function publicError(error: unknown): { status: number; body: ReturnType<typeof problem> } | null {
-  if (error instanceof ExternalApiError) return { status: error.status, body: problem(error.code, error.message) };
-  if (error instanceof z.ZodError)
-    return {
-      status: 400,
-      body: problem(
-        'invalid-request',
-        error.issues
-          .slice(0, 5)
-          .map(issue => `${issue.path.join('.') || 'body'}: ${issue.message}`)
-          .join('; '),
-      ),
-    };
-  if (error instanceof TableValidationError)
-    return { status: 400, body: problem('invalid-values', error.fieldId ? `field ${error.fieldId}` : undefined) };
-  if (error instanceof AccessDenied || error instanceof WorkspaceMembershipDenied)
-    return { status: 404, body: problem('not-found') };
-  if (error instanceof GenerationError)
-    return { status: error.code === 'not-found' ? 404 : 409, body: problem(error.code) };
-  if (error instanceof TableError) return { status: error.status, body: problem(error.code) };
-  if (error instanceof FileError) return { status: fileErrorStatus[error.code], body: problem(`file-${error.code}`) };
-  if (error instanceof AgentTaskError) return { status: 409, body: problem(error.code) };
-  if (error instanceof StorageUnavailableError)
-    return error.code === 'disabled'
-      ? { status: 404, body: problem('not-found') }
-      : { status: 503, body: problem('temporarily-unavailable') };
-  return null;
 }
 
 const errorJson = {
@@ -113,7 +107,9 @@ const errorJson = {
   },
   required: ['error'],
 };
-const errors = Object.fromEntries([400, 401, 403, 404, 409, 413, 429, 503].map(status => [status, errorJson]));
+const errors = Object.fromEntries(
+  [400, 401, 403, 404, 409, 413, 415, 429, 500, 503].map(status => [status, errorJson]),
+);
 const json = (description: string) => ({ description, type: 'object', additionalProperties: true });
 const tags = ['Public API'];
 const uuid = { type: 'string', format: 'uuid' };
@@ -122,9 +118,14 @@ const params = (...names: string[]) => ({
   properties: Object.fromEntries(['workspaceId', ...names].map(name => [name, uuid])),
   required: ['workspaceId', ...names],
 });
+const idempotencyDescription =
+  'Any unique printable ASCII string up to 255 characters. Retrying with the same key and the same request is ' +
+  'safe and returns the original result; the same key with a different request returns 409 idempotency-conflict.';
 const idempotencyHeader = {
   type: 'object',
-  properties: { 'idempotency-key': { type: 'string', minLength: 1, maxLength: 255 } },
+  properties: {
+    'idempotency-key': { type: 'string', minLength: 1, maxLength: 255, description: idempotencyDescription },
+  },
   required: ['idempotency-key'],
 };
 const security = [{ accessToken: [] }];
@@ -142,30 +143,37 @@ const doc = (operationId: string, summary: string, extra: Record<string, unknown
  */
 export function registerPublicApi(
   app: FastifyInstance,
-  dependencies: { tokens: Pick<AccessTokens, 'authenticate'>; api: ExternalApi },
+  dependencies: { tokens: Pick<AccessTokens, 'authenticate'>; api: ExternalApi; limiter: TokenLimiter },
 ) {
   const { api } = dependencies;
   app.register(async routes => {
-    admitAccessTokens(routes, dependencies.tokens);
+    admitAccessTokens(routes, dependencies.tokens, dependencies.limiter);
     routes.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (_request, body, done) =>
       done(null, body),
     );
+    // The schemas document requests; the Zod schemas in external-api.ts validate them, so the two cannot disagree.
+    routes.setValidatorCompiler(() => () => true);
     routes.setErrorHandler((error, request, reply: FastifyReply) => {
       const mapped = publicError(error);
-      if (mapped) return reply.code(mapped.status).send(mapped.body);
-      if (typeof error === 'object' && error !== null && 'validation' in error)
-        return reply.code(400).send(problem('invalid-request', String((error as { message?: unknown }).message ?? '')));
-      if (requestBoundaryError(error, reply)) return;
+      if (mapped) return sendProblem(reply, mapped);
       request.log.error({ err: error }, 'Public API request failed');
       return reply.code(500).send(problem('internal-server-error'));
     });
+    routes.setNotFoundHandler((_request, reply) =>
+      reply.code(404).send(problem('not-found', 'No such endpoint. The Public API is described at /v1/docs.')),
+    );
     const key = (request: FastifyRequest) => {
       const value = request.headers['idempotency-key'];
       if (typeof value !== 'string' || !value)
         throw new ExternalApiError(400, 'idempotency-key-required', 'Send an Idempotency-Key header with every write.');
       return value;
     };
-    const id = (request: FastifyRequest, name: string) => (request.params as Record<string, string>)[name]!;
+    const id = (request: FastifyRequest, name: string) => {
+      const value = (request.params as Record<string, string>)[name]!;
+      if (!z.uuid().safeParse(value).success)
+        throw new ExternalApiError(400, 'invalid-request', `${name} must be a UUID.`);
+      return value;
+    };
     const base = '/workspaces/:workspaceId';
 
     routes.get(
@@ -189,7 +197,7 @@ export function registerPublicApi(
           principalOf(request),
           z
             .object({
-              after: z.string().max(40).optional(),
+              after: z.uuid('expected the nextCursor from the previous page').optional(),
               search: z.string().max(255).optional(),
               limit: z.coerce.number().int().min(1).max(100).optional(),
             })
@@ -214,8 +222,8 @@ export function registerPublicApi(
           'List rows with optional filters, search, sort and cursor (`after`), up to 100 at a time',
           {
             params: params('tableId'),
-            body: { type: 'object' },
-            response: { 200: json('Rows, total and the next cursor'), ...errors },
+            body: queryRowsBody,
+            response: { 200: rowsPageJson, ...errors },
           },
         ),
       },
@@ -230,7 +238,7 @@ export function registerPublicApi(
             type: 'object',
             properties: { after: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 100 } },
           },
-          response: { 200: json('Rows, total and the next cursor'), ...errors },
+          response: { 200: rowsPageJson, ...errors },
         }),
       },
       request => {
@@ -259,8 +267,8 @@ export function registerPublicApi(
           {
             params: params('tableId'),
             headers: idempotencyHeader,
-            body: { type: 'object' },
-            response: { 200: json('One result per row'), ...errors },
+            body: createRowsBody,
+            response: { 200: createRowsResultJson, ...errors },
           },
         ),
       },
@@ -272,8 +280,8 @@ export function registerPublicApi(
         schema: doc('publicUpdateRowV1', "Update a row's values. `expectedToken` must be the row's current token", {
           params: params('tableId', 'rowId'),
           headers: idempotencyHeader,
-          body: { type: 'object' },
-          response: { 200: json('The updated row'), ...errors },
+          body: updateRowBody,
+          response: { 200: json('The updated row, with its new token'), ...errors },
         }),
       },
       request =>
@@ -285,7 +293,7 @@ export function registerPublicApi(
         schema: doc('publicDeleteRowV1', 'Delete a row. `expectedToken` must be the row’s current token', {
           params: params('tableId', 'rowId'),
           headers: idempotencyHeader,
-          body: { type: 'object' },
+          body: deleteRowBody,
           response: { 200: json('The deleted row id and token'), ...errors },
         }),
       },
@@ -364,8 +372,9 @@ export function registerPublicApi(
     routes.get(
       `${base}/files/:fileId/content`,
       {
-        schema: doc('publicDownloadFileV1', "Download a file's bytes", {
+        schema: doc('publicDownloadFileV1', "Download a file's bytes, with the file's media type", {
           params: params('fileId'),
+          produces: ['application/octet-stream', '*/*'],
           response: { 200: { description: 'The file bytes', type: 'string', format: 'binary' }, ...errors },
         }),
       },
@@ -376,10 +385,15 @@ export function registerPublicApi(
         });
         const result = await api.downloadFile(principalOf(request), id(request, 'fileId'), reader.signal);
         const filename = encodeURIComponent(result.name).replaceAll("'", '%27');
+        const fallback = result.name.replace(/[^\x20-\x7e]|["\\]/g, '_') || 'file';
+        const mediaType = /^[\w.+-]+\/[\w.+-]+$/.test(result.mediaType ?? '')
+          ? result.mediaType!
+          : 'application/octet-stream';
         return reply
           .header('X-Content-Type-Options', 'nosniff')
-          .header('Content-Disposition', `attachment; filename="file"; filename*=UTF-8''${filename}`)
-          .type('application/octet-stream')
+          .header('Content-Security-Policy', "default-src 'none'; sandbox")
+          .header('Content-Disposition', `attachment; filename="${fallback}"; filename*=UTF-8''${filename}`)
+          .type(mediaType)
           .send(Buffer.from(result.bytes));
       },
     );
@@ -393,6 +407,8 @@ export function registerPublicApi(
           {
             params: params(),
             headers: idempotencyHeader,
+            consumes: ['application/octet-stream'],
+            body: binaryBody,
             querystring: {
               type: 'object',
               properties: {
@@ -408,7 +424,7 @@ export function registerPublicApi(
       },
       async (request, reply) => {
         if (!Buffer.isBuffer(request.body))
-          throw new ExternalApiError(400, 'invalid-request', 'Send the file as application/octet-stream.');
+          throw new ExternalApiError(400, 'invalid-request', 'Send the file bytes as application/octet-stream.');
         const input = z
           .object({ name: z.string(), mediaType: z.string(), parentId: z.uuid().optional() })
           .parse(request.query);
@@ -446,7 +462,7 @@ export function registerPublicApi(
           {
             params: params('agentId'),
             headers: idempotencyHeader,
-            body: { type: 'object' },
+            body: runAgentBody,
             response: { 202: json('The queued task'), ...errors },
           },
         ),

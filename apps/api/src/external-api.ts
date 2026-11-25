@@ -10,18 +10,10 @@ import type { createFiles } from '@tulipfarm/files';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import type { AccessTokenScope } from './access-token-secret.ts';
 import type { TokenPrincipal } from './access-tokens.ts';
+import { ExternalApiError, publicError } from './public-errors.ts';
 import { createRecordRequests } from './table-record-requests.ts';
 
-/** A refusal the public API reports with its own status and code. */
-export class ExternalApiError extends Error {
-  readonly status: 400 | 403 | 404 | 409 | 413;
-  readonly code: string;
-  constructor(status: ExternalApiError['status'], code: string, message?: string) {
-    super(message ?? code);
-    this.status = status;
-    this.code = code;
-  }
-}
+export { ExternalApiError };
 
 export const idempotencyKeySchema = z
   .string()
@@ -52,6 +44,13 @@ export function derivedId(...parts: string[]) {
   const variant = ((parseInt(hex[16]!, 16) & 0x3) | 0x8).toString(16);
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-8${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
+
+/** Postgres `timestamptz` text or an ISO string, as ISO 8601. */
+function iso(value: string) {
+  const parsed = Date.parse(value.replace(' ', 'T').replace(/([+-]\d\d)$/, '$1:00'));
+  return Number.isNaN(parsed) ? value : new Date(parsed).toISOString();
+}
+const count = (value: unknown) => (value === null || value === undefined ? null : Number(value));
 
 const sleep = (ms: number, signal?: AbortSignal) =>
   new Promise<void>(resolve => {
@@ -128,8 +127,8 @@ export function createExternalApi(dependencies: {
       pauseReason: summary.pauseReason ?? null,
       failureReason: summary.failureReason ?? null,
       reply,
-      createdAt: summary.createdAt,
-      creditsCharged: summary.cost.chargedCreditUnits,
+      createdAt: iso(summary.createdAt),
+      creditsCharged: count(summary.cost.chargedCreditUnits),
       appUrl: slug ? `${dependencies.appOrigin}/${slug}/agent-tasks/${summary.id}` : null,
     };
   }
@@ -154,7 +153,7 @@ export function createExternalApi(dependencies: {
             id: entry.id,
             name: entry.definition.label,
             revision: entry.revision,
-            rowCount: entry.recordCount,
+            rowCount: count(entry.recordCount),
           })),
         nextCursor: page.nextCursor,
       };
@@ -177,7 +176,7 @@ export function createExternalApi(dependencies: {
         revision: await revision(principal, id),
         query: parsed,
       });
-      return { rows: page.records, total: page.total, nextCursor: page.nextCursor };
+      return { rows: page.records, total: count(page.total), nextCursor: page.nextCursor };
     },
 
     async getRow(principal: TokenPrincipal, tableId: string, rowId: string) {
@@ -195,7 +194,9 @@ export function createExternalApi(dependencies: {
 
     /**
      * Creates up to 100 rows, each as its own idempotent request, so a retry with the same key replays every row
-     * that was written and writes only the ones that were not. A row's outcome never depends on the others.
+     * that was written and writes only the ones that were not. A row's outcome never depends on the others, except
+     * that reusing a key for different rows is refused as a whole: rows are written in order, so the first row that
+     * differs from the earlier request comes before any row that request did not have, and nothing new is written.
      */
     async createRows(principal: TokenPrincipal, tableId: string, key: string, input: unknown) {
       scope(principal, 'tables:write');
@@ -214,6 +215,13 @@ export function createExternalApi(dependencies: {
           });
           results.push({ status: 'created' as const, row: result });
         } catch (error) {
+          if ((error as { code?: unknown } | null)?.code === 'idempotency-conflict')
+            throw new ExternalApiError(
+              409,
+              'idempotency-conflict',
+              `Row ${index} differs from the earlier request with this Idempotency-Key. Reuse a key only to retry ` +
+                'the identical request; use a new key for new rows.',
+            );
           results.push({ status: 'failed' as const, id: recordId, error: rowError(error) });
         }
       }
@@ -273,12 +281,13 @@ export function createExternalApi(dependencies: {
       input: { parentId?: string | null | undefined; query?: string | undefined; after?: string | undefined },
     ) {
       scope(principal, 'files:read');
-      return files().list(principal.workspaceId, principal.userId, {
+      const { next, ...page } = await files().list(principal.workspaceId, principal.userId, {
         parentId: input.parentId ?? null,
         query: input.query ?? '',
         trash: false,
         ...(input.after ? { after: input.after } : {}),
       });
+      return { ...page, nextCursor: next };
     },
 
     async getFile(principal: TokenPrincipal, fileId: string) {
@@ -300,6 +309,8 @@ export function createExternalApi(dependencies: {
       signal: AbortSignal,
     ) {
       scope(principal, 'files:write');
+      if (bytes.length === 0)
+        throw new ExternalApiError(400, 'empty-file', 'The file is empty. Send 1 byte to 10 MiB.');
       const fileId = derivedId('file', idempotencyKeySchema.parse(key));
       return files().upload(
         principal.workspaceId,
@@ -340,9 +351,13 @@ export function createExternalApi(dependencies: {
 }
 export type ExternalApi = ReturnType<typeof createExternalApi>;
 
-/** A per-row failure code, without any detail that could carry another row's data. */
+/**
+ * A failed row's code, message and field. Only errors this API maps are described; anything else is a bare
+ * `write-failed`, so no detail that could carry another row's data reaches the caller.
+ */
 function rowError(error: unknown) {
-  if (error instanceof z.ZodError) return 'invalid-request';
-  const code = (error as { code?: unknown } | null)?.code;
-  return typeof code === 'string' && /^[a-z][a-z0-9-]{0,63}$/.test(code) ? code : 'write-failed';
+  const mapped = publicError(error);
+  return mapped && mapped.status < 500
+    ? mapped.body.error
+    : { code: 'write-failed', message: 'This row could not be written.' };
 }

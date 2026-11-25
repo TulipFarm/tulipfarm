@@ -64,7 +64,7 @@ import { createTableService } from '@tulipfarm/tables/service';
 import { createAccessTokens, type AccessTokens } from './access-tokens.ts';
 import { registerAccessTokenSettings } from './access-token-routes.ts';
 import { createExternalApi } from './external-api.ts';
-import { registerPublicApi } from './public-api.ts';
+import { createTokenLimiter, registerPublicApi } from './public-api.ts';
 import { registerPublicMcp } from './public-mcp.ts';
 
 export function buildApp(
@@ -278,10 +278,11 @@ export function buildApp(
             (await auth.pool.query<{ slug: string }>('SELECT slug FROM app.workspaces WHERE id = $1', [id])).rows[0]
               ?.slug ?? null,
         });
-        external.register(async routes => registerPublicApi(routes, { tokens: accessTokens!, api }), {
+        const limiter = createTokenLimiter();
+        external.register(async routes => registerPublicApi(routes, { tokens: accessTokens!, api, limiter }), {
           prefix: '/public',
         });
-        registerPublicMcp(external, { tokens: accessTokens, api });
+        registerPublicMcp(external, { tokens: accessTokens, api, limiter });
       });
       v1.register(async data => {
         if (!workspaceStorage) return;
