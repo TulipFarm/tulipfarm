@@ -826,14 +826,6 @@
   --xy-edge-stroke-width: 1.25;
   --xy-background-pattern-dots-color-default: var(--input);
 }
-.workflow-diagram .react-flow.light,
-.workflow-diagram .react-flow.dark {
-  color-scheme: inherit;
-}
-.schema-diagram .react-flow.light,
-.schema-diagram .react-flow.dark {
-  color-scheme: inherit;
-}
 .workflow-diagram .react-flow__node {
   border: 0;
   border-radius: 12px;
