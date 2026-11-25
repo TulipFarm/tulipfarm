@@ -491,6 +491,23 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         await chat.processTurn(workspaceId, id);
         assert.equal((await chat.read(workspaceId, ownerUserId, agentId, id)).text, 'Synthetic answer');
       });
+      await t.test('input larger in bytes than the route token limit still reaches the model', async () => {
+        let calls = 0;
+        const chat = createAgentChat(
+          runtime,
+          config(async () => {
+            calls++;
+            return answer;
+          }),
+        );
+        const id = randomUUID();
+        const prompt = '€'.repeat(8000);
+        assert.ok(Buffer.byteLength(prompt) > routes[0].maxInputTokens);
+        await chat.submit(workspaceId, ownerUserId, agentId, { id, activationId, scope, prompt });
+        await chat.processTurn(workspaceId, id);
+        assert.equal(calls, 1);
+        assert.equal((await chat.read(workspaceId, ownerUserId, agentId, id)).text, 'Synthetic answer');
+      });
       await t.test('primary result pending behind disable cannot become a tool call', async () => {
         const chat = createAgentChat(
           runtime,
