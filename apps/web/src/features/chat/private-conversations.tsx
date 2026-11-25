@@ -538,28 +538,41 @@ function ConversationDetail({
   const sharedChat = draft ? draftProjectId !== null : read.state.kind === 'ready' && !!read.state.data.chat.projectId;
   const privateChat = data !== null && !sharedChat;
   const [content, setContent] = useState<ChatDraft>(emptyRichDocument);
-  const [mode, setMode] = useState<TurnMode>('normal');
+  const [mode, setMode] = useState<TurnMode>(() => {
+    if (draft || sharedChat || compact || typeof window === 'undefined') return 'normal';
+    try {
+      const saved = window.sessionStorage.getItem(`tulipfarm.chat-turn-mode.${workspace.id}.${chatId}`);
+      if (saved === 'plan' || saved === 'code') return saved;
+    } catch {
+      // Ignore storage access failures.
+    }
+    return 'normal';
+  });
   const manualModeForChat = useRef<string | null>(null);
   const codeSessionsEnabled = useFlag('code-sessions');
   const codeApi = useMemo(() => codeSessionApi(workspace.id), [workspace.id]);
   const [codeAvailability, setCodeAvailability] = useState<CodeModeAvailability | null>(null);
   const [codeAvailabilityLoading, setCodeAvailabilityLoading] = useState(false);
   const [codeDraft, setCodeDraft] = useState<CodeSessionDraftConfig>(() => defaultCodeSessionDraft(null));
+  const modeRef = useRef<TurnMode>(mode);
+  modeRef.current = mode;
   useEffect(() => {
-    if (!codeSessionsEnabled || draft || sharedChat || compact) return;
+    if (draft || sharedChat || compact) return;
     if (manualModeForChat.current === chatId) {
-      void codeApi.setTurnMode(chatId, mode).catch(() => undefined);
+      if (codeSessionsEnabled && modeRef.current !== 'normal') {
+        void codeApi.setTurnMode(chatId, modeRef.current).catch(() => undefined);
+      }
       return;
     }
-    const controller = new AbortController();
-    void codeApi
-      .getTurnMode(chatId, controller.signal)
-      .then(res => {
-        if (manualModeForChat.current !== chatId) setMode(res.mode);
-      })
-      .catch(() => undefined);
-    return () => controller.abort();
-  }, [codeApi, codeSessionsEnabled, chatId, draft, sharedChat, compact, mode]);
+    let next: TurnMode = 'normal';
+    try {
+      const saved = window.sessionStorage.getItem(`tulipfarm.chat-turn-mode.${workspace.id}.${chatId}`);
+      if (saved === 'plan' || saved === 'code') next = saved;
+    } catch {
+      // Ignore storage access failures.
+    }
+    setMode(next);
+  }, [codeApi, codeSessionsEnabled, workspace.id, chatId, draft, sharedChat, compact]);
   useEffect(() => {
     if (!codeSessionsEnabled || mode !== 'code' || sharedChat || compact) return;
     const controller = new AbortController();
@@ -580,11 +593,16 @@ function ConversationDetail({
     (next: TurnMode) => {
       manualModeForChat.current = chatId;
       setMode(next);
+      try {
+        window.sessionStorage.setItem(`tulipfarm.chat-turn-mode.${workspace.id}.${chatId}`, next);
+      } catch {
+        // Ignore storage access failures.
+      }
       if (codeSessionsEnabled && !draft && !sharedChat) {
         void codeApi.setTurnMode(chatId, next).catch(() => undefined);
       }
     },
-    [codeApi, codeSessionsEnabled, chatId, draft, sharedChat],
+    [codeApi, codeSessionsEnabled, workspace.id, chatId, draft, sharedChat],
   );
   const contentResult = parseChatDraft(content);
   const validContent = contentResult.success ? contentResult.data : null;
