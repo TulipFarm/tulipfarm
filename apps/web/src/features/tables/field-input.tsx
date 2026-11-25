@@ -7,6 +7,7 @@ import { Input } from '@tulipfarm/sprout/input';
 import { Textarea } from '@tulipfarm/sprout/textarea';
 import { Field, ChoiceGroup } from '@tulipfarm/sprout/field';
 import { Checkbox } from '@tulipfarm/sprout/checkbox';
+import { Combobox, ComboboxContent, ComboboxInput, ComboboxItem, ComboboxList } from '@tulipfarm/sprout/combobox';
 import { Label } from '@tulipfarm/sprout/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 import { SearchField } from '@tulipfarm/sprout/search-field';
@@ -651,6 +652,15 @@ function RelationshipInput({
     target.state.kind === 'ready' && !!target.state.data.applied?.definition.fields.some(item => item.kind === 'text');
   const read = useTableRelationship(api, field.targetTableId, after, searchable && search ? search : undefined);
   const locked = disabled || read.state.kind !== 'ready' || !!read.state.error || read.state.refreshing;
+  const choices = read.state.kind === 'ready' ? read.state.data.records : [];
+  const choiceTarget = read.state.kind === 'ready' ? read.state.data.target : null;
+  const choiceLabel = (id: string) => {
+    if (id === '__not_set__') return 'Not set';
+    const row = choices.find(record => record.id === id);
+    return row && choiceTarget
+      ? rowLabel(choiceTarget.definition, row.values, choiceTarget.systemKind)
+      : linkedLabel(linked.state, id);
+  };
   const select = (recordIds: string[]) =>
     change(recordIds.length ? { kind: 'relationship', tableId: field.targetTableId, recordIds } : null);
   return (
@@ -658,7 +668,7 @@ function RelationshipInput({
       <p className="text-sm text-muted-foreground">
         {field.cardinality === 'one' ? `Choose one ${targetNoun}.` : `Choose linked ${targetPlural}.`}
       </p>
-      {selected.length > 0 && (
+      {selected.length > 0 && field.cardinality !== 'one' && (
         <ul aria-label={`${isTargetTasks ? 'Tasks' : 'Rows'} linked from ${field.label}`} className="space-y-1">
           {selected.map((id, index) => {
             const label = linkedLabel(linked.state, id);
@@ -695,7 +705,7 @@ function RelationshipInput({
         </ul>
       )}
       <ReferenceRetry linked={linked} disabled={disabled} />
-      {searchable && (
+      {searchable && field.cardinality !== 'one' && (
         <SearchField
           id={`record-field-${field.id}-search`}
           label={`Search ${targetPlural} for ${field.label}`}
@@ -708,6 +718,54 @@ function RelationshipInput({
           }}
         />
       )}
+      {field.cardinality === 'one' && (
+        <Combobox<string>
+          items={['__not_set__', ...choices.map(record => record.id)]}
+          value={selected[0] ?? null}
+          disabled={disabled || read.state.kind === 'unavailable'}
+          itemToStringLabel={choiceLabel}
+          filter={searchable ? null : (id, typed) => choiceLabel(id).toLowerCase().includes(typed.toLowerCase())}
+          onInputValueChange={(next, details) => {
+            if (details.reason !== 'input-change') return;
+            setQuery(next);
+            setAfter(undefined);
+          }}
+          onValueChange={id => {
+            select(id && id !== '__not_set__' ? [id] : []);
+            setQuery('');
+            setAfter(undefined);
+          }}
+        >
+          <ComboboxInput
+            id={`record-field-${field.id}-picker`}
+            aria-label={`Choose or search ${field.label.toLowerCase()}`}
+            placeholder={`Choose or search ${field.label.toLowerCase()}`}
+            disabled={disabled || read.state.kind === 'unavailable'}
+            maxLength={255}
+          />
+          <ComboboxContent>
+            {read.state.kind === 'ready' ? (
+              <ComboboxList>
+                {(id: string) => (
+                  <ComboboxItem key={id} value={id}>
+                    {choiceLabel(id)}
+                    {id !== '__not_set__' &&
+                    choices.filter(record => choiceLabel(record.id) === choiceLabel(id)).length > 1
+                      ? ` (row ${choices.findIndex(record => record.id === id) + 1} on this page)`
+                      : ''}
+                  </ComboboxItem>
+                )}
+              </ComboboxList>
+            ) : (
+              <p role="status" className="px-3 py-2 text-sm text-muted-foreground">
+                {read.state.kind === 'loading'
+                  ? `Loading ${targetPlural}…`
+                  : `Could not load ${targetPlural}. Try again below.`}
+              </p>
+            )}
+          </ComboboxContent>
+        </Combobox>
+      )}
       <TableRead state={read.state} refresh={read.refresh}>
         {({ target, records, nextCursor }) => (
           <div className="space-y-2">
@@ -717,17 +775,19 @@ function RelationshipInput({
                   <p className="text-sm">
                     No {targetPlural} match “{search}”.
                   </p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={locked}
-                    onClick={() => {
-                      setQuery('');
-                      setAfter(undefined);
-                    }}
-                  >
-                    Clear search
-                  </Button>
+                  {field.cardinality !== 'one' && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={locked}
+                      onClick={() => {
+                        setQuery('');
+                        setAfter(undefined);
+                      }}
+                    >
+                      Clear search
+                    </Button>
+                  )}
                 </div>
               ) : (
                 <p className="text-sm">
@@ -736,35 +796,7 @@ function RelationshipInput({
                     : `${target.definition.label} has no ${targetPlural} yet.`}
                 </p>
               ))}
-            {field.cardinality === 'one' ? (
-              <Select value={selected[0] ?? ''} disabled={locked} onValueChange={id => select(id ? [id] : [])}>
-                <SelectTrigger width="full" aria-label={`Choose ${field.label.toLowerCase()}`}>
-                  <SelectValue>
-                    {selected[0] ? linkedLabel(linked.state, selected[0]) : `Choose a ${targetNoun}`}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">Not set</SelectItem>
-                  {selected[0] && !records.some(record => record.id === selected[0]) && (
-                    <SelectItem value={selected[0]}>{linkedLabel(linked.state, selected[0])}</SelectItem>
-                  )}
-                  {records.map((record, index) => {
-                    const label = rowLabel(target.definition, record.values, target.systemKind);
-                    const repeated = records.some(
-                      other =>
-                        other.id !== record.id &&
-                        rowLabel(target.definition, other.values, target.systemKind) === label,
-                    );
-                    return (
-                      <SelectItem key={record.id} value={record.id}>
-                        {label}
-                        {repeated ? ` (row ${index + 1} on this page)` : ''}
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
-            ) : (
+            {field.cardinality !== 'one' &&
               records.map((record, index) => {
                 const label = rowLabel(target.definition, record.values, target.systemKind);
                 const repeated = records.some(
@@ -791,8 +823,7 @@ function RelationshipInput({
                     )}
                   </div>
                 );
-              })
-            )}
+              })}
             {(after || nextCursor) && (
               <div className="flex gap-2">
                 <Button variant="outline" disabled={locked || !after} onClick={() => setAfter(undefined)}>

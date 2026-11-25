@@ -4,13 +4,13 @@ import { Button } from '@tulipfarm/sprout/button';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Form, FormFooter } from '@tulipfarm/sprout/form';
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  type SheetContentProps,
-} from '@tulipfarm/sprout/sheet';
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  type DialogContentProps,
+} from '@tulipfarm/sprout/dialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -62,7 +62,7 @@ export function RecordEditor({
   /** Receives the saved row's ID. */
   saved: (recordId: string) => void;
   refresh: () => Promise<void>;
-  finalFocus?: SheetContentProps['finalFocus'];
+  finalFocus?: DialogContentProps['finalFocus'];
 }) {
   const isMember = table.systemKind === 'workspace-members';
   const isTasks = table.systemKind === 'tasks';
@@ -122,7 +122,7 @@ export function RecordEditor({
   const count = Object.keys(errors).length;
   const dismiss = () => {
     close();
-    void refresh();
+    if (uncertain) void refresh();
   };
   const requestClose = () => {
     if (!sending) {
@@ -156,16 +156,16 @@ export function RecordEditor({
       });
   }
   return (
-    <Sheet
+    <Dialog
       open
       onOpenChange={open => {
         if (!open) requestClose();
       }}
     >
-      <SheetContent size="lg" showCloseButton={!sending} finalFocus={finalFocus}>
-        <SheetHeader>
-          <SheetTitle>{title}</SheetTitle>
-          <SheetDescription>
+      <DialogContent size="split" showCloseButton={!sending} finalFocus={finalFocus}>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>
             {isTasks
               ? record
                 ? rowLabel(table.definition, record.values, table.systemKind)
@@ -177,9 +177,9 @@ export function RecordEditor({
                       ? ': create a person without sending an invitation or granting access.'
                       : ': fill in the fields, then save.'
                 }`}
-          </SheetDescription>
-        </SheetHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+          </DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 px-4 pb-4">
           <UnsavedChanges dirty={dirty || uncertain || sending} />
           {isMember && (
             <div className="mb-5 space-y-3">
@@ -423,7 +423,7 @@ export function RecordEditor({
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   );
 }

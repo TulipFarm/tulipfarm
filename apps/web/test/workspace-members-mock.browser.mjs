@@ -208,7 +208,7 @@ test(
 
       await tickets.getByRole('button', { name: /^Edit Review the October rota/ }).click();
       dialog = page.getByRole('dialog', { name: 'Edit row', exact: true });
-      await dialog.getByRole('combobox', { name: 'Choose assignee', exact: true }).click();
+      await dialog.getByRole('combobox', { name: 'Choose or search assignee', exact: true }).click();
       assert.equal(
         await page.getByRole('option', { name: /Theo Park/ }).count(),
         0,
@@ -220,6 +220,15 @@ test(
       await page.getByRole('button', { name: 'Clear filters', exact: true }).first().click();
       await tickets.getByRole('link', { name: 'Jordan Chen', exact: true }).waitFor();
       assert.equal(await tickets.getByRole('row').count(), 4);
+
+      // Short text edits from its cell: Enter saves, and the grid shows the new value.
+      await tickets.getByRole('button', { name: 'Review the October rota', exact: true }).click();
+      const titleEditor = page.getByRole('dialog', { name: 'Edit Title', exact: true });
+      await titleEditor.getByRole('textbox').fill('Review the November rota');
+      await titleEditor.getByRole('textbox').press('Enter');
+      await titleEditor.waitFor({ state: 'detached' });
+      await tickets.getByRole('button', { name: 'Review the November rota', exact: true }).waitFor();
+      assert.equal((await tickets.getByRole('button', { name: 'Edit Assignee' }).count()) > 0, true);
       await tickets.getByRole('cell', { name: 'Mira Patel, Sam Lee and 3 more', exact: true }).waitFor();
 
       await page
