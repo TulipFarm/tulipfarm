@@ -99,7 +99,7 @@ import { useOwnMembership } from '@/features/governance/queries';
 import { BudProvider } from '@/features/chat/bud-provider';
 import { WorkspaceQueryProvider } from '@/lib/query';
 import { setAnalyticsWorkspace } from '@/lib/analytics';
-import { setFlagWorkspace } from '@/lib/feature-flags';
+import { setFlagWorkspace, useFlag } from '@/lib/feature-flags';
 import { useWorkspaceSettings } from '@/features/settings/queries';
 import { useSecretsCapabilities } from '@/features/secrets/queries';
 import type { RecentSection } from '@/features/navigation/recent-queries';
@@ -825,6 +825,7 @@ function SettingsNavigation({ backHref }: { backHref: string }) {
     workspaceSettings.state.data.membership.role === 'admin';
   const capabilities = useSecretsCapabilities(workspace.id);
   const secretsVisible = capabilities.state.kind === 'ready' && capabilities.state.data.enabled;
+  const externalAccessVisible = useFlag('external-access');
   const { setOpenMobile } = useSidebar();
   const backLabel = `Back to ${workspace.name}`;
   return (
@@ -863,7 +864,7 @@ function SettingsNavigation({ backHref }: { backHref: string }) {
             <SidebarGroupLabel>{workspace.name}</SidebarGroupLabel>
             <SidebarMenu>
               {settingsPages
-                .filter(page => page !== soul || soulVisible)
+                .filter(page => (page !== soul || soulVisible) && (page !== externalAccess || externalAccessVisible))
                 .map(page => (
                   <NavItem key={page.to} page={page} />
                 ))}
