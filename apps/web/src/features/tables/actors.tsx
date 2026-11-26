@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AgentAvatar } from '@tulipfarm/sprout/agent-avatar';
+import { AgentMark } from '@/components/agent-mark';
 import { EntityAvatar } from '@tulipfarm/sprout/avatar';
 import {
   Select,
@@ -100,7 +100,7 @@ export function ActorName({
     <span className="flex min-w-0 items-center gap-2">
       <span aria-hidden="true" className="flex shrink-0">
         {actor.type === 'agent' ? (
-          <AgentAvatar agentId={actor.id} name={label} size="sm" />
+          <AgentMark agentId={actor.id} size={24} />
         ) : (
           <EntityAvatar seed={actor.id} name={label} image={actorImage(workspaceId, data, actor)} size="sm" />
         )}

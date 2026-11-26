@@ -155,7 +155,7 @@ export function WorkflowStepIcon({
   if (identity?.kind === 'agent')
     return (
       <span className="workflow-step-identity" aria-hidden="true">
-        <AgentMark size={32} />
+        <AgentMark agentId={identity.agentId} size={32} />
       </span>
     );
   if (identity?.kind === 'app')
