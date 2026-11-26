@@ -36,7 +36,7 @@ export type { WorkspaceId } from './names.ts';
 export type { SqlClient } from './transactions.ts';
 
 // Readers must accept every shipped common migration; the migrations test pins this to the common/ file count.
-export const commonCompatibility = Object.freeze({ minimum: 1, maximum: 116 });
+export const commonCompatibility = Object.freeze({ minimum: 1, maximum: 117 });
 
 export const runtimeCredentialSchema = z.object({
   workspaceId: workspaceIdSchema,

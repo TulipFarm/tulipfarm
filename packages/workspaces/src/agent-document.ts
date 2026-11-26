@@ -85,6 +85,24 @@ export const agentDefinitionSchema = z.strictObject({
       logins: z.array(z.uuid()).max(10).optional(),
     })
     .optional(),
+  defaults: z
+    .strictObject({
+      context: z.string().trim().min(1).max(4000).optional(),
+      githubRepository: z
+        .string()
+        .trim()
+        .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/)
+        .optional(),
+      githubConnection: z
+        .strictObject({
+          kind: z.enum(['personal', 'team']),
+          id: z.uuid(),
+          allowWrites: z.boolean().default(false),
+        })
+        .optional(),
+      knowledgeSourceIds: z.array(z.uuid()).max(20).optional(),
+    })
+    .optional(),
 });
 
 export function serializeAgentDocument(input: z.input<typeof agentDefinitionSchema>): string {

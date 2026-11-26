@@ -1,5 +1,6 @@
 import { createGitHubAccounts, githubConfiguration } from '@tulipfarm/github';
 import { createGitHubReads } from '@tulipfarm/github/reads';
+import { createTeamGitHubReads } from '@tulipfarm/github/team-reads';
 import { createGitHubInvestigation } from '@tulipfarm/github/investigation';
 import { githubReadBindings } from '@tulipfarm/github/read-provider';
 import { integrationCredentialKeyring } from '@tulipfarm/integrations';
@@ -18,6 +19,11 @@ export function githubChatReads(runtime: ConversationRuntime, env: NodeJS.Proces
   });
   return {
     ...createGitHubReads({ runtime, accounts, bindings: githubReadBindings(env) }),
+    teamReads: () =>
+      createTeamGitHubReads({
+        runtime,
+        keyring: integrationCredentialKeyring(env),
+      }),
     investigation: createGitHubInvestigation({
       runtime,
       accounts,

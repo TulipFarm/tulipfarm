@@ -23,6 +23,10 @@ import type { agentApi, AgentCommand, AgentContext, AgentDetail, AgentInput } fr
 import { activateRevision, needsActivationReview, type RevisionActivation } from './revision-activation';
 import { RevisionReview } from './revision-review';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
+import { BrandIcon } from '@tulipfarm/sprout/brand-icon';
+import { Switch } from '@tulipfarm/sprout/switch';
+import { GitHubRepositoryPicker } from '@/features/code-sessions/GitHubRepositoryPicker';
+import { apiOrigin } from '@/lib/auth';
 import { AgentBrowserSettingsSection, browserSettings, parseBrowserSites } from './browser-settings';
 
 const responseRules = [
@@ -55,9 +59,15 @@ type DefinitionDraft = {
   /** Allowed sites, one per line, while the browser is a permitted action. */
   browserSites: string;
   browserLogins: string[];
+  defaultContext: string;
+  defaultGitHubRepository: string;
+  defaultTeamGitHubId: string;
+  defaultTeamGitHubAllowWrites: boolean;
 };
 function savedDraft(detail: AgentDetail | null): DefinitionDraft {
   const definition = detail?.definition;
+  const defaults = definition?.defaults;
+  const teamConn = defaults?.githubConnection?.kind === 'team' ? defaults.githubConnection : undefined;
   return {
     name: definition?.name ?? '',
     instructions: definition?.instructions ?? '',
@@ -67,6 +77,10 @@ function savedDraft(detail: AgentDetail | null): DefinitionDraft {
     modelFamilyId: definition?.modelFamilyId,
     browserSites: definition?.browser?.sites?.join('\n') ?? '',
     browserLogins: definition?.browser?.logins ?? [],
+    defaultContext: defaults?.context ?? '',
+    defaultGitHubRepository: defaults?.githubRepository ?? '',
+    defaultTeamGitHubId: teamConn?.id ?? '',
+    defaultTeamGitHubAllowWrites: teamConn?.allowWrites ?? false,
   };
 }
 
@@ -296,14 +310,48 @@ export function AgentEditor({
       return 'invalid';
     }
     setShowErrors(false);
-    const { modelFamilyId: _savedFamily, browser: _savedBrowser, ...savedDefinition } = detail?.definition ?? {};
-    const { modelFamilyId, browserSites, browserLogins, ...definition } = draft;
+    const {
+      modelFamilyId: _savedFamily,
+      browser: _savedBrowser,
+      defaults: _savedDefaults,
+      ...savedDefinition
+    } = detail?.definition ?? {};
+    const {
+      modelFamilyId,
+      browserSites,
+      browserLogins,
+      defaultContext,
+      defaultGitHubRepository,
+      defaultTeamGitHubId,
+      defaultTeamGitHubAllowWrites,
+      ...definition
+    } = draft;
     const browser = draft.tools.includes('browser.act') ? browserSettings(browserSites, browserLogins) : undefined;
+    const trimmedContext = defaultContext.trim();
+    const trimmedRepo = defaultGitHubRepository.trim();
+    const trimmedTeamId = defaultTeamGitHubId.trim();
+    const defaults =
+      trimmedContext || trimmedRepo || trimmedTeamId
+        ? {
+            ...(trimmedContext ? { context: trimmedContext } : {}),
+            ...(trimmedRepo ? { githubRepository: trimmedRepo } : {}),
+            ...(trimmedTeamId
+              ? {
+                  githubConnection: {
+                    kind: 'team' as const,
+                    id: trimmedTeamId,
+                    allowWrites: defaultTeamGitHubAllowWrites,
+                  },
+                }
+              : {}),
+          }
+        : undefined;
     const parsed = webAgentDefinitionSchema.safeParse({
       ...savedDefinition,
       ...definition,
       ...(modelFamilyId === undefined ? {} : { modelFamilyId }),
       ...(browser ? { browser } : {}),
+      ...(defaults ? { defaults } : {}),
     });
     if (!parsed.success) {
       setParseFailed(true);
@@ -439,6 +487,7 @@ export function AgentEditor({
           onValueChange={responseRule => update({ responseRule })}
         />
       </FormSection>
+      <AgentDefaultsSection workspaceId={workspaceId} draft={draft} disabled={locked} onChange={update} />
     </>
   );
   const footer = (
@@ -703,5 +752,139 @@ export function AgentEditor({
         />
       )}
     </section>
+  );
+}
+
+function AgentDefaultsSection({
+  workspaceId,
+  draft,
+  disabled,
+  onChange,
+}: {
+  workspaceId: string;
+  draft: DefinitionDraft;
+  disabled: boolean;
+  onChange: (patch: Partial<DefinitionDraft>) => void;
+}) {
+  const [teamConnections, setTeamConnections] = useState<Array<{ id: string; name: string }>>([]);
+
+  useEffect(() => {
+    let active = true;
+    fetch(`${apiOrigin}/v1/workspaces/${workspaceId}/integrations`, { credentials: 'include' })
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => {
+        if (!active || !data || !Array.isArray(data.integrations)) return;
+        const github = (
+          data.integrations as Array<{ id?: string; name?: string; provider?: string; enabled?: boolean }>
+        )
+          .filter(
+            item => item.enabled !== false && item.id && item.name && (!item.provider || item.provider === 'github'),
+          )
+          .map(item => ({ id: item.id!, name: item.name! }));
+        setTeamConnections(github);
+      })
+      .catch(() => {
+        // Optional helper list; users can still configure default context and repository.
+      });
+    return () => {
+      active = false;
+    };
+  }, [workspaceId]);
+
+  return (
+    <FormSection
+      title="Default context & connections"
+      description="Give this agent default context, repository, and a team GitHub connection so teammates can run tasks without setting them every time."
+    >
+      <Field
+        id="agent-default-context"
+        label="Default context"
+        optional
+        helper="Background details this agent should know on every task (e.g. product conventions, target repos, or channels)."
+      >
+        <Textarea
+          id="agent-default-context"
+          rows={3}
+          disabled={disabled}
+          value={draft.defaultContext}
+          placeholder="Example: Primary codebase is TulipFarm/tulipfarm. Use the team GitHub account for pull requests."
+          onChange={e => onChange({ defaultContext: e.target.value })}
+        />
+      </Field>
+      <Field
+        id="agent-default-github-repo"
+        label="Default GitHub repository"
+        optional
+        helper="Optional repository used automatically when a task does not specify one."
+      >
+        <GitHubRepositoryPicker
+          id="agent-default-github-repo"
+          workspaceId={workspaceId}
+          value={draft.defaultGitHubRepository}
+          onChange={nextRepo => onChange({ defaultGitHubRepository: nextRepo })}
+          disabled={disabled}
+          allowClear
+          ariaLabel="Default GitHub repository"
+          placeholder="None (choose per task)"
+        />
+      </Field>
+      <Field
+        id="agent-default-team-github"
+        label="Default team GitHub connection"
+        optional
+        helper="Always use a shared team GitHub connection for this agent so teammates without a personal GitHub account can still run tasks."
+      >
+        <Select
+          value={draft.defaultTeamGitHubId || '__none__'}
+          disabled={disabled}
+          onValueChange={next =>
+            onChange({
+              defaultTeamGitHubId: !next || next === '__none__' ? '' : next,
+              ...(next === '__none__' ? { defaultTeamGitHubAllowWrites: false } : {}),
+            })
+          }
+        >
+          <SelectTrigger id="agent-default-team-github">
+            <SelectValue>
+              <span className="inline-flex items-center gap-2">
+                <BrandIcon brand="github" size="inline" />
+                <span>
+                  {teamConnections.find(c => c.id === draft.defaultTeamGitHubId)?.name ??
+                    "None (ask per task or use member's account)"}
+                </span>
+              </span>
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">None (ask per task or use member&apos;s account)</SelectItem>
+            {teamConnections.map(conn => (
+              <SelectItem key={conn.id} value={conn.id}>
+                <span className="inline-flex items-center gap-2">
+                  <BrandIcon brand="github" size="inline" />
+                  <span>Team: {conn.name}</span>
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      {draft.defaultTeamGitHubId && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
+          <div className="space-y-0.5">
+            <p className="text-sm font-medium">Allow commits, pushes, and pull requests</p>
+            <p className="text-xs text-muted-foreground">
+              Let this agent push branches and open PRs using the selected team GitHub connection on behalf of any
+              teammate.
+            </p>
+          </div>
+          <Switch
+            checked={draft.defaultTeamGitHubAllowWrites}
+            disabled={disabled}
+            aria-label="Allow commits, pushes, and pull requests with team GitHub connection"
+            onCheckedChange={checked => onChange({ defaultTeamGitHubAllowWrites: checked })}
+          />
+        </div>
+      )}
+    </FormSection>
   );
 }

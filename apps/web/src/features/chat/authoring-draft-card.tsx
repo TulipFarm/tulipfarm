@@ -723,6 +723,7 @@ const agentFieldLabels: Record<AgentDefinitionField, string> = {
   responseRule: 'Response rule',
   mcp: 'Connected app permissions',
   browser: 'Browser settings',
+  defaults: 'Default context & connections',
 };
 
 const badges = {

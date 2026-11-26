@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { AccessDenied } from '@tulipfarm/access';
+import { AccessDenied, lockAndResolveHuman } from '@tulipfarm/access';
 import { TaskTableError } from '@tulipfarm/tables/tasks-table';
 import {
   AssignmentLimitsError,
@@ -20,6 +20,11 @@ import {
   TaskReminderError,
   tasksTableSchema,
 } from '@tulipfarm/agents/row-work';
+import { createTaskClarifications, TaskClarificationError } from '@tulipfarm/agents/task-clarifications';
+import {
+  taskClarificationAnswerInputSchema,
+  taskClarificationViewSchema,
+} from '@tulipfarm/agents/task-clarification-contracts';
 import { commonCompatibility, StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { authConfig, type registerAuth } from './auth.ts';
 import { authenticateRoutes } from './authenticated-routes.ts';
@@ -31,12 +36,14 @@ export function registerRowWork(
   app: FastifyInstance,
   dependencies: {
     auth: Pick<ReturnType<typeof registerAuth>['auth'], 'api'>;
-    runtime: Parameters<typeof createRowWork>[0];
+    runtime: Parameters<typeof createRowWork>[0] & Parameters<typeof createTaskClarifications>[0]['runtime'];
   },
 ) {
   const service = createRowWork(dependencies.runtime, commonCompatibility);
+  const clarifications = createTaskClarifications({ runtime: dependencies.runtime });
   const workspace = z.object({ workspaceId: z.uuid() });
   const row = workspace.extend({ tableId: z.uuid(), rowId: z.uuid() });
+  const clarificationParam = row.extend({ clarificationId: z.uuid() });
   const comment = row.extend({ itemId: z.uuid() });
   const inboxItem = workspace.extend({ itemId: z.uuid() });
   const taskKey = workspace.extend({ key: z.string().regex(/^tul-\d{1,10}$/i) });
@@ -59,6 +66,10 @@ export function registerRowWork(
       if (error instanceof AssignmentLimitsError) return reply.code(400).send({ error: error.code });
       if (error instanceof TaskTableError) return reply.code(error.status).send({ error: error.code });
       if (error instanceof TaskReminderError) return reply.code(error.status).send({ error: error.code });
+      if (error instanceof TaskClarificationError) {
+        const status = error.code === 'not-found' ? 404 : error.code === 'already-answered' ? 409 : 400;
+        return reply.code(status).send({ error: error.code });
+      }
       if (error instanceof StorageUnavailableError) return reply.code(503).send({ error: 'workspace-unavailable' });
       if (error instanceof z.ZodError || (typeof error === 'object' && error !== null && 'validation' in error))
         return reply.code(400).send({ error: 'invalid-request' });
@@ -205,6 +216,59 @@ export function registerRowWork(
       async request => {
         const p = reminder.parse(request.params);
         return service.cancelReminder(p.workspaceId, user(request), p.tableId, p.rowId, p.reminderId);
+      },
+    );
+    routes.get(
+      `${base}/clarifications`,
+      {
+        logLevel: 'silent',
+        schema: {
+          operationId: 'taskClarificationsList',
+          params: validation.json(row),
+          response: {
+            200: validation.json(
+              z.object({
+                items: z.array(taskClarificationViewSchema),
+              }),
+            ),
+            ...errors,
+          },
+        },
+      },
+      async request => {
+        const p = row.parse(request.params);
+        const actor = await dependencies.runtime.transaction(p.workspaceId, commonCompatibility, tx =>
+          lockAndResolveHuman(tx, user(request)),
+        );
+        const items = await clarifications.listOpen(p.workspaceId, actor, p.tableId, p.rowId);
+        return { items };
+      },
+    );
+    routes.post(
+      `${base}/clarifications/:clarificationId/answer`,
+      {
+        schema: {
+          operationId: 'taskClarificationAnswer',
+          params: validation.json(clarificationParam),
+          body: validation.json(taskClarificationAnswerInputSchema),
+          response: { 200: validation.json(z.object({ item: taskClarificationViewSchema })), ...errors },
+        },
+      },
+      async request => {
+        const p = clarificationParam.parse(request.params);
+        const body = taskClarificationAnswerInputSchema.parse(request.body);
+        const actor = await dependencies.runtime.transaction(p.workspaceId, commonCompatibility, tx =>
+          lockAndResolveHuman(tx, user(request)),
+        );
+        const item = await clarifications.answer(
+          p.workspaceId,
+          actor,
+          p.clarificationId,
+          { answers: body.answers },
+          'web',
+          { tableId: p.tableId, rowId: p.rowId },
+        );
+        return { item };
       },
     );
     routes.get(
