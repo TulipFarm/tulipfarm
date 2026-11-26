@@ -214,6 +214,7 @@ export async function preloadTools(input: ToolPreloadInput): Promise<string[]> {
     .map(([id, group]) => ({ id, ...group, tools: group.tools.filter(tool => offered.has(tool)) }))
     .filter(group => group.tools.length);
   if (!groups.length) return [];
+  const started = performance.now();
   const answers = await ask(
     'tool-preload',
     {
@@ -250,7 +251,16 @@ export async function preloadTools(input: ToolPreloadInput): Promise<string[]> {
   );
   for (const group of groups)
     if (chosen.has(group.id)) for (const need of toolGroupNeeds[group.id] ?? []) chosen.add(need);
-  return groups.filter(group => chosen.has(group.id)).flatMap(group => group.tools);
+  const preloaded = groups.filter(group => chosen.has(group.id));
+  const tools = preloaded.flatMap(group => group.tools);
+  log('info', 'inference', 'call_completed', {
+    operation: 'chat.tool-preload',
+    outcome: tools.length ? 'preloaded' : 'none',
+    ...(preloaded.length ? { 'decision.groups': preloaded.map(group => group.id).join(',') } : {}),
+    'decision.tools': tools.length,
+    duration_ms: Math.round(performance.now() - started),
+  });
+  return tools;
 }
 
 // --- Completion check -------------------------------------------------------------------------------------------------

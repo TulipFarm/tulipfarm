@@ -4,6 +4,7 @@ import { relation, type AgentStorage, type AgentTransaction } from './store.ts';
 import { withHuman } from './saved-policy.ts';
 import { digestJson } from '@tulipfarm/tables/canonical';
 import { creationRequested } from './decisions.ts';
+import { log } from '@tulipfarm/observability';
 
 type Context = {
   workspaceId: string;
@@ -39,6 +40,21 @@ const trustedPrivateCreationSourceKinds: ReadonlySet<string> = new Set([
   'workspace-skill',
   'creation-team',
 ]);
+
+/** Whether a message asks to create a `kind` now: Jev's decision, or the phrase check when Jev is off or unsure. */
+async function creationDecision(workspaceId: string, text: string, kind: string) {
+  const started = performance.now();
+  const decided = await creationRequested(workspaceId, text, kind);
+  const requested = decided ?? explicitCreation(text, kind);
+  log('info', 'inference', 'call_completed', {
+    operation: 'chat.creation-review',
+    outcome: requested ? 'save' : 'card',
+    'decision.source': decided === undefined ? 'fallback' : 'decision-model',
+    'decision.kind': kind,
+    ...(decided === undefined ? {} : { duration_ms: Math.round(performance.now() - started) }),
+  });
+  return requested;
+}
 
 export function explicitCreation(text: string, kind: string) {
   const normalized = text.trim();
@@ -136,7 +152,7 @@ export async function policyWrite(
     if (shouldAsk(policy, action)) return { review: true };
     if (!row) {
       const kind = action.slice(7);
-      let requested = (await creationRequested(workspaceId, turn.text, kind)) ?? explicitCreation(turn.text, kind);
+      let requested = await creationDecision(workspaceId, turn.text, kind);
       if (!requested && !turn.text.includes('?') && !previewOnlyPhrase.test(turn.text)) {
         const priorTurns = (
           await tx.client.query<{ text: string }>(
@@ -152,7 +168,7 @@ export async function policyWrite(
         ).rows;
         for (const prior of priorTurns) {
           if (previewOnlyPhrase.test(prior.text)) break;
-          if ((await creationRequested(workspaceId, prior.text, kind)) ?? explicitCreation(prior.text, kind)) {
+          if (await creationDecision(workspaceId, prior.text, kind)) {
             requested = true;
             break;
           }
