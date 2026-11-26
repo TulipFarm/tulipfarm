@@ -53,6 +53,99 @@ export function explicitCreation(text: string, kind: string) {
   return !modifiers.some(word => previewModifier.test(word));
 }
 
+export type ChatDraftDecisionChoice = 'save' | 'activate' | 'dismiss';
+
+const draftDeclinePhrase =
+  /\b(?:don't|don’t|do\s+not|never|no|nope|nah|cancel|dismiss|reject|stop|abort|scrap|skip|hold\s+off|not\s+yet|wait)\b/i;
+
+const draftConfirmPhrase =
+  /\b(?:yes|yep|yeah|yup|sure|ok|okay|alright|go\s+ahead|proceed|confirm(?:ed)?|approve[d]?|looks\s+good|lgtm|sounds\s+good|perfect|ship\s+it|do\s+it|make\s+it|build\s+it|create\s+it|save\s+it|activate\s+it|enable\s+it|turn\s+it\s+on|run\s+it|apply\s+it|add\s+it|update\s+it|delete\s+it|move\s+it|rename\s+it|share\s+it|archive\s+it|restore\s+it|remember\s+it|create\s+and\s+activate|save\s+(?:(?:it|this|that)\s+)?(?:as\s+)?(?:a\s+)?draft|save\s+(?:this|that|the)\b|create\s+(?:this|that|the)\b|activate\s+(?:this|that|the)\b|apply\s+(?:this|that|the)\b|approve\s+(?:this|that|the)\b|confirm\s+(?:this|that|the)\b|publish\s+(?:this|that|the|it)\b)\b/i;
+
+const saveDraftOnlyPhrase =
+  /\b(?:save\s+(?:(?:it|this|that)\s+)?(?:as\s+)?(?:a\s+)?draft|draft\s+only|without\s+activat(?:ing|ion)|keep\s+(?:it\s+)?(?:inactive|off|disabled)|do\s+not\s+activate|don't\s+activate|don’t\s+activate)\b/i;
+
+const draftDismissPhrase =
+  /\b(?:cancel|dismiss|reject|scrap|abort|drop\s+it|never\s*mind|nevermind|no\b|nope|nah|(?:don't|don’t|do\s+not)\s+(?:create|save|activate|apply|do|make|build|add|update|delete|move|rename|share|archive|restore)|change\b|modify\b|instead\b)\b/i;
+
+/**
+ * Server-side check that the human's actual latest chat message expresses the requested decision on a pending
+ * workspace authoring card. Never trusts model prose or tool arguments alone.
+ */
+export function chatDraftConfirmation(text: string, decision: ChatDraftDecisionChoice): boolean {
+  const normalized = text.trim();
+  if (!normalized || normalized.includes('?')) return false;
+  if (decision === 'dismiss') return draftDismissPhrase.test(normalized);
+  if (decision === 'activate' && saveDraftOnlyPhrase.test(normalized)) return false;
+  if (previewOnlyPhrase.test(normalized)) return false;
+  // Allow "save without activating" for save, otherwise block decline/negation phrases.
+  if (!(decision === 'save' && saveDraftOnlyPhrase.test(normalized)) && draftDeclinePhrase.test(normalized))
+    return false;
+  return draftConfirmPhrase.test(normalized);
+}
+
+export type ChatDraftVerification =
+  | { ok: true; digest: string; proposalKind: string }
+  | { ok: false; reason: 'not-found' | 'already-decided' | 'same-turn' | 'not-confirmed' };
+
+/**
+ * Verifies in the database that a pending authoring draft in this conversation was created in a strictly earlier turn
+ * and that the human's actual message in the current turn confirms the requested decision.
+ */
+export async function verifyChatDraftDecision(
+  runtime: AgentStorage,
+  workspaceId: string,
+  actor: HumanActor,
+  origin: NonNullable<Context['origin']>,
+  draftId: string,
+  decision: ChatDraftDecisionChoice,
+): Promise<ChatDraftVerification> {
+  return withHuman(runtime, workspaceId, actor, 'read', async tx => {
+    const name = (s: string) => relation(tx, s);
+    const turn = (
+      await tx.client.query<{ text: string; acceptedSequence: number }>(
+        `SELECT string_agg(p.text, ' ' ORDER BY p.ordinal) AS text, t.accepted_sequence AS "acceptedSequence"
+      FROM ${name('tf_conversations')} c
+      JOIN ${name('tf_conversation_turns')} t ON t.conversation_id = c.id
+      JOIN ${name('tf_conversation_messages')} m
+        ON m.id = t.source_message_id AND m.conversation_id = c.id AND m.sequence = t.accepted_sequence
+      JOIN ${name('tf_conversation_parts')} p ON p.message_id = m.id AND p.kind = 'text'
+      WHERE c.id = $1 AND c.app_id IS NULL AND c.deleted_at IS NULL
+        AND t.id = $2 AND t.status NOT IN ('completed', 'blocked', 'cancelled', 'failed')
+        AND NOT COALESCE((to_jsonb(t)->>'planning_mode')::boolean, false)
+        AND m.author_kind = 'human' AND m.membership_id = $3
+        AND NOT EXISTS (SELECT 1 FROM ${name('tf_slack_dm_roots')} WHERE conversation_id = c.id)
+        AND NOT EXISTS (SELECT 1 FROM ${name('tf_slack_default_turns')} WHERE conversation_id = c.id)
+      GROUP BY t.id, t.accepted_sequence`,
+        [origin.conversationId, origin.turnId, actor.membershipId],
+      )
+    ).rows[0];
+    if (!turn?.text) return { ok: false, reason: 'not-confirmed' };
+    const draft = (
+      await tx.client.query<{
+        digest: string;
+        proposalKind: string;
+        turnId: string;
+        draftSequence: number;
+        decided: boolean;
+      }>(
+        `SELECT d.digest, d.proposal->>'kind' AS "proposalKind", d.turn_id AS "turnId",
+        dt.accepted_sequence AS "draftSequence",
+        EXISTS (SELECT 1 FROM ${name('tf_chat_authoring_decisions')} dec WHERE dec.draft_id = d.id) AS decided
+      FROM ${name('tf_chat_authoring_drafts')} d
+      JOIN ${name('tf_conversation_turns')} dt ON dt.conversation_id = d.conversation_id AND dt.id = d.turn_id
+      WHERE d.id = $1 AND d.conversation_id = $2 AND d.membership_id = $3`,
+        [draftId, origin.conversationId, actor.membershipId],
+      )
+    ).rows[0];
+    if (!draft) return { ok: false, reason: 'not-found' };
+    if (draft.decided) return { ok: false, reason: 'already-decided' };
+    if (draft.turnId === origin.turnId || draft.draftSequence >= turn.acceptedSequence)
+      return { ok: false, reason: 'same-turn' };
+    if (!chatDraftConfirmation(turn.text, decision)) return { ok: false, reason: 'not-confirmed' };
+    return { ok: true, digest: draft.digest, proposalKind: draft.proposalKind };
+  });
+}
+
 async function pending(tx: AgentTransaction, chat: string, action: ReviewAction, callId: string) {
   const name = (s: string) => relation(tx, s);
   if (action === 'create-table')

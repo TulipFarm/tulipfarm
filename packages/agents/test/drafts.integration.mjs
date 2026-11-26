@@ -363,3 +363,139 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     );
   });
 });
+
+test('drafts.decide confirms or dismisses pending workspace authoring cards from a later human turn', async t => {
+  const db = await fixture();
+  let runtime;
+  t.after(async () => {
+    await runtime?.close();
+    await db.close();
+  });
+  await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
+${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', import.meta.url), 'utf8')}`);
+  const stream = await workspaceTableMigrations();
+  const w = await db.create(stream);
+  runtime = createWorkspaceRuntime({
+    replicaCount: 1,
+    reservedConnections: 2,
+    databaseConnectionBudget: 20,
+    resolveCredential: async () => ({
+      workspaceId: w.id,
+      generation: 1,
+      connectionString: db.login(w),
+    }),
+  });
+  const table = name => `"${w.names.schema}".${name}`;
+  const member = randomUUID();
+  const user = randomUUID();
+  await db.platform.query(`INSERT INTO ${table('tf_memberships')} (id,user_id,role) VALUES ($1,$2,'member')`, [
+    member,
+    user,
+  ]);
+  const reviewMode = (await db.platform.query(`SELECT mode FROM ${table('tf_action_review')} WHERE id=1`)).rows[0]
+    ?.mode;
+  assert.equal(reviewMode, 'auto');
+
+  const chats = createConversations(runtime);
+  const head = 'a'.repeat(40);
+  await db.platform.query(`UPDATE ${table('tf_soul_head')} SET revision=$1 WHERE id=1`, [head]);
+  const chatId = randomUUID();
+  await chats.create(w.id, user, { chatId, commandId: randomUUID() });
+
+  const sendAndRun = async (text, fn) => {
+    const sent = await chats.send(w.id, user, chatId, {
+      messageId: randomUUID(),
+      commandId: randomUUID(),
+      parts: [{ kind: 'text', text }],
+    });
+    let captured;
+    const executor = createConversationExecutor(runtime, async ({ executeTool }) => {
+      captured = await fn(call =>
+        executeTool(call.tool, false, context => createChatTools(context.runtime).invoke(context, call)),
+      );
+      return { text: 'Done.', sources: [] };
+    });
+    assert.equal(
+      await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
+      'completed',
+    );
+    return captured;
+  };
+
+  // Turn 1: Draft an agent (card shown), and verify same-turn drafts.decide is refused.
+  const { draftId, sameTurn } = await sendAndRun('Draft an agent for PR code review.', async runTool => {
+    const proposed = await runTool({
+      tool: 'agents.draft',
+      agent: 'new',
+      input: {
+        owningTeamId: null,
+        expectedSoulRevision: head,
+        definition: {
+          name: 'PR Code Reviewer',
+          instructions: 'Review pull requests for bugs and regressions.',
+          tools: ['rows.list'],
+        },
+      },
+    });
+    const sameTurnResult = await runTool({
+      tool: 'drafts.decide',
+      draftId: proposed.draftId,
+      decision: 'save',
+    });
+    return { draftId: proposed.draftId, sameTurn: sameTurnResult };
+  });
+  assert.ok(draftId);
+  assert.equal(sameTurn.error, 'same-turn');
+
+  // Turn 2: Unconfirmed question cannot apply the card.
+  const unconfirmed = await sendAndRun('What tools does it have?', async runTool =>
+    runTool({ tool: 'drafts.decide', draftId, decision: 'save' }),
+  );
+  assert.equal(unconfirmed.error, 'not-confirmed');
+
+  // Turn 3: Direct human confirmation ("create it") applies the card and updates card status.
+  const { applied, replay } = await sendAndRun('create it', async runTool => {
+    const first = await runTool({ tool: 'drafts.decide', draftId, decision: 'save' });
+    const second = await runTool({ tool: 'drafts.decide', draftId, decision: 'save' });
+    return { applied: first, replay: second };
+  });
+  assert.equal(applied.status, 'applied');
+  assert.equal(applied.outcome.kind, 'agent');
+  assert.equal(replay.error, 'already-decided');
+  const savedDecision = (
+    await db.platform.query(
+      `SELECT input->>'decision' AS decision FROM ${table('tf_chat_authoring_decisions')} WHERE draft_id=$1`,
+      [draftId],
+    )
+  ).rows[0]?.decision;
+  assert.equal(savedDecision, 'save');
+
+  // Turn 4 & 5: Dismissing a pending card from chat marks it dismissed.
+  const secondDraftId = await sendAndRun('Draft another agent for triage.', async runTool => {
+    const proposed = await runTool({
+      tool: 'agents.draft',
+      agent: 'new',
+      input: {
+        owningTeamId: null,
+        expectedSoulRevision: head,
+        definition: {
+          name: 'Triage Helper',
+          instructions: 'Triage incoming requests.',
+          tools: ['rows.list'],
+        },
+      },
+    });
+    return proposed.draftId;
+  });
+  const dismissed = await sendAndRun('Cancel that.', async runTool =>
+    runTool({ tool: 'drafts.decide', draftId: secondDraftId, decision: 'dismiss' }),
+  );
+  assert.equal(dismissed.status, 'dismissed');
+  const dismissedDecision = (
+    await db.platform.query(
+      `SELECT input->>'decision' AS decision FROM ${table('tf_chat_authoring_decisions')} WHERE draft_id=$1`,
+      [secondDraftId],
+    )
+  ).rows[0]?.decision;
+  assert.equal(dismissedDecision, 'dismiss');
+});

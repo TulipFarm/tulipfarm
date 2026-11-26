@@ -50,7 +50,7 @@ import {
   toolCallSchema,
 } from './contracts.ts';
 import { createToolRegistry } from './registry.ts';
-import { policyWrite, type PrivateBudReview } from './chat-action-review.ts';
+import { policyWrite, verifyChatDraftDecision, type PrivateBudReview } from './chat-action-review.ts';
 import type { ModelFamilyEligibility } from './model-policy-contracts.ts';
 import { verifiedMcpApps } from './verified-mcp.ts';
 import { mcpCatalogAppByEndpoint } from '@tulipfarm/mcp-catalog';
@@ -194,8 +194,10 @@ import { readConversationMessage } from '@tulipfarm/conversations/compaction';
 import { standaloneTurn } from '@tulipfarm/conversations/turn-requester';
 import { admittedMcpTools, validateMcpCall } from './mcp-catalog.ts';
 import { knowledgeToolsUnavailable, type KnowledgeTools } from './knowledge-tool-contracts.ts';
-import { authoredDefinitionSchema } from '@tulipfarm/workflows/contracts';
-import { createWorkflows } from '@tulipfarm/workflows';
+import { authoredDefinitionSchema, type Work } from '@tulipfarm/workflows/contracts';
+import type { GitHubSubscriptions } from '@tulipfarm/workflows/github-triggers';
+import { createWorkflows, WorkflowConflict } from '@tulipfarm/workflows';
+import type { FileBytes } from '@tulipfarm/files';
 import { createWorkflowDrafts, previewWorkflowRun, summarizeWorkflow } from './workflow-drafts.ts';
 import {
   agentLinkedWorkflow,
@@ -350,6 +352,15 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
     tool: z.literal('agents.draft'),
     agent: z.union([z.literal('new'), z.strictObject({ id: z.uuid(), savedRevision: soulRevisionSchema })]),
     input: agentDraftInputSchema.omit({ expectedSavedRevision: true }),
+  }),
+  z.strictObject({
+    tool: z.literal('drafts.decide'),
+    draftId: z.uuid(),
+    decision: z.enum(['save', 'activate', 'dismiss']),
+    replaceChannels: z
+      .array(z.string().regex(/^[CG][A-Z0-9]{1,63}$/))
+      .max(20)
+      .optional(),
   }),
   z.strictObject({
     tool: z.literal('skills.draft'),
@@ -888,7 +899,9 @@ const descriptions: Record<ToolName, string> = {
   'agents.context':
     'Discover choices to create an agent: Soul revision, own membership, eligible placement/sharing teams, bundled skills, tools/runtime support and the models the agent may prefer. Supply agentId for current policy, activation versions, its linked Workflow (revision, generation and triggers) and older trigger Workflows; channels for checked Slack attachments/readiness; triggers (Workflow triggers) to validate them and list their next runs. Use skills.workspace for reviewed skills, tables.list/schema.inspect for resources and slack.resolve for real destinations. This grants no authority.',
   'agents.draft':
-    'Prepare one immutable Basics/Skills/Access/Triggers setup for human review. Include setup with explicit policy, enrollment, scope/limits, Slack attachment expected versions and triggers, plus expectedPolicyVersion/expectedActivationIds from context. Include expectedWorkflowRevision/expectedWorkflowGeneration from context too. setup.prompt is the one instruction the agent runs for every trigger (required when there are triggers) and setup.runLimits optionally caps each run. Each setup.triggers item (0–20) is {id: a UUID (reuse setupId from context to keep an existing trigger), optional label, trigger: a Workflow trigger without id (cron, interval, once, webhook, event, record, row, provider, github)}; a github trigger has repositories (a list of repositoryId values, or {organizationId, includeFuture: true}) and events ({event, optional actions}). Activating saves them all to the one linked Workflow of the agent, which passes the trigger that fired and its data (new row, issue, webhook body) to the agent. Leave triggers empty for an agent people only call in chat or Slack. Agents get no schedules of their own. Definition-only historical inputs remain save-only. The human chooses Save draft or Create and activate and explicitly consents to channel replacement on the exact card; activating runs unattended triggers with their access. A workspace-policy result queues the private inactive save; do not send the person through the wizard again. Never use model prose as consent. When agents.context reports evals.available, add evalCases (3–5 starter test cases); the card shows them and the person adds them to Evals after saving.',
+    'Prepare one immutable Basics/Skills/Access/Triggers setup for human review. Include setup with explicit policy, enrollment, scope/limits, Slack attachment expected versions and triggers, plus expectedPolicyVersion/expectedActivationIds from context. Include expectedWorkflowRevision/expectedWorkflowGeneration from context too. setup.prompt is the one instruction the agent runs for every trigger (required when there are triggers) and setup.runLimits optionally caps each run. Each setup.triggers item (0–20) is {id: a UUID (reuse setupId from context to keep an existing trigger), optional label, trigger: a Workflow trigger without id (cron, interval, once, webhook, event, record, row, provider, github)}; a github trigger has repositories (a list of repositoryId values, or {organizationId, includeFuture: true}) and events ({event, optional actions}). Activating saves them all to the one linked Workflow of the agent, which passes the trigger that fired and its data (new row, issue, webhook body) to the agent. Leave triggers empty for an agent people only call in chat or Slack. Agents get no schedules of their own. Definition-only historical inputs remain save-only. The human can choose Save draft or Create and activate on the card, or reply in a later chat message to confirm it via drafts.decide; activating runs unattended triggers with their access. A workspace-policy result queues the private inactive save; do not send the person through the wizard again. Never confirm a card in the same turn it was created. When agents.context reports evals.available, add evalCases (3–5 starter test cases); the card shows them and the person adds them to Evals after saving.',
+  'drafts.decide':
+    'Confirm, activate, or dismiss a pending workspace authoring review card (agent, workflow, skill archive/restore, project, file action/share, Knowledge, personal memory, or row change) that was created in an EARLIER turn of this direct chat, when the human explicitly asks in their latest message (for example "create it", "create and activate", "yes, save it", or "cancel it"). Use decision "activate" for Create and activate on an agent card with setup, "save" to save/apply any other pending authoring card (or save an agent as a draft), and "dismiss" to cancel/reject it. Never call this in the same turn a card was created; the server independently verifies the human’s latest message and rejects unconfirmed or same-turn calls.',
   'agents.task.start':
     "Start bounded work with an activated saved agent; use agents.task.read for its status. Returns a task ID and status, not the result. The owner keeps all approval authority, and delegation is bounded by the saved agent's limits.",
   'agents.delegate':
@@ -1072,6 +1085,8 @@ function admittedToolSchemas(access: ToolAccess) {
       )
       // Saved agents delegate through their own task tools; only a chat reply runs sub-agents.
       .filter(schema => schema.shape.tool.value !== 'agents.delegate' || access.kind === 'chat')
+      // Confirming pending workspace authoring cards from chat requires a direct human chat turn.
+      .filter(schema => schema.shape.tool.value !== 'drafts.decide' || access.kind === 'chat')
       // Code runs only in a chat reply, and only when this deployment configures an execution backend.
       .filter(schema => schema.shape.tool.value !== 'execution.run' || (access.kind === 'chat' && executionAvailable()))
       .filter(
@@ -1233,6 +1248,9 @@ export type ChatToolsOptions = {
   appPages?: AppPages | undefined;
   telemetryRuntime?: ToolRuntime | undefined;
   wakePlan?: ((workspaceId: string, planId: string) => Promise<unknown>) | undefined;
+  workflowWake?: ((work: Work) => Promise<void>) | undefined;
+  githubSubscriptions?: GitHubSubscriptions | undefined;
+  fileBytes?: FileBytes | undefined;
   agentSetup?: AgentSetupOptions | undefined;
   /** Runs an `agents.delegate` call's sub-agents. Without it, the tool is refused. */
   subagents?: SubagentDelegation | undefined;
@@ -1328,6 +1346,9 @@ export function createChatTools(
     appPages,
     telemetryRuntime = 'chat',
     wakePlan,
+    workflowWake,
+    githubSubscriptions,
+    fileBytes,
     agentSetup,
     subagents,
     chatFiles,
@@ -2110,6 +2131,84 @@ export function createChatTools(
           if (applied && 'result' in applied) return applied.result;
         }
         return createAuthoringDrafts(runtime).propose(workspaceId, actor, callId, origin, proposal);
+      }
+      case 'drafts.decide': {
+        if (!context.origin) throw new AccessDenied();
+        const origin = context.origin;
+        const verified = await verifyChatDraftDecision(
+          runtime,
+          workspaceId,
+          actor,
+          origin,
+          call.draftId,
+          call.decision,
+        );
+        if (!verified.ok) {
+          const instructions: Record<typeof verified.reason, string> = {
+            'same-turn':
+              'A review card created in this same turn cannot be confirmed yet. Leave the card waiting for the human to confirm in a later message or on the card.',
+            'not-confirmed':
+              'The human’s latest message did not clearly confirm this action. Leave the card waiting for their explicit confirmation in chat or on the card.',
+            'not-found': 'No pending authoring draft with that draftId was found in this chat.',
+            'already-decided': 'That review card has already been decided.',
+          };
+          return { error: verified.reason, draftId: call.draftId, instruction: instructions[verified.reason] };
+        }
+        const authoringDrafts = createAuthoringDrafts(
+          runtime,
+          privateBud?.eligible,
+          workflowWake,
+          agentSetup,
+          undefined,
+          githubSubscriptions,
+          fileBytes,
+        );
+        try {
+          const outcome = await authoringDrafts.decide(workspaceId, actor.userId, origin.conversationId, call.draftId, {
+            commandId: callId,
+            digest: verified.digest,
+            decision: call.decision,
+            ...(call.replaceChannels?.length ? { consent: { replaceChannels: call.replaceChannels } } : {}),
+          });
+          const url =
+            outcome.kind === 'agent'
+              ? await privateBud?.link(workspaceId, 'agents', outcome.receipt.agentId)
+              : outcome.kind === 'workflow'
+                ? await workflowLink?.(workspaceId, outcome.workflowId)
+                : outcome.kind === 'project'
+                  ? await privateBud?.link(workspaceId, 'projects', outcome.projectId)
+                  : undefined;
+          return {
+            draftId: call.draftId,
+            decision: call.decision,
+            status: call.decision === 'dismiss' ? 'dismissed' : 'applied',
+            outcome,
+            ...(url ? { url } : {}),
+            instruction:
+              call.decision === 'dismiss'
+                ? 'The pending card has been dismissed and nothing in it was applied.'
+                : 'The pending card has been applied. Confirm what was done and link to the created or updated item when a url is present.',
+          };
+        } catch (error) {
+          if (error instanceof AgentError)
+            return {
+              error: error.code,
+              draftId: call.draftId,
+              instruction:
+                error.code === 'setup-review-required'
+                  ? 'Use decision "save" (not "activate") for this card, or ask the human to review it on the card.'
+                  : error.code === 'draft-stale'
+                    ? 'The pending card is stale because the underlying item changed. Tell the human and prepare a fresh draft if they want to continue.'
+                    : `Could not apply the pending card (${error.code}). Tell the human clearly.`,
+            };
+          if (error instanceof WorkflowConflict)
+            return {
+              error: error.message,
+              draftId: call.draftId,
+              instruction: `Could not apply the pending card (${error.message}). Tell the human clearly.`,
+            };
+          throw error;
+        }
       }
       case 'skills.draft': {
         if (!context.origin) throw new AccessDenied();
