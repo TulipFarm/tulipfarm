@@ -86,10 +86,9 @@ import {
 import type { CodeModeAvailability, TurnMode } from '@tulipfarm/agents/code-session-contracts';
 import { ConversationFileReference, ConversationGoogleFileReference, useRichFileMentions } from './file-mentions';
 import { SentSkill, SkillUse, StagedSkill, useRichSkillPicker } from './skill-picker';
-import { keywordAccounts, type RichTextEditorHandle, type RichTextValue } from '@tulipfarm/sprout/rich-text-editor';
+import type { RichTextEditorHandle } from '@tulipfarm/sprout/rich-text-editor';
 import { emptyChatDocument } from './editor-extensions';
-import { ChatKeywords, RichMessage } from './rich-message';
-import { useIntegrationKeywords } from '@/features/integrations/keywords';
+import { RichMessage } from './rich-message';
 import { ChatModelStatus, useChatModelFor, useChatModels } from './chat-models';
 import { usePlanAccount } from './plan-account';
 import { BrowserActivityCard, useLiveBrowserOpening, usedBrowser } from '@/features/browser/browser-card';
@@ -489,10 +488,6 @@ function ConversationDetail({
   const projects = useWorkspaceProjects(workspace.id);
   const navigate = useNavigate();
   const { workspaceSlug } = workspaceRoute.useParams();
-  const integrations = useIntegrationKeywords(workspace.id, workspaceSlug, draft ? undefined : chatId, {
-    id: chatId,
-    draft,
-  });
   const [pages, setPages] = useState(1);
   const stream = useConversationStream(api, chatId, !draft);
   useEffect(() => {
@@ -992,20 +987,6 @@ function ConversationDetail({
       return;
     posting.current = true;
     const messageId = crypto.randomUUID();
-    // Each integration chip keeps naming the account the message was sent with, even after a later switch.
-    const accounts = Object.fromEntries(
-      Object.entries(keywordAccounts(shown.doc as RichTextValue, integrations.keywords)).map(([id, account]) => [
-        id,
-        integrations.keywords.find(keyword => keyword.id === id)?.accounts?.find(option => option.id === account)
-          ?.label ?? account,
-      ]),
-    );
-    if (Object.keys(accounts).length) {
-      shown = { ...shown, accounts };
-      parts = parts.map(part =>
-        part.kind === 'text' && part.content ? { ...part, content: { ...part.content, accounts } } : part,
-      );
-    }
     if (draft) {
       sendNavigation.current = true;
       void navigate({
@@ -1040,7 +1021,6 @@ function ConversationDetail({
         mode,
         ...(codePayload ? { code: codePayload } : {}),
       })
-      .then(() => (draft ? integrations.applyDraft(chatId).catch(() => undefined) : undefined))
       .finally(() => {
         posting.current = false;
       });
@@ -1271,780 +1251,763 @@ function ConversationDetail({
   const trailingReply = (messages: ConversationMessage[]) =>
     replyAfter === null ? liveReply(messages, messages.length - 1) : null;
   return (
-    <ChatKeywords value={integrations.keywords}>
-      <div className="flex min-h-0 flex-1 flex-col">
-        {!draft && (
-          <MoveToProjectDialog
-            workspaceId={workspace.id}
-            open={moving}
-            onOpenChange={setMoving}
-            onMove={projectId => submit({ kind: 'move', chatId, commandId: crypto.randomUUID(), projectId })}
-          />
-        )}
-        <UnsavedChanges
-          dirty={
-            !persistent &&
-            ((!!text && !(prefill?.prompt && text === prefill.prompt && !staged)) ||
-              staged ||
-              !!editing ||
-              write.state.kind === 'sending' ||
-              write.state.kind === 'uncertain')
-          }
-          allowNavigation={sendNavigation}
+    <div className="flex min-h-0 flex-1 flex-col">
+      {!draft && (
+        <MoveToProjectDialog
+          workspaceId={workspace.id}
+          open={moving}
+          onOpenChange={setMoving}
+          onMove={projectId => submit({ kind: 'move', chatId, commandId: crypto.randomUUID(), projectId })}
         />
-        {!compact &&
-          headerElement &&
-          createPortal(
-            <>
-              {!empty && !sharedChat && (draft || data) && <Bud />}
-              {data ? (
-                <>
-                  <h1
-                    ref={heading}
-                    tabIndex={-1}
-                    title={data.chat.title}
-                    className="min-w-0 flex-1 truncate text-sm font-medium outline-none"
-                  >
-                    <TypedText text={data.chat.title} animate={!data.chat.titleManual && data.chat.titleRevision > 1} />
-                  </h1>
-                  {!draft && (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        render={
-                          <Button size="icon-sm" variant="ghost" aria-label="Chat actions" title="Chat actions" />
+      )}
+      <UnsavedChanges
+        dirty={
+          !persistent &&
+          ((!!text && !(prefill?.prompt && text === prefill.prompt && !staged)) ||
+            staged ||
+            !!editing ||
+            write.state.kind === 'sending' ||
+            write.state.kind === 'uncertain')
+        }
+        allowNavigation={sendNavigation}
+      />
+      {!compact &&
+        headerElement &&
+        createPortal(
+          <>
+            {!empty && !sharedChat && (draft || data) && <Bud />}
+            {data ? (
+              <>
+                <h1
+                  ref={heading}
+                  tabIndex={-1}
+                  title={data.chat.title}
+                  className="min-w-0 flex-1 truncate text-sm font-medium outline-none"
+                >
+                  <TypedText text={data.chat.title} animate={!data.chat.titleManual && data.chat.titleRevision > 1} />
+                </h1>
+                {!draft && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={<Button size="icon-sm" variant="ghost" aria-label="Chat actions" title="Chat actions" />}
+                    >
+                      <ChevronDownIcon size="md" aria-hidden="true" />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent size="menu" align="end">
+                      <DropdownMenuItem
+                        disabled={locked || !!editing}
+                        onClick={() => setEditing({ title: data.chat.title, titleRevision: data.chat.titleRevision })}
+                      >
+                        Edit title
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={locked}
+                        onClick={() =>
+                          submit(
+                            {
+                              kind: 'archive',
+                              chatId,
+                              commandId: crypto.randomUUID(),
+                              archived: !data.chat.archived,
+                            },
+                            data.chat,
+                          )
                         }
                       >
-                        <ChevronDownIcon size="md" aria-hidden="true" />
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent size="menu" align="end">
-                        <DropdownMenuItem
-                          disabled={locked || !!editing}
-                          onClick={() => setEditing({ title: data.chat.title, titleRevision: data.chat.titleRevision })}
-                        >
-                          Edit title
-                        </DropdownMenuItem>
+                        {data.chat.archived ? 'Restore chat' : 'Archive chat'}
+                      </DropdownMenuItem>
+                      {!data.chat.archived && (
                         <DropdownMenuItem
                           disabled={locked}
                           onClick={() =>
                             submit(
                               {
-                                kind: 'archive',
+                                kind: 'pin',
                                 chatId,
                                 commandId: crypto.randomUUID(),
-                                archived: !data.chat.archived,
+                                pinned: !data.chat.pinned,
                               },
                               data.chat,
                             )
                           }
                         >
-                          {data.chat.archived ? 'Restore chat' : 'Archive chat'}
+                          {data.chat.pinned ? 'Unpin chat' : 'Pin chat'}
                         </DropdownMenuItem>
-                        {!data.chat.archived && (
-                          <DropdownMenuItem
-                            disabled={locked}
-                            onClick={() =>
-                              submit(
-                                {
-                                  kind: 'pin',
-                                  chatId,
-                                  commandId: crypto.randomUUID(),
-                                  pinned: !data.chat.pinned,
-                                },
-                                data.chat,
-                              )
-                            }
-                          >
-                            {data.chat.pinned ? 'Unpin chat' : 'Pin chat'}
-                          </DropdownMenuItem>
-                        )}
-                        {!data.chat.projectId && !persistent && (
-                          <DropdownMenuItem disabled={locked} onClick={() => setMoving(true)}>
-                            Move to project
-                          </DropdownMenuItem>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  )}
-                </>
-              ) : (
-                <span className="text-sm text-muted-foreground">
-                  {read.state.kind === 'loading' ? 'Loading chat…' : 'Chat unavailable'}
-                </span>
-              )}
-              <ChatCanvasToggle />
-            </>,
-            headerElement,
-          )}
+                      )}
+                      {!data.chat.projectId && !persistent && (
+                        <DropdownMenuItem disabled={locked} onClick={() => setMoving(true)}>
+                          Move to project
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+              </>
+            ) : (
+              <span className="text-sm text-muted-foreground">
+                {read.state.kind === 'loading' ? 'Loading chat…' : 'Chat unavailable'}
+              </span>
+            )}
+            <ChatCanvasToggle />
+          </>,
+          headerElement,
+        )}
+      <div
+        ref={timeline}
+        role="region"
+        aria-label="Conversation"
+        tabIndex={0}
+        className={
+          compact
+            ? 'conversation-timeline min-h-0 flex-1 overflow-y-auto overscroll-contain px-3'
+            : `conversation-timeline min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 sm:px-6 ${empty ? 'overflow-x-clip' : ''} ${visible ? 'chat-timeline-transition' : ''}`
+        }
+        onScroll={event => {
+          const element = event.currentTarget;
+          // Pinning fires its scroll event a frame later, after the content may have grown again.
+          if (followLatest.current === 'following' && element.scrollTop === pinnedTop.current) pinLatest(element);
+          else if (followLatest.current !== 'inspecting' && !startScreen.current)
+            followLatest.current = nearLatest(element) ? 'following' : 'scrolled';
+          syncLatest(element);
+        }}
+      >
         <div
-          ref={timeline}
-          role="region"
-          aria-label="Conversation"
-          tabIndex={0}
+          ref={timelineContent}
           className={
             compact
-              ? 'conversation-timeline min-h-0 flex-1 overflow-y-auto overscroll-contain px-3'
-              : `conversation-timeline min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 sm:px-6 ${empty ? 'overflow-x-clip' : ''} ${visible ? 'chat-timeline-transition' : ''}`
+              ? 'w-full space-y-3 py-3'
+              : empty
+                ? 'mx-auto w-full max-w-3xl space-y-8 pt-8 pb-6 sm:pt-16'
+                : 'mx-auto w-full max-w-3xl space-y-6 py-6 sm:py-8'
           }
-          onScroll={event => {
-            const element = event.currentTarget;
-            // Pinning fires its scroll event a frame later, after the content may have grown again.
-            if (followLatest.current === 'following' && element.scrollTop === pinnedTop.current) pinLatest(element);
-            else if (followLatest.current !== 'inspecting' && !startScreen.current)
-              followLatest.current = nearLatest(element) ? 'following' : 'scrolled';
-            syncLatest(element);
-          }}
         >
-          <div
-            ref={timelineContent}
-            className={
-              compact
-                ? 'w-full space-y-3 py-3'
-                : empty
-                  ? 'mx-auto w-full max-w-3xl space-y-8 pt-8 pb-6 sm:pt-16'
-                  : 'mx-auto w-full max-w-3xl space-y-6 py-6 sm:py-8'
-            }
-          >
-            {data?.chat.archived && (
-              <p role="status" className="text-sm text-muted-foreground">
-                This chat is archived. Messages stay saved and any active reply finishes.
-              </p>
-            )}
-            {editing && (
-              <form
-                className="space-y-2 rounded-lg border p-4"
-                onSubmit={event => {
-                  event.preventDefault();
-                  if (!locked && !titleValidation)
-                    submit(
-                      {
-                        kind: 'rename',
-                        chatId,
-                        commandId: crypto.randomUUID(),
-                        title: editing.title.trim(),
-                        expectedRevision: editing.titleRevision,
-                      },
-                      data?.chat,
-                    );
-                }}
-              >
-                <Label htmlFor="chat-title">Chat title</Label>
-                <Input
-                  id="chat-title"
-                  autoFocus
-                  value={editing.title}
-                  maxLength={640}
-                  disabled={locked}
-                  aria-invalid={!!titleValidation}
-                  aria-describedby={titleValidation ? 'title-error' : undefined}
-                  onChange={event => setEditing({ ...editing, title: event.target.value })}
-                />
-                {titleValidation && (
-                  <p id="title-error" role="alert">
-                    {titleValidation}
-                  </p>
-                )}
-                <div className="flex gap-2">
-                  <Button type="submit" disabled={locked || !!titleValidation}>
-                    Save title
-                  </Button>
-                  <Button variant="ghost" disabled={write.locked} onClick={() => setEditing(null)}>
-                    Cancel title edit
-                  </Button>
-                </div>
-              </form>
-            )}
-            <ConversationRead
-              state={read.state.kind === 'ready' && data ? { ...read.state, data } : read.state}
-              refresh={read.refresh}
-              quiet={commandFailed}
+          {data?.chat.archived && (
+            <p role="status" className="text-sm text-muted-foreground">
+              This chat is archived. Messages stay saved and any active reply finishes.
+            </p>
+          )}
+          {editing && (
+            <form
+              className="space-y-2 rounded-lg border p-4"
+              onSubmit={event => {
+                event.preventDefault();
+                if (!locked && !titleValidation)
+                  submit(
+                    {
+                      kind: 'rename',
+                      chatId,
+                      commandId: crypto.randomUUID(),
+                      title: editing.title.trim(),
+                      expectedRevision: editing.titleRevision,
+                    },
+                    data?.chat,
+                  );
+              }}
             >
-              {history => (
-                <>
-                  {history.nextBefore && (
-                    <div className="flex justify-center">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={!ready}
-                        onClick={() => {
-                          olderScrollHeight.current = timeline.current?.scrollHeight ?? null;
-                          setPages(value => value + 1);
-                        }}
-                      >
-                        Load older messages
-                      </Button>
-                    </div>
-                  )}
-                  {empty ? (
-                    compact ? (
-                      <p className="text-sm text-muted-foreground">What can I help you with?</p>
-                    ) : (
-                      <Greeting />
-                    )
-                  ) : (
-                    <PackageChatProvider
-                      value={{
-                        packages,
-                        chatId,
-                        disabled: history.chat.isClosed || projectArchived,
-                        foreground: visible && !compact,
+              <Label htmlFor="chat-title">Chat title</Label>
+              <Input
+                id="chat-title"
+                autoFocus
+                value={editing.title}
+                maxLength={640}
+                disabled={locked}
+                aria-invalid={!!titleValidation}
+                aria-describedby={titleValidation ? 'title-error' : undefined}
+                onChange={event => setEditing({ ...editing, title: event.target.value })}
+              />
+              {titleValidation && (
+                <p id="title-error" role="alert">
+                  {titleValidation}
+                </p>
+              )}
+              <div className="flex gap-2">
+                <Button type="submit" disabled={locked || !!titleValidation}>
+                  Save title
+                </Button>
+                <Button variant="ghost" disabled={write.locked} onClick={() => setEditing(null)}>
+                  Cancel title edit
+                </Button>
+              </div>
+            </form>
+          )}
+          <ConversationRead
+            state={read.state.kind === 'ready' && data ? { ...read.state, data } : read.state}
+            refresh={read.refresh}
+            quiet={commandFailed}
+          >
+            {history => (
+              <>
+                {history.nextBefore && (
+                  <div className="flex justify-center">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={!ready}
+                      onClick={() => {
+                        olderScrollHeight.current = timeline.current?.scrollHeight ?? null;
+                        setPages(value => value + 1);
                       }}
                     >
-                      <ol aria-label="Messages" className={compact ? 'space-y-3' : 'space-y-8'}>
-                        {[
-                          ...history.messages.flatMap((message, index) => {
-                            const live = index === replyAfter ? liveReply(history.messages, index) : null;
-                            const next = history.messages[index + 1];
-                            // A turn's activity and its reply read as one block, so they sit as close as the
-                            // activity lines do; separate exchanges keep the list's wider gap.
-                            const answered =
-                              message.author === 'human' &&
-                              !!message.turn &&
-                              (live
-                                ? true
-                                : index === history.messages.length - 1
-                                  ? !pending && !incomingTurns.length && !!trailingReply(history.messages)
-                                  : next?.author === 'assistant' && !answerOnly(next));
-                            return [
-                              answerOnly(message) ? null : (
-                                <li
-                                  key={
-                                    message.id === sentId.current
-                                      ? 'pending'
-                                      : message.turn
-                                        ? `turn:${message.turn.id}`
-                                        : message.id
+                      Load older messages
+                    </Button>
+                  </div>
+                )}
+                {empty ? (
+                  compact ? (
+                    <p className="text-sm text-muted-foreground">What can I help you with?</p>
+                  ) : (
+                    <Greeting />
+                  )
+                ) : (
+                  <PackageChatProvider
+                    value={{
+                      packages,
+                      chatId,
+                      disabled: history.chat.isClosed || projectArchived,
+                      foreground: visible && !compact,
+                    }}
+                  >
+                    <ol aria-label="Messages" className={compact ? 'space-y-3' : 'space-y-8'}>
+                      {[
+                        ...history.messages.flatMap((message, index) => {
+                          const live = index === replyAfter ? liveReply(history.messages, index) : null;
+                          const next = history.messages[index + 1];
+                          // A turn's activity and its reply read as one block, so they sit as close as the
+                          // activity lines do; separate exchanges keep the list's wider gap.
+                          const answered =
+                            message.author === 'human' &&
+                            !!message.turn &&
+                            (live
+                              ? true
+                              : index === history.messages.length - 1
+                                ? !pending && !incomingTurns.length && !!trailingReply(history.messages)
+                                : next?.author === 'assistant' && !answerOnly(next));
+                          return [
+                            answerOnly(message) ? null : (
+                              <li
+                                key={
+                                  message.id === sentId.current
+                                    ? 'pending'
+                                    : message.turn
+                                      ? `turn:${message.turn.id}`
+                                      : message.id
+                                }
+                                className={answered ? 'mb-3 space-y-3' : 'space-y-3'}
+                              >
+                                <ConversationEntry
+                                  api={api}
+                                  chatId={chatId}
+                                  slug={workspaceSlug}
+                                  message={message}
+                                  latest={index === history.messages.length - 1}
+                                  rowViews={entryDetails(history.messages, modelFamilies).rowViews[index]!}
+                                  stats={entryDetails(history.messages, modelFamilies).stats[index]}
+                                  modelName={entryModelName}
+                                  fallbackTurn={entryDetails(history.messages, modelFamilies).fallbacks.get(message.id)}
+                                  fallbackControls={
+                                    entryDetails(history.messages, modelFamilies).fallbacks.has(message.id)
+                                      ? fallbackControls
+                                      : undefined
                                   }
-                                  className={answered ? 'mb-3 space-y-3' : 'space-y-3'}
-                                >
-                                  <ConversationEntry
-                                    api={api}
-                                    chatId={chatId}
-                                    slug={workspaceSlug}
-                                    message={message}
-                                    latest={index === history.messages.length - 1}
-                                    rowViews={entryDetails(history.messages, modelFamilies).rowViews[index]!}
-                                    stats={entryDetails(history.messages, modelFamilies).stats[index]}
-                                    modelName={entryModelName}
-                                    fallbackTurn={entryDetails(history.messages, modelFamilies).fallbacks.get(
-                                      message.id,
-                                    )}
-                                    fallbackControls={
-                                      entryDetails(history.messages, modelFamilies).fallbacks.has(message.id)
-                                        ? fallbackControls
-                                        : undefined
-                                    }
-                                    disabled={locked}
-                                    retryHandoff={retryHandoff}
-                                    control={controlEntry}
-                                  />
-                                  {queuedMessages.includes(message) && message.turn && (
-                                    <div className="flex flex-col items-end gap-2">
-                                      <p role="status" className="text-sm text-muted-foreground">
-                                        {queueLabel}
-                                      </p>
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        disabled={locked}
-                                        onClick={() =>
-                                          submit({
-                                            kind: 'cancel',
-                                            chatId,
-                                            commandId: crypto.randomUUID(),
-                                            turnId: message.turn!.id,
-                                            expectedGeneration: message.turn!.generation,
-                                          })
-                                        }
-                                      >
-                                        Remove queued message
-                                      </Button>
-                                    </div>
-                                  )}
-                                  <ToolActivity
-                                    key="activity"
-                                    variant="transcript"
-                                    items={toolActivityItems(message.tools, { admin })}
-                                    active={
-                                      thinking &&
-                                      !read.uncertain &&
-                                      !!turn &&
-                                      message.turn?.id === turn.id &&
-                                      !continuesBelow
-                                    }
-                                    activityLabel={
-                                      message.turn?.id === turn?.id && !continuesBelow ? activityLabel : undefined
-                                    }
-                                    onToggle={() => inspectActivity(thinking && !!turn && message.turn?.id === turn.id)}
-                                  />
-                                  <MemoryChanges tools={message.tools} />
-                                  {message.turn?.id === turn?.id && !continuesBelow && (
-                                    <LiveNarration text={narration} saved={savedNarration} />
-                                  )}
-                                  {message.turn?.status === 'waiting' &&
-                                    (() => {
-                                      const note = message.tools.filter(tool => tool.narration).at(-1)?.narration;
-                                      return note ? <StepNarration text={note} /> : null;
-                                    })()}
-                                  {message.parts.map((part, index) =>
-                                    part.kind === 'request' ? (
-                                      <InteractionCard key={index} api={api} chatId={chatId} reference={part} />
-                                    ) : null,
-                                  )}
-                                  {message.tools.map(tool => {
-                                    const replyTurn = message.turn;
-                                    return tool.tool === 'agents.delegate' ? (
-                                      <SubagentFanout
-                                        key={`subagents:${tool.id}`}
-                                        tool={tool}
-                                        live={stream.subagents?.get(tool.id)}
-                                        families={modelFamilies}
-                                        stop={
-                                          replyTurn?.status === 'processing'
-                                            ? key =>
-                                                api.stopSubagent(
-                                                  chatId,
-                                                  replyTurn.id,
-                                                  tool.id,
-                                                  key,
-                                                  AbortSignal.timeout(15_000),
-                                                )
-                                            : undefined
-                                        }
-                                      />
-                                    ) : null;
-                                  })}
-                                  <ConversationTools
-                                    api={api}
-                                    chatId={chatId}
-                                    slug={workspaceSlug}
-                                    message={message}
-                                    changed={read.refresh}
-                                    githubLocked={
-                                      locked ||
-                                      history.messages.some(
-                                        item =>
-                                          item.turn &&
-                                          !['completed', 'cancelled', 'blocked'].includes(item.turn.status),
-                                      )
-                                    }
-                                    pickGitHub={pickGitHub}
-                                    correct={() => composerInput.current?.focus()}
-                                  />
-                                  {message.turn?.status === 'cancelled' &&
-                                    !history.messages.some(item => item.stoppedTurnId === message.turn?.id) && (
-                                      <Message align="start">
-                                        <MessageContent>
-                                          <p className="text-xs text-muted-foreground">{turnLabels.cancelled}</p>
-                                        </MessageContent>
-                                      </Message>
-                                    )}
-                                </li>
-                              ),
-                              live,
-                            ];
-                          }),
-                          pending ? (
-                            <li
-                              key="pending"
-                              className={`space-y-3 ${trailingReply(history.messages) && !incomingTurns.length ? 'mb-3' : ''} ${!compact && visible ? 'chat-sent-transition' : ''}`.trim()}
-                            >
-                              <Message align="end">
-                                <MessageContent>
-                                  {pending.skill && <SentSkill skill={pending.skill} />}
-                                  <MessageBubble variant="secondary">
-                                    <RichMessage
-                                      content={pending.content}
-                                      file={reference =>
-                                        reference.source === 'tulipfarm' ? (
-                                          <ConversationFileReference
-                                            workspaceId={workspace.id}
-                                            slug={workspaceSlug}
-                                            fileId={reference.id}
-                                          />
-                                        ) : (
-                                          (() => {
-                                            const item = pending.references.find(
-                                              candidate =>
-                                                candidate.source === 'google' && candidate.id === reference.id,
-                                            );
-                                            return item?.source === 'google' ? (
-                                              <ConversationGoogleFileReference
-                                                slug={workspaceSlug}
-                                                fileId={item.id}
-                                                name={item.name}
-                                                mimeType={item.mediaType}
-                                              />
-                                            ) : null;
-                                          })()
-                                        )
-                                      }
-                                    />
-                                  </MessageBubble>
-                                  {waiting && (
-                                    <p className="self-end text-xs text-muted-foreground">Sending when ready</p>
-                                  )}
-                                  {pendingQueued && (
-                                    <p role="status" className="self-end text-sm text-muted-foreground">
+                                  disabled={locked}
+                                  retryHandoff={retryHandoff}
+                                  control={controlEntry}
+                                />
+                                {queuedMessages.includes(message) && message.turn && (
+                                  <div className="flex flex-col items-end gap-2">
+                                    <p role="status" className="text-sm text-muted-foreground">
                                       {queueLabel}
                                     </p>
-                                  )}
-                                  {unconfirmed && (
-                                    <p className="self-end text-xs text-muted-foreground">
-                                      {write.state.kind === 'uncertain' && write.state.unsent
-                                        ? 'Not sent'
-                                        : 'Not confirmed sent'}
-                                    </p>
-                                  )}
-                                </MessageContent>
-                              </Message>
-                              {!waiting && !pendingQueued && !turn && !incomingTurns.length && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      disabled={locked}
+                                      onClick={() =>
+                                        submit({
+                                          kind: 'cancel',
+                                          chatId,
+                                          commandId: crypto.randomUUID(),
+                                          turnId: message.turn!.id,
+                                          expectedGeneration: message.turn!.generation,
+                                        })
+                                      }
+                                    >
+                                      Remove queued message
+                                    </Button>
+                                  </div>
+                                )}
                                 <ToolActivity
                                   key="activity"
                                   variant="transcript"
-                                  items={[]}
-                                  active={thinking && !read.uncertain}
-                                  activityLabel={activityLabel}
+                                  items={toolActivityItems(message.tools, { admin })}
+                                  active={
+                                    thinking &&
+                                    !read.uncertain &&
+                                    !!turn &&
+                                    message.turn?.id === turn.id &&
+                                    !continuesBelow
+                                  }
+                                  activityLabel={
+                                    message.turn?.id === turn?.id && !continuesBelow ? activityLabel : undefined
+                                  }
+                                  onToggle={() => inspectActivity(thinking && !!turn && message.turn?.id === turn.id)}
                                 />
-                              )}
-                            </li>
-                          ) : null,
-                          ...incomingTurns.map(incoming => (
-                            <li key={`turn:${incoming.id}`}>
+                                <MemoryChanges tools={message.tools} />
+                                {message.turn?.id === turn?.id && !continuesBelow && (
+                                  <LiveNarration text={narration} saved={savedNarration} />
+                                )}
+                                {message.turn?.status === 'waiting' &&
+                                  (() => {
+                                    const note = message.tools.filter(tool => tool.narration).at(-1)?.narration;
+                                    return note ? <StepNarration text={note} /> : null;
+                                  })()}
+                                {message.parts.map((part, index) =>
+                                  part.kind === 'request' ? (
+                                    <InteractionCard key={index} api={api} chatId={chatId} reference={part} />
+                                  ) : null,
+                                )}
+                                {message.tools.map(tool => {
+                                  const replyTurn = message.turn;
+                                  return tool.tool === 'agents.delegate' ? (
+                                    <SubagentFanout
+                                      key={`subagents:${tool.id}`}
+                                      tool={tool}
+                                      live={stream.subagents?.get(tool.id)}
+                                      families={modelFamilies}
+                                      stop={
+                                        replyTurn?.status === 'processing'
+                                          ? key =>
+                                              api.stopSubagent(
+                                                chatId,
+                                                replyTurn.id,
+                                                tool.id,
+                                                key,
+                                                AbortSignal.timeout(15_000),
+                                              )
+                                          : undefined
+                                      }
+                                    />
+                                  ) : null;
+                                })}
+                                <ConversationTools
+                                  api={api}
+                                  chatId={chatId}
+                                  slug={workspaceSlug}
+                                  message={message}
+                                  changed={read.refresh}
+                                  githubLocked={
+                                    locked ||
+                                    history.messages.some(
+                                      item =>
+                                        item.turn && !['completed', 'cancelled', 'blocked'].includes(item.turn.status),
+                                    )
+                                  }
+                                  pickGitHub={pickGitHub}
+                                  correct={() => composerInput.current?.focus()}
+                                />
+                                {message.turn?.status === 'cancelled' &&
+                                  !history.messages.some(item => item.stoppedTurnId === message.turn?.id) && (
+                                    <Message align="start">
+                                      <MessageContent>
+                                        <p className="text-xs text-muted-foreground">{turnLabels.cancelled}</p>
+                                      </MessageContent>
+                                    </Message>
+                                  )}
+                              </li>
+                            ),
+                            live,
+                          ];
+                        }),
+                        pending ? (
+                          <li
+                            key="pending"
+                            className={`space-y-3 ${trailingReply(history.messages) && !incomingTurns.length ? 'mb-3' : ''} ${!compact && visible ? 'chat-sent-transition' : ''}`.trim()}
+                          >
+                            <Message align="end">
+                              <MessageContent>
+                                {pending.skill && <SentSkill skill={pending.skill} />}
+                                <MessageBubble variant="secondary">
+                                  <RichMessage
+                                    content={pending.content}
+                                    file={reference =>
+                                      reference.source === 'tulipfarm' ? (
+                                        <ConversationFileReference
+                                          workspaceId={workspace.id}
+                                          slug={workspaceSlug}
+                                          fileId={reference.id}
+                                        />
+                                      ) : (
+                                        (() => {
+                                          const item = pending.references.find(
+                                            candidate => candidate.source === 'google' && candidate.id === reference.id,
+                                          );
+                                          return item?.source === 'google' ? (
+                                            <ConversationGoogleFileReference
+                                              slug={workspaceSlug}
+                                              fileId={item.id}
+                                              name={item.name}
+                                              mimeType={item.mediaType}
+                                            />
+                                          ) : null;
+                                        })()
+                                      )
+                                    }
+                                  />
+                                </MessageBubble>
+                                {waiting && (
+                                  <p className="self-end text-xs text-muted-foreground">Sending when ready</p>
+                                )}
+                                {pendingQueued && (
+                                  <p role="status" className="self-end text-sm text-muted-foreground">
+                                    {queueLabel}
+                                  </p>
+                                )}
+                                {unconfirmed && (
+                                  <p className="self-end text-xs text-muted-foreground">
+                                    {write.state.kind === 'uncertain' && write.state.unsent
+                                      ? 'Not sent'
+                                      : 'Not confirmed sent'}
+                                  </p>
+                                )}
+                              </MessageContent>
+                            </Message>
+                            {!waiting && !pendingQueued && !turn && !incomingTurns.length && (
                               <ToolActivity
                                 key="activity"
                                 variant="transcript"
-                                items={toolActivityItems(incoming.tools, { admin })}
+                                items={[]}
                                 active={thinking && !read.uncertain}
                                 activityLabel={activityLabel}
-                                onToggle={() => inspectActivity(thinking)}
                               />
-                              {incoming.tools.map(tool =>
-                                tool.tool === 'agents.delegate' ? (
-                                  <SubagentFanout
-                                    key={`subagents:${tool.id}`}
-                                    tool={tool}
-                                    live={stream.subagents?.get(tool.id)}
-                                    families={modelFamilies}
-                                    stop={key =>
-                                      api.stopSubagent(chatId, incoming.id, tool.id, key, AbortSignal.timeout(15_000))
-                                    }
-                                  />
-                                ) : null,
-                              )}
-                            </li>
-                          )),
-                        ]}
-                        {trailingReply(history.messages)}
-                        {read.uncertain && (
-                          <li>
-                            <Alert>
-                              <AlertDescription>We couldn't confirm whether this reply finished.</AlertDescription>
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                <Button
-                                  variant="outline"
-                                  disabled={read.state.kind === 'ready' && read.state.refreshing}
-                                  onClick={() => {
-                                    stream.retry();
-                                    read.retryStatus();
-                                  }}
-                                >
-                                  Retry
-                                </Button>
-                                {stopReply && (text || staged) && (
-                                  <Button variant="outline" disabled={locked} onClick={stopReply}>
-                                    Stop reply
-                                  </Button>
-                                )}
-                              </div>
-                            </Alert>
+                            )}
                           </li>
-                        )}
-                        {stalledTurn && (
-                          <li>
-                            <Alert>
-                              <AlertTitle>Reply is taking too long</AlertTitle>
-                              <AlertDescription>
-                                The reply has not started after 1 minute. Cancel it, then send your message again.
-                              </AlertDescription>
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  disabled={locked}
-                                  onClick={() =>
-                                    submit({
-                                      kind: 'cancel',
-                                      chatId,
-                                      commandId: crypto.randomUUID(),
-                                      turnId: stalledTurn.id,
-                                      expectedGeneration: stalledTurn.generation,
-                                    })
+                        ) : null,
+                        ...incomingTurns.map(incoming => (
+                          <li key={`turn:${incoming.id}`}>
+                            <ToolActivity
+                              key="activity"
+                              variant="transcript"
+                              items={toolActivityItems(incoming.tools, { admin })}
+                              active={thinking && !read.uncertain}
+                              activityLabel={activityLabel}
+                              onToggle={() => inspectActivity(thinking)}
+                            />
+                            {incoming.tools.map(tool =>
+                              tool.tool === 'agents.delegate' ? (
+                                <SubagentFanout
+                                  key={`subagents:${tool.id}`}
+                                  tool={tool}
+                                  live={stream.subagents?.get(tool.id)}
+                                  families={modelFamilies}
+                                  stop={key =>
+                                    api.stopSubagent(chatId, incoming.id, tool.id, key, AbortSignal.timeout(15_000))
                                   }
-                                >
-                                  Cancel reply
-                                </Button>
-                              </div>
-                            </Alert>
+                                />
+                              ) : null,
+                            )}
                           </li>
-                        )}
-                      </ol>
-                    </PackageChatProvider>
-                  )}
-                  {!draft && !empty && history.chat.isClosed && (
-                    <ChatMaintenance api={api} chatId={chatId} disabled={locked} />
-                  )}
-                  {!draft && (
-                    <ChatPackages
-                      packages={packages}
-                      chatId={chatId}
-                      disabled={history.chat.isClosed || projectArchived}
-                      foreground={visible && !compact}
-                    />
-                  )}
-                  {!empty && (
-                    <IntegrationLinks
-                      workspaceId={workspace.id}
-                      slug={workspaceSlug}
-                      chatId={chatId}
-                      messages={history.messages}
-                    />
-                  )}
-                  {!draft && !empty && (
-                    <NewChatDrafts
-                      workspaceId={workspace.id}
-                      chatId={chatId}
-                      tools={history.messages.flatMap(message => message.tools)}
-                      foreground={visible && !compact}
-                    />
-                  )}
-                  {!draft && !empty && (
-                    <ChatPlans
-                      workspaceId={workspace.id}
-                      chatId={chatId}
-                      tools={history.messages.flatMap(message => message.tools)}
-                      foreground={visible && !compact}
-                      revision={(() => {
-                        const last = history.messages.at(-1);
-                        return `${last?.id}:${last?.turn?.status}`;
-                      })()}
-                    />
-                  )}
-                </>
-              )}
-            </ConversationRead>
-            {!compact && empty && (
-              <StartingTasks
-                disabled={
-                  locked || !models.usable || (!!text && !(prefill?.prompt && text === prefill.prompt)) || staged
-                }
-                disabledReason={
-                  !models.usable
-                    ? 'Waiting for an available AI model before starting a prompt.'
-                    : (!!text && !(prefill?.prompt && text === prefill.prompt)) || staged
-                      ? 'Clear your current draft to use a suggested prompt.'
-                      : null
-                }
-                onChoose={prompt => {
-                  const canReplaceDraft = !text || (!!prefill?.prompt && text === prefill.prompt);
-                  if (!locked && models.usable && canReplaceDraft && !staged)
-                    post(textDocument(prompt), [{ kind: 'text', text: prompt }]);
-                }}
-              />
-            )}
-            {draft && empty && (
-              <UpcomingMeetings
-                workspaceId={workspace.id}
-                disabled={locked || !models.usable || !!text || staged}
-                onShowAll={() => {
-                  if (!locked && models.usable && !text && !staged)
-                    post(textDocument(showAllMeetingsPrompt), [{ kind: 'text', text: showAllMeetingsPrompt }]);
-                }}
-              />
-            )}
-            {!draft && data?.hasGitHubProposals && (
-              <GitHubBatches
-                workspaceId={workspace.id}
-                chatId={chatId}
-                revision={JSON.stringify(
-                  data.messages.map(message => [message.id, message.turn?.status, message.tools]),
+                        )),
+                      ]}
+                      {trailingReply(history.messages)}
+                      {read.uncertain && (
+                        <li>
+                          <Alert>
+                            <AlertDescription>We couldn't confirm whether this reply finished.</AlertDescription>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <Button
+                                variant="outline"
+                                disabled={read.state.kind === 'ready' && read.state.refreshing}
+                                onClick={() => {
+                                  stream.retry();
+                                  read.retryStatus();
+                                }}
+                              >
+                                Retry
+                              </Button>
+                              {stopReply && (text || staged) && (
+                                <Button variant="outline" disabled={locked} onClick={stopReply}>
+                                  Stop reply
+                                </Button>
+                              )}
+                            </div>
+                          </Alert>
+                        </li>
+                      )}
+                      {stalledTurn && (
+                        <li>
+                          <Alert>
+                            <AlertTitle>Reply is taking too long</AlertTitle>
+                            <AlertDescription>
+                              The reply has not started after 1 minute. Cancel it, then send your message again.
+                            </AlertDescription>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={locked}
+                                onClick={() =>
+                                  submit({
+                                    kind: 'cancel',
+                                    chatId,
+                                    commandId: crypto.randomUUID(),
+                                    turnId: stalledTurn.id,
+                                    expectedGeneration: stalledTurn.generation,
+                                  })
+                                }
+                              >
+                                Cancel reply
+                              </Button>
+                            </div>
+                          </Alert>
+                        </li>
+                      )}
+                    </ol>
+                  </PackageChatProvider>
                 )}
-              />
+                {!draft && !empty && history.chat.isClosed && (
+                  <ChatMaintenance api={api} chatId={chatId} disabled={locked} />
+                )}
+                {!draft && (
+                  <ChatPackages
+                    packages={packages}
+                    chatId={chatId}
+                    disabled={history.chat.isClosed || projectArchived}
+                    foreground={visible && !compact}
+                  />
+                )}
+                {!empty && (
+                  <IntegrationLinks
+                    workspaceId={workspace.id}
+                    slug={workspaceSlug}
+                    chatId={chatId}
+                    messages={history.messages}
+                  />
+                )}
+                {!draft && !empty && (
+                  <NewChatDrafts
+                    workspaceId={workspace.id}
+                    chatId={chatId}
+                    tools={history.messages.flatMap(message => message.tools)}
+                    foreground={visible && !compact}
+                  />
+                )}
+                {!draft && !empty && (
+                  <ChatPlans
+                    workspaceId={workspace.id}
+                    chatId={chatId}
+                    tools={history.messages.flatMap(message => message.tools)}
+                    foreground={visible && !compact}
+                    revision={(() => {
+                      const last = history.messages.at(-1);
+                      return `${last?.id}:${last?.turn?.status}`;
+                    })()}
+                  />
+                )}
+              </>
             )}
-          </div>
-        </div>
-        <footer
-          className={
-            compact
-              ? 'relative shrink-0 px-3 pb-3'
-              : `relative shrink-0 px-3 pt-2 pb-3 sm:px-6 sm:pb-2 ${visible ? 'chat-composer-transition' : ''}`
-          }
-        >
-          {awayFromLatest && (
-            <div className="pointer-events-none absolute inset-x-0 bottom-full flex justify-center pb-2 *:pointer-events-auto">
-              <Button
-                size={unseenUpdates ? 'sm' : 'icon-sm'}
-                variant="outline"
-                aria-label="Jump to latest"
-                title="Jump to latest"
-                onClick={() => {
-                  const element = timeline.current;
-                  if (element) pinLatest(element);
-                  followLatest.current = 'following';
-                  setAwayFromLatest(false);
-                  setUnseenUpdates(false);
-                }}
-              >
-                <ArrowDownIcon size="sm" aria-hidden="true" />
-                {unseenUpdates && 'New updates'}
-              </Button>
-            </div>
-          )}
-          <div className="mx-auto w-full max-w-3xl space-y-3">
-            <CommandFeedback
-              write={write}
-              refreshed={refreshed && ready}
-              refresh={() => void refresh()}
-              review={() => {
-                if (editing && read.state.kind === 'ready')
-                  setEditing({ ...editing, titleRevision: read.state.data.chat.titleRevision });
+          </ConversationRead>
+          {!compact && empty && (
+            <StartingTasks
+              disabled={locked || !models.usable || (!!text && !(prefill?.prompt && text === prefill.prompt)) || staged}
+              disabledReason={
+                !models.usable
+                  ? 'Waiting for an available AI model before starting a prompt.'
+                  : (!!text && !(prefill?.prompt && text === prefill.prompt)) || staged
+                    ? 'Clear your current draft to use a suggested prompt.'
+                    : null
+              }
+              onChoose={prompt => {
+                const canReplaceDraft = !text || (!!prefill?.prompt && text === prefill.prompt);
+                if (!locked && models.usable && canReplaceDraft && !staged)
+                  post(textDocument(prompt), [{ kind: 'text', text: prompt }]);
               }}
             />
-            {skillHandoffError && (
-              <Alert variant="destructive">
-                <AlertDescription>{skillHandoffError}</AlertDescription>
-              </Alert>
-            )}
-            {notice}
-            <div data-slot="conversation-input" className={questionPending ? 'space-y-1' : 'space-y-3'}>
-              <div
-                className={compact ? 'max-h-64 space-y-3 overflow-y-auto overscroll-contain empty:hidden' : 'space-y-3'}
-              >
-                {!sharedChat && <BudPreferences chatId={chatId} />}
-                <ApprovalDock />
-              </div>
-              <Composer
-                compact={compact}
-                minRows={1}
-                inputRef={composerInput}
-                content={draftSent ? emptyRichDocument() : content}
-                onContentChange={setContent}
-                onSend={send}
-                canSend={!locked && canSend && sendAvailable}
-                placeholder={
-                  compact ? 'Reply…' : empty ? (composerPlaceholder ?? 'What would you like to get done?') : 'Reply…'
-                }
-                mode={!sharedChat && !compact ? { value: mode, onChange: handleModeChange } : undefined}
-                codeHeader={
-                  !sharedChat && !compact && mode === 'code' ? (
-                    <CodeSessionBar
-                      workspaceId={workspace.id}
-                      workspaceSlug={workspaceSlug}
-                      availability={codeAvailability}
-                      draft={codeDraft}
-                      onChange={setCodeDraft}
-                      disabled={write.locked || projectArchived}
-                    />
-                  ) : undefined
-                }
-                sendDisabledReason={
-                  !sharedChat && !compact && mode === 'code'
-                    ? !codeStartInput
-                      ? 'Select a repository to start a code session'
-                      : (codeAvailability?.unavailableReason ?? undefined)
-                    : undefined
-                }
-                codeNotice={
-                  !sharedChat && !compact && mode === 'code' ? (
-                    <CodeSessionNotice
-                      workspaceSlug={workspaceSlug}
-                      availability={codeAvailability}
-                      loading={codeAvailabilityLoading}
-                      codingAgent={codeDraft.codingAgent}
-                    />
-                  ) : undefined
-                }
-                codeAgentPicker={
-                  !sharedChat && !compact && mode === 'code' ? (
-                    <CodeAgentPicker
-                      value={codeDraft.codingAgent}
-                      availability={codeAvailability}
-                      onChange={codingAgent => setCodeDraft(current => ({ ...current, codingAgent }))}
-                      disabled={write.locked || projectArchived}
-                    />
-                  ) : undefined
-                }
-                scope={draft && empty ? scope : projectSharingScope}
-                onStop={!text && !staged ? stopReply : undefined}
-                disabled={write.locked || projectArchived}
-                sending={write.state.kind === 'sending'}
-                validation={validation}
-                onFiles={uploads.add}
-                integrations={{
-                  keywords: integrations.keywords,
-                  onConnect: integrations.connect,
-                  onAccountChange: integrations.switchAccount,
-                }}
-                attachments={
-                  !draftSent && (staged || uploads.error || mentions.notice) ? (
-                    <div className="space-y-2">
-                      {skills.staged && (
-                        <StagedSkill skill={skills.staged} disabled={write.locked} onRemove={skills.remove} />
-                      )}
-                      <StagedAttachments
-                        uploads={uploads}
-                        disabled={write.locked}
-                        reading={{
-                          imageInput: modelFamilies.find(family => family.id === models.model?.id)?.imageInput ?? null,
-                        }}
-                        references={{ items: mentions.references, notice: mentions.notice }}
-                        blocked={
-                          googleBlocked && (
-                            <GooglePrivateOnly
-                              disabled={write.locked}
-                              draft={draft}
-                              remove={() => {
-                                for (const reference of mentions.references)
-                                  if (reference.source === 'google') mentions.remove(reference);
-                              }}
-                              usePrivate={() => {
-                                if (draft || mentions.moveGoogleToNewChat())
-                                  void navigate({
-                                    to: '/$workspaceSlug',
-                                    params: { workspaceSlug },
-                                    search: {},
-                                    ignoreBlocker: true,
-                                  });
-                              }}
-                            />
-                          )
-                        }
-                      />
-                    </div>
-                  ) : undefined
-                }
-                extensions={composerExtensions}
-                picker={picker}
-                model={models.model}
-                models={models.choices}
-                onModelChange={models.select}
-                planAccount={planAccount}
-              />
-            </div>
-            <ChatModelStatus
-              catalog={models}
-              slug={workspaceSlug}
-              quiet={commandFailed || (read.state.kind === 'ready' && !!read.state.error)}
+          )}
+          {draft && empty && (
+            <UpcomingMeetings
+              workspaceId={workspace.id}
+              disabled={locked || !models.usable || !!text || staged}
+              onShowAll={() => {
+                if (!locked && models.usable && !text && !staged)
+                  post(textDocument(showAllMeetingsPrompt), [{ kind: 'text', text: showAllMeetingsPrompt }]);
+              }}
             />
-            {!compact && (
-              <p className="-mt-1.5 hidden text-center text-xs text-muted-foreground sm:block">
-                TulipFarm can make mistakes. Check important details.
-              </p>
-            )}
-          </div>
-        </footer>
+          )}
+          {!draft && data?.hasGitHubProposals && (
+            <GitHubBatches
+              workspaceId={workspace.id}
+              chatId={chatId}
+              revision={JSON.stringify(data.messages.map(message => [message.id, message.turn?.status, message.tools]))}
+            />
+          )}
+        </div>
       </div>
-    </ChatKeywords>
+      <footer
+        className={
+          compact
+            ? 'relative shrink-0 px-3 pb-3'
+            : `relative shrink-0 px-3 pt-2 pb-3 sm:px-6 sm:pb-2 ${visible ? 'chat-composer-transition' : ''}`
+        }
+      >
+        {awayFromLatest && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-full flex justify-center pb-2 *:pointer-events-auto">
+            <Button
+              size={unseenUpdates ? 'sm' : 'icon-sm'}
+              variant="outline"
+              aria-label="Jump to latest"
+              title="Jump to latest"
+              onClick={() => {
+                const element = timeline.current;
+                if (element) pinLatest(element);
+                followLatest.current = 'following';
+                setAwayFromLatest(false);
+                setUnseenUpdates(false);
+              }}
+            >
+              <ArrowDownIcon size="sm" aria-hidden="true" />
+              {unseenUpdates && 'New updates'}
+            </Button>
+          </div>
+        )}
+        <div className="mx-auto w-full max-w-3xl space-y-3">
+          <CommandFeedback
+            write={write}
+            refreshed={refreshed && ready}
+            refresh={() => void refresh()}
+            review={() => {
+              if (editing && read.state.kind === 'ready')
+                setEditing({ ...editing, titleRevision: read.state.data.chat.titleRevision });
+            }}
+          />
+          {skillHandoffError && (
+            <Alert variant="destructive">
+              <AlertDescription>{skillHandoffError}</AlertDescription>
+            </Alert>
+          )}
+          {notice}
+          <div data-slot="conversation-input" className={questionPending ? 'space-y-1' : 'space-y-3'}>
+            <div
+              className={compact ? 'max-h-64 space-y-3 overflow-y-auto overscroll-contain empty:hidden' : 'space-y-3'}
+            >
+              {!sharedChat && <BudPreferences chatId={chatId} />}
+              <ApprovalDock />
+            </div>
+            <Composer
+              compact={compact}
+              minRows={1}
+              inputRef={composerInput}
+              content={draftSent ? emptyRichDocument() : content}
+              onContentChange={setContent}
+              onSend={send}
+              canSend={!locked && canSend && sendAvailable}
+              placeholder={
+                compact ? 'Reply…' : empty ? (composerPlaceholder ?? 'What would you like to get done?') : 'Reply…'
+              }
+              mode={!sharedChat && !compact ? { value: mode, onChange: handleModeChange } : undefined}
+              codeHeader={
+                !sharedChat && !compact && mode === 'code' ? (
+                  <CodeSessionBar
+                    workspaceId={workspace.id}
+                    workspaceSlug={workspaceSlug}
+                    availability={codeAvailability}
+                    draft={codeDraft}
+                    onChange={setCodeDraft}
+                    disabled={write.locked || projectArchived}
+                  />
+                ) : undefined
+              }
+              sendDisabledReason={
+                !sharedChat && !compact && mode === 'code'
+                  ? !codeStartInput
+                    ? 'Select a repository to start a code session'
+                    : (codeAvailability?.unavailableReason ?? undefined)
+                  : undefined
+              }
+              codeNotice={
+                !sharedChat && !compact && mode === 'code' ? (
+                  <CodeSessionNotice
+                    workspaceSlug={workspaceSlug}
+                    availability={codeAvailability}
+                    loading={codeAvailabilityLoading}
+                    codingAgent={codeDraft.codingAgent}
+                  />
+                ) : undefined
+              }
+              codeAgentPicker={
+                !sharedChat && !compact && mode === 'code' ? (
+                  <CodeAgentPicker
+                    value={codeDraft.codingAgent}
+                    availability={codeAvailability}
+                    onChange={codingAgent => setCodeDraft(current => ({ ...current, codingAgent }))}
+                    disabled={write.locked || projectArchived}
+                  />
+                ) : undefined
+              }
+              scope={draft && empty ? scope : projectSharingScope}
+              onStop={!text && !staged ? stopReply : undefined}
+              disabled={write.locked || projectArchived}
+              sending={write.state.kind === 'sending'}
+              validation={validation}
+              onFiles={uploads.add}
+              attachments={
+                !draftSent && (staged || uploads.error || mentions.notice) ? (
+                  <div className="space-y-2">
+                    {skills.staged && (
+                      <StagedSkill skill={skills.staged} disabled={write.locked} onRemove={skills.remove} />
+                    )}
+                    <StagedAttachments
+                      uploads={uploads}
+                      disabled={write.locked}
+                      reading={{
+                        imageInput: modelFamilies.find(family => family.id === models.model?.id)?.imageInput ?? null,
+                      }}
+                      references={{ items: mentions.references, notice: mentions.notice }}
+                      blocked={
+                        googleBlocked && (
+                          <GooglePrivateOnly
+                            disabled={write.locked}
+                            draft={draft}
+                            remove={() => {
+                              for (const reference of mentions.references)
+                                if (reference.source === 'google') mentions.remove(reference);
+                            }}
+                            usePrivate={() => {
+                              if (draft || mentions.moveGoogleToNewChat())
+                                void navigate({
+                                  to: '/$workspaceSlug',
+                                  params: { workspaceSlug },
+                                  search: {},
+                                  ignoreBlocker: true,
+                                });
+                            }}
+                          />
+                        )
+                      }
+                    />
+                  </div>
+                ) : undefined
+              }
+              extensions={composerExtensions}
+              picker={picker}
+              model={models.model}
+              models={models.choices}
+              onModelChange={models.select}
+              planAccount={planAccount}
+            />
+          </div>
+          <ChatModelStatus
+            catalog={models}
+            slug={workspaceSlug}
+            quiet={commandFailed || (read.state.kind === 'ready' && !!read.state.error)}
+          />
+          {!compact && (
+            <p className="-mt-1.5 hidden text-center text-xs text-muted-foreground sm:block">
+              TulipFarm can make mistakes. Check important details.
+            </p>
+          )}
+        </div>
+      </footer>
+    </div>
   );
 }
 

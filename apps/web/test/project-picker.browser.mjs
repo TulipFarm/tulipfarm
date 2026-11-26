@@ -159,11 +159,11 @@ test('composer project badge searches, recovers, and opens project creation', { 
           await composer.getByRole('button', { name: `Start this chat in: ${project.name}`, exact: true }).count(),
           1,
         );
-        const attachBox = await composer.getByRole('button', { name: 'Add files and more' }).boundingBox();
+        const editorBox = await composer.getByRole('textbox', { name: 'Message' }).boundingBox();
         const projectBox = await selected.boundingBox();
         assert.ok(
-          attachBox && projectBox && projectBox.x > attachBox.x && Math.abs(projectBox.y - attachBox.y) < 12,
-          'badge sits on the same row as Add',
+          editorBox && projectBox && projectBox.y + projectBox.height <= editorBox.y + 4,
+          'project selector sits in the top bar above the composer input',
         );
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
         if (process.env.PROJECT_PICKER_SCREENSHOTS)

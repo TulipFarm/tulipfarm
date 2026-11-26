@@ -1,13 +1,10 @@
-import { createContext, use, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { chatDocumentSchema, type ChatDocument, type ChatFileReference } from '@tulipfarm/conversations/rich-content';
 import { MessageRichText } from '@tulipfarm/sprout/message-rich-text';
-import type { RichTextKeyword, RichTextValue } from '@tulipfarm/sprout/rich-text-editor';
+import type { RichTextValue } from '@tulipfarm/sprout/rich-text-editor';
 import { PackagePill, packageLinkParts } from './package-reference';
 
-/** The composer's integration keywords, so sent messages show the same chips. */
-export const ChatKeywords = createContext<readonly RichTextKeyword[] | undefined>(undefined);
-
-/** A sent message with the composer's integration chips, file chips and package pills. Plain text shows as typed. */
+/** A sent message with file chips and package pills. Plain text shows as typed. */
 export function RichMessage({
   content,
   text,
@@ -17,15 +14,12 @@ export function RichMessage({
   text?: string;
   file: (reference: ChatFileReference) => ReactNode;
 }) {
-  const keywords = use(ChatKeywords);
   const document = content ? chatDocumentSchema.parse(content) : null;
   const value = document ? withPackages(document.doc as RichTextValue) : plainDocument(text ?? '');
   return (
     <div className="wrap-break-word">
       <MessageRichText
         value={value}
-        keywords={keywords}
-        accounts={document?.accounts}
         renderNode={node =>
           node.type === 'fileReference' ? (
             file(node.attrs as ChatFileReference)

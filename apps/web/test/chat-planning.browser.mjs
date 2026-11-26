@@ -194,7 +194,8 @@ test(
       assert.equal(sends.length, 2);
       assert.deepEqual(sends[0], sends[1], 'failed sends retain the exact request and mode');
       assert.equal(sends[0].mode, 'plan');
-      await page.getByRole('button', { name: 'Turn off Plan' }).waitFor();
+      await page.getByRole('button', { name: 'Mode: Plan' }).waitFor();
+      assert.equal(await page.getByRole('button', { name: 'Turn off Plan' }).count(), 0);
       await page.getByText('Plan only · no setup actions').first().waitFor();
 
       listed = [plan];
