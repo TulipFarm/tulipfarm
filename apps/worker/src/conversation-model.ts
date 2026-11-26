@@ -59,6 +59,34 @@ export function roleModel(role: ModelCatalogRole, env: NodeJS.ProcessEnv = proce
 }
 
 /**
+ * Resolves a faster, lower-cost catalog model distinct from `chat` for simple auto-routed chat turns. Returns null when
+ * no strictly cheaper non-paused catalog model is available.
+ */
+export function fastRouteModel(
+  chat: ConversationModel,
+  env: NodeJS.ProcessEnv = process.env,
+): ConversationModel | null {
+  const baseInput = chat.price.rates[0]?.usdPerMillionTokens.input;
+  if (baseInput === undefined) return null;
+  const needsImageInput = Boolean(chat.route.capabilities?.imageInput);
+  const candidates = [roleModel('heartbeat', env), roleModel('completion-check', env)];
+  for (const candidate of candidates) {
+    const candidateInput = candidate?.price.rates[0]?.usdPerMillionTokens.input;
+    if (
+      candidate &&
+      candidateInput !== undefined &&
+      candidate.price.familyId !== chat.price.familyId &&
+      !conversationFamilyPaused(candidate.price.familyId, env) &&
+      (!needsImageInput || Boolean(candidate.route.capabilities?.imageInput)) &&
+      candidateInput < baseInput
+    ) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+/**
  * The model that retries a failed chat call once: the first available model of the catalog's fallback chain for the chat
  * model (its `fallback`, that model's `fallback`, ..., then the model with the role `fallback`). Without one, failed
  * replies are not retried on another model.
