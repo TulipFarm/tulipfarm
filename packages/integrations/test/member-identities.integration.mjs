@@ -28,8 +28,13 @@ const seed = (sql, values) => db.platform.query(sql, values);
 
 before(async () => {
   db = await fixture();
-  // The older workspace has to exist before 0118 is published, the same way a pending rollout leaves one behind.
-  legacy = await db.create(db.baseline.slice(0, -1));
+  // The older workspace has to exist before 0120 is published, the same way a pending rollout leaves one behind.
+  legacy = await db.create(
+    db.baseline.slice(
+      0,
+      db.baseline.findIndex(item => item.name === '0120_member_identities.sql'),
+    ),
+  );
   await db.platform.query('BEGIN');
   await lockRolloutTarget(db.platform, db.baseline, true);
   await db.platform.query('COMMIT');
@@ -46,7 +51,7 @@ after(async () => {
   await db?.close();
 });
 
-async function within(run, { client = runtime, workspace = ws, commonVersion = 118 } = {}) {
+async function within(run, { client = runtime, workspace = ws, commonVersion = 120 } = {}) {
   await client.query('BEGIN');
   try {
     const result = await run({ client, schema: workspace.names.schema, commonVersion });
@@ -635,8 +640,8 @@ test('search finds people by current handle, past handle, external ID and displa
   assert.deepEqual(await search('  '), []);
 });
 
-test('a workspace still on version 117 reads no identities and refuses to record any', async () => {
-  const old = (run, commonVersion = 117) => within(run, { client: legacyRuntime, workspace: legacy, commonVersion });
+test('a workspace still on version 119 reads no identities and refuses to record any', async () => {
+  const old = (run, commonVersion = 119) => within(run, { client: legacyRuntime, workspace: legacy, commonVersion });
   const person = { memberId: randomUUID() };
 
   assert.deepEqual(await old(tx => listMemberIdentities(tx, person.memberId)), []);
@@ -675,7 +680,7 @@ test('a workspace still on version 117 reads no identities and refuses to record
     { code: 'unsupported', status: 503 },
   );
   await assert.rejects(
-    old(tx => listMemberIdentities(tx, person.memberId), 118),
+    old(tx => listMemberIdentities(tx, person.memberId), 120),
     { code: '42P01' },
   );
 });

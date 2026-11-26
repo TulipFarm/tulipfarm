@@ -2,7 +2,7 @@ import type { Client } from 'pg';
 import { z } from 'zod';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 
-export const memberIdentitiesVersion = 118;
+export const memberIdentitiesVersion = 120;
 
 export const hasMemberIdentities = (tx: object) =>
   ((tx as { commonVersion?: number }).commonVersion ?? 0) >= memberIdentitiesVersion;
