@@ -27,13 +27,13 @@ export function heartbeatProcessor(
     const validated = inferenceRouteSchema.safeParse(model?.route);
     if (!model || !validated.success) return { kind: 'blocked', reason: 'model-configuration' };
     const header = (name: string) =>
-      input.message.headers.find(entry => entry.name.toLowerCase() === name)?.value ?? null;
+      input.message?.headers?.find(entry => entry.name.toLowerCase() === name)?.value ?? null;
     if (
       !(await heartbeatMatches(input.work.workspaceId, input.instructions, {
         from: header('from'),
         subject: header('subject'),
-        snippet: input.message.snippet,
-        body: input.message.text,
+        snippet: input.message?.snippet ?? null,
+        body: input.message?.text ?? null,
       }))
     ) {
       return 'No action needed.';
