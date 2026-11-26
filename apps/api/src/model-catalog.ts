@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied, currentMember, lockAndResolveHuman, uuidSchema } from '@tulipfarm/access';
 import {
+  equivalentPlanFamilyIds,
   isPlanProvider,
   loadModelCatalog,
   planProviderNames,
@@ -91,8 +92,25 @@ export type ModelCatalogDependencies = {
 };
 
 export type PlanUsage = NonNullable<ModelCatalogFamily['planUsage']>;
-export type PlanModelChoice = { slug: string; label: string; usage?: PlanUsage };
-type OfferedPlanModel = { provider: PlanProvider; slug: string; label: string; usage?: PlanUsage | undefined };
+export type PlanModelChoice = {
+  slug: string;
+  label: string;
+  connectionId?: string | undefined;
+  maxInputTokens?: number | undefined;
+  maxOutputTokens?: number | undefined;
+  imageInput?: boolean | undefined;
+  usage?: PlanUsage;
+};
+type OfferedPlanModel = {
+  provider: PlanProvider;
+  slug: string;
+  label: string;
+  connectionId?: string | undefined;
+  maxInputTokens?: number | undefined;
+  maxOutputTokens?: number | undefined;
+  imageInput?: boolean | undefined;
+  usage?: PlanUsage | undefined;
+};
 
 /** The plan models of plans the catalog offers. */
 function offeredPlanModels(planModels: Map<string, OfferedPlanModel>) {
@@ -137,8 +155,8 @@ function projectCatalog(
   const selectable = [
     ...listed,
     ...[...planModels.entries()].flatMap(([key, offered]) => {
-      const { provider, slug, label } = offered;
-      const id = named.has(key) ? null : planModelFamilyId(provider, slug);
+      const { provider, slug, label, connectionId } = offered;
+      const id = named.has(key) ? null : planModelFamilyId(provider, slug, connectionId);
       const model = id ? catalog.model(id) : undefined;
       if (!model || hidden.has(model.id)) return [];
       planOf.set(model.id, offered);
@@ -158,7 +176,8 @@ function projectCatalog(
   return {
     families: selectable.map((family): ModelCatalogFamily => {
       const platformResolution = resolutions.get(family.id);
-      const resolution = disabled.has(family.id) || paused(family.id) ? null : platformResolution;
+      const isDisabled = equivalentPlanFamilyIds(family.id).some(id => disabled.has(id));
+      const resolution = isDisabled || paused(family.id) ? null : platformResolution;
       const rates = (resolution?.rates ?? family.rates).filter(
         rate =>
           rate.promptTokensAbove === null &&
@@ -169,19 +188,21 @@ function projectCatalog(
       const rate = family.pricing !== 'unmetered' && rates.length === 1 ? rates[0] : undefined;
       // 10^12 pico-USD per USD and 10^12 units per credit cancel, so credits per USD equals units per pico-USD.
       const creditsPerUsd = Number(creditPricing().unitsPerPicoUsd);
+      const offeredPlan = planOf.get(family.id);
       const entry = {
         id: family.id,
         displayName: family.name,
         vendor: family.vendor,
-        currentVersion: resolution?.modelId ?? family.route.model,
+        currentVersion: offeredPlan?.slug ?? resolution?.modelId ?? family.route.model,
         provider: resolution?.route.provider ?? family.route.type,
         inputCreditsPerMillionTokens: rate ? rate.usdPerMillionTokens.input * creditsPerUsd : null,
         outputCreditsPerMillionTokens: rate ? rate.usdPerMillionTokens.output * creditsPerUsd : null,
         speed: family.speed,
         quality: family.quality,
-        imageInput: resolveModelCapabilities(family.route.type, family.capabilities).imageInput,
+        imageInput:
+          offeredPlan?.imageInput ?? resolveModelCapabilities(family.route.type, family.capabilities).imageInput,
         imageModelId: family.imageModel,
-        ...(planOf.get(family.id)?.usage ? { planUsage: planOf.get(family.id)!.usage } : {}),
+        ...(offeredPlan?.usage ? { planUsage: offeredPlan.usage } : {}),
       };
       return modelCatalogFamilySchema.parse(
         resolution
@@ -294,7 +315,13 @@ export function registerModelCatalog(app: FastifyInstance, dependencies: ModelCa
         const planModels = new Map(
           planProviderNames.flatMap(provider =>
             (offered.get(provider) ?? []).map(
-              ({ slug, label, usage }) => [`${provider}:${slug}`, { provider, slug, label, usage }] as const,
+              choice =>
+                [
+                  provider === 'byok-openai-compatible'
+                    ? `${provider}:${choice.connectionId ?? ''}:${choice.slug}`
+                    : `${provider}:${choice.slug}`,
+                  { provider, ...choice },
+                ] as const,
             ),
           ),
         );

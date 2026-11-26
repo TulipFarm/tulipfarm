@@ -328,7 +328,16 @@ export async function modelUsageReport(
 
 const connectionRow = z.object({
   id: z.string(),
-  provider: z.enum(['chatgpt', 'claude', 'copilot']),
+  provider: z.enum([
+    'chatgpt',
+    'claude',
+    'copilot',
+    'byok-anthropic',
+    'byok-openai',
+    'byok-google',
+    'byok-xai',
+    'byok-openai-compatible',
+  ]),
   owner_membership_id: z.string(),
   plan: z.string().nullable(),
   state: z.string(),

@@ -46,13 +46,42 @@ const builtInProviders = Object.keys(modelProviderDefaults) as BuiltInProvider[]
 export const chatGptProvider = 'chatgpt';
 
 /**
- * Built-in route providers that run on a member's own plan. Each has no key: each request uses the credential of a member
- * who connected that plan.
+ * Built-in route providers that run on a member's own subscription plan. Each has no deployment key: each request uses
+ * the credential of a member who connected that plan.
  */
-export const planProviders = Object.freeze({
+export const subscriptionPlanProviders = Object.freeze({
   chatgpt: { label: 'ChatGPT' },
   claude: { label: 'Claude' },
   copilot: { label: 'GitHub Copilot' },
+} as const satisfies Record<string, { label: string }>);
+export type SubscriptionPlanProvider = keyof typeof subscriptionPlanProviders;
+export const subscriptionPlanProviderNames = Object.keys(subscriptionPlanProviders) as SubscriptionPlanProvider[];
+export const isSubscriptionPlanProvider = (provider: string): provider is SubscriptionPlanProvider =>
+  Object.hasOwn(subscriptionPlanProviders, provider);
+
+/**
+ * Built-in route providers that run on a member's own API key (BYOK). Unmetered on TulipFarm credits; each request
+ * uses the member's (or shared) encrypted API key and, for `byok-openai-compatible`, their configured endpoint.
+ */
+export const byokProviders = Object.freeze({
+  'byok-anthropic': { label: 'Anthropic API', wire: 'anthropic' as const },
+  'byok-openai': { label: 'OpenAI API', wire: 'openai' as const },
+  'byok-google': { label: 'Google Gemini API', wire: 'google' as const },
+  'byok-xai': { label: 'xAI API', wire: 'xai' as const },
+  'byok-openai-compatible': { label: 'OpenAI-compatible API', wire: 'openai-compatible' as const },
+} as const);
+export type ByokProvider = keyof typeof byokProviders;
+export const byokProviderNames = Object.keys(byokProviders) as ByokProvider[];
+export const isByokProvider = (provider: string): provider is ByokProvider => Object.hasOwn(byokProviders, provider);
+export const byokWireProvider = (provider: ByokProvider) => byokProviders[provider].wire;
+
+/**
+ * All member-connected model providers (subscription plans and BYOK API keys). Each has no deployment key: requests
+ * use the credential of a member who connected it (or shared it) and spend no workspace credits.
+ */
+export const planProviders = Object.freeze({
+  ...subscriptionPlanProviders,
+  ...byokProviders,
 } as const satisfies Record<string, { label: string }>);
 export type PlanProvider = keyof typeof planProviders;
 export const planProviderNames = Object.keys(planProviders) as PlanProvider[];

@@ -103,6 +103,10 @@
       "types": "./dist/member-profiles.d.ts",
       "default": "./dist/member-profiles.js"
     },
+    "./member-identities-contracts": {
+      "types": "./dist/member-identities-contracts.d.ts",
+      "default": "./dist/member-identities-contracts.js"
+    },
     "./members": {
       "types": "./dist/members.d.ts",
       "default": "./dist/members.js"

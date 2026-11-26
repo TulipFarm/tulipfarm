@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   completeGitHubPullRequestEvent,
+  extractGitHubObservedHandles,
   githubEventInputByteLimit,
   GitHubEventError,
   matchesGitHubEvent,
@@ -191,4 +192,89 @@ test('normalized input accepts exactly 32 KiB and rejects one byte more', () => 
   );
   body.pull_request.user.login += 'x';
   assert.throws(() => normalizeGitHubEvent('pull_request', body), failure('event-input-too-large'));
+});
+
+test('normalization accepts pull request and issue users with or without numeric IDs and rejects unsafe IDs', () => {
+  const withId = payload();
+  withId.pull_request.user = { id: 424242, login: 'dhruv' };
+  const prEvent = normalizeGitHubEvent('pull_request', withId);
+  assert.equal(prEvent.kind, 'event');
+  assert.equal(prEvent.fields['pullRequest.author'], 'dhruv');
+
+  const issueComment = payload();
+  issueComment.action = 'created';
+  delete issueComment.pull_request;
+  delete issueComment.number;
+  issueComment.issue = {
+    number: 42,
+    title: 'Commented PR',
+    html_url: 'https://github.com/acme/widget/pull/42',
+    user: { id: 424242, login: 'dhruv' },
+    pull_request: { url: 'https://api.github.com/repos/acme/widget/pulls/42' },
+  };
+  issueComment.comment = { body: 'Ship it', html_url: 'https://github.com/acme/widget/pull/42#issuecomment-77' };
+  assert.equal(normalizeGitHubEvent('issue_comment', issueComment).fields['pullRequest.author'], 'dhruv');
+
+  const negativeId = payload();
+  negativeId.pull_request.user = { id: -1, login: 'dhruv' };
+  assert.throws(() => normalizeGitHubEvent('pull_request', negativeId), failure('event-invalid'));
+
+  const unsafeId = payload();
+  unsafeId.pull_request.user = { id: Number.MAX_SAFE_INTEGER + 1, login: 'dhruv' };
+  assert.throws(() => normalizeGitHubEvent('pull_request', unsafeId), failure('event-invalid'));
+});
+
+test('extractGitHubObservedHandles extracts and deduplicates standard webhook users without throwing', () => {
+  const observed = extractGitHubObservedHandles({
+    sender: { id: 101, login: 'alice' },
+    pull_request: {
+      user: { id: 101, login: 'alice', name: 'Alice Example' },
+      merged_by: { id: 102, login: 'bob', name: null },
+    },
+    issue: { user: { id: 103, login: 'carol' } },
+    comment: { user: { id: 104, login: 'dave', type: 'User' } },
+    review: { user: { id: 105, login: 'erin' } },
+    pusher: { id: 106, login: 'frank', name: 'Frank' },
+    commits: [
+      { author: { id: 107, login: 'grace', name: 'Grace' } },
+      { author: { id: 108, username: 'heidi', name: 'Heidi' } },
+      { author: { id: 101, login: 'alice-duplicate' } },
+      { author: { name: 'No ID', email: 'noid@example.com' } },
+      null,
+      'invalid-commit',
+    ],
+  });
+  assert.deepEqual(observed, [
+    { externalId: '101', handle: 'alice', displayName: 'Alice Example' },
+    { externalId: '102', handle: 'bob', displayName: null },
+    { externalId: '103', handle: 'carol' },
+    { externalId: '104', handle: 'dave' },
+    { externalId: '105', handle: 'erin' },
+    { externalId: '106', handle: 'frank', displayName: 'Frank' },
+    { externalId: '107', handle: 'grace', displayName: 'Grace' },
+    { externalId: '108', handle: 'heidi', displayName: 'Heidi' },
+  ]);
+
+  assert.deepEqual(
+    extractGitHubObservedHandles({
+      sender: { login: 'missing-id' },
+      pull_request: {
+        user: { id: 201, login: 'dependabot[bot]', type: 'Bot' },
+        merged_by: null,
+      },
+      issue: { user: { id: 0, login: 'zero-id' } },
+      comment: { user: { id: -5, login: 'neg-id' } },
+      review: { user: { id: Number.MAX_SAFE_INTEGER + 1, login: 'unsafe-id' } },
+      pusher: { name: 'git-pusher', email: 'push@example.com' },
+      commits: [
+        { author: { id: 202, login: 'bad login' } },
+        { author: { id: 203, login: 'org-actor', type: 'Organization' } },
+      ],
+    }),
+    [],
+  );
+
+  for (const invalid of [null, undefined, 42, 'not-an-object', [], { sender: 'oops', commits: 'not-an-array' }]) {
+    assert.deepEqual(extractGitHubObservedHandles(invalid), []);
+  }
 });

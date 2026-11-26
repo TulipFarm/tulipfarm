@@ -47,6 +47,21 @@ const replyFailures: Record<string, string> = {
   'model-copilot-reconnect': `GitHub Copilot needs you to sign in again before TulipFarm can use your plan. ${switchModel}`,
   'model-copilot-not-eligible': `Your GitHub Copilot plan can't run this model, or a Copilot policy blocks it. ${switchModel}`,
   'model-copilot-member-required': `Copilot plan models run only in your own chats, after you connect GitHub Copilot in Models settings. ${switchModel}`,
+  'model-byok-anthropic-usage-limit': `Your Anthropic API key hit its rate limit or billing quota. Check your Anthropic console. ${switchModel}`,
+  'model-byok-anthropic-reconnect': `Your Anthropic API key was rejected. Update it in Models settings under API keys. ${switchModel}`,
+  'model-byok-anthropic-member-required': `This model uses an Anthropic API key. Connect one in Models settings under API keys. ${switchModel}`,
+  'model-byok-openai-usage-limit': `Your OpenAI API key hit its rate limit or billing quota. Check your OpenAI billing settings. ${switchModel}`,
+  'model-byok-openai-reconnect': `Your OpenAI API key was rejected. Update it in Models settings under API keys. ${switchModel}`,
+  'model-byok-openai-member-required': `This model uses an OpenAI API key. Connect one in Models settings under API keys. ${switchModel}`,
+  'model-byok-google-usage-limit': `Your Google AI Studio API key hit its rate limit or billing quota. Check your Google AI Studio settings. ${switchModel}`,
+  'model-byok-google-reconnect': `Your Google AI Studio API key was rejected. Update it in Models settings under API keys. ${switchModel}`,
+  'model-byok-google-member-required': `This model uses a Google AI Studio API key. Connect one in Models settings under API keys. ${switchModel}`,
+  'model-byok-xai-usage-limit': `Your xAI API key hit its rate limit or billing quota. Check your xAI console. ${switchModel}`,
+  'model-byok-xai-reconnect': `Your xAI API key was rejected. Update it in Models settings under API keys. ${switchModel}`,
+  'model-byok-xai-member-required': `This model uses an xAI API key. Connect one in Models settings under API keys. ${switchModel}`,
+  'model-byok-openai-compatible-usage-limit': `Your custom API key hit its rate limit or billing quota. Check your provider account. ${switchModel}`,
+  'model-byok-openai-compatible-reconnect': `Your custom API key was rejected. Update it in Models settings under API keys. ${switchModel}`,
+  'model-byok-openai-compatible-member-required': `This model uses a custom API key. Connect one in Models settings under API keys. ${switchModel}`,
 };
 
 /** The ChatGPT usage page, where a member reviews their plan and TulipFarm's limit. */
@@ -57,17 +72,37 @@ export const planUsageUrls = {
   chatgpt: chatGptUsageUrl,
   claude: 'https://claude.ai/settings/usage',
   copilot: 'https://github.com/settings/copilot',
+  'byok-anthropic': 'https://console.anthropic.com/settings/billing',
+  'byok-openai': 'https://platform.openai.com/usage',
+  'byok-google': 'https://aistudio.google.com/apikey',
+  'byok-xai': 'https://console.x.ai',
+  'byok-openai-compatible': '',
 } as const;
-export const planLabels = { chatgpt: 'ChatGPT', claude: 'Claude', copilot: 'GitHub Copilot' } as const;
+export const planLabels = {
+  chatgpt: 'ChatGPT',
+  claude: 'Claude',
+  copilot: 'GitHub Copilot',
+  'byok-anthropic': 'Anthropic API key',
+  'byok-openai': 'OpenAI API key',
+  'byok-google': 'Google AI Studio API key',
+  'byok-xai': 'xAI API key',
+  'byok-openai-compatible': 'Custom API key',
+} as const;
 
 /** The recovery action a failed plan reply offers, if any. */
 export function planFailureAction(
   code: string | null | undefined,
 ): { kind: 'manage-usage'; label: string; href: string } | { kind: 'reconnect'; label: string } | null {
-  const match = /^model-(chatgpt|claude|copilot)-(usage-limit|reconnect)$/.exec(code ?? '');
+  const match =
+    /^model-(chatgpt|claude|copilot|byok-anthropic|byok-openai|byok-google|byok-xai|byok-openai-compatible)-(usage-limit|reconnect)$/.exec(
+      code ?? '',
+    );
   if (!match) return null;
   const provider = match[1] as keyof typeof planLabels;
-  if (match[2] === 'usage-limit') return { kind: 'manage-usage', label: 'Manage usage', href: planUsageUrls[provider] };
+  if (match[2] === 'usage-limit') {
+    const href = planUsageUrls[provider];
+    return href ? { kind: 'manage-usage', label: 'Manage usage', href } : null;
+  }
   return { kind: 'reconnect', label: `Reconnect ${planLabels[provider]}` };
 }
 

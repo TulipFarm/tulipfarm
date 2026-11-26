@@ -44,10 +44,12 @@ export {
   type SlackReactionRequest,
 } from './message-source.ts';
 export {
+  extractSlackUserMentions,
   slackMessageText,
   matchesSlackSnapshot,
   sameSlackPublicationText,
   slackThreadPrompt,
+  type SlackResolvedMember,
 } from './message-content.ts';
 export { SlackApiError, type SlackApiErrorCode } from './web-api.ts';
 export * from './action-contracts.ts';

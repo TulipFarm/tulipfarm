@@ -4,7 +4,8 @@ import { workspaceModelsRoute } from '@/router';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { BrandIcon, type Brand } from '@tulipfarm/sprout/brand-icon';
 import { Button } from '@tulipfarm/sprout/button';
-import { ArrowUpRightIcon, ImageIcon, KeyIcon, MinimizeIcon } from '@tulipfarm/icons';
+import { ImageIcon, KeyIcon, MinimizeIcon } from '@tulipfarm/icons';
+import { isByokProvider } from './byok-plan-api';
 import { useChatGptConnection, useTokenConnection } from './plan-connections';
 import type { TokenConnection } from './token-plan-api';
 import {
@@ -18,6 +19,8 @@ import {
   type Subscription,
 } from './subscription-sharing';
 
+export { ApiKeysPane } from './byok-keys-pane';
+
 /** What the Models page shows on the right: one model source, or a workspace setting. */
 export type ModelSource =
   | 'access'
@@ -29,11 +32,21 @@ export type ModelSource =
   | 'images'
   | `plan:${string}`;
 
-const providerBrands: Record<Subscription['provider'], Brand> = {
+const providerBrands: Record<Subscription['provider'], Brand | null> = {
   chatgpt: 'openai',
   claude: 'claude',
   copilot: 'github',
+  'byok-anthropic': 'claude',
+  'byok-openai': 'openai',
+  'byok-google': 'gemini',
+  'byok-xai': 'grok',
+  'byok-openai-compatible': null,
 };
+
+function ProviderMark({ provider, size }: { provider: Subscription['provider']; size: 'inline' | 'sm' }) {
+  const brand = providerBrands[provider];
+  return brand ? <BrandIcon brand={brand} size={size} /> : <KeyIcon size="sm" aria-hidden="true" />;
+}
 
 function Tile({ children, muted }: { children: ReactNode; muted?: boolean }) {
   return (
@@ -109,6 +122,20 @@ export function ModelSources({
   const offered = !(chatGpt.state.kind === 'unavailable' || (chatGpt.state.kind === 'ready' && !chatGpt.state.data));
   const shared =
     read.state.kind === 'ready' ? read.state.data.filter(item => !item.mine && item.state !== 'signed-out') : [];
+  const ownKeys =
+    read.state.kind === 'ready'
+      ? read.state.data.filter(item => item.mine && isByokProvider(item.provider) && item.state !== 'signed-out')
+      : [];
+  const keysDetail =
+    read.state.kind === 'loading'
+      ? 'Checking…'
+      : ownKeys.length === 0
+        ? 'Not connected'
+        : ownKeys.some(item => item.state === 'reconnect-required')
+          ? 'Needs reconnect'
+          : ownKeys.length === 1
+            ? (ownKeys[0]?.account ?? '1 key connected')
+            : `${ownKeys.length} keys connected`;
   const chatGptDetail =
     chatGpt.state.kind === 'loading'
       ? 'Checking…'
@@ -179,11 +206,11 @@ export function ModelSources({
               item(
                 `plan:${plan.connectionId}`,
                 <Tile>
-                  <BrandIcon brand={providerBrands[plan.provider]} size="inline" />
+                  <ProviderMark provider={plan.provider} size="inline" />
                 </Tile>,
                 providerLabels[plan.provider],
                 plan.state === 'connected'
-                  ? `${people.name(plan.ownerMembershipId)}’s plan`
+                  ? `${people.name(plan.ownerMembershipId)}’s ${isByokProvider(plan.provider) ? 'key' : 'plan'}`
                   : planStates[plan.state].label,
               ),
             )}
@@ -192,11 +219,11 @@ export function ModelSources({
         <RailGroup label="API keys">
           {item(
             'keys',
-            <Tile muted>
+            <Tile muted={ownKeys.length === 0}>
               <KeyIcon size="sm" aria-hidden="true" />
             </Tile>,
-            'Add API key',
-            'Coming soon',
+            'API keys',
+            keysDetail,
           )}
         </RailGroup>
         <RailGroup label="Settings">
@@ -232,17 +259,19 @@ export function SharedPlanPane({ workspaceId, connectionId }: { workspaceId: str
   const plan = read.state.data.find(item => item.connectionId === connectionId);
   if (!plan) return <p className="text-sm text-muted-foreground">This plan is no longer shared with you.</p>;
   const provider = providerLabels[plan.provider];
+  const noun = isByokProvider(plan.provider) ? 'key' : 'plan';
   return (
     <div className="grid gap-5">
       <header className="flex flex-wrap items-start gap-3">
-        <BrandIcon brand={providerBrands[plan.provider]} size="sm" />
+        <ProviderMark provider={plan.provider} size="sm" />
         <div className="min-w-0 flex-1">
           <h2 className="flex flex-wrap items-center gap-2 text-lg font-medium">
-            {provider} plan
+            {isByokProvider(plan.provider) ? provider : `${provider} plan`}
             <Badge variant={planStates[plan.state].variant}>{planStates[plan.state].label}</Badge>
           </h2>
           <p className="text-sm text-muted-foreground">
-            {people.name(plan.ownerMembershipId)}’s plan{plan.account ? ` · ${plan.account}` : ''}
+            {people.name(plan.ownerMembershipId)}’s {noun}
+            {plan.account ? ` · ${plan.account}` : ''}
           </p>
           {plan.grants && <p className="text-sm text-muted-foreground">Shared with: {audience(plan.grants, people)}</p>}
         </div>
@@ -253,63 +282,13 @@ export function SharedPlanPane({ workspaceId, connectionId }: { workspaceId: str
         )}
       </header>
       <p className="text-sm text-muted-foreground">
-        Use this plan’s models in your chats. Usage counts against {people.name(plan.ownerMembershipId)}’s {provider}{' '}
-        plan, not workspace credits.
+        Use this {noun}’s models in your chats. Usage counts against {people.name(plan.ownerMembershipId)}’s {provider}
+        {isByokProvider(plan.provider) ? '' : ' plan'}, not workspace credits.
       </p>
       <PlanModels workspaceId={workspaceId} subscription={plan} people={people} />
       {sharing && (
         <ShareDialog workspaceId={workspaceId} subscription={plan} people={people} close={() => setSharing(false)} />
       )}
-    </div>
-  );
-}
-
-const keyProviders: { name: string; brand: Brand | null; url: string | null }[] = [
-  { name: 'OpenAI', brand: 'openai', url: 'https://platform.openai.com/api-keys' },
-  { name: 'Anthropic', brand: 'claude', url: 'https://console.anthropic.com/settings/keys' },
-  { name: 'Google AI Studio', brand: 'gemini', url: 'https://aistudio.google.com/apikey' },
-  { name: 'OpenRouter', brand: null, url: 'https://openrouter.ai/keys' },
-  { name: 'xAI', brand: 'grok', url: 'https://console.x.ai' },
-  { name: 'Any OpenAI-compatible server', brand: null, url: null },
-];
-
-/** Bring-your-own API keys, not supported yet. */
-export function ApiKeysPane() {
-  return (
-    <div className="grid gap-5">
-      <header>
-        <h2 className="flex items-center gap-2 text-lg font-medium">
-          API keys <Badge variant="secondary">Coming soon</Badge>
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          Soon you’ll be able to add your own API key from an AI provider. Requests will be billed to your provider
-          account, not workspace credits.
-        </p>
-      </header>
-      <ul className="divide-y rounded-md border px-3">
-        {keyProviders.map(provider => (
-          <li key={provider.name} className="flex items-center gap-3 py-2.5 text-sm">
-            {provider.brand ? (
-              <BrandIcon brand={provider.brand} size="inline" />
-            ) : (
-              <span className="text-muted-foreground">
-                <KeyIcon size="sm" aria-hidden="true" />
-              </span>
-            )}
-            <span className="flex-1">{provider.name}</span>
-            {provider.url && (
-              <a
-                href={provider.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline"
-              >
-                Get a key <ArrowUpRightIcon size="xs" aria-hidden="true" />
-              </a>
-            )}
-          </li>
-        ))}
-      </ul>
     </div>
   );
 }

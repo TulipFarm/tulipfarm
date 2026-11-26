@@ -5,7 +5,13 @@ import type { SlackActionsFactory } from '@tulipfarm/agents/slack-actions';
 import { requireDraftSources } from '@tulipfarm/agents/draft-sources';
 import { coordinatorReplyBudget, recordCoordinatorReplyTime } from '@tulipfarm/agents/plan-runtime';
 import type { InferenceUsage, ToolModelMeter } from '@tulipfarm/agents/inference';
-import { calculateUsageCost, isPlanProvider, reserveModelCost, usageTokenCounts } from '@tulipfarm/config';
+import {
+  calculateUsageCost,
+  isByokProvider,
+  isPlanProvider,
+  reserveModelCost,
+  usageTokenCounts,
+} from '@tulipfarm/config';
 import { modelFallbackReason } from '@tulipfarm/config/model-fallback';
 import {
   renewConversationReplyLease,
@@ -203,9 +209,9 @@ export async function beginReplySession(input: {
   const chatId = (step: number) => `chat:${fence.turnId}:${fence.generation}:${fence.epoch}:${step}`;
   const planRate = creditRates().plan;
   const listedModels = new Map<ConversationModel, ListedModel | null>();
-  /** The listed model that values a call on a member's plan, or null for a call paid with credits or none listed. */
+  /** The listed model that values a call on a member's plan, or null for a BYOK/credit call or none listed. */
   const listedFor = (model: ConversationModel) => {
-    if (!isPlanProvider(model.route.provider)) return null;
+    if (!isPlanProvider(model.route.provider) || isByokProvider(model.route.provider)) return null;
     if (!listedModels.has(model)) listedModels.set(model, planListModel(model.route.model));
     return listedModels.get(model)!;
   };

@@ -23,9 +23,17 @@
       "types": "./dist/token-plans.d.ts",
       "default": "./dist/token-plans.js"
     },
+    "./byok-plans": {
+      "types": "./dist/byok-plans.d.ts",
+      "default": "./dist/byok-plans.js"
+    },
     "./contracts": {
       "types": "./dist/contracts.d.ts",
       "default": "./dist/contracts.js"
+    },
+    "./member-identities": {
+      "types": "./dist/member-identities.d.ts",
+      "default": "./dist/member-identities.js"
     },
     "./subscriptions": {
       "types": "./dist/subscriptions.d.ts",
@@ -40,6 +48,7 @@
   },
   "dependencies": {
     "@tulipfarm/access": "workspace:*",
+    "@tulipfarm/config": "workspace:*",
     "@tulipfarm/keyring": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/workspace-storage": "workspace:*",

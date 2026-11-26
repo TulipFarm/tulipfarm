@@ -35,7 +35,7 @@ test(
         INTEGRATION_CREDENTIAL_KEY_ID: 'plan-chat',
       }),
     );
-    t.after(useModelCatalog(['claude-haiku', 'claude-sonnet', 'claude-plan-sonnet']));
+    t.after(useModelCatalog(['claude-haiku', 'claude-sonnet']));
     const requests = [];
     t.mock.method(globalThis, 'fetch', async url => {
       requests.push(String(url));
@@ -177,7 +177,7 @@ test(
         INTEGRATION_CREDENTIAL_KEY_ID: 'plan-chat',
       }),
     );
-    t.after(useModelCatalog(['claude-haiku', 'claude-sonnet', 'claude-plan-sonnet']));
+    t.after(useModelCatalog(['claude-haiku', 'claude-sonnet']));
     t.mock.method(globalThis, 'fetch', async () => {
       throw new Error('Unexpected fetch');
     });

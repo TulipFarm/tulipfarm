@@ -20,7 +20,9 @@ import {
 import { z } from 'zod';
 import { fitFileImportSelection, parseImportFile, TableImportError } from '@tulipfarm/tables/imports';
 import {
+  byokWireProvider,
   estimateInputTokens,
+  isByokProvider,
   modelApiSupported,
   modelEndpointProblem,
   modelCapabilities,
@@ -176,6 +178,22 @@ export const inferenceRouteSchema = z
     // A member's Claude or GitHub Copilot plan, answered through the vendor's agent SDK with the member's token.
     z.strictObject({ provider: z.literal('claude'), ...routeFields, accessToken: credentialSchema.optional() }),
     z.strictObject({ provider: z.literal('copilot'), ...routeFields, accessToken: credentialSchema.optional() }),
+    // A member's BYOK API keys: the worker adds the member's decrypted API key (and custom endpoint) per reply.
+    z.strictObject({ provider: z.literal('byok-anthropic'), ...routeFields, accessToken: credentialSchema.optional() }),
+    z.strictObject({ provider: z.literal('byok-openai'), ...routeFields, accessToken: credentialSchema.optional() }),
+    z.strictObject({ provider: z.literal('byok-xai'), ...routeFields, accessToken: credentialSchema.optional() }),
+    z.strictObject({
+      provider: z.literal('byok-google'),
+      ...routeFields,
+      model: z.string().regex(/^[a-zA-Z0-9._:/@-]{1,200}$/),
+      accessToken: credentialSchema.optional(),
+    }),
+    z.strictObject({
+      provider: z.literal('byok-openai-compatible'),
+      ...routeFields,
+      model: z.string().regex(/^[a-zA-Z0-9._:/@-]{1,200}$/),
+      accessToken: credentialSchema.optional(),
+    }),
     z.strictObject({
       provider: z.literal('openai-compatible'),
       ...routeFields,
@@ -212,10 +230,30 @@ type ParsedRoute = z.output<typeof inferenceRouteSchema>;
 /** Azure Foundry, OpenAI, xAI and OpenAI-compatible endpoints share the chat-completions and responses wire format. */
 export type OpenAiShapedRoute = Extract<
   ParsedRoute,
-  { provider: 'azure' | 'openai' | 'xai' | 'openai-compatible' | 'chatgpt' | 'copilot' }
+  {
+    provider:
+      | 'azure'
+      | 'openai'
+      | 'xai'
+      | 'openai-compatible'
+      | 'chatgpt'
+      | 'copilot'
+      | 'byok-openai'
+      | 'byok-xai'
+      | 'byok-openai-compatible';
+  }
 >;
-/** Routes that run on a member's own plan and carry that member's token per reply. */
-export const planRouteProviders = ['chatgpt', 'claude', 'copilot'] as const;
+/** Routes that run on a member's own plan or BYOK API key and carry that member's credential per reply. */
+export const planRouteProviders = [
+  'chatgpt',
+  'claude',
+  'copilot',
+  'byok-anthropic',
+  'byok-openai',
+  'byok-google',
+  'byok-xai',
+  'byok-openai-compatible',
+] as const;
 export type PlanRouteProvider = (typeof planRouteProviders)[number];
 export function isPlanRoute<T extends { provider: string }>(
   route: T,
@@ -225,8 +263,12 @@ export function isPlanRoute<T extends { provider: string }>(
 const planSessionRoute = (route: { provider: string }): route is { provider: PlanSessionProvider } =>
   route.provider === 'claude' || route.provider === 'copilot';
 /** The Anthropic key header; a Claude plan route answers through the SDK and sends none. */
-const anthropicKey = (config: Extract<ParsedRoute, { provider: 'anthropic' | 'claude' }>) =>
-  config.provider === 'claude' ? {} : { 'x-api-key': config.apiKey };
+const anthropicKey = (config: Extract<ParsedRoute, { provider: 'anthropic' | 'claude' | 'byok-anthropic' }>) =>
+  config.provider === 'claude'
+    ? {}
+    : { 'x-api-key': config.provider === 'byok-anthropic' ? (config.accessToken ?? '') : config.apiKey };
+const googleKey = (config: Extract<ParsedRoute, { provider: 'google' | 'byok-google' }>) =>
+  config.provider === 'byok-google' ? (config.accessToken ?? '') : config.apiKey;
 
 /**
  * Base URL of the OpenAI-shaped APIs and the credential header of the route. An endpoint without a path gets `v1/`;
@@ -235,6 +277,17 @@ const anthropicKey = (config: Extract<ParsedRoute, { provider: 'anthropic' | 'cl
 export function openAiWire(config: OpenAiShapedRoute) {
   if (config.provider === 'chatgpt' || config.provider === 'copilot')
     return { base: config.endpoint, auth: { authorization: 'Bearer ' + (config.accessToken ?? '') } };
+  if (
+    config.provider === 'byok-openai' ||
+    config.provider === 'byok-xai' ||
+    config.provider === 'byok-openai-compatible'
+  ) {
+    const endpoint = config.endpoint.endsWith('/') ? config.endpoint : `${config.endpoint}/`;
+    return {
+      base: new URL(endpoint).pathname === '/' ? `${endpoint}v1/` : endpoint,
+      auth: { authorization: `Bearer ${config.accessToken ?? ''}` },
+    };
+  }
   if (config.provider !== 'azure')
     return {
       base: new URL(config.endpoint).pathname === '/' ? `${config.endpoint}v1/` : config.endpoint,
@@ -305,7 +358,8 @@ export type InferenceFailure =
   | PlanRouteFailure;
 /** Why a subscription plan could not answer, so the next plan the requester may use is tried. */
 export type PlanFailure = 'usage-limit' | 'reconnect' | 'not-eligible';
-const planFailurePattern = /^model-(?:chatgpt|claude|copilot)-(usage-limit|reconnect|not-eligible)$/;
+const planFailurePattern =
+  /^model-(?:chatgpt|claude|copilot|byok-anthropic|byok-openai|byok-google|byok-xai|byok-openai-compatible)-(usage-limit|reconnect|not-eligible)$/;
 export function planFailure(error: unknown): PlanFailure | undefined {
   return error instanceof Error ? (planFailurePattern.exec(error.message)?.[1] as PlanFailure | undefined) : undefined;
 }
@@ -632,7 +686,8 @@ function usage(route: CapableRoute, body: unknown): InferenceUsage {
   } satisfies InferenceUsage;
   switch (route.provider) {
     case 'anthropic':
-    case 'claude': {
+    case 'claude':
+    case 'byok-anthropic': {
       const parsed = anthropicUsageSchema.safeParse(body);
       if (!parsed.success) return unknown;
       const u = parsed.data.usage;
@@ -654,10 +709,14 @@ function usage(route: CapableRoute, body: unknown): InferenceUsage {
     case 'openai':
     case 'xai':
     case 'openai-compatible':
+    case 'byok-openai':
+    case 'byok-xai':
+    case 'byok-openai-compatible':
     case 'azure': {
       return openAiUsage(routeCapabilities(route), body);
     }
-    case 'google': {
+    case 'google':
+    case 'byok-google': {
       const parsed = googleUsageSchema.safeParse(body);
       if (!parsed.success) return unknown;
       const u = parsed.data.usageMetadata;
@@ -805,6 +864,12 @@ export function httpFailure(
     if (has('plan_not_eligible')) return `${provider}-not-eligible`;
     if (has('plan_unavailable')) return 'unavailable';
   }
+  if (isByokProvider(provider)) {
+    const wire = httpFailure(status, body, byokWireProvider(provider), retryAfterMs);
+    if (wire === 'authentication') return `${provider}-reconnect`;
+    if (wire === 'quota' || wire === 'rate-limit') return `${provider}-usage-limit`;
+    return wire;
+  }
   if (status === 401 || has('authentication_error', 'unauthenticated', 'invalid_api_key')) return 'authentication';
   // xAI answers a wrong key with 400 "Incorrect API key provided".
   if (provider === 'xai' && status === 400 && /api key/i.test(message)) return 'authentication';
@@ -933,7 +998,8 @@ function decision(
     text.trim() ? { kind: 'decision' as const, value: { decision: { kind: 'answer', text } } } : invalid;
   switch (route.provider) {
     case 'anthropic':
-    case 'claude': {
+    case 'claude':
+    case 'byok-anthropic': {
       const parsed = anthropicResponseSchema.safeParse(body);
       if (!parsed.success) return invalid;
       const data = parsed.data;
@@ -952,6 +1018,9 @@ function decision(
     case 'openai':
     case 'xai':
     case 'openai-compatible':
+    case 'byok-openai':
+    case 'byok-xai':
+    case 'byok-openai-compatible':
     case 'azure': {
       if (capabilities.api === 'responses') {
         const parsed = responsesResponseSchema.safeParse(body);
@@ -1010,7 +1079,8 @@ function decision(
         return invalid;
       }
     }
-    case 'google': {
+    case 'google':
+    case 'byok-google': {
       const feedback = googlePromptFeedbackSchema.safeParse(body);
       if (
         feedback.success &&
@@ -1419,8 +1489,9 @@ function chatWire(
   switch (config.provider) {
     case 'anthropic':
     case 'claude':
+    case 'byok-anthropic':
       return {
-        url: `${config.endpoint}v1/messages`,
+        url: `${config.endpoint.replace(/\/+$/, '')}/v1/messages`,
         headers: { ...headers, ...anthropicKey(config), 'anthropic-version': '2023-06-01' },
         body: {
           model: config.model,
@@ -1443,6 +1514,9 @@ function chatWire(
     case 'openai':
     case 'xai':
     case 'openai-compatible':
+    case 'byok-openai':
+    case 'byok-xai':
+    case 'byok-openai-compatible':
     case 'azure':
       return openAiShapedRequest(
         config,
@@ -1457,9 +1531,12 @@ function chatWire(
         schema,
       );
     case 'google':
+    case 'byok-google': {
+      const base = config.endpoint.replace(/\/+$/, '');
+      const googleBase = base.endsWith('/v1beta') ? base : `${base}/v1beta`;
       return {
-        url: `${config.endpoint}v1beta/models/${config.model}:generateContent`,
-        headers: { ...headers, 'x-goog-api-key': config.apiKey },
+        url: `${googleBase}/models/${config.model}:generateContent`,
+        headers: { ...headers, 'x-goog-api-key': googleKey(config) },
         body: {
           systemInstruction: { parts: [{ text: system }] },
           contents: context.map(message => ({
@@ -1472,6 +1549,7 @@ function chatWire(
           },
         },
       };
+    }
   }
 }
 /**
@@ -1532,6 +1610,12 @@ export type ToolInferenceContext = {
   apps?: AppKind | undefined;
   /** Deferred chat tools, by framework name, offered from the first round without a `tools_search`. */
   preloadedTools?: readonly string[];
+  /** Loads reviewed workspace skills selected by the decision model before round 1. */
+  loadPreloadedSkills?:
+    | ((
+        skills: readonly { id: string; revision: string }[],
+      ) => Promise<readonly { id: string; name: string; description?: string | undefined; instructions: string }[]>)
+    | undefined;
   /** Built-in procedures resolved by the server for this request, not names extracted from message text. */
   builtinSkills?: readonly string[] | undefined;
   agentBuilderUrl?: string;
@@ -1563,7 +1647,12 @@ export type ToolInferenceContext = {
    * its usage limit, lost its sign-in or was refused, before the step produced output. Null when no plan is left; the
    * configured `fallback` then answers as for any other failure.
    */
-  nextPlanCredential?: ((failure: PlanFailure, retryAfterMs?: number) => Promise<string | null>) | undefined;
+  nextPlanCredential?:
+    | ((
+        failure: PlanFailure,
+        retryAfterMs?: number,
+      ) => Promise<string | { token: string; endpoint?: string | null; model?: string | null } | null>)
+    | undefined;
   /**
    * Counts the requester's undecided review and approval cards in this chat, read fresh from storage. A reply may point
    * to such a card without a tool call; without this read, every card claim needs a card made in the reply.
@@ -1760,7 +1849,8 @@ function nativeStep(route: CapableRoute, body: unknown): NativeStep {
   };
   switch (route.provider) {
     case 'anthropic':
-    case 'claude': {
+    case 'claude':
+    case 'byok-anthropic': {
       const parsed = anthropicNativeSchema.safeParse(body);
       if (!parsed.success) return invalid('schema');
       const data = parsed.data;
@@ -1783,6 +1873,9 @@ function nativeStep(route: CapableRoute, body: unknown): NativeStep {
     case 'openai':
     case 'xai':
     case 'openai-compatible':
+    case 'byok-openai':
+    case 'byok-xai':
+    case 'byok-openai-compatible':
     case 'azure': {
       if (routeCapabilities(route).api === 'responses') {
         const parsed = responsesNativeSchema.safeParse(body);
@@ -1835,7 +1928,8 @@ function nativeStep(route: CapableRoute, body: unknown): NativeStep {
       }
       return step(withoutReasoningMarkup(choice.message.content ?? ''), calls, null);
     }
-    case 'google': {
+    case 'google':
+    case 'byok-google': {
       const feedback = googlePromptFeedbackSchema.safeParse(body);
       if (
         feedback.success &&
@@ -1961,7 +2055,8 @@ function nativeWire(
   const system = blocks.join('\n\n');
   switch (config.provider) {
     case 'anthropic':
-    case 'claude': {
+    case 'claude':
+    case 'byok-anthropic': {
       const messages = items.map(item => {
         if (item.kind === 'turn') return { role: item.turn.role, content: turnContent(config, item.turn) };
         if (item.kind === 'model')
@@ -1983,7 +2078,7 @@ function nativeWire(
         };
       });
       return {
-        url: `${config.endpoint}v1/messages`,
+        url: `${config.endpoint.replace(/\/+$/, '')}/v1/messages`,
         headers: { ...headers, ...anthropicKey(config), 'anthropic-version': '2023-06-01' },
         body: {
           model: config.model,
@@ -2010,6 +2105,9 @@ function nativeWire(
     case 'openai':
     case 'xai':
     case 'openai-compatible':
+    case 'byok-openai':
+    case 'byok-xai':
+    case 'byok-openai-compatible':
     case 'azure': {
       const { base, auth } = openAiWire(config);
       const capabilities = routeCapabilities(config);
@@ -2108,7 +2206,8 @@ function nativeWire(
         },
       };
     }
-    case 'google': {
+    case 'google':
+    case 'byok-google': {
       const contents = items.map(item => {
         if (item.kind === 'turn')
           return { role: item.turn.role === 'user' ? 'user' : 'model', parts: googleParts(config, item.turn) };
@@ -2124,9 +2223,11 @@ function nativeWire(
           })),
         };
       });
+      const base = config.endpoint.replace(/\/+$/, '');
+      const googleBase = base.endsWith('/v1beta') ? base : `${base}/v1beta`;
       return {
-        url: `${config.endpoint}v1beta/models/${config.model}:generateContent`,
-        headers: { ...headers, 'x-goog-api-key': config.apiKey },
+        url: `${googleBase}/models/${config.model}:generateContent`,
+        headers: { ...headers, 'x-goog-api-key': googleKey(config) },
         body: {
           systemInstruction: { parts: [{ text: system }] },
           contents,
@@ -4099,7 +4200,8 @@ export type ContentInferenceResult =
 function contentAnswer(route: CapableRoute, body: unknown): ContentInferenceResult | undefined {
   switch (route.provider) {
     case 'anthropic':
-    case 'claude': {
+    case 'claude':
+    case 'byok-anthropic': {
       const parsed = anthropicResponseSchema.safeParse(body);
       if (!parsed.success) return undefined;
       const text = parsed.data.content.flatMap(block => (block.type === 'text' ? [block.text] : [])).join('');
@@ -4112,6 +4214,9 @@ function contentAnswer(route: CapableRoute, body: unknown): ContentInferenceResu
     case 'openai':
     case 'xai':
     case 'openai-compatible':
+    case 'byok-openai':
+    case 'byok-xai':
+    case 'byok-openai-compatible':
     case 'azure': {
       if (routeCapabilities(route).api === 'responses') {
         const parsed = responsesResponseSchema.safeParse(body);
@@ -4140,7 +4245,8 @@ function contentAnswer(route: CapableRoute, body: unknown): ContentInferenceResu
       if (choice.finish_reason === 'length') return { kind: 'truncated', text };
       return choice.finish_reason === 'stop' ? { kind: 'answer', text } : undefined;
     }
-    case 'google': {
+    case 'google':
+    case 'byok-google': {
       const feedback = googlePromptFeedbackSchema.safeParse(body);
       if (
         feedback.success &&
@@ -4333,6 +4439,10 @@ export async function inferWithTools(
     }
   }
   let inventory: WorkspaceInventory | undefined;
+  let preloadedSkills:
+    | readonly { id: string; name: string; description?: string | undefined; instructions: string }[]
+    | undefined;
+  let skillPreloadAttempted = false;
   const latestHuman = [...sourceMessages].reverse().find(turn => turn.role === 'user');
   const requestedTables = () => namedInventoryTables(latestHuman ? textTurn(latestHuman).text : '', inventory);
   const inventoryCheckNeeded = () => requestedTables().length > 0 && !workToolUsed;
@@ -4779,6 +4889,7 @@ export async function inferWithTools(
       if (!diagnostics) throw error;
     }
     // A plan that ran out or lost its sign-in hands the step to the next plan the requester may use, before any fallback.
+    const baseConfig = config;
     let planFailed = 'error' in first ? planFailure(first.error) : undefined;
     while (
       planFailed &&
@@ -4787,9 +4898,18 @@ export async function inferWithTools(
       !outputProduced &&
       answeredBy === undefined
     ) {
-      const token = await tools.nextPlanCredential(planFailed, diagnostics.retryAfterMs);
-      if (!token || !isPlanRoute(config)) break;
-      config = { ...config, accessToken: token };
+      const nextCredential = await tools.nextPlanCredential(planFailed, diagnostics.retryAfterMs);
+      if (!nextCredential || !isPlanRoute(baseConfig)) break;
+      const token = typeof nextCredential === 'string' ? nextCredential : nextCredential.token;
+      const endpoint = typeof nextCredential === 'string' ? null : (nextCredential.endpoint ?? null);
+      const nextModel = typeof nextCredential === 'string' ? null : (nextCredential.model ?? null);
+      // Rebuild from the original route and re-validate so a previous attempt's endpoint can never leak into the next.
+      config = inferenceRouteSchema.parse({
+        ...baseConfig,
+        endpoint: endpoint ?? baseConfig.endpoint,
+        model: nextModel ?? baseConfig.model,
+        accessToken: token,
+      });
       try {
         const value = await call(config);
         if (outputProduced || !invalid?.(value)) return value;
@@ -5533,6 +5653,32 @@ export async function inferWithTools(
           tools?.projectInstructions === undefined
             ? await observeChatDetail('inventory', async () => tools?.readWorkspaceInventory?.())
             : undefined;
+        if (!skillPreloadAttempted && tools?.decisions?.preloadSkills && inventory?.skills.length && request) {
+          skillPreloadAttempted = true;
+          const matchedIds: string[] = await observeChatDetail('tool-preload', () =>
+            tools.decisions!.preloadSkills!({
+              request,
+              skills: inventory!.skills,
+              signal,
+            }).catch(() => [] as string[]),
+          );
+          if (matchedIds.length) {
+            for (const toolName of [
+              'skills_list',
+              'skills_workspace',
+              'skills_load',
+              'skills_files_read',
+              'skills_execute',
+            ])
+              loaded.add(toolName);
+            const matched = inventory.skills.filter(skill => matchedIds.includes(skill.id));
+            if (matched.length && tools.loadPreloadedSkills) {
+              preloadedSkills = await tools
+                .loadPreloadedSkills(matched.map(skill => ({ id: skill.id, revision: skill.revision })))
+                .catch(() => undefined);
+            }
+          }
+        }
         if (!rowReviewCandidate) {
           rowReviewCandidate = rowReviewPrefilter(
             sourceMessages.map(textTurn),
@@ -5584,6 +5730,7 @@ export async function inferWithTools(
                   browser: tools?.browser ?? false,
                   personalMemory,
                   inventory,
+                  preloadedSkills,
                 },
                 timeZone,
               ),
@@ -6062,6 +6209,15 @@ export async function inferWithTools(
           },
         );
         continue;
+      }
+      if (rowReviewCandidate && !rowReviewRequested && !rowReviewIntentChecked && tools?.decisions?.rowReviewIntent) {
+        const intent = await tools.decisions.rowReviewIntent(request, signal).catch(() => undefined);
+        if (intent === false) {
+          rowReviewCandidate = undefined;
+          rowReviewIntentChecked = true;
+        } else if (intent === true) {
+          rowReviewRequested = true;
+        }
       }
       const reviewReply = (await tableReviewReply()) ?? (rowReviewRequested ? undefined : skillReviewReply());
       const refusedBatch = refusedSourceBatch(items);
@@ -6706,13 +6862,14 @@ export async function inferWithTools(
         if (instruction && value && typeof value === 'object') value = { ...value, instruction };
       }
       if (call.tool === 'members.find') {
-        if (call.query === undefined) directoryAttempted = true;
+        const unfiltered = !call.query?.trim() && !call.provider?.trim();
+        if (unfiltered) directoryAttempted = true;
         const found = workspaceDirectorySchema.safeParse(value);
         if (found.success) {
           directoryCheckNeeded ||= !invitationLookup(sourceMessages);
           directorySucceeded = true;
-          directoryMatches = { ...found.data, scope: call.query === undefined ? found.data.scope : 'filtered' };
-          if (call.query === undefined && found.data.scope !== 'filtered') directory = found.data;
+          directoryMatches = { ...found.data, scope: unfiltered ? found.data.scope : 'filtered' };
+          if (unfiltered && found.data.scope !== 'filtered') directory = found.data;
         }
       }
       if (call.tool === 'skills.read' && value && typeof value === 'object' && !('error' in value)) {
@@ -6957,6 +7114,15 @@ export async function inferWithTools(
       const calendarMessages = sourceMessages.map(textTurn);
       const key = JSON.stringify(calendar.target);
       let binding = calendarBindings.get(key);
+      if (!binding && tools?.decisions?.calendarTextFastPath) {
+        const fast = await tools.decisions
+          .calendarTextFastPath(calendar.target, calendarMessages, signal)
+          .catch(() => false);
+        if (fast) {
+          binding = { summary: { mode: 'unspecified' }, description: { mode: 'unspecified' } };
+          calendarBindings.set(key, binding);
+        }
+      }
       if (!binding) {
         const bound = await withChatModelRequest('calendar', () =>
           send(

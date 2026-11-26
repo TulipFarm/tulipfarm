@@ -31,6 +31,7 @@ const subscriptionSchema = z.object({
   /** Whether its owner turned the connection on for chats, and for coding runs and Workflow coding steps. */
   useForChat: z.boolean(),
   useForCoding: z.boolean(),
+  endpoint: z.string().nullable(),
   createdAt: z.string(),
 });
 const listSchema = z.object({ subscriptions: z.array(subscriptionSchema) });
@@ -39,7 +40,7 @@ const usesBody = z
   .strictObject({ chat: z.boolean().optional(), coding: z.boolean().optional() })
   .refine(body => body.chat !== undefined || body.coding !== undefined);
 const emptySchema = z.strictObject({});
-const modelsBody = z.strictObject({ disabledModels: z.array(z.string().min(1).max(200)).max(200) });
+const modelsBody = z.strictObject({ disabledModels: z.array(z.string().min(1).max(200)).max(1000) });
 const validation = routeValidation({
   target: 'openapi-3.0',
   missing: 'Missing subscription validator',

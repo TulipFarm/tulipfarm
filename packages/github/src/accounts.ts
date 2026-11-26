@@ -10,6 +10,11 @@ import {
   remoteSourceCheckDeadline,
 } from '@tulipfarm/access';
 import type { IntegrationKeyring } from '@tulipfarm/integrations';
+import {
+  hasMemberIdentities,
+  identityProviders,
+  observeExternalHandle,
+} from '@tulipfarm/integrations/member-identities';
 import { TokenPlanError } from '@tulipfarm/integrations/token-plans';
 import { qualified, type createWorkspaceRuntime, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import {
@@ -346,6 +351,16 @@ export function createGitHubAccounts(options: {
             `UPDATE ${relation(tx, 'accounts')} SET state='active',identity=$2,scopes=$3,credential=$4,refresh_credential=$6,access_expires_at=CASE WHEN $6::jsonb IS NULL OR $5::integer IS NULL THEN NULL ELSE clock_timestamp()+$5*interval '1 second' END,expires_at=CASE WHEN COALESCE($7::integer,$5::integer) IS NULL THEN NULL ELSE clock_timestamp()+COALESCE($7::integer,$5::integer)*interval '1 second' END WHERE id=$1`,
             [row.id, who, token.scopes, credential, token.expiresIn, refreshCredential, token.refreshExpiresIn],
           );
+          if (hasMemberIdentities(tx)) {
+            await observeExternalHandle(tx, {
+              provider: 'github',
+              scope: identityProviders.github.defaultScope,
+              externalId: who.id,
+              handle: who.login,
+              priorHandle: row.identity?.login ?? null,
+              source: 'oauth',
+            });
+          }
           await tx.client.query(
             `UPDATE ${relation(tx, 'account_attempts')} SET state='consumed',verifier=NULL WHERE account_id=$1 AND generation=$2`,
             [row.id, row.generation],

@@ -8,6 +8,11 @@ const planNames: Record<PlanProvider, string> = {
   chatgpt: 'ChatGPT plan',
   claude: 'Claude plan',
   copilot: 'GitHub Copilot plan',
+  'byok-anthropic': 'Anthropic API key',
+  'byok-openai': 'OpenAI API key',
+  'byok-google': 'Google AI Studio API key',
+  'byok-xai': 'xAI API key',
+  'byok-openai-compatible': 'Custom API key',
 };
 
 export function ModelOption({ family, details = false }: { family: ModelCatalogFamily; details?: boolean }) {

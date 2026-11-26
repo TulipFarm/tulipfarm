@@ -17,11 +17,21 @@ import { hasPlanAccounts, setUses, useColumn, type PlanUse } from './plan-accoun
 export { maxPlanAccounts, planUses, type PlanUse } from './plan-accounts.ts';
 
 /**
- * Subscription connections: a member's own ChatGPT, Claude or Copilot plan, which model calls can run on for its owner
- * and for the members, teams or whole workspace it is shared with. Each provider module keeps its own sign-in and
- * tokens; this module owns sharing and the order in which a caller's eligible plans are tried.
+ * Member-connected model providers: subscription plans (ChatGPT, Claude, Copilot) and BYOK API keys (Anthropic,
+ * OpenAI, Google, xAI, OpenAI-compatible custom endpoints). Model calls can run on them for their owner and for the
+ * members, teams or whole workspace they are shared with. Each provider module keeps its own sign-in and credentials;
+ * this module owns sharing and the order in which a caller's eligible connections are tried.
  */
-export const subscriptionProviders = ['chatgpt', 'claude', 'copilot'] as const;
+export const subscriptionProviders = [
+  'chatgpt',
+  'claude',
+  'copilot',
+  'byok-anthropic',
+  'byok-openai',
+  'byok-google',
+  'byok-xai',
+  'byok-openai-compatible',
+] as const;
 export type SubscriptionProvider = (typeof subscriptionProviders)[number];
 
 export const subscriptionGranteeSchema = z.discriminatedUnion('kind', [
@@ -47,9 +57,17 @@ export type SubscriptionCandidate = {
   own: boolean;
   /** When the plan last refused a reply for its usage limit; null once it answers again. */
   limitedAt: Date | null;
+  /** Full discovered model metadata (exact provider slug casing, limits, capabilities) for enabled models. */
+  modelDetails?: readonly SubscriptionModel[];
 };
 
-export type SubscriptionModel = { slug: string; label: string };
+export type SubscriptionModel = {
+  slug: string;
+  label: string;
+  maxInputTokens?: number | undefined;
+  maxOutputTokens?: number | undefined;
+  imageInput?: boolean | undefined;
+};
 
 /** The plan a model runs on for the caller, and what its replies last said about its usage limit. */
 export type SubscriptionModelPlan = {
@@ -81,6 +99,8 @@ export type SharedSubscription = {
   useForChat: boolean;
   /** The owner turned the connection on for coding runs and Workflow coding steps. */
   useForCoding: boolean;
+  /** Custom API base URL for BYOK connections (required for OpenAI-compatible endpoints). */
+  endpoint: string | null;
   createdAt: string;
 };
 
@@ -95,7 +115,19 @@ type Runtime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
 const uuid = z.uuid();
 const defaultCooldownMs = 15 * 60_000;
 const maxCooldownMs = 24 * 60 * 60_000;
-const storedModels = z.array(z.object({ slug: z.string(), label: z.string() }).loose()).max(200);
+const storedModels = z
+  .array(
+    z
+      .object({
+        slug: z.string(),
+        label: z.string(),
+        maxInputTokens: z.number().int().positive().optional(),
+        maxOutputTokens: z.number().int().positive().optional(),
+        imageInput: z.boolean().optional(),
+      })
+      .loose(),
+  )
+  .max(1000);
 const candidateRow = z.object({
   id: z.uuid(),
   owner_membership_id: z.uuid(),
@@ -113,6 +145,7 @@ const connectionRow = z.object({
   owner_membership_id: z.uuid(),
   email: z.string().nullable(),
   plan: z.string().nullable(),
+  endpoint: z.string().nullable().default(null),
   use_for_chat: z.boolean(),
   use_for_coding: z.boolean(),
   created_at: z.union([z.date(), z.string()]).transform(value => new Date(value)),
@@ -150,6 +183,8 @@ function granteeKey(grantee: SubscriptionGrant['grantee']) {
 // Workspaces still below this common migration have no usage-limit column, so their plans show no learned status.
 const usageLimitVersion = 85;
 const hasUsageLimit = (tx: object) => ((tx as { commonVersion?: number }).commonVersion ?? 0) >= usageLimitVersion;
+const endpointVersion = 117;
+const hasEndpoint = (tx: object) => ((tx as { commonVersion?: number }).commonVersion ?? 0) >= endpointVersion;
 
 /**
  * The SQL rank of a connection for `$2` (the caller's membership, or null for memberless runs): 1 own, 2 shared with
@@ -219,6 +254,7 @@ export function createSubscriptions(options: { runtime: Runtime }) {
       const models = listed.filter(slug => !row.disabled_models.includes(slug));
       // A plan whose owner turned every listed model off is not used at all.
       if (listed.length && !models.length) return [];
+      const enabledDetails = stored.filter(model => models.includes(model.slug));
       return [
         {
           connectionId: row.id,
@@ -227,7 +263,8 @@ export function createSubscriptions(options: { runtime: Runtime }) {
           disabled: row.disabled_models,
           own: row.rank === 1,
           limitedAt: row.usage_limited_at,
-          labels: stored.filter(model => models.includes(model.slug)),
+          modelDetails: enabledDetails,
+          labels: enabledDetails,
         } satisfies SubscriptionCandidate & { labels: SubscriptionModel[] },
       ];
     });
@@ -236,7 +273,9 @@ export function createSubscriptions(options: { runtime: Runtime }) {
   /** The connections visible to the actor: their own, and every one shared with them, their teams or the workspace. */
   async function visible(tx: AuthorizationTransaction, actor: HumanActor, admin: boolean) {
     const rows = await tx.client.query(
-      `SELECT c.id, c.provider, c.owner_membership_id, c.email, c.plan, c.state, c.models, c.disabled_models,
+      `SELECT c.id, c.provider, c.owner_membership_id, c.email, c.plan,
+              ${hasEndpoint(tx) ? 'c.endpoint' : 'NULL::text AS endpoint'},
+              c.state, c.models, c.disabled_models,
               c.created_at,
               ${hasPlanAccounts(tx) ? 'c.use_for_chat, c.use_for_coding' : 'true AS use_for_chat, true AS use_for_coding'},
               c.owner_membership_id = $1::uuid AS mine,
@@ -294,8 +333,10 @@ export function createSubscriptions(options: { runtime: Runtime }) {
                 limitedAt: candidate.limitedAt,
               };
               for (const model of candidate.labels) {
-                const known = models.get(model.slug);
-                if (!known || (known.plan.limitedAt && !plan.limitedAt)) models.set(model.slug, { ...model, plan });
+                const key =
+                  provider === 'byok-openai-compatible' ? `${candidate.connectionId}:${model.slug}` : model.slug;
+                const known = models.get(key);
+                if (!known || (known.plan.limitedAt && !plan.limitedAt)) models.set(key, { ...model, plan });
               }
             }
             return [provider, [...models.values()]] as const;
@@ -382,6 +423,9 @@ export function createSubscriptions(options: { runtime: Runtime }) {
               : (storedModels.safeParse(row.models).data ?? []).map(model => ({
                   slug: model.slug,
                   label: model.label,
+                  ...(model.maxInputTokens !== undefined ? { maxInputTokens: model.maxInputTokens } : {}),
+                  ...(model.maxOutputTokens !== undefined ? { maxOutputTokens: model.maxOutputTokens } : {}),
+                  ...(model.imageInput !== undefined ? { imageInput: model.imageInput } : {}),
                 })),
           disabledModels: row.disabled_models,
           canShare: row.manage,
@@ -389,6 +433,7 @@ export function createSubscriptions(options: { runtime: Runtime }) {
           plan: row.plan,
           useForChat: row.use_for_chat,
           useForCoding: row.use_for_coding,
+          endpoint: row.endpoint,
           createdAt: row.created_at.toISOString(),
         }));
       });
@@ -426,7 +471,7 @@ export function createSubscriptions(options: { runtime: Runtime }) {
 
     /** Sets which of the owner's plan models are off, for the owner and everyone it is shared with. Owner only. */
     async setDisabledModels(workspaceId: string, userId: string, connectionId: string, disabled: readonly string[]) {
-      const parsed = [...new Set(z.array(slugSchema).max(200).parse(disabled))];
+      const parsed = [...new Set(z.array(slugSchema).max(1000).parse(disabled))];
       return authorized(workspaceId, userId, 'write', async (tx, actor, admin) => {
         const row = (await visible(tx, actor, admin)).find(item => item.id === uuid.parse(connectionId));
         if (!row) throw new SubscriptionError('not-found');

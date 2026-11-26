@@ -54,7 +54,12 @@ function wire(config: Route, system: string, messages: readonly Message[]) {
     case 'chatgpt':
     case 'claude':
     case 'copilot':
-      // Authoring assistance runs as the workspace, never on a member's plan.
+    case 'byok-anthropic':
+    case 'byok-openai':
+    case 'byok-google':
+    case 'byok-xai':
+    case 'byok-openai-compatible':
+      // Authoring assistance runs as the workspace, never on a member's plan or API key.
       throw new Error(`${config.provider}-member-required`);
     case 'openai':
     case 'xai':
