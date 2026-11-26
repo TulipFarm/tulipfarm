@@ -53,6 +53,7 @@ import { AgentError } from './saved-contracts.ts';
 import { requireTaskDefinitionSources } from './draft-sources.ts';
 import type { SlackActionsFactory } from './slack-actions.ts';
 import { activeTaskWork, reserveTaskWork, withTaskWork, type TaskWork } from './task-activity.ts';
+import { taskCompletionStatus } from './decisions.ts';
 import { observeTaskModel, recoverTaskModelUsage, settleTaskModelTime } from './task-model-accounting.ts';
 import { isMcpCall, mcpExecutionResultSchema } from './mcp-contracts.ts';
 import type { McpExecutionFactory } from './mcp-runtime.ts';
@@ -1267,6 +1268,17 @@ export function createTaskRuntime(
       }
     };
     let continuing = false;
+    let jevTaskCompletion: 'done' | 'continue' | undefined;
+    if (result.kind === 'success') {
+      try {
+        const parsed = parseModelDecision(result.decision, claim.input);
+        if (parsed.kind === 'answer' && parsed.incomplete === undefined) {
+          jevTaskCompletion = await taskCompletionStatus(workspaceId, parsed.text);
+        }
+      } catch {
+        // Invalid model decisions are rejected inside the transaction below.
+      }
+    }
     try {
       await observe(result, elapsed);
       await metered(workspaceId, taskId, async (tx, meter) => {
@@ -1439,7 +1451,12 @@ export function createTaskRuntime(
               ).rowCount
             )
               throw new TaskDecisionRejected(new Error('task-has-unfinished-proposal'));
-            incomplete = decision.kind === 'answer' && (decision.incomplete ?? announcesFurtherWork(decision.text));
+            incomplete =
+              decision.kind === 'answer' &&
+              (decision.incomplete ??
+                (jevTaskCompletion !== undefined
+                  ? jevTaskCompletion === 'continue'
+                  : announcesFurtherWork(decision.text)));
             continuing = incomplete && !(await answered(tx, taskId, c.task.generation));
             if (!incomplete) {
               const status = decision.kind === 'answer' ? 'completed' : 'waiting-clarification';

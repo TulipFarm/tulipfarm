@@ -281,6 +281,10 @@ test('a snapshot uses evaluateMany once per scope; false decides, missing and fa
     'decisions-learning-gate': false,
     'decisions-heartbeat-filter': false,
     'decisions-drift-audit': false,
+    'decisions-skill-preload': false,
+    'decisions-row-and-calendar': false,
+    'decisions-model-routing': false,
+    'decisions-task-completion': false,
   });
   assert.deepEqual(failed, {
     'openai-models': false,
@@ -293,5 +297,9 @@ test('a snapshot uses evaluateMany once per scope; false decides, missing and fa
     'decisions-learning-gate': false,
     'decisions-heartbeat-filter': false,
     'decisions-drift-audit': false,
+    'decisions-skill-preload': false,
+    'decisions-row-and-calendar': false,
+    'decisions-model-routing': false,
+    'decisions-task-completion': false,
   });
 });

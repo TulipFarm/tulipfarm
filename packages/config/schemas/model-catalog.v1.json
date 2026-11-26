@@ -175,7 +175,11 @@
                   "decisions-creation-review",
                   "decisions-learning-gate",
                   "decisions-heartbeat-filter",
-                  "decisions-drift-audit"
+                  "decisions-drift-audit",
+                  "decisions-skill-preload",
+                  "decisions-row-and-calendar",
+                  "decisions-model-routing",
+                  "decisions-task-completion"
                 ]
               },
               {
@@ -530,7 +534,11 @@
                   "decisions-creation-review",
                   "decisions-learning-gate",
                   "decisions-heartbeat-filter",
-                  "decisions-drift-audit"
+                  "decisions-drift-audit",
+                  "decisions-skill-preload",
+                  "decisions-row-and-calendar",
+                  "decisions-model-routing",
+                  "decisions-task-completion"
                 ]
               },
               {

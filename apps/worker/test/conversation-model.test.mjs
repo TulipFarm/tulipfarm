@@ -3,7 +3,13 @@ import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { initialModelMapping, isPlanProvider, legacyModels, shippedModelCatalogPath } from '@tulipfarm/config';
 import { modelEnvironment } from '@tulipfarm/agents/model-environment';
-import { chatFallbackModel, chatReplyModel, conversationModel, roleModel } from '../src/conversation-model.ts';
+import {
+  chatFallbackModel,
+  chatReplyModel,
+  conversationModel,
+  fastRouteModel,
+  roleModel,
+} from '../src/conversation-model.ts';
 import { chatTitleRoute, meteredReply } from '../src/conversation-activities.ts';
 
 const runtime = { transaction: async () => assert.fail('An unavailable model must not reach storage') };
@@ -158,4 +164,15 @@ test('a family runs on the catalog-preferred provider when both of its providers
   assert.equal(conversationModel('gpt-luna', direct).price.modelId, 'gpt-6-luna-openai');
   assert.equal(conversationModel('grok', direct).price.modelId, 'grok-4-6-xai');
   assert.equal(conversationModel('grok', direct).route.provider, 'xai');
+});
+
+test('fastRouteModel picks a strictly cheaper non-paused heartbeat or completion-check model', () => {
+  const env = {
+    ...shipped,
+    MODEL_CATALOG: claudeCatalog({ 'claude-haiku': ['heartbeat'] }),
+  };
+  const sonnet = conversationModel('claude-sonnet', env);
+  const haiku = conversationModel('claude-haiku', env);
+  assert.equal(fastRouteModel(sonnet, env)?.price.familyId, 'claude-haiku');
+  assert.equal(fastRouteModel(haiku, env), null);
 });

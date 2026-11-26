@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   AccessDenied,
+  deferRemoteSourceChecks,
   SourceAuthorizationUnavailable,
   lockAuthorization,
   resolveHuman,
@@ -50,6 +51,17 @@ const rowSchema = z.object({
 });
 type RequestRow = z.infer<typeof rowSchema>;
 
+/** Refuses a request with the reason, so telemetry can tell a revoked source from a missing request. */
+export class ConversationRequestDenied extends AccessDenied {
+  readonly code: string;
+  constructor(code: string) {
+    super();
+    this.code = code;
+  }
+}
+const denialCode = (error: AccessDenied) =>
+  'code' in error && typeof error.code === 'string' ? error.code : 'access-denied';
+
 export function createConversationRequests(runtime: ConversationRuntime) {
   async function transaction<T>(workspaceId: string, operation: (tx: AuthorizationTransaction) => Promise<T>) {
     return runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async tx => {
@@ -73,7 +85,7 @@ export function createConversationRequests(runtime: ConversationRuntime) {
           )
         ).rows[0],
       );
-    if (!row) throw new AccessDenied();
+    if (!row) throw new ConversationRequestDenied('not-found');
     return row;
   }
 
@@ -107,8 +119,10 @@ export function createConversationRequests(runtime: ConversationRuntime) {
   ) {
     try {
       await requireRequestSources(tx, actor, row, readOnly);
-      return true;
+      return null;
     } catch (error) {
+      // An unavailable check, such as GitHub rate limiting or a spent reread budget, proves nothing about access, so
+      // the review stays pending and the caller can retry.
       if (error instanceof SourceAuthorizationUnavailable) throw error;
       if (!(error instanceof AccessDenied)) throw error;
       if (row.status === 'pending' && row.membership_id === actor.membershipId)
@@ -117,7 +131,7 @@ export function createConversationRequests(runtime: ConversationRuntime) {
           conversationId: row.conversation_id,
           turnId: row.turn_id,
         });
-      return false;
+      return new ConversationRequestDenied(denialCode(error));
     }
   }
 
@@ -309,7 +323,8 @@ export function createConversationRequests(runtime: ConversationRuntime) {
       }
       const row = await request(tx, chatId, requestId);
       if (row.membership_id !== actor.membershipId) throw new AccessDenied();
-      if (!(await readableRequest(tx, workspaceId, actor, row))) return null;
+      const denied = await readableRequest(tx, workspaceId, actor, row);
+      if (denied) return denied;
       // A secrets form is answered or declined only through the secrets service, which stores the values.
       if (row.answer_schema.kind === 'secrets') throw new ConversationConflict('request-conflict');
       if (row.revision !== input.expectedRevision || row.status !== 'pending')
@@ -348,41 +363,47 @@ export function createConversationRequests(runtime: ConversationRuntime) {
       );
       return outcome;
     });
-    if (!result) throw new AccessDenied();
+    // The denial is thrown after its transaction commits the closed review.
+    if (result instanceof ConversationRequestDenied) throw result;
     return result;
   }
 
   async function read(workspaceId: string, userId: string, chatIdInput: string, requestIdInput: string) {
     const chatId = uuidSchema.parse(chatIdInput),
       requestId = uuidSchema.parse(requestIdInput);
-    const result = await transaction(workspaceId, async tx => {
-      const actor = await resolveHuman(tx, userId);
-      await owned(tx, actor, chatId);
-      const row = await request(tx, chatId, requestId);
-      if (!(await readableRequest(tx, workspaceId, actor, row, true))) return null;
-      if (row.status === 'pending' && row.expired) await settle(tx, row, 'expired');
-      const result = z
-        .object({
-          id: uuidSchema,
-          turnId: uuidSchema,
-          revision: z.number().int(),
-          prompt: z.string(),
-          answerSchema: answerDefinitionSchema,
-          status: requestViewSchema.shape.status,
-          expiresAt: z.date(),
-          response: z.unknown(),
-        })
-        .parse(
-          (
-            await tx.client.query(
-              `SELECT r.id,r.turn_id AS "turnId",r.revision,r.prompt,r.answer_schema AS "answerSchema",r.status,r.expires_at AS "expiresAt", CASE WHEN s.id IS NULL THEN NULL ELSE jsonb_build_object('id',s.id,'answer',s.answer,'createdAt',s.created_at) END AS response FROM ${table(tx, 'tf_conversation_requests')} r LEFT JOIN ${table(tx, 'tf_conversation_responses')} s ON s.request_id=r.id WHERE r.id=$1`,
-              [requestId],
-            )
-          ).rows[0],
-        );
-      return requestViewSchema.parse({ ...result, expiresAt: result.expiresAt.toISOString() });
-    });
-    if (!result) throw new AccessDenied();
+    // GitHub rereads run between transactions, each source with its own budget, as chat page loads do. Repeating the
+    // transaction is safe: only its last run commits.
+    const result = await deferRemoteSourceChecks(() =>
+      transaction(workspaceId, async tx => {
+        const actor = await resolveHuman(tx, userId);
+        await owned(tx, actor, chatId);
+        const row = await request(tx, chatId, requestId);
+        const denied = await readableRequest(tx, workspaceId, actor, row, true);
+        if (denied) return denied;
+        if (row.status === 'pending' && row.expired) await settle(tx, row, 'expired');
+        const result = z
+          .object({
+            id: uuidSchema,
+            turnId: uuidSchema,
+            revision: z.number().int(),
+            prompt: z.string(),
+            answerSchema: answerDefinitionSchema,
+            status: requestViewSchema.shape.status,
+            expiresAt: z.date(),
+            response: z.unknown(),
+          })
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT r.id,r.turn_id AS "turnId",r.revision,r.prompt,r.answer_schema AS "answerSchema",r.status,r.expires_at AS "expiresAt", CASE WHEN s.id IS NULL THEN NULL ELSE jsonb_build_object('id',s.id,'answer',s.answer,'createdAt',s.created_at) END AS response FROM ${table(tx, 'tf_conversation_requests')} r LEFT JOIN ${table(tx, 'tf_conversation_responses')} s ON s.request_id=r.id WHERE r.id=$1`,
+                [requestId],
+              )
+            ).rows[0],
+          );
+        return requestViewSchema.parse({ ...result, expiresAt: result.expiresAt.toISOString() });
+      }),
+    );
+    if (result instanceof ConversationRequestDenied) throw result;
     return result;
   }
 

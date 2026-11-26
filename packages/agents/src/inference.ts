@@ -1610,6 +1610,12 @@ export type ToolInferenceContext = {
   apps?: AppKind | undefined;
   /** Deferred chat tools, by framework name, offered from the first round without a `tools_search`. */
   preloadedTools?: readonly string[];
+  /** Loads reviewed workspace skills selected by the decision model before round 1. */
+  loadPreloadedSkills?:
+    | ((
+        skills: readonly { id: string; revision: string }[],
+      ) => Promise<readonly { id: string; name: string; description?: string | undefined; instructions: string }[]>)
+    | undefined;
   /** Built-in procedures resolved by the server for this request, not names extracted from message text. */
   builtinSkills?: readonly string[] | undefined;
   agentBuilderUrl?: string;
@@ -4433,6 +4439,10 @@ export async function inferWithTools(
     }
   }
   let inventory: WorkspaceInventory | undefined;
+  let preloadedSkills:
+    | readonly { id: string; name: string; description?: string | undefined; instructions: string }[]
+    | undefined;
+  let skillPreloadAttempted = false;
   const latestHuman = [...sourceMessages].reverse().find(turn => turn.role === 'user');
   const requestedTables = () => namedInventoryTables(latestHuman ? textTurn(latestHuman).text : '', inventory);
   const inventoryCheckNeeded = () => requestedTables().length > 0 && !workToolUsed;
@@ -5643,6 +5653,32 @@ export async function inferWithTools(
           tools?.projectInstructions === undefined
             ? await observeChatDetail('inventory', async () => tools?.readWorkspaceInventory?.())
             : undefined;
+        if (!skillPreloadAttempted && tools?.decisions?.preloadSkills && inventory?.skills.length && request) {
+          skillPreloadAttempted = true;
+          const matchedIds: string[] = await observeChatDetail('tool-preload', () =>
+            tools.decisions!.preloadSkills!({
+              request,
+              skills: inventory!.skills,
+              signal,
+            }).catch(() => [] as string[]),
+          );
+          if (matchedIds.length) {
+            for (const toolName of [
+              'skills_list',
+              'skills_workspace',
+              'skills_load',
+              'skills_files_read',
+              'skills_execute',
+            ])
+              loaded.add(toolName);
+            const matched = inventory.skills.filter(skill => matchedIds.includes(skill.id));
+            if (matched.length && tools.loadPreloadedSkills) {
+              preloadedSkills = await tools
+                .loadPreloadedSkills(matched.map(skill => ({ id: skill.id, revision: skill.revision })))
+                .catch(() => undefined);
+            }
+          }
+        }
         if (!rowReviewCandidate) {
           rowReviewCandidate = rowReviewPrefilter(
             sourceMessages.map(textTurn),
@@ -5694,6 +5730,7 @@ export async function inferWithTools(
                   browser: tools?.browser ?? false,
                   personalMemory,
                   inventory,
+                  preloadedSkills,
                 },
                 timeZone,
               ),
@@ -6172,6 +6209,15 @@ export async function inferWithTools(
           },
         );
         continue;
+      }
+      if (rowReviewCandidate && !rowReviewRequested && !rowReviewIntentChecked && tools?.decisions?.rowReviewIntent) {
+        const intent = await tools.decisions.rowReviewIntent(request, signal).catch(() => undefined);
+        if (intent === false) {
+          rowReviewCandidate = undefined;
+          rowReviewIntentChecked = true;
+        } else if (intent === true) {
+          rowReviewRequested = true;
+        }
       }
       const reviewReply = (await tableReviewReply()) ?? (rowReviewRequested ? undefined : skillReviewReply());
       const refusedBatch = refusedSourceBatch(items);
@@ -7067,6 +7113,15 @@ export async function inferWithTools(
       const calendarMessages = sourceMessages.map(textTurn);
       const key = JSON.stringify(calendar.target);
       let binding = calendarBindings.get(key);
+      if (!binding && tools?.decisions?.calendarTextFastPath) {
+        const fast = await tools.decisions
+          .calendarTextFastPath(calendar.target, calendarMessages, signal)
+          .catch(() => false);
+        if (fast) {
+          binding = { summary: { mode: 'unspecified' }, description: { mode: 'unspecified' } };
+          calendarBindings.set(key, binding);
+        }
+      }
       if (!binding) {
         const bound = await withChatModelRequest('calendar', () =>
           send(

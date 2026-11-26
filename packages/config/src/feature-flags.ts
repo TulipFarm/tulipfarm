@@ -95,6 +95,34 @@ export const featureFlags = {
     scope: 'workspace',
     env: 'FEATURE_FLAG_DECISIONS_DRIFT_AUDIT',
   },
+  'decisions-skill-preload': {
+    description:
+      'With TYPESAFE_API_KEY set, the Jev decision model scores reviewed workspace skills against the user request in parallel with chat setup and preloads matching skills for round 1.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_DECISIONS_SKILL_PRELOAD',
+  },
+  'decisions-row-and-calendar': {
+    description:
+      'With TYPESAFE_API_KEY set, the Jev decision model filters false-positive row-review intent and fast-paths unspecified Calendar text checks before falling back to the full model.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_DECISIONS_ROW_AND_CALENDAR',
+  },
+  'decisions-model-routing': {
+    description:
+      'With TYPESAFE_API_KEY set, the Jev decision model classifies chat turn complexity so confident simple turns route to a fast catalog model.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_DECISIONS_MODEL_ROUTING',
+  },
+  'decisions-task-completion': {
+    description:
+      'With TYPESAFE_API_KEY set, the Jev decision model checks whether a plain-text saved agent task answer finished or merely promised more work.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_DECISIONS_TASK_COMPLETION',
+  },
 } as const satisfies Record<string, FeatureFlagDefinition>;
 
 export type FeatureFlag = keyof typeof featureFlags;
