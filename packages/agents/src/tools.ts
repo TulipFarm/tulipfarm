@@ -63,7 +63,7 @@ import { agentDefinitionSchema } from './contracts.ts';
 import { AgentError, soulRevisionSchema } from './saved-contracts.ts';
 import { memoryError } from './memory-drafts.ts';
 import { createAuthoringDrafts } from './drafts.ts';
-import { agentModelChoices } from './model-availability.ts';
+import { agentModelContext } from './model-availability.ts';
 import {
   cancelFollowUpCallSchema,
   listFollowUpsCallSchema,
@@ -1951,7 +1951,9 @@ export function createChatTools(
               };
             })
           : { activations: [], linkedWorkflow: null };
-        const models = await withHuman(runtime, workspaceId, actor, 'read', tx => agentModelChoices(tx));
+        const modelContext = await withHuman(runtime, workspaceId, actor, 'read', tx =>
+          agentModelContext(tx, undefined, actor.membershipId),
+        );
         if (call.channels?.length && !agentSetup?.inspectSlack)
           throw new AgentError('slack-channel-inspection-unavailable', 503);
         const channels = [];
@@ -1986,7 +1988,8 @@ export function createChatTools(
               'Include evalCases in agents.draft: 3 to 5 starter test cases that check the job this agent was set up for. The person adds them to the agent’s Evals after saving.',
           },
           models: {
-            choices: models,
+            connectedPlans: modelContext.connectedPlans,
+            choices: modelContext.choices,
             instruction:
               'Use the requested model and plan from choices. If no choice matches, explain that before saving a substitute. Otherwise use the workspace default when no model was requested. A model plan is not a CLI runtime: check the tools and their supported runtimes. Do not replace a requested coding CLI with GitHub tools without asking.',
           },

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  byokEndpointProblem,
+  isPrivateModelIp,
   modelEndpointHosts,
   modelEndpointProblem,
   modelEndpointShapeProblem,
@@ -111,4 +113,33 @@ test('MODEL_ENDPOINT_HOSTS takes bare host names', () => {
       () => modelEndpointHosts({ MODEL_ENDPOINT_HOSTS: value }),
       /MODEL_ENDPOINT_HOSTS: .* is not a host name/,
     );
+});
+
+test('named BYOK providers are pinned to their built-in endpoints and custom endpoints enforce SSRF policy', () => {
+  assert.equal(modelEndpointProblem('byok-anthropic', 'https://api.anthropic.com/', {}), null);
+  assert.equal(
+    modelEndpointProblem('byok-anthropic', 'https://evil.example.com/', dev),
+    'must be https://api.anthropic.com/',
+  );
+  assert.equal(modelEndpointProblem('byok-openai-compatible', 'https://openrouter.ai/api/v1/', {}), null);
+  assert.equal(
+    byokEndpointProblem('https://169.254.169.254/v1/', { NODE_ENV: 'production' }),
+    'must not target a private or internal address',
+  );
+  assert.equal(
+    byokEndpointProblem('https://127.0.0.1/v1/', { NODE_ENV: 'production' }),
+    'must not target a loopback address in production',
+  );
+  assert.equal(byokEndpointProblem('http://localhost:11434/v1/', { NODE_ENV: 'development' }), null);
+  assert.equal(
+    byokEndpointProblem('https://internal.local/v1/', { NODE_ENV: 'production' }),
+    'must not target a private or internal address',
+  );
+  assert.equal(
+    byokEndpointProblem('http://openrouter.ai/api/v1/', { NODE_ENV: 'production' }),
+    'must use https (http is allowed only for localhost)',
+  );
+  assert.equal(isPrivateModelIp('100.64.0.1'), true);
+  assert.equal(isPrivateModelIp('::ffff:127.0.0.1'), true);
+  assert.equal(isPrivateModelIp('1.1.1.1'), false);
 });

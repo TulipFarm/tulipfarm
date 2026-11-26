@@ -87,12 +87,16 @@ export function createPlanUsage(options: {
   ): Promise<PlanModelChoice[]> => {
     const counts = new Map<string, Promise<PremiumRequests | null>>();
     return Promise.all(
-      models.map(async ({ slug, label, plan }) => {
+      models.map(async ({ slug, label, maxInputTokens, maxOutputTokens, imageInput, plan }) => {
         if (provider === 'copilot' && !counts.has(plan.connectionId))
           counts.set(plan.connectionId, premiumRequests(workspaceId, plan));
         return {
           slug,
           label,
+          connectionId: plan.connectionId,
+          ...(maxInputTokens ? { maxInputTokens } : {}),
+          ...(maxOutputTokens ? { maxOutputTokens } : {}),
+          ...(imageInput !== undefined ? { imageInput } : {}),
           usage: {
             plan: plan.own ? 'own' : 'shared',
             status: plan.limitedAt ? 'limit-reached' : 'available',

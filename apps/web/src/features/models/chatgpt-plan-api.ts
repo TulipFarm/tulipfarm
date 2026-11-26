@@ -4,13 +4,30 @@ import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson, responseError } from '@/lib/http';
 import { TableRequestError } from '@/features/tables/request-state';
 
-export type PlanProvider = 'chatgpt' | 'claude' | 'copilot';
+export type PlanProvider =
+  | 'chatgpt'
+  | 'claude'
+  | 'copilot'
+  | 'byok-anthropic'
+  | 'byok-openai'
+  | 'byok-google'
+  | 'byok-xai'
+  | 'byok-openai-compatible';
 
-/** The member plan a catalog family runs on, or null for a model the workspace pays for. */
+const planProviderSet = new Set<string>([
+  'chatgpt',
+  'claude',
+  'copilot',
+  'byok-anthropic',
+  'byok-openai',
+  'byok-google',
+  'byok-xai',
+  'byok-openai-compatible',
+]);
+
+/** The member plan or BYOK API key a catalog family runs on, or null for a model the workspace pays for. */
 export function familyPlan(family: Pick<ModelCatalogFamily, 'provider'>): PlanProvider | null {
-  return family.provider === 'chatgpt' || family.provider === 'claude' || family.provider === 'copilot'
-    ? family.provider
-    : null;
+  return planProviderSet.has(family.provider) ? (family.provider as PlanProvider) : null;
 }
 
 const chatGptConnectionSchema = z.object({

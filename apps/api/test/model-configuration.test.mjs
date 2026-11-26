@@ -92,17 +92,22 @@ test('the catalog and worker model calls enable the same families with the same 
 test("a plan model is eligible only as an agent's model, never for memberless work or as a fallback", async () => {
   const { modelFamilyEligibility } = createModelConfiguration({
     pool,
-    env: { ...env, MODEL_CATALOG: catalogOf(['claude-opus', 'claude-sonnet', 'chatgpt-luna']) },
+    env: { ...env, MODEL_CATALOG: catalogOf(['claude-opus', 'claude-sonnet']) },
   });
-  assert.equal(await modelFamilyEligibility(request('chatgpt-luna', { purpose: 'agent-model' })), true);
-  assert.equal(await modelFamilyEligibility(request('chatgpt-luna')), false);
+  assert.equal(await modelFamilyEligibility(request('chatgpt-gpt-6-luna', { purpose: 'agent-model' })), true);
+  assert.equal(await modelFamilyEligibility(request('chatgpt-gpt-6-luna')), false);
   assert.equal(
-    await modelFamilyEligibility(request('chatgpt-luna', { purpose: 'agent-model', fallbackFor: 'claude-opus' })),
+    await modelFamilyEligibility(request('chatgpt-gpt-6-luna', { purpose: 'agent-model', fallbackFor: 'claude-opus' })),
     false,
   );
   assert.equal(
-    await modelFamilyEligibility(request('claude-opus', { purpose: 'agent-model', fallbackFor: 'chatgpt-luna' })),
+    await modelFamilyEligibility(request('claude-opus', { purpose: 'agent-model', fallbackFor: 'chatgpt-gpt-6-luna' })),
     false,
   );
+  assert.equal(
+    await modelFamilyEligibility(request('byok-anthropic-claude-sonnet-5-5', { purpose: 'agent-model' })),
+    true,
+  );
+  assert.equal(await modelFamilyEligibility(request('byok-anthropic-claude-sonnet-5-5')), false);
   assert.equal(await modelFamilyEligibility(request('claude-sonnet', { purpose: 'agent-model' })), true);
 });
