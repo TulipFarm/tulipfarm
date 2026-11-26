@@ -6862,13 +6862,14 @@ export async function inferWithTools(
         if (instruction && value && typeof value === 'object') value = { ...value, instruction };
       }
       if (call.tool === 'members.find') {
-        if (call.query === undefined) directoryAttempted = true;
+        const unfiltered = !call.query?.trim() && !call.provider?.trim();
+        if (unfiltered) directoryAttempted = true;
         const found = workspaceDirectorySchema.safeParse(value);
         if (found.success) {
           directoryCheckNeeded ||= !invitationLookup(sourceMessages);
           directorySucceeded = true;
-          directoryMatches = { ...found.data, scope: call.query === undefined ? found.data.scope : 'filtered' };
-          if (call.query === undefined && found.data.scope !== 'filtered') directory = found.data;
+          directoryMatches = { ...found.data, scope: unfiltered ? found.data.scope : 'filtered' };
+          if (unfiltered && found.data.scope !== 'filtered') directory = found.data;
         }
       }
       if (call.tool === 'skills.read' && value && typeof value === 'object' && !('error' in value)) {

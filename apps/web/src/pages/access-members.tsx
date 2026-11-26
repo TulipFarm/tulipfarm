@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { CheckIcon, MoreIcon, UserIcon } from '@tulipfarm/icons';
 import { createdInvitationSchema, invitationLinkSchema } from '@tulipfarm/workspaces/governance-contracts';
@@ -19,6 +19,7 @@ import { governanceError, governancePath, governanceRequest, GovernanceRequestEr
 import { useInvitations, type Invitation } from '@/features/governance/invitations';
 import { WorkspaceMemberPicker } from '@/features/tables/member-picker';
 import { useConfirmation } from '@/features/access/confirm';
+import { searchMemberIdentities } from '@/features/access/member-identities-api';
 import { joinList } from '@/features/access/policies';
 import { AddPersonDialog, memberInactive, memberName, memberText, useRemovePerson } from '@/features/access/people';
 import { tableApi, type TableDataRow } from '@/features/tables/api';
@@ -41,6 +42,7 @@ export const failed = (result: Awaited<ReturnType<AccessPage['change']>>) =>
 
 type Row = {
   id: string;
+  memberId: string | null;
   // A person is someone added to Members by hand, without an account here.
   kind: 'member' | 'invite' | 'person';
   name: string;
@@ -55,6 +57,18 @@ type Row = {
   record?: TableDataRow;
 };
 
+type IdentityMatches = {
+  query: string;
+  memberIds: ReadonlySet<string>;
+  membershipIds: ReadonlySet<string>;
+};
+
+const emptyIdentityMatches: IdentityMatches = {
+  query: '',
+  memberIds: new Set(),
+  membershipIds: new Set(),
+};
+
 // Keeps one request id per invitation until a resend is confirmed, so retrying never sends twice.
 const resendRequests = new Map<string, string>();
 
@@ -65,6 +79,7 @@ export function MembersList({ page }: { page: AccessPage }) {
   const { workspaceId, workspaceSlug, admin, data, access, busy, change } = page;
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
+  const [identityMatches, setIdentityMatches] = useState<IdentityMatches>(emptyIdentityMatches);
   const confirmation = useConfirmation();
   const invitations = useInvitations(workspaceId, admin, page.accessLost, '', true);
   const resendMember = useRef('');
@@ -75,10 +90,39 @@ export function MembersList({ page }: { page: AccessPage }) {
   const removePerson = useRemovePerson(tables, people);
   const [adding, setAdding] = useState(false);
   const admins = adminCount(page);
+  const needle = search.trim().toLowerCase();
+
+  useEffect(() => {
+    if (!needle) {
+      setIdentityMatches(emptyIdentityMatches);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void searchMemberIdentities(workspaceId, search.trim(), undefined, controller.signal)
+        .then(result => {
+          if (controller.signal.aborted) return;
+          setIdentityMatches({
+            query: needle,
+            memberIds: new Set(result.matches.map(match => match.memberId)),
+            membershipIds: new Set(result.matches.flatMap(match => (match.membershipId ? [match.membershipId] : []))),
+          });
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setIdentityMatches(emptyIdentityMatches);
+        });
+    }, 200);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [workspaceId, needle, search]);
+
   const teamsOf = (membershipId: string) =>
     data.teams.filter(team => team.membershipIds.includes(membershipId)).map(team => team.name);
   const members: Row[] = data.directory.map(member => ({
     id: member.id,
+    memberId: member.workspaceMemberId ?? null,
     kind: 'member',
     name: member.name,
     email: member.email,
@@ -94,6 +138,7 @@ export function MembersList({ page }: { page: AccessPage }) {
         .filter(item => item.kind === 'email' && item.email && (item.status === 'active' || item.status === 'expired'))
         .map(item => ({
           id: item.id,
+          memberId: item.workspaceMemberId ?? null,
           kind: 'invite',
           name: '',
           email: item.email!,
@@ -122,6 +167,7 @@ export function MembersList({ page }: { page: AccessPage }) {
       const name = memberText(record.values, workspaceMemberFields.name);
       return {
         id: record.id,
+        memberId: record.id,
         kind: 'person',
         name,
         email: memberText(record.values, workspaceMemberFields.contactEmail),
@@ -134,9 +180,14 @@ export function MembersList({ page }: { page: AccessPage }) {
         record,
       };
     });
-  const needle = search.trim().toLowerCase();
+  const activeIdentityMatches = identityMatches.query === needle ? identityMatches : emptyIdentityMatches;
   const rows = [...members, ...invites, ...added].filter(
-    row => !needle || row.name.toLowerCase().includes(needle) || row.email.toLowerCase().includes(needle),
+    row =>
+      !needle ||
+      row.name.toLowerCase().includes(needle) ||
+      row.email.toLowerCase().includes(needle) ||
+      (row.memberId !== null && activeIdentityMatches.memberIds.has(row.memberId)) ||
+      (row.kind === 'member' && activeIdentityMatches.membershipIds.has(row.id)),
   );
 
   const base = (id: string) => `${governancePath(workspaceId)}/invitations/${id}`;
@@ -408,10 +459,10 @@ export function MembersList({ page }: { page: AccessPage }) {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <SearchField
           id="member-search"
-          label="Search by name or email"
+          label="Search by name, email, or handle"
           value={search}
           onChange={setSearch}
-          placeholder="Search by name or email"
+          placeholder="Search by name, email, or handle"
         />
         {(people || invite) && (
           <div className="flex flex-wrap gap-2">
@@ -458,7 +509,9 @@ export function MembersList({ page }: { page: AccessPage }) {
             heading="h3"
             icon={UserIcon}
             title={needle ? 'No one matches that search' : 'No members yet'}
-            description={needle ? 'Try another name or email.' : 'Invite people to work in this workspace.'}
+            description={
+              needle ? 'Try another name, email, or external handle.' : 'Invite people to work in this workspace.'
+            }
           />
         }
         columns={[

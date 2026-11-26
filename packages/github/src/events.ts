@@ -1,5 +1,12 @@
 import { z } from 'zod';
 import {
+  hasMemberIdentities,
+  identityProviders,
+  observeExternalHandle,
+  type IdentityTransaction,
+} from '@tulipfarm/integrations/member-identities';
+import { githubLoginSchema } from './contracts.ts';
+import {
   githubBranchSelectionSchema,
   githubCommentActionSchema,
   githubEventFieldsSchema,
@@ -38,7 +45,7 @@ const repository = z.object({
   private: z.boolean(),
   owner: z.object({ id: providerId, type: z.enum(['User', 'Organization']) }),
 });
-const identity = z.object({ login: text });
+const identity = z.object({ id: providerId.optional(), login: text });
 const pullRequest = z
   .object({
     number,
@@ -302,4 +309,106 @@ export function matchesGitHubEvent(event: GitHubNormalizedEvent, filter: z.infer
       filter.baseBranches.names.includes(event.fields['pullRequest.baseBranch'])) &&
     (filter.headBranches.kind === 'all' || filter.headBranches.names.includes(event.fields['pullRequest.headBranch']))
   );
+}
+
+export type GitHubObservedHandle = {
+  externalId: string;
+  handle: string;
+  displayName?: string | null;
+};
+
+const observedUserId = z.union([providerId, githubEventIdSchema]);
+const observedDisplayNameControl = /\p{Cc}/u;
+const observedUserPaths: readonly (readonly string[])[] = [
+  ['sender'],
+  ['pull_request', 'user'],
+  ['pull_request', 'merged_by'],
+  ['issue', 'user'],
+  ['comment', 'user'],
+  ['review', 'user'],
+  ['pusher'],
+];
+const maxObservedCommits = 200;
+
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function readObservedDisplayName(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || [...trimmed].length > 200 || observedDisplayNameControl.test(trimmed)) return undefined;
+  return trimmed;
+}
+
+function parseObservedUser(value: unknown, allowUsername = false): GitHubObservedHandle | null {
+  const user = objectRecord(value);
+  if (!user) return null;
+  if (typeof user.type === 'string' && user.type !== 'User') return null;
+  const id = observedUserId.safeParse(user.id);
+  if (!id.success) return null;
+  const rawLogin = typeof user.login === 'string' ? user.login : allowUsername ? user.username : undefined;
+  const handle = githubLoginSchema.safeParse(rawLogin);
+  if (!handle.success) return null;
+  const displayName = readObservedDisplayName(user.name);
+  return {
+    externalId: id.data,
+    handle: handle.data,
+    ...(displayName !== undefined ? { displayName } : {}),
+  };
+}
+
+export function extractGitHubObservedHandles(body: unknown): GitHubObservedHandle[] {
+  const root = objectRecord(body);
+  if (!root) return [];
+  const seen = new Map<string, GitHubObservedHandle>();
+  const record = (candidate: unknown, allowUsername = false) => {
+    const parsed = parseObservedUser(candidate, allowUsername);
+    if (!parsed) return;
+    const existing = seen.get(parsed.externalId);
+    if (!existing) {
+      seen.set(parsed.externalId, parsed);
+    } else if (existing.displayName == null && parsed.displayName != null) {
+      existing.displayName = parsed.displayName;
+    }
+  };
+  for (const path of observedUserPaths) {
+    let cursor: unknown = root;
+    for (const segment of path) {
+      const next = objectRecord(cursor);
+      if (!next) {
+        cursor = undefined;
+        break;
+      }
+      cursor = next[segment];
+    }
+    record(cursor);
+  }
+  if (Array.isArray(root.commits)) {
+    for (const commit of root.commits.slice(0, maxObservedCommits)) {
+      const entry = objectRecord(commit);
+      if (entry) record(entry.author, true);
+    }
+  }
+  return [...seen.values()];
+}
+
+export async function observeGitHubHandles(tx: IdentityTransaction, body: unknown, observedAt?: Date): Promise<number> {
+  if (!hasMemberIdentities(tx)) return 0;
+  let recorded = 0;
+  for (const { externalId, handle } of extractGitHubObservedHandles(body)) {
+    const outcome = await observeExternalHandle(tx, {
+      provider: 'github',
+      scope: identityProviders.github.defaultScope,
+      externalId,
+      handle,
+      source: 'webhook',
+      ...(observedAt ? { observedAt } : {}),
+    });
+    if (outcome === 'recorded') recorded++;
+  }
+  return recorded;
 }

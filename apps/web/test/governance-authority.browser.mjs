@@ -136,7 +136,7 @@ test('focus applies same-membership authority changes to loaded administration',
   try {
     await t.test('Members conceals administration on demotion and keeps it when authority is unchanged', () =>
       fixture(async ({ page, state, focusCheck, settled }) => {
-        const search = page.getByRole('searchbox', { name: 'Search by name or email', exact: true });
+        const search = page.getByRole('searchbox', { name: 'Search by name, email, or handle', exact: true });
         const invite = page.getByRole('link', { name: 'Invite members', exact: true });
         await page.goto(`${origin}/acme/members`);
         // The first visit waits for Vite to transform the whole app on a cold server.

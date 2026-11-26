@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Link, Navigate, useNavigate } from '@tanstack/react-router';
 import { Button } from '@tulipfarm/sprout/button';
 import { workspaceMemberAccess, workspaceMemberFields } from '@tulipfarm/tables/workspace-members';
+import { MemberIdentitiesCard } from '@/features/access/member-identities';
 import { MemberProfileCard, memberInactive, memberName, memberText, useRemovePerson } from '@/features/access/people';
 import { useConfirmation } from '@/features/access/confirm';
 import { tableApi, type TableApi } from '@/features/tables/api';
@@ -117,10 +118,11 @@ function Person({
     </>
   );
   return (
-    <>
+    <div className="flex flex-col gap-6">
       <MemberProfileCard workspace={workspace} api={api} members={members} memberId={memberId} actions={actions} />
+      <MemberIdentitiesCard workspaceId={page.workspaceId} memberId={memberId} />
       {confirmation.element}
-    </>
+    </div>
   );
 }
 
@@ -132,7 +134,12 @@ export function AccountProfile({ page, memberId }: { page: AccessPage; memberId:
   if (members.state.kind === 'unavailable') return null;
   return (
     <TableRead state={members.state} refresh={members.refresh}>
-      {table => <MemberProfileCard workspace={workspace} api={api} members={table} memberId={memberId} />}
+      {table => (
+        <div className="flex flex-col gap-6">
+          <MemberProfileCard workspace={workspace} api={api} members={table} memberId={memberId} />
+          <MemberIdentitiesCard workspaceId={page.workspaceId} memberId={memberId} />
+        </div>
+      )}
     </TableRead>
   );
 }

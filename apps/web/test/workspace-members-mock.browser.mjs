@@ -158,11 +158,49 @@ test(
       await page.getByText('Removed Robin Shah from Members.', { exact: true }).waitFor();
       await person('Robin Shah').waitFor({ state: 'detached' });
 
+      const search = page.getByRole('searchbox', { name: 'Search by name, email, or handle', exact: true });
+      await search.fill('@mira-old');
+      await person('mira.patel@example.test').waitFor();
+      await person('Maya Rao').waitFor({ state: 'detached' });
+      await search.fill('');
+      await person('Maya Rao').waitFor();
+
       // An account member's page shows their Members profile; their name follows their own profile.
       await person('mira.patel@example.test').getByRole('link').first().click();
       await page.waitForURL(`${origin}/members-table-mock/members/87654321-4321-4321-8321-000000000004`);
       await page.getByRole('heading', { name: 'Profile', exact: true }).waitFor();
       await page.getByText('WD-101', { exact: true }).waitFor();
+
+      await page.getByRole('heading', { name: 'Connected accounts & handles', exact: true }).waitFor();
+      await page.getByRole('link', { name: '@mira-dev', exact: true }).waitFor();
+      await page.getByText('Previously: @mira-old', { exact: true }).waitFor();
+      await page.getByRole('button', { name: 'Add handle', exact: true }).click();
+      dialog = page.getByRole('dialog', { name: 'Add external handle', exact: true });
+      await dialog.getByRole('combobox', { name: 'Platform', exact: true }).click();
+      await page.getByRole('option', { name: 'Discord', exact: true }).click();
+      await dialog.getByRole('textbox', { name: 'Handle', exact: true }).fill('@miracord');
+      await dialog.getByRole('button', { name: 'Add handle', exact: true }).click();
+      await dialog.waitFor({ state: 'hidden' });
+      await page.getByText('Added Discord handle.', { exact: true }).waitFor();
+      await page.getByText('@miracord', { exact: true }).waitFor();
+      await page
+        .getByRole('region', { name: 'Added handles', exact: true })
+        .getByRole('button', { name: 'Edit', exact: true })
+        .click();
+      dialog = page.getByRole('dialog', { name: 'Edit Discord handle', exact: true });
+      await dialog.getByRole('textbox', { name: 'Handle', exact: true }).fill('@miracord2');
+      await dialog.getByRole('button', { name: 'Save changes', exact: true }).click();
+      await dialog.waitFor({ state: 'hidden' });
+      await page.getByText('@miracord2', { exact: true }).waitFor();
+      await page.getByText('Previously: @miracord', { exact: true }).waitFor();
+      await page
+        .getByRole('region', { name: 'Added handles', exact: true })
+        .getByRole('button', { name: 'Remove', exact: true })
+        .click();
+      await page.getByRole('alertdialog').getByRole('button', { name: 'Remove', exact: true }).click();
+      await page.getByText('Removed Discord handle.', { exact: true }).waitFor();
+      assert.equal(await page.getByText('@miracord2', { exact: true }).count(), 0);
+
       await page.getByRole('button', { name: 'Edit profile', exact: true }).click();
       dialog = page.getByRole('dialog', { name: 'Edit member', exact: true });
       assert.ok(await dialog.getByRole('textbox', { name: 'Name', exact: true }).isDisabled());

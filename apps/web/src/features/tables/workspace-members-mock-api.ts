@@ -16,7 +16,25 @@ import {
   workspaceMemberAccess as access,
   workspaceMemberStateSchema,
 } from '@tulipfarm/tables/workspace-members';
+import { workspaceMemberIdSchema } from '@tulipfarm/tables/workspace-member-id';
+import {
+  addWorkspaceMemberIdentityInputSchema,
+  updateWorkspaceMemberIdentityInputSchema,
+  type IdentityProviderInfo,
+  type WorkspaceMemberIdentity,
+} from '@tulipfarm/workspaces/member-identities-contracts';
 import type { RecordHistoryEntry } from './api';
+
+const mockIdentityProviders: IdentityProviderInfo[] = [
+  { id: 'slack', label: 'Slack', defaultScope: null, handlePrefix: '@', supportsManual: true },
+  { id: 'github', label: 'GitHub', defaultScope: 'github.com', handlePrefix: '@', supportsManual: true },
+  { id: 'discord', label: 'Discord', defaultScope: 'discord', handlePrefix: '@', supportsManual: true },
+  { id: 'telegram', label: 'Telegram', defaultScope: 'telegram', handlePrefix: '@', supportsManual: true },
+  { id: 'teams', label: 'Microsoft Teams', defaultScope: null, handlePrefix: '@', supportsManual: true },
+  { id: 'linear', label: 'Linear', defaultScope: null, handlePrefix: '@', supportsManual: true },
+  { id: 'x', label: 'X', defaultScope: 'x', handlePrefix: '@', supportsManual: true },
+  { id: 'linkedin', label: 'LinkedIn', defaultScope: 'linkedin', handlePrefix: null, supportsManual: true },
+];
 
 const id = (n: number) => `87654321-4321-4321-8321-${String(n).padStart(12, '0')}`;
 const revision = 'b'.repeat(40);
@@ -289,9 +307,125 @@ export function createMemberTablesMock(
       ),
     );
   };
+  const identities = new Map<string, WorkspaceMemberIdentity[]>([
+    [
+      me,
+      [
+        {
+          id: null,
+          memberId: workspaceMemberIdSchema.parse(me),
+          membershipId: id(4),
+          provider: 'github',
+          providerLabel: 'GitHub',
+          scope: 'github.com',
+          externalId: '424242',
+          handle: 'mira-dev',
+          displayName: 'Mira Patel',
+          aliases: ['mira-old'],
+          trust: 'verified',
+          conflict: null,
+          profileUrl: 'https://github.com/mira-dev',
+          mention: '@mira-dev',
+          updatedAt: date,
+        },
+      ],
+    ],
+  ]);
   const root = `/v1/workspaces/${workspaceId}`;
   async function handle(url: URL, method: string, body: unknown): Promise<Response | null> {
     const path = url.pathname;
+    if (path === `${root}/workspace-members/identities/search` && method === 'GET') {
+      const q = (url.searchParams.get('q') ?? '').trim().replace(/^@+/, '').toLowerCase();
+      const providerFilter = url.searchParams.get('provider')?.trim().toLowerCase() || null;
+      if (!q) return Response.json({ matches: [] });
+      const matches: { memberId: string; membershipId: string | null; identity: WorkspaceMemberIdentity }[] = [];
+      for (const list of identities.values()) {
+        for (const identity of list) {
+          if (providerFilter && identity.provider !== providerFilter) continue;
+          const haystack = [identity.handle, identity.externalId, identity.displayName, ...identity.aliases]
+            .filter((value): value is string => Boolean(value))
+            .map(value => value.toLowerCase());
+          if (haystack.some(value => value.includes(q))) {
+            matches.push({ memberId: identity.memberId, membershipId: identity.membershipId, identity });
+          }
+        }
+      }
+      return Response.json({ matches });
+    }
+    const memberIdentitiesMatch = new RegExp(`^${root}/workspace-members/([^/]+)/identities(?:/([^/]+))?$`).exec(path);
+    if (memberIdentitiesMatch) {
+      const targetMemberId = memberIdentitiesMatch[1]!;
+      const identityId = memberIdentitiesMatch[2] ?? null;
+      if (!states.has(targetMemberId)) return Response.json({ error: 'member-not-found' }, { status: 404 });
+      const list = identities.get(targetMemberId) ?? [];
+      if (!identityId && method === 'GET') {
+        return Response.json({
+          memberId: targetMemberId,
+          canManage: !readOnly,
+          providers: mockIdentityProviders,
+          identities: list,
+        });
+      }
+      if (readOnly) return Response.json({ error: 'forbidden' }, { status: 403 });
+      if (!identityId && method === 'POST') {
+        const input = addWorkspaceMemberIdentityInputSchema.parse(body);
+        const provider = input.provider.trim().toLowerCase();
+        const providerInfo = mockIdentityProviders.find(item => item.id === provider);
+        const handle = input.handle?.trim().replace(/^@+/, '') || null;
+        const externalId = input.externalId?.trim() || null;
+        const created: WorkspaceMemberIdentity = {
+          id: crypto.randomUUID(),
+          memberId: workspaceMemberIdSchema.parse(targetMemberId),
+          membershipId: targetMemberId === me ? id(4) : null,
+          provider,
+          providerLabel: providerInfo?.label ?? provider,
+          scope: input.scope?.trim() || providerInfo?.defaultScope || provider,
+          externalId,
+          handle,
+          displayName: input.displayName?.trim() || null,
+          aliases: [],
+          trust: 'manual',
+          conflict: null,
+          profileUrl: null,
+          mention: handle && providerInfo?.handlePrefix ? `${providerInfo.handlePrefix}${handle}` : null,
+          updatedAt: date,
+        };
+        identities.set(targetMemberId, [...list, created]);
+        return Response.json({ identity: created }, { status: 201 });
+      }
+      if (identityId && method === 'PATCH') {
+        const index = list.findIndex(item => item.id === identityId && item.trust === 'manual');
+        if (index === -1) return Response.json({ error: 'identity-not-found' }, { status: 404 });
+        const input = updateWorkspaceMemberIdentityInputSchema.parse(body);
+        const existing = list[index]!;
+        const nextHandle =
+          input.handle !== undefined ? input.handle?.trim().replace(/^@+/, '') || null : existing.handle;
+        const aliases =
+          existing.handle && nextHandle && existing.handle.toLowerCase() !== nextHandle.toLowerCase()
+            ? [...new Set([...existing.aliases, existing.handle])]
+            : existing.aliases;
+        const providerInfo = mockIdentityProviders.find(item => item.id === existing.provider);
+        const updated: WorkspaceMemberIdentity = {
+          ...existing,
+          handle: nextHandle,
+          externalId: input.externalId !== undefined ? input.externalId?.trim() || null : existing.externalId,
+          displayName: input.displayName !== undefined ? input.displayName?.trim() || null : existing.displayName,
+          aliases,
+          mention: nextHandle && providerInfo?.handlePrefix ? `${providerInfo.handlePrefix}${nextHandle}` : null,
+          updatedAt: date,
+        };
+        const nextList = [...list];
+        nextList[index] = updated;
+        identities.set(targetMemberId, nextList);
+        return Response.json({ identity: updated });
+      }
+      if (identityId && method === 'DELETE') {
+        const nextList = list.filter(item => !(item.id === identityId && item.trust === 'manual'));
+        if (nextList.length === list.length) return Response.json({ error: 'identity-not-found' }, { status: 404 });
+        identities.set(targetMemberId, nextList);
+        return Response.json({ removed: true });
+      }
+    }
     if (path === `${root}/workspace-members` && method === 'GET') {
       if (scenario === 'status-error' && readsFailed++ === 0)
         return Response.json({ error: 'member-unavailable' }, { status: 503 });
