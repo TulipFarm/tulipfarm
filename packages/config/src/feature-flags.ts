@@ -74,6 +74,27 @@ export const featureFlags = {
     scope: 'workspace',
     env: 'FEATURE_FLAG_DECISIONS_CREATION_REVIEW',
   },
+  'decisions-learning-gate': {
+    description:
+      'With TYPESAFE_API_KEY set, the Jev decision model gates background personal memory, knowledge, and agent lesson learning so chunks with nothing durable to save skip the full model call.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_DECISIONS_LEARNING_GATE',
+  },
+  'decisions-heartbeat-filter': {
+    description:
+      'With TYPESAFE_API_KEY set, the Jev decision model pre-filters incoming Gmail heartbeat emails against the owner instructions before reserving credits and calling the full model.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_DECISIONS_HEARTBEAT_FILTER',
+  },
+  'decisions-drift-audit': {
+    description:
+      'With TYPESAFE_API_KEY set, asynchronously shadow-audits a sampled fraction of Jev decisions against reference checks and logs agreement and human override signals for judge drift monitoring.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_DECISIONS_DRIFT_AUDIT',
+  },
 } as const satisfies Record<string, FeatureFlagDefinition>;
 
 export type FeatureFlag = keyof typeof featureFlags;

@@ -131,7 +131,7 @@ export const identityProviderList = Object.entries(identityProviders).map(
   }),
 );
 
-// These mirror the CHECK constraints in 0118_member_identities.sql, so bad input fails here with a typed error.
+// These mirror the CHECK constraints in 0120_member_identities.sql, so bad input fails here with a typed error.
 const providerPattern = /^[a-z][a-z0-9-]{0,31}$/;
 const scopePattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const handlePattern = /^[^\s@\p{Cc}][^\s\p{Cc}]{0,127}$/u;

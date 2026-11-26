@@ -220,7 +220,7 @@ const runRowSchema = z.object({
 const githubTaskHandoffs = {
   'selection-required': {
     status: 'waiting-clarification',
-    text: 'Choose a GitHub source in this task, then continue. Investigation sources stay private and read-only.',
+    text: 'Choose a GitHub account or team connection for this investigation, then continue.',
   },
   'tool-limit': {
     status: 'paused',
@@ -1360,9 +1360,11 @@ export function createAgentExecutor(options: Options) {
                 ? 'waiting'
                 : 'completed';
             const handoff =
-              response.state === 'selection-required' || response.state === 'tool-limit'
-                ? githubTaskHandoffs[response.state]
-                : null;
+              response.state === 'tool-limit'
+                ? githubTaskHandoffs['tool-limit']
+                : response.state === 'selection-required' && response.provider === 'github-investigation'
+                  ? githubTaskHandoffs['selection-required']
+                  : null;
             await executionTransaction(ids, async tx => {
               const owner = await taskOutputAllowed(tx, ids.workspaceId, ids.runId, true);
               await requireDraftSources(tx, owner, response.sources, new Set(), ids.runId);

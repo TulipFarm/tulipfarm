@@ -4,7 +4,7 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import { createServer } from 'vite';
+import { createBuiltAppServer as createServer } from './built-app.fixture.mjs';
 import { createAttachments } from '@tulipfarm/conversations/attachments';
 import { createConversations } from '@tulipfarm/conversations';
 import { knowledgeFixture } from '../../api/test/knowledge-fixture.mjs';

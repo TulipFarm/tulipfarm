@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { createServer } from 'vite';
+import { createBuiltAppServer as createServer } from './built-app.fixture.mjs';
 import { chromium } from 'playwright';
 import { chatDocumentSchema } from '@tulipfarm/conversations/rich-content';
 import { execFileSync } from 'node:child_process';

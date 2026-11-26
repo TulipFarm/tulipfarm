@@ -32,6 +32,7 @@ import {
   type SuggestionArea,
 } from './agent-lessons.ts';
 import { inferWithSystem, isPlanRoute, type InferenceRoute, type InferenceUsage } from './inference.ts';
+import { worthLearning } from './decisions.ts';
 import { modelFamilyEnabled } from './model-availability.ts';
 import type { ModelEnvironment } from './model-environment.ts';
 import type { ModelFamilyEligibility } from './model-policy-contracts.ts';
@@ -311,6 +312,11 @@ export function createAgentLessonLearning(options: {
     const keys: string[] = [];
     try {
       for (const part of learnedParts(messages)) {
+        const text = part.map(message => message.text).join('\n\n');
+        if (!(await worthLearning(workspaceId, 'knowledge', text))) {
+          keys.push(...part.map(message => `fact:${message.id}`));
+          continue;
+        }
         const entries = await learned.entries(workspaceId, owner);
         const answer = await options.model({
           workspaceId,
@@ -360,6 +366,16 @@ export function createAgentLessonLearning(options: {
   ) {
     const fresh = gathered.evidence.filter(item => !seen.has(item.key));
     if (!fresh.length) return [];
+    const keys = fresh.map(item => item.key);
+    if (
+      !(await worthLearning(
+        workspaceId,
+        'agent-lesson',
+        JSON.stringify(fresh.map(({ kind, detail }) => ({ kind, ...detail }))),
+      ))
+    ) {
+      return keys;
+    }
     const store = agentLessonsStore(workspaceId, gathered.agentId);
     const current: AgentLessonBook = await store.read();
     const { definition } = gathered;
@@ -381,7 +397,6 @@ export function createAgentLessonLearning(options: {
     });
     if (answer === null) return null;
     const output = parseLessonOutput(answer);
-    const keys = fresh.map(item => item.key);
     if (!output) return keys;
     const safe = safeLessonOutput(output, {
       evidence: fresh.flatMap(item => evidenceTexts(item.detail)),

@@ -9,10 +9,14 @@ const baseline = process.env.UI_BASELINE === '1';
 const output = new URL('../../../docs/evidence/ui-ux-priorities/', import.meta.url);
 await mkdir(output, { recursive: true });
 const origin = 'http://127.0.0.1:5458';
-const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', '5458', '--strictPort'], {
-  cwd: process.env.UI_APP_ROOT ?? new URL('..', import.meta.url),
-  stdio: 'ignore',
-});
+const server = spawn(
+  process.execPath,
+  ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', '5458', '--strictPort'],
+  {
+    cwd: process.env.UI_APP_ROOT ?? new URL('..', import.meta.url),
+    stdio: 'ignore',
+  },
+);
 const ids = Array.from(
   { length: 9 },
   (_, i) =>

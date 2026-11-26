@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createServer } from 'vite';
+import { createBuiltAppServer as createServer } from './built-app.fixture.mjs';
 import { ownMembership } from './workspace-query.fixture.mjs';
 import { installTurnstileFixture } from './turnstile-fixture.mjs';
 

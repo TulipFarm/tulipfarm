@@ -112,6 +112,38 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
     });
   }
 
+  async function verifyTeamGitHubDefaults(
+    transaction: AgentTransaction,
+    actor: HumanActor,
+    agentId: string,
+    revision: string,
+  ) {
+    const definitionRow = (
+      await transaction.client.query(
+        `SELECT definition FROM ${relation(transaction, 'tf_agent_definitions')} WHERE agent_id = $1 AND revision = $2`,
+        [agentId, revision],
+      )
+    ).rows[0] as { definition?: unknown } | undefined;
+    const parsedDefinition = agentDefinitionSchema.safeParse(definitionRow?.definition);
+    const defaultGitHub = parsedDefinition.success ? parsedDefinition.data.defaults?.githubConnection : undefined;
+    if (defaultGitHub?.kind !== 'team') return;
+    const teamIntegration = (
+      await transaction.client.query(
+        `SELECT id FROM ${relation(transaction, 'tf_integrations')}
+         WHERE id = $1 AND enabled AND deleted_at IS NULL AND credential IS NOT NULL`,
+        [defaultGitHub.id],
+      )
+    ).rows[0];
+    if (!teamIntegration) throw new AccessDenied();
+    if (!(await canAccessAsset(transaction, actor, defaultGitHub.id, 'integration.read'))) throw new AccessDenied();
+    if (!(await canAccessAsset(transaction, actor, defaultGitHub.id, 'integration.use'))) throw new AccessDenied();
+    if (
+      defaultGitHub.allowWrites &&
+      !(await canAccessAsset(transaction, actor, defaultGitHub.id, 'integration.manage'))
+    )
+      throw new AccessDenied();
+  }
+
   async function activate(workspaceId: string, actor: HumanActor, input: unknown) {
     const value = z
       .strictObject({
@@ -141,6 +173,7 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
       )
         throw new AccessDenied();
       await resolveDefinitionProcedures(transaction, value.agentId, value.revision);
+      await verifyTeamGitHubDefaults(transaction, actor, value.agentId, value.revision);
       const id = value.requestId ?? randomUUID();
       const previous = (
         await transaction.client.query(
@@ -321,6 +354,7 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
         [];
       if (canonicalJson(scope) !== canonicalJson(value.scope)) throw new AgentError('activation-scope-conflict');
       await resolveDefinitionProcedures(transaction, value.agentId, value.revision, actor);
+      await verifyTeamGitHubDefaults(transaction, actor, value.agentId, value.revision);
       const before = await definitionRecommendationAudience(transaction, 'agent', value.agentId);
       // Replacing instructions must not change the default scope or resolve genuinely tied activation times.
       const attributed = supportsActivationActor(transaction);

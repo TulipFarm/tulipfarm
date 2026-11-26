@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright';
-import { build, preview } from 'vite';
+import { startBuiltApp } from './built-app.fixture.mjs';
 import { googleFixture } from '../../../packages/google-workspace/test/fixture.mjs';
 import { createGmailHeartbeat } from '@tulipfarm/google-workspace/heartbeat';
 import { createGoogleOperations } from '@tulipfarm/google-workspace/operations';
@@ -180,22 +180,11 @@ test(
         { prefix: '/v1' },
       );
       const apiOrigin = await app.listen({ host: '127.0.0.1', port: 0 });
-      const root = fileURLToPath(new URL('..', import.meta.url));
-      const config = {
-        root,
-        configFile: `${root}/vite.config.ts`,
-        configLoader: 'native',
-        envDir: false,
-        logLevel: 'warn',
-        // A separate output keeps the shared dist, which other browser tests serve, built for the default API.
-        build: { outDir: 'node_modules/.cache/google-browser-dist', emptyOutDir: true },
-      };
-      await build({ ...config, define: { 'import.meta.env.VITE_API_URL': JSON.stringify(apiOrigin) } });
-      if (priorNodeEnv === undefined) delete process.env.NODE_ENV;
-      else process.env.NODE_ENV = priorNodeEnv;
-      server = await preview({
-        ...config,
-        preview: { host: '127.0.0.1', port: Number(new URL(origin).port), strictPort: true },
+      server = await startBuiltApp({
+        host: '127.0.0.1',
+        port: Number(new URL(origin).port),
+        apiUrl: apiOrigin,
+        devMode: true,
       });
       if (priorNodeEnv === undefined) delete process.env.NODE_ENV;
       else process.env.NODE_ENV = priorNodeEnv;

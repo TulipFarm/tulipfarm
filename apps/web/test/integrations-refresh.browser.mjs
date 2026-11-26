@@ -1,11 +1,10 @@
-// browser-tests: run alone, since beside other tests its waits time out.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { mkdir } from 'node:fs/promises';
 import { chromium } from 'playwright';
-import { createServer } from 'vite';
+import { createBuiltAppServer as createServer } from './built-app.fixture.mjs';
 
 test('integration status recovery and Google review lifecycle', { timeout: 480_000 }, async t => {
   const root = fileURLToPath(new URL('..', import.meta.url));

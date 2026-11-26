@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { test } from 'node:test';
-import { createServer } from 'vite';
+import { createBuiltAppServer as createServer } from './built-app.fixture.mjs';
 import { chromium } from 'playwright';
 import { installTurnstileFixture } from './turnstile-fixture.mjs';
 

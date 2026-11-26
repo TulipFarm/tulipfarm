@@ -8,10 +8,14 @@ import { chromium } from 'playwright';
 test('ordinary editor retains optional family through save and uncertain retry', { timeout: 60000 }, async () => {
   const port = Number(process.env.AGENT_EDITOR_BROWSER_PORT ?? 5199);
   const origin = `http://127.0.0.1:${port}`;
-  const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-    cwd: new URL('..', import.meta.url),
-    stdio: 'ignore',
-  });
+  const server = spawn(
+    process.execPath,
+    ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+    {
+      cwd: new URL('..', import.meta.url),
+      stdio: 'ignore',
+    },
+  );
   let browser;
   try {
     for (let attempt = 0; ; attempt++) {
@@ -151,10 +155,14 @@ test('ordinary editor retains optional family through save and uncertain retry',
 test('a manager limits an agent’s browser to listed sites and preselects logins', { timeout: 60000 }, async () => {
   const port = Number(process.env.AGENT_EDITOR_BROWSER_PORT ?? 5199) + 1;
   const origin = `http://127.0.0.1:${port}`;
-  const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-    cwd: new URL('..', import.meta.url),
-    stdio: 'ignore',
-  });
+  const server = spawn(
+    process.execPath,
+    ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+    {
+      cwd: new URL('..', import.meta.url),
+      stdio: 'ignore',
+    },
+  );
   let browser;
   try {
     for (let attempt = 0; ; attempt++) {

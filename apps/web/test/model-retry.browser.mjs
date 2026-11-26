@@ -13,10 +13,14 @@ test(
   async t => {
     const port = Number(process.env.MODEL_RETRY_BROWSER_PORT ?? 5299);
     const origin = `http://127.0.0.1:${port}`;
-    const vite = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-      cwd: new URL('..', import.meta.url),
-      stdio: 'ignore',
-    });
+    const vite = spawn(
+      process.execPath,
+      ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+      {
+        cwd: new URL('..', import.meta.url),
+        stdio: 'ignore',
+      },
+    );
     let browser;
     try {
       for (let i = 0; ; i++) {

@@ -10,10 +10,14 @@ test(
   { timeout: 120000 },
   async () => {
     const origin = 'http://127.0.0.1:5776';
-    const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', '5776', '--strictPort'], {
-      cwd: new URL('..', import.meta.url),
-      stdio: 'ignore',
-    });
+    const server = spawn(
+      process.execPath,
+      ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', '5776', '--strictPort'],
+      {
+        cwd: new URL('..', import.meta.url),
+        stdio: 'ignore',
+      },
+    );
     let browser;
     try {
       for (

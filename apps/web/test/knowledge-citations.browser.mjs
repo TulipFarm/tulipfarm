@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createServer } from 'vite';
+import { createBuiltAppServer as createServer } from './built-app.fixture.mjs';
 import { chromium } from 'playwright';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
 import { createWorkspaceFixture, serveWorkspaceShellEvent, workspaceShellReads } from './workspace.fixture.mjs';

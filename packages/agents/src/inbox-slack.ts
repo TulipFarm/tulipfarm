@@ -5,6 +5,8 @@ import { formatTaskKey, taskNumberOf } from '@tulipfarm/tables/task-keys';
 import { rowTitle } from './row-assignments.ts';
 import { tasksTableId } from './task-reminders.ts';
 import { agentCompatibility, relation, type AgentStorage } from './store.ts';
+import { relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
+import { taskClarificationFieldSchema, type TaskClarificationField } from './task-clarification-contracts.ts';
 
 const kindText: Record<string, string> = {
   assigned: 'Assigned to you',
@@ -95,6 +97,7 @@ export function createInboxSlackNotifier(options: {
       );
       const messages = [];
       const tasksId = taskKeys ? await tasksTableId(tx) : null;
+      const hasClarifications = await relationInstalled(tx.client, relation(tx, 'tf_row_clarifications'));
       for (const item of items) {
         const actor: HumanActor = { kind: 'human', userId: item.user_id, membershipId: item.membership_id };
         // Behavior 60: a message names only a row the member can still read.
@@ -107,7 +110,34 @@ export function createInboxSlackNotifier(options: {
         );
         const row = readable ? await rowTitle(tx, item.table_id, item.row_id) : null;
         const number = row && item.table_id === tasksId ? await taskNumberOf(tx, item.table_id, item.row_id) : null;
-        if (row) messages.push({ item, row, key: number === null ? null : formatTaskKey(number) });
+        let clarification: {
+          id: string;
+          title: string;
+          summary: string | null;
+          fields: TaskClarificationField[];
+        } | null = null;
+        if (row && item.kind === 'waiting' && hasClarifications) {
+          const found = (
+            await tx.client.query(
+              `SELECT id, title, summary, fields FROM ${relation(tx, 'tf_row_clarifications')}
+               WHERE table_id = $1 AND row_id = $2 AND status = 'open'
+               ORDER BY created_at DESC LIMIT 1`,
+              [item.table_id, item.row_id],
+            )
+          ).rows[0] as { id: string; title: string; summary: string | null; fields: unknown } | undefined;
+          if (found) {
+            const parsedFields = z.array(taskClarificationFieldSchema).safeParse(found.fields);
+            if (parsedFields.success) {
+              clarification = {
+                id: found.id,
+                title: found.title,
+                summary: found.summary,
+                fields: parsedFields.data,
+              };
+            }
+          }
+        }
+        if (row) messages.push({ item, row, key: number === null ? null : formatTaskKey(number), clarification });
       }
       return { installed, messages };
     });
@@ -129,7 +159,7 @@ export function createInboxSlackNotifier(options: {
       claimed.installed.bot_credential,
     );
     let sent = 0;
-    for (const { item, row, key } of claimed.messages) {
+    for (const { item, row, key, clarification } of claimed.messages) {
       try {
         const link =
           key && options.taskLink
@@ -140,11 +170,39 @@ export function createInboxSlackNotifier(options: {
           `*${kindText[item.kind] ?? 'Inbox'}*: ${plain(item.summary ?? '')}`.replace(/: $/, ''),
           `${link ? `[${name}](${link})` : name} in ${plain(row.table)}`,
         ].join('\n');
+        const clarificationBlocks = clarification
+          ? [
+              {
+                type: 'section' as const,
+                text: {
+                  type: 'mrkdwn' as const,
+                  text: [
+                    `*${plain(clarification.title)}*`,
+                    ...(clarification.summary ? [plain(clarification.summary)] : []),
+                    ...clarification.fields.map(f => `• ${plain(f.label)}`),
+                  ].join('\n'),
+                },
+              },
+              {
+                type: 'actions' as const,
+                elements: [
+                  {
+                    type: 'button' as const,
+                    action_id: `tf_task_clarify:${clarification.id}`,
+                    style: 'primary' as const,
+                    text: { type: 'plain_text' as const, text: 'Answer in Slack' },
+                    value: clarification.id,
+                  },
+                ],
+              },
+            ]
+          : undefined;
         const channel = await openBotDirectMessage(token, item.slack_user_id, options.fetcher);
         const outcome = await postBotMessage({
           token,
           channel,
           text,
+          ...(clarificationBlocks ? { blocks: clarificationBlocks as never } : {}),
           ...(options.fetcher ? { fetcher: options.fetcher } : {}),
         });
         if (outcome.kind === 'sent') sent += 1;

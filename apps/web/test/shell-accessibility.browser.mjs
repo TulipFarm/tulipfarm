@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { createServer } from 'vite';
+import { createBuiltAppServer as createServer } from './built-app.fixture.mjs';
 import { chromium } from 'playwright';
 import { createWorkspaceFixture, workspaceShellReads, serveWorkspaceShellEvent } from './workspace.fixture.mjs';
 

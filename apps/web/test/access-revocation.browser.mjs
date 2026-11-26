@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import { createServer } from 'vite';
+import { createBuiltAppServer as createServer } from './built-app.fixture.mjs';
 
 test('private workspace views respect revocation across concurrent refreshes', { timeout: 300_000 }, async t => {
   const root = fileURLToPath(new URL('..', import.meta.url));

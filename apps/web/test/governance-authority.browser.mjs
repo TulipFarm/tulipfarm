@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import { createServer } from 'vite';
+import { createBuiltAppServer as createServer } from './built-app.fixture.mjs';
 import { createWorkspaceFixture } from './workspace.fixture.mjs';
 import { ownMembership } from './workspace-query.fixture.mjs';
 import { shellRead } from './shell-reads.mjs';

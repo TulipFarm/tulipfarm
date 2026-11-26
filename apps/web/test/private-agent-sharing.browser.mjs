@@ -9,10 +9,14 @@ import { createWorkspaceFixture } from './workspace.fixture.mjs';
 test('personal agent creation and manager sharing retain inputs across failures', { timeout: 90000 }, async () => {
   const port = 5299,
     origin = `http://127.0.0.1:${port}`;
-  const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-    cwd: new URL('..', import.meta.url),
-    stdio: 'ignore',
-  });
+  const server = spawn(
+    process.execPath,
+    ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+    {
+      cwd: new URL('..', import.meta.url),
+      stdio: 'ignore',
+    },
+  );
   let browser;
   try {
     for (let attempt = 0; ; attempt++) {
