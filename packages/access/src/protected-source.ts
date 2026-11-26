@@ -468,10 +468,64 @@ export async function requireWorkflowDefinitionSources(
   actor: HumanActor,
   sources: readonly SourceDependency[],
 ) {
-  const closure = await protectedSourceClosure(tx, sources);
+  const closure = await savedDefinitionSources(tx, await protectedSourceClosure(tx, sources));
   // Memory first, so a definition derived from someone else's memory is refused as such rather than by whichever
   // other source of the same chat happens to be checked first.
   for (const source of closure)
     if (source.kind === 'personal-memory') await requirePersonalMemorySource(tx, actor, source);
-  for (const source of closure) if (source.kind !== 'personal-memory') await requireProtectedSource(tx, actor, source);
+  for (const source of closure)
+    if (source.kind !== 'personal-memory') await requireProtectedSource(tx, actor, source, undefined, false, true);
+}
+
+/**
+ * The sources a saved definition still depends on. A chat draft records every table, agent and skill its chat could
+ * list, so editing, archiving or deleting any of them must not lock anyone out of what was saved: tables move to their
+ * current revision, and a deleted table, agent or skill is left out. One that still exists keeps needing the actor's
+ * current access.
+ */
+export async function savedDefinitionSources(
+  tx: AuthorizationTransaction,
+  sources: readonly SourceDependency[],
+): Promise<SourceDependency[]> {
+  const ids = (select: (source: SourceDependency) => string | undefined) => [
+    ...new Set(sources.flatMap(source => select(source) ?? [])),
+  ];
+  const tableIds = ids(source =>
+    source.kind === 'table' || source.kind === 'table-rows' || source.kind === 'table-schema'
+      ? source.tableId
+      : undefined,
+  );
+  const agentIds = ids(source => (source.kind === 'agent-definition' ? source.agentId : undefined));
+  const skillIds = ids(source => (source.kind === 'workspace-skill' ? source.skillId : undefined));
+  const present = async (name: string, live: string, values: string[]) =>
+    new Set(
+      values.length
+        ? z
+            .array(z.object({ id: z.uuid() }))
+            .parse(
+              (
+                await tx.client.query(
+                  `SELECT id FROM ${escapeIdentifier(tx.schema)}.${escapeIdentifier(name)} WHERE id=ANY($1::uuid[])${live}`,
+                  [values],
+                )
+              ).rows,
+            )
+            .map(row => row.id)
+        : [],
+    );
+  const tables = await present('tf_table_catalog', '', tableIds);
+  const agents = await present('tf_agents', ' AND deleted_at IS NULL', agentIds);
+  const skills = await present('tf_workspace_skills', ' AND deleted_at IS NULL', skillIds);
+  return currentTableRevisions(
+    tx,
+    sources.filter(source =>
+      source.kind === 'table' || source.kind === 'table-rows' || source.kind === 'table-schema'
+        ? tables.has(source.tableId)
+        : source.kind === 'agent-definition'
+          ? agents.has(source.agentId)
+          : source.kind === 'workspace-skill'
+            ? skills.has(source.skillId)
+            : true,
+    ),
+  );
 }

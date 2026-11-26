@@ -8,6 +8,7 @@ import {
   protectedSourceClosure,
   requirePersonalMemorySource,
   requireProtectedSource,
+  savedDefinitionSources,
   sourceDependenciesSchema,
   type HumanActor,
   type SourceDependency,
@@ -21,6 +22,8 @@ import { requireNoMcpDerived } from '@tulipfarm/access';
  * `ownMemory` accepts the actor's own personal memory anywhere in the closure; chat drafts set it. `slackTurn`
  * checks a Slack thread in the closure against its current audience; without it a Slack thread is refused.
  * `chatReview` checks the closure a chat review card depends on (see `chatReviewClosure`); chat drafts set it.
+ * `savedDefinition` checks what a saved definition still depends on (see `savedDefinitionSources`), and a disabled
+ * skill no longer refuses it.
  */
 export async function requireDraftSources(
   tx: AgentTransaction,
@@ -34,19 +37,19 @@ export async function requireDraftSources(
   privateConversation?: (source: SourceDependency) => Promise<void>,
   chatReview = false,
   readOnly = false,
+  savedDefinition = false,
 ): Promise<void> {
   await currentMember(tx, actor);
   await lockAuthorization(tx);
-  for (const source of chatReview
-    ? await chatReviewClosure(tx, actor, sources)
-    : await protectedSourceClosure(tx, sources)) {
+  const closure = chatReview ? await chatReviewClosure(tx, actor, sources) : await protectedSourceClosure(tx, sources);
+  for (const source of savedDefinition ? await savedDefinitionSources(tx, closure) : closure) {
     const key = canonicalJson(source);
     if (visited.has(key)) continue;
     visited.add(key);
     if (ownMemory && source.kind === 'personal-memory') await requirePersonalMemorySource(tx, actor, source);
     else if (slackTurn && source.kind === 'shared-slack-turn') await slackTurn(source.eventId);
     else if (privateConversation && source.kind === 'private-conversation') await privateConversation(source);
-    else await requireProtectedSource(tx, actor, source, runId, publicOnly, readOnly);
+    else await requireProtectedSource(tx, actor, source, runId, publicOnly, readOnly || savedDefinition);
     if (source.kind === 'agent-definition') await requireAgentPermission(tx, actor, source.agentId, 'read');
   }
 }
