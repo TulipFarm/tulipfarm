@@ -103,6 +103,11 @@ export function guideAccess(pool: Pool, secret: string) {
       await limit('signup-visitor', id, 3, 3_600_000);
       if (email) await limit('signup-email', email, 3, 900_000);
     },
+    /** Website lookups in signup step 1: one per pause in typing the workspace name. */
+    async lookup(ip: string, id: string) {
+      await limit('lookup-visitor', id, 10, 3_600_000);
+      await limit('lookup-ip', ip, 30, 3_600_000);
+    },
     async google(ip: string) {
       await limit('google', ip, 10, 60_000);
     },

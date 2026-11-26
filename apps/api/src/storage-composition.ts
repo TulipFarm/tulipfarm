@@ -129,7 +129,7 @@ export function registerStorageComposition(
   registerRecommendations(app, { runtime, auth: dependencies.auth });
   // Keep is reached lazily per workspace; an invalid endpoint still fails at startup.
   keepConfiguration();
-  registerBud(app, { auth: dependencies.auth, service: createBudAssistant(runtime) });
+  registerBud(app, { auth: dependencies.auth, service: createBudAssistant(runtime), pool: dependencies.pool });
   registerSkills(app, { runtime, auth: dependencies.auth });
   const wakeTask = taskWake(app, temporal);
   const wakeTaskAction = taskActionWake(app, runtime, wakeTask, wake);

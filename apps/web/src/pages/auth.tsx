@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
 import { ArrowRightIcon } from '@tulipfarm/icons';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
@@ -15,6 +15,8 @@ import { pauseDevAutoSignIn } from '@/lib/dev-auto-sign-in';
 import { forgetSession } from '@/lib/last-workspace';
 import { persistedReads } from '@/lib/query/persisted-reads';
 import { useOnboardingFields } from '@/features/auth/onboarding-fields';
+import { OnboardingChatWindow, clearOnboardingChat } from '@/features/auth/onboarding-interview';
+import { PublicAuthQueryProvider, useAuthOptions } from '@/features/auth/public-query';
 
 export function RegisterPage() {
   const [pending, setPending] = useState(false);
@@ -48,6 +50,15 @@ export function RegisterPage() {
 }
 
 export function WorkspaceSignupPage() {
+  // Step 1 reads the sign-up options too (the chat-onboarding flag shapes its fields), so the whole page shares them.
+  return (
+    <PublicAuthQueryProvider>
+      <WorkspaceSignup />
+    </PublicAuthQueryProvider>
+  );
+}
+
+function WorkspaceSignup() {
   const [pending, setPending] = useState(false);
   const [step, setStep] = useState<'workspace' | 'account'>('workspace');
   const workspace = useOnboardingFields(pending);
@@ -74,7 +85,7 @@ export function WorkspaceSignupPage() {
       <AuthLayout
         step="Step 1 of 2"
         title="Create your workspace"
-        subtitle="Next, you’ll create your account."
+        subtitle="A shared home where your business, team or family works with AI agents."
         footer={footer}
       >
         <SignInAvailable>
@@ -116,40 +127,93 @@ export function WorkspaceSignupPage() {
         </SignInAvailable>
       </AuthLayout>
     );
-  return (
-    <AuthLayout step="Step 2 of 2" title="Create your account" subtitle={`Sign in to claim ${name}.`} footer={footer}>
-      <div className="space-y-6">
-        <div className="flex items-center gap-3 rounded-xl border bg-card p-3">
-          <EntityAvatar seed={slug} name={name} size="md" shape="square" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate font-medium text-foreground">{name}</p>
-            <p className="truncate text-sm text-muted-foreground">
-              {window.location.host}/{slug}
-            </p>
-          </div>
-          <Button
-            variant="ghost"
-            disabled={pending}
-            aria-label="Edit workspace details"
-            onClick={() => setStep('workspace')}
-          >
-            Edit
-          </Button>
-        </div>
-        <AuthForm
-          workspace={workspace}
-          withName
-          providersFirst
-          submitLabel="Create workspace with email"
-          passwordLabel="Create workspace"
-          linkLabel="Email me a sign-in link instead"
-          googleLabel="Continue with Google"
-          pending={pending}
-          onPendingChange={setPending}
-        />
+  const workspaceCard = (
+    <div className="flex items-center gap-3 rounded-xl border bg-card p-3">
+      <EntityAvatar seed={slug} name={name} size="md" shape="square" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-medium text-foreground">{name}</p>
+        <p className="truncate text-sm text-muted-foreground">
+          {window.location.host}/{slug}
+        </p>
       </div>
-    </AuthLayout>
+      <Button
+        variant="ghost"
+        disabled={pending}
+        aria-label="Edit workspace details"
+        onClick={() => setStep('workspace')}
+      >
+        Edit
+      </Button>
+    </div>
   );
+  const accountForm = (
+    <AuthForm
+      workspace={workspace}
+      withName
+      providersFirst
+      submitLabel="Create workspace with email"
+      passwordLabel="Create workspace"
+      linkLabel="Email me a sign-in link instead"
+      googleLabel="Continue with Google"
+      name={workspace.personName}
+      pending={pending}
+      onPendingChange={setPending}
+    />
+  );
+  return (
+    <PublicAuthQueryProvider>
+      <AccountStep
+        chat={
+          <OnboardingChatWindow
+            workspaceName={name}
+            workspaceSlug={slug}
+            visitorName={workspace.personName}
+            profile={workspace.profile}
+            onProfileChange={workspace.setProfile}
+            onEditWorkspace={() => setStep('workspace')}
+            pending={pending}
+            signup={
+              <div className="space-y-4">
+                {accountForm}
+                <p className="text-sm text-muted-foreground">{footer}</p>
+              </div>
+            }
+          />
+        }
+        form={
+          <AuthLayout
+            step="Step 2 of 2"
+            title="Create your account"
+            subtitle={`Sign in to claim ${name}.`}
+            footer={footer}
+          >
+            <div className="space-y-6">
+              {workspaceCard}
+              {accountForm}
+            </div>
+          </AuthLayout>
+        }
+        onForm={() => {
+          // With the chat off, no answers ride along with the draft.
+          workspace.setProfile(undefined);
+          clearOnboardingChat();
+        }}
+      />
+    </PublicAuthQueryProvider>
+  );
+}
+
+/** Step 2: the onboarding chat when chat-onboarding is on, else the account form. */
+function AccountStep({ chat, form, onForm }: { chat: ReactNode; form: ReactNode; onForm: () => void }) {
+  const options = useAuthOptions();
+  const chatOn = options.data?.chatOnboarding === true;
+  const clear = useRef(onForm);
+  clear.current = onForm;
+  useEffect(() => {
+    if (options.isSuccess && !chatOn) clear.current();
+  }, [options.isSuccess, chatOn]);
+  if (options.isPending) return form;
+  return chatOn ? chat : form;
 }
 
 export function VerifyEmailPage() {

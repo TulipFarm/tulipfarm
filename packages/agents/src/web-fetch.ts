@@ -291,13 +291,19 @@ async function scrape(url: string, signal: AbortSignal): Promise<unknown> {
 }
 
 /** SearXNG `GET /search` with JSON output, or a proxy in front of it that takes SEARXNG_TOKEN. */
-async function search(query: string, window: 'day' | 'week' | 'any', signal: AbortSignal): Promise<unknown> {
+async function search(
+  query: string,
+  window: 'day' | 'week' | 'any',
+  signal: AbortSignal,
+  language?: string | undefined,
+): Promise<unknown> {
   const config = publicWebConfiguration()?.search;
   if (!config) throw new Error('web-unavailable');
   const url = new URL('/search', config.endpoint);
   url.searchParams.set('q', query);
   url.searchParams.set('format', 'json');
   if (window !== 'any') url.searchParams.set('time_range', window);
+  if (language) url.searchParams.set('language', language);
   const response = await fetch(url, {
     redirect: 'error',
     signal,
@@ -414,14 +420,19 @@ export async function searchPublicWeb(input: {
   query: string;
   window: 'day' | 'week' | 'any';
   limit: number;
+  /** A BCP 47 locale, such as en-IN, that biases results towards a region. */
+  language?: string | undefined;
+  signal?: AbortSignal;
 }): Promise<WebResult> {
   denyMcpEgress();
-  const signal = AbortSignal.timeout(45000);
+  const signal = input.signal
+    ? AbortSignal.any([input.signal, AbortSignal.timeout(45000)])
+    : AbortSignal.timeout(45000);
   let window = input.window;
   let widened = false;
   let sources: WebResult['sources'] = [];
   const read = async () => {
-    const parsed = searchResponse.parse(await search(input.query, window, signal));
+    const parsed = searchResponse.parse(await search(input.query, window, signal, input.language));
     const sources: WebResult['sources'] = [];
     for (const item of parsed.results) {
       if (sources.length >= input.limit) break;

@@ -14,6 +14,7 @@ import {
   saveOnboarding,
   resumeOnboarding,
   expireOnboarding,
+  keepOnboardingProfile,
   OnboardingConflict,
   OnboardingUnavailable,
   workspaceUrlAvailable,
@@ -155,6 +156,10 @@ export function registerOnboarding(
             slug: saved.details.slug,
           },
           () => verify(input.challengeToken ?? null),
+        );
+        // Bud continues the onboarding chat from this profile when the creator first opens the workspace.
+        await keepOnboardingProfile(pool, workspace.id, session.user.id, saved.details).catch((error: unknown) =>
+          request.log.error({ err: error }, 'Onboarding profile could not be kept'),
         );
         if (workspace.status === 'provisioning') {
           try {

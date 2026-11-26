@@ -144,6 +144,13 @@ export const featureFlags = {
     scope: 'workspace',
     env: 'FEATURE_FLAG_DECISIONS_GOAL_LOOPS',
   },
+  'chat-onboarding': {
+    description:
+      'Signup step 2 becomes a chat with the TulipFarm onboarding agent: it asks the goal and a line about the business, suggests starter agents, and signs the person up in the chat. Off keeps the account form. Signed-out visitors read it from /v1/auth/options.',
+    default: 'development',
+    scope: 'global',
+    env: 'FEATURE_FLAG_CHAT_ONBOARDING',
+  },
 } as const satisfies Record<string, FeatureFlagDefinition>;
 
 export type FeatureFlag = keyof typeof featureFlags;

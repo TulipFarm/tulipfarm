@@ -1,6 +1,7 @@
 import { createEmailDeliveryStore, emailDeliveryKeys } from '@tulipfarm/workspaces/email-delivery';
 import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance } from 'fastify';
+import { isFeatureEnabled } from '@tulipfarm/observability';
 import { turnstileConfig } from './turnstile.ts';
 import { createDevSessions, devAutoSignInAllowed, devSessionsAllowed, safeRedirectPath } from './dev-session.ts';
 import { authConfig, createAuth, emailTransportConfigured } from './better-auth.ts';
@@ -50,6 +51,8 @@ export function registerAuth(app: FastifyInstance) {
       turnstileSiteKey: turnstile?.siteKey ?? null,
       google: Boolean(config.google),
       magicLink,
+      // A global flag needs no subject, so signed-out visitors on /register get the same answer.
+      chatOnboarding: await isFeatureEnabled('chat-onboarding', null),
       ...(devAutoSignIn && { devAutoSignIn: true }),
       ...(config.emailPassword && { emailPassword: true, passwordResetEmail }),
     });

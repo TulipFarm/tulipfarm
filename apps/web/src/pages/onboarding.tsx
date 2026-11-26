@@ -8,7 +8,7 @@ import { AuthVerification } from '@/features/auth/verification';
 import { PublicAuthQueryProvider } from '@/features/auth/public-query';
 import { OnboardingChatHistory, OnboardingChatSetup, OnboardingChatSlug } from '@/features/auth/onboarding-chat';
 import { useWorkspaceChanges } from '@/features/workspaces/changes';
-import { completeOnboarding, resumeOnboarding } from '@/lib/onboarding';
+import { completeOnboarding, markOnboardingToContinue, resumeOnboarding } from '@/lib/onboarding';
 import { WorkspaceRequestError } from '@/lib/workspaces';
 
 export function OnboardingChatPage() {
@@ -81,6 +81,7 @@ function OnboardingResume({ token, chat }: { token: string; chat: boolean }) {
     async (created: Workspace) => {
       if (!mounted.current || activeToken.current !== token) return;
       setPhase('opening');
+      if (draft?.details.profile) markOnboardingToContinue(created.id);
       try {
         await changes.changed();
         if (!mounted.current || activeToken.current !== token) return;
@@ -93,7 +94,7 @@ function OnboardingResume({ token, chat }: { token: string; chat: boolean }) {
         setPhase('error');
       }
     },
-    [changes.changed, navigate, token, chat],
+    [changes.changed, navigate, token, chat, draft],
   );
 
   const signIn = useCallback(() => {

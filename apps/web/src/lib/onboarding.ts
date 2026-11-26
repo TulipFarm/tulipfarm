@@ -38,3 +38,21 @@ export async function resumeOnboarding(token: string) {
 export async function completeOnboarding(token: string, challengeToken: string) {
   return workspaceSchema.parse(await request('complete', { token, ...(challengeToken ? { challengeToken } : {}) }));
 }
+
+// After sign-up, Bud continues the onboarding chat in the new workspace. The flag lives for this tab only, and the API
+// continues the chat at most once, so reopening the workspace later never repeats it.
+const continueKey = 'tulipfarm:continue-onboarding';
+export function markOnboardingToContinue(workspaceId: string) {
+  try {
+    sessionStorage.setItem(continueKey, workspaceId);
+  } catch {}
+}
+export function takeOnboardingToContinue(workspaceId: string) {
+  try {
+    if (sessionStorage.getItem(continueKey) !== workspaceId) return false;
+    sessionStorage.removeItem(continueKey);
+    return true;
+  } catch {
+    return false;
+  }
+}

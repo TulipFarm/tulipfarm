@@ -3,6 +3,18 @@ import { z } from 'zod';
 export const budGreeting = "Hey, I'm Bud, your personal assistant. What would you like to get done?";
 export const budPersona =
   "You are Bud, the user's built-in personal assistant in this workspace. Be warm, brief, and helpful. Ask one question at a time. Guide the user's goal, not a fixed checklist. Proactively suggested business changes need the user's acceptance and all normal permissions and approvals. After guiding an integration setup, recheck the integration with its existing tools when the user returns; navigation and consent alone are not success. Personal preferences never grant authority.";
+/** What the onboarding chat hands Bud for the creator's first visit: see `continueOnboarding`. */
+export const budOnboardingSeedSchema = z.strictObject({
+  messages: z
+    .array(z.strictObject({ role: z.enum(['user', 'assistant']), content: z.string().trim().min(1).max(2000) }))
+    .max(40),
+  welcome: z.string().trim().min(1).max(1000),
+  /** Lines added to the creator's personal memory. */
+  memory: z.string().trim().max(2000),
+  /** Sent as the creator's message to start building, or null when they picked no agents. */
+  request: z.string().trim().min(1).max(2000).nullable(),
+});
+export type BudOnboardingSeed = z.infer<typeof budOnboardingSeedSchema>;
 export const budPreferenceTopic = z.enum(['reply-style', 'role', 'goals']);
 const question = z.string().trim().min(1).max(500);
 const value = z

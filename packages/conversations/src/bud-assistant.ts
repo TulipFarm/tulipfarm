@@ -11,11 +11,17 @@ import {
 import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
 import { notifyConversationChange } from './event-publisher.ts';
 import { recordConversationActivity } from './activity.ts';
-import { readPersonalMemory, replacePersonalMemory } from './personal-memory.ts';
+import {
+  PersonalMemoryConflict,
+  PersonalMemoryUnavailable,
+  readPersonalMemory,
+  replacePersonalMemory,
+} from './personal-memory.ts';
 import {
   budCommandSchema,
   budGreeting,
   budNudgeSchema,
+  budOnboardingSeedSchema,
   budPreferenceAskSchema,
   budPreferenceProposeSchema,
   budPreferenceSchema,
@@ -136,7 +142,13 @@ export function createBudAssistant(runtime: ConversationRuntime) {
     if (!row) throw new BudConflict('bud-not-initialized');
     return row;
   }
-  async function append(tx: AuthorizationTransaction, actor: HumanActor, chatId: string, text: string) {
+  async function append(
+    tx: AuthorizationTransaction,
+    actor: HumanActor,
+    chatId: string,
+    text: string,
+    author: 'assistant' | 'human' = 'assistant',
+  ) {
     await budPrivateChat(tx, actor, chatId);
     const chat = (
       await tx.client.query(
@@ -146,9 +158,9 @@ export function createBudAssistant(runtime: ConversationRuntime) {
     ).rows[0];
     const id = randomUUID();
     await tx.client.query(
-      `INSERT INTO ${table(tx, 'tf_conversation_messages')}(id,conversation_id,sequence,author_kind)
-      VALUES($1,$2,$3,'assistant')`,
-      [id, chatId, chat.next_message_sequence],
+      `INSERT INTO ${table(tx, 'tf_conversation_messages')}(id,conversation_id,sequence,author_kind,membership_id)
+      VALUES($1,$2,$3,$4,$5)`,
+      [id, chatId, chat.next_message_sequence, author, author === 'human' ? actor.membershipId : null],
     );
     await tx.client.query(
       `INSERT INTO ${table(tx, 'tf_conversation_parts')}(conversation_id,message_id,ordinal,kind,text)
@@ -161,6 +173,21 @@ export function createBudAssistant(runtime: ConversationRuntime) {
     );
     await recordConversationActivity(tx, chatId);
     return id;
+  }
+  async function bootstrap(tx: AuthorizationTransaction, actor: HumanActor) {
+    await tx.client.query(
+      `INSERT INTO ${table(tx, 'tf_bud_state')}(membership_id,onboarding,initial_integrations)
+      SELECT $1,CASE WHEN EXISTS(SELECT 1 FROM ${table(tx, 'tf_conversations')} WHERE owner_membership_id=$1)
+        OR EXISTS(SELECT 1 FROM ${table(tx, 'tf_conversation_messages')} WHERE membership_id=$1)
+        THEN 'ineligible' ELSE 'active' END,
+        (SELECT COALESCE(jsonb_agg(integration),'[]'::jsonb) FROM (
+          SELECT 'google:'||id||':'||generation AS integration FROM ${table(tx, 'tf_google_integrations')} WHERE membership_id=$1 AND status='connected'
+          UNION ALL SELECT 'github:'||id||':'||generation FROM ${table(tx, 'tf_github_accounts')} WHERE owner_membership_id=$1 AND state='active'
+          UNION ALL SELECT 'slack:'||id||':'||generation FROM ${table(tx, 'tf_slack_identities')} WHERE membership_id=$1 AND state='authorized'
+        ) integrations)
+      ON CONFLICT(membership_id) DO NOTHING`,
+      [actor.membershipId],
+    );
   }
   async function ensureThread(tx: AuthorizationTransaction, actor: HumanActor, welcome: boolean) {
     const prior = await state(tx, actor);
@@ -370,19 +397,7 @@ export function createBudAssistant(runtime: ConversationRuntime) {
       const input = budCommandSchema.parse(value);
       return human(workspaceId, userId, true, async (tx, actor) => {
         if (input.kind === 'bootstrap') {
-          await tx.client.query(
-            `INSERT INTO ${table(tx, 'tf_bud_state')}(membership_id,onboarding,initial_integrations)
-            SELECT $1,CASE WHEN EXISTS(SELECT 1 FROM ${table(tx, 'tf_conversations')} WHERE owner_membership_id=$1)
-              OR EXISTS(SELECT 1 FROM ${table(tx, 'tf_conversation_messages')} WHERE membership_id=$1)
-              THEN 'ineligible' ELSE 'active' END,
-              (SELECT COALESCE(jsonb_agg(integration),'[]'::jsonb) FROM (
-                SELECT 'google:'||id||':'||generation AS integration FROM ${table(tx, 'tf_google_integrations')} WHERE membership_id=$1 AND status='connected'
-                UNION ALL SELECT 'github:'||id||':'||generation FROM ${table(tx, 'tf_github_accounts')} WHERE owner_membership_id=$1 AND state='active'
-                UNION ALL SELECT 'slack:'||id||':'||generation FROM ${table(tx, 'tf_slack_identities')} WHERE membership_id=$1 AND state='authorized'
-              ) integrations)
-            ON CONFLICT(membership_id) DO NOTHING`,
-            [actor.membershipId],
-          );
+          await bootstrap(tx, actor);
         } else {
           const row = await state(tx, actor);
           if (input.kind === 'open') await ensureThread(tx, actor, row.onboarding === 'active');
@@ -475,6 +490,48 @@ export function createBudAssistant(runtime: ConversationRuntime) {
             await notifyConversationChange(tx, { workspaceId, conversationId: next.conversationId });
         }
         return next;
+      });
+    },
+    /**
+     * Carries the creator's onboarding chat into their Bud chat, once: the chat as it was, Bud's welcome, what they told
+     * the chat saved to their memory so every chat knows the business, then a request that starts Bud building the
+     * first agent they picked. Does nothing when Bud already has a chat.
+     */
+    async continueOnboarding(workspaceId: string, userId: string, value: unknown) {
+      const seed = budOnboardingSeedSchema.parse(value);
+      return human(workspaceId, userId, true, async (tx, actor) => {
+        await bootstrap(tx, actor);
+        if ((await state(tx, actor)).conversation_id) return view(tx, actor);
+        const chatId = await ensureThread(tx, actor, false);
+        for (const message of seed.messages)
+          await append(tx, actor, chatId, message.content, message.role === 'user' ? 'human' : 'assistant');
+        await append(tx, actor, chatId, seed.welcome);
+        if (seed.memory) {
+          // Memory can be unavailable; the chat still continues without it.
+          await tx.client.query('SAVEPOINT bud_onboarding_memory');
+          try {
+            const memory = await readPersonalMemory(tx, actor);
+            await replacePersonalMemory(
+              tx,
+              actor,
+              `${memory.content.trimEnd()}${memory.content.trim() ? '\n\n' : ''}${seed.memory}`,
+              memory.revision,
+            );
+            await tx.client.query('RELEASE SAVEPOINT bud_onboarding_memory');
+          } catch (error) {
+            if (!(error instanceof PersonalMemoryUnavailable || error instanceof PersonalMemoryConflict)) throw error;
+            await tx.client.query('ROLLBACK TO SAVEPOINT bud_onboarding_memory');
+          }
+        }
+        if (seed.request)
+          await conversations.sendInTransaction(tx, actor, workspaceId, chatId, {
+            commandId: randomUUID(),
+            messageId: randomUUID(),
+            parts: [{ kind: 'text', text: seed.request }],
+          });
+        await notifyBudChange(tx, workspaceId, actor.membershipId);
+        await notifyConversationChange(tx, { workspaceId, conversationId: chatId });
+        return view(tx, actor);
       });
     },
     async propose(

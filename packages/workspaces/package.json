@@ -23,6 +23,14 @@
       "types": "./dist/onboarding.d.ts",
       "default": "./dist/onboarding.js"
     },
+    "./onboarding-catalog": {
+      "types": "./dist/onboarding-catalog.d.ts",
+      "default": "./dist/onboarding-catalog.js"
+    },
+    "./onboarding-interview": {
+      "types": "./dist/onboarding-interview.d.ts",
+      "default": "./dist/onboarding-interview.js"
+    },
     "./onboarding-contracts": {
       "types": "./dist/onboarding-contracts.d.ts",
       "default": "./dist/onboarding-contracts.js"

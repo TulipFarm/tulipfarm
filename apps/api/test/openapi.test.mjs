@@ -224,6 +224,8 @@ test('v1 documentation describes the routes and their response contracts', async
         '/v1/public/guide/options',
         '/v1/public/guide/session',
         '/v1/public/guide/messages',
+        '/v1/public/guide/onboarding',
+        '/v1/public/guide/website',
         '/v1/public/guide/signup',
         '/v1/public/guide/google',
         '/v1/atlassian/oauth/callback',

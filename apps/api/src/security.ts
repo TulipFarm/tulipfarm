@@ -130,9 +130,10 @@ export function registerSecurity(app: FastifyInstance, webOrigin: string) {
     delegator: (request, callback) => {
       // App servers call app data routes from their own process; a browser must never be granted them.
       if (request.url?.startsWith('/v1/app-data/')) return callback(null, { origin: false });
-      const guide = /^\/v1\/public\/guide\/(?:options|session|messages|signup)(?:\?|$)/.test(request.url);
+      const guide = /^\/v1\/public\/guide\/(?:options|session|messages|onboarding|signup)(?:\?|$)/.test(request.url);
       callback(null, {
-        origin: guide ? publicGuideOrigins() : webOrigin,
+        // The app's own origin also uses the guide, for the onboarding chat after signup step 1.
+        origin: guide ? [...new Set([...publicGuideOrigins(), new URL(webOrigin).origin])] : webOrigin,
         credentials: !guide,
         methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         allowedHeaders: ['authorization', 'content-type', 'x-captcha-response', 'x-tulipfarm-expected-session'],

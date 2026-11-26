@@ -6,11 +6,20 @@ import { Pool } from 'pg';
 import { databasePools } from '@tulipfarm/config/database-connections';
 import { z } from 'zod';
 import { canonicalEmail } from '@tulipfarm/workspaces/canonical-email';
-import { onboardingDetailsSchema, onboardingTokenSchema } from '@tulipfarm/workspaces/onboarding-contracts';
+import {
+  interviewRequestSchema,
+  interviewTurnSchema,
+  onboardingDetailsSchema,
+  onboardingTokenSchema,
+} from '@tulipfarm/workspaces/onboarding-contracts';
+import { ruleTurn } from '@tulipfarm/workspaces/onboarding-interview';
+import { onboardingInterviewer } from './onboarding-interviewer.ts';
+import { findWebsite } from './onboarding-website.ts';
+import { readOnboardingSite, siteLine } from './onboarding-site.ts';
 import { saveOnboarding, OnboardingConflict, OnboardingUnavailable } from '@tulipfarm/workspaces/onboarding';
 import { authConfig, type registerAuth } from './auth.ts';
 import { guideAccess, guideTokens, GuideUnavailable } from './public-guide-access.ts';
-import { guideLimits, guideMessageSchema, publicGuideOrigins } from './public-guide-config.ts';
+import { guideLimits, guideMessageSchema, publicGuideOrigins, type GuideMessage } from './public-guide-config.ts';
 import { publicGuideModel } from './public-guide-model.ts';
 import { createTurnstileVerifier, turnstileConfig } from './turnstile.ts';
 import { requestBoundaryError } from './security.ts';
@@ -39,11 +48,37 @@ const validator = (schema: z.ZodType) => () => (input: unknown) => {
 };
 const event = (type: string, data: object) => `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
 
+/** The latest turns that fit the signed history limit; the onboarding profile carries older answers. */
+function recentHistory(messages: GuideMessage[]) {
+  const kept = [...messages];
+  while (kept.length > 2 && Buffer.byteLength(JSON.stringify(kept)) > guideLimits.historyBytes) kept.splice(0, 2);
+  return kept;
+}
+
+const websiteLookupSchema = z
+  .object({
+    name: z.string().trim().min(2).max(80),
+    language: z
+      .string()
+      .regex(/^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/)
+      .max(35)
+      .optional(),
+    timeZone: z
+      .string()
+      .regex(/^[A-Za-z_]+(\/[A-Za-z0-9_+-]+){0,2}$/)
+      .max(64)
+      .optional(),
+  })
+  .strict();
+
 export type PublicGuideDependencies = {
   origins: string[];
   tokens: ReturnType<typeof guideTokens>;
   access: ReturnType<typeof guideAccess>;
   model: ReturnType<typeof publicGuideModel>;
+  interviewer: ReturnType<typeof onboardingInterviewer>;
+  readSite: typeof readOnboardingSite;
+  findWebsite: typeof findWebsite;
   siteKey: string | null;
   appOrigin: string;
   googleAvailable: boolean;
@@ -236,6 +271,90 @@ export function registerPublicGuideRoutes(app: FastifyInstance, deps: PublicGuid
         return reply.type('text/event-stream; charset=utf-8').header('X-Accel-Buffering', 'no').send(stream);
       },
     );
+    // Signup step 1 fills in the website from the workspace name. The browser's locale and time zone are only a hint
+    // for the search, never stored.
+    routes.post(
+      '/public/guide/website',
+      {
+        bodyLimit: 2048,
+        validatorCompiler: validator(websiteLookupSchema),
+        schema: {
+          operationId: 'publicGuideWebsiteV1',
+          tags: ['Public guide'],
+          summary: 'Find the website of a business from its name, for signup step 1',
+          body: json(websiteLookupSchema),
+          response: { 200: json(z.object({ website: z.string().nullable() })) },
+        },
+      },
+      async request => {
+        const id = await visitor(request);
+        const body = websiteLookupSchema.parse(request.body);
+        await deps.access.lookup(normalizeIP(request.ip), id);
+        const website = await deps.findWebsite(
+          body.name,
+          { language: body.language, timeZone: body.timeZone },
+          AbortSignal.timeout(10_000),
+        );
+        return { website };
+      },
+    );
+    routes.post(
+      '/public/guide/onboarding',
+      {
+        bodyLimit: 24_000,
+        validatorCompiler: validator(interviewRequestSchema),
+        schema: {
+          operationId: 'publicGuideOnboardingV1',
+          tags: ['Public guide'],
+          summary: 'Take one onboarding chat turn: TulipFarm replies, updates the answers and picks the next stage',
+          body: json(interviewRequestSchema),
+          response: { 200: json(interviewTurnSchema) },
+        },
+      },
+      async request => {
+        const id = await visitor(request);
+        const body = interviewRequestSchema.parse(request.body);
+        const history = deps.tokens.readConversation(id, body.conversation);
+        const controller = new AbortController();
+        const deadline = setTimeout(() => controller.abort(new Error('guide-timeout')), guideLimits.timeoutMs);
+        controllers.add(controller);
+        try {
+          // Without a model the rules answer for free, so only model turns spend the guide's budget.
+          const release = deps.model ? await deps.access.turn(normalizeIP(request.ip), id, controller) : async () => {};
+          let turn;
+          // The first message reads the website from step 1, so TulipFarm starts from the visitor's business. The
+          // read never rejects: an unreadable site is null.
+          const site =
+            body.kind === 'open' && body.profile.website
+              ? await deps.readSite(body.profile.website, controller.signal)
+              : null;
+          const input = body.kind === 'open' ? { ...body, profile: { ...body.profile, site: siteLine(site) } } : body;
+          try {
+            turn = await deps.interviewer(history, input, controller.signal, site);
+          } catch (error) {
+            // Onboarding never waits on the model: the rules take the turn instead.
+            request.log.warn({ err: error }, 'Onboarding interviewer fell back to rules');
+            turn = ruleTurn(input);
+          } finally {
+            await release();
+          }
+          return {
+            ...turn,
+            conversation: deps.tokens.conversation(
+              id,
+              recentHistory([
+                ...history,
+                ...(input.message ? [{ role: 'user' as const, content: input.message }] : []),
+                { role: 'assistant', content: turn.reply },
+              ]),
+            ),
+          };
+        } finally {
+          clearTimeout(deadline);
+          controllers.delete(controller);
+        }
+      },
+    );
     routes.post(
       '/public/guide/signup',
       {
@@ -319,10 +438,14 @@ export function registerPublicGuide(app: FastifyInstance, { auth, pool: authPool
     return { callbackURL, newUserCallbackURL: callbackURL, errorCallbackURL: error.href };
   };
   registerPublicGuideRoutes(app, {
-    origins: publicGuideOrigins(),
+    // The app's own origin runs the onboarding chat after signup step 1.
+    origins: [...new Set([...publicGuideOrigins(), new URL(config.webOrigin).origin])],
     tokens,
     access: guideAccess(pool, config.secret),
     model: publicGuideModel(),
+    interviewer: onboardingInterviewer(),
+    readSite: readOnboardingSite,
+    findWebsite,
     siteKey: turnstile?.siteKey ?? null,
     appOrigin: config.webOrigin,
     googleAvailable: Boolean(config.google),

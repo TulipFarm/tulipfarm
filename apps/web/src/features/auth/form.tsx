@@ -101,7 +101,7 @@ export function AuthLayout({
   step,
 }: {
   title: string;
-  subtitle: ReactNode;
+  subtitle?: ReactNode;
   children: ReactNode;
   footer: ReactNode;
   compact?: boolean;
@@ -134,7 +134,7 @@ export function AuthLayout({
                 >
                   {title}
                 </h1>
-                <p className="text-lg text-muted-foreground">{subtitle}</p>
+                {subtitle && <p className="text-lg text-muted-foreground">{subtitle}</p>}
               </header>
               {children}
               <p className="text-sm text-muted-foreground">{footer}</p>
@@ -202,8 +202,11 @@ export function AuthForm({
   providersFirst,
   email,
   redirect,
+  name,
 }: {
   withName?: boolean;
+  /** A name the person already gave, such as on signup step 1; the name field is then hidden. */
+  name?: string | undefined;
   submitLabel: string;
   /** The primary action when password sign-in is on; the email link becomes the secondary one. */
   passwordLabel?: string;
@@ -232,7 +235,8 @@ export function AuthForm({
   const [submittedMode, setSubmittedMode] = useState<'password' | 'link'>('password');
   const [sentTo, setSentTo] = useState('');
   const [devLink, setDevLink] = useState('');
-  const [nameInput, setNameInput] = useState('');
+  const [typedName, setNameInput] = useState('');
+  const nameInput = name?.trim() || typedName;
   const [emailInput, setEmailInput] = useState(email ?? '');
   // Replaces the login page index.html painted, before the browser paints, keeping what was typed.
   useLayoutEffect(() => {
@@ -520,7 +524,7 @@ export function AuthForm({
       {emailForm && (
         <Form onSubmit={submit} disabled={pending}>
           <div className="space-y-5">
-            {withName && (
+            {withName && !name?.trim() && (
               <Field id="name" label="Name" required error={nameError}>
                 <Input
                   name="name"
