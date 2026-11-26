@@ -100,7 +100,9 @@ async function verifyRegistryPrivileges(
         coalesce(to_regprocedure('app.pending_member_profile_events()'),0::oid),
         coalesce(to_regprocedure('app.advance_member_profile_event(uuid,bigint,uuid,uuid)'),0::oid),
         coalesce(to_regprocedure('app.register_model_bundle(text,jsonb)'),0::oid),
-        coalesce(to_regprocedure('app.model_bundle(text)'),0::oid)
+        coalesce(to_regprocedure('app.model_bundle(text)'),0::oid),
+        coalesce(to_regprocedure('app.replace_github_workflow_subscriptions(uuid,uuid,uuid,integer,jsonb)'),0::oid),
+        coalesce(to_regprocedure('app.remove_github_workflow_subscriptions(uuid,uuid,integer)'),0::oid)
       ]) AND p.proowner=(SELECT nspowner FROM pg_namespace WHERE nspname='app')
         AND p.proconfig=ARRAY['search_path=pg_catalog']
         AND NOT has_function_privilege($1,p.oid,'EXECUTE WITH GRANT OPTION'))
@@ -166,6 +168,8 @@ export async function grantTableRegistryAccess(
       'app.workspace_flag_context(uuid)',
       'app.pending_member_profile_events()',
       'app.advance_member_profile_event(uuid,bigint,uuid,uuid)',
+      'app.replace_github_workflow_subscriptions(uuid,uuid,uuid,integer,jsonb)',
+      'app.remove_github_workflow_subscriptions(uuid,uuid,integer)',
       ...modelBundleRoutines,
     ])
       if ((await client.query('SELECT to_regprocedure($1) AS routine', [signature])).rows[0]?.routine) {

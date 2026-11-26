@@ -5632,12 +5632,6 @@ export async function inferWithTools(
           const preloaded = await observeChatDetail('tool-preload', () => toolPreload!);
           toolPreload = undefined;
           for (const name of preloaded) loaded.add(name);
-          if (preloaded.length)
-            log('info', 'inference', 'call_completed', {
-              operation: 'chat.tool-preload',
-              outcome: 'preloaded',
-              loaded: preloaded.length,
-            });
         }
         const currentCatalogKey = observeChatDetailSync('serialize', () => catalogKey(mcp));
         const personalMemory =

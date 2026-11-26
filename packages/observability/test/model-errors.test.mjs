@@ -255,3 +255,41 @@ test('error.site logs where an error was thrown and nothing else', async t => {
   assert.equal(records[1]['error.site'], undefined);
   assert.ok(!JSON.stringify(records).includes('PRIVATE'));
 });
+
+test('decision outcomes log their groups, counts, source and kind, and nothing free-form', async t => {
+  const records = [];
+  const write = process.stdout.write.bind(process.stdout);
+  t.mock.method(process.stdout, 'write', (chunk, ...args) => {
+    if (typeof chunk === 'string' && chunk.startsWith('{"level":')) {
+      records.push(JSON.parse(chunk));
+      return true;
+    }
+    return write(chunk, ...args);
+  });
+  log('info', 'inference', 'call_completed', {
+    operation: 'chat.tool-preload',
+    outcome: 'preloaded',
+    'decision.groups': 'rows-advanced,agents-manage',
+    'decision.tools': 7,
+    duration_ms: 412,
+  });
+  log('info', 'inference', 'call_completed', {
+    operation: 'chat.creation-review',
+    outcome: 'save',
+    'decision.source': 'decision-model',
+    'decision.kind': 'table',
+  });
+  log('info', 'inference', 'call_completed', {
+    'decision.groups': 'PRIVATE request text',
+    'decision.source': 'PRIVATE',
+    'decision.kind': 'PRIVATE kind',
+    'decision.tools': -1,
+  });
+  assert.equal(records[0]['decision.groups'], 'rows-advanced,agents-manage');
+  assert.equal(records[0]['decision.tools'], 7);
+  assert.equal(records[0].duration_ms, 412);
+  assert.equal(records[1]['decision.source'], 'decision-model');
+  assert.equal(records[1]['decision.kind'], 'table');
+  assert.ok(!JSON.stringify(records).includes('PRIVATE'));
+  assert.equal(records[2]['decision.tools'], undefined);
+});

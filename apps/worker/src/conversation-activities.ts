@@ -17,6 +17,8 @@ import {
 } from '@tulipfarm/agents/inference';
 import { chatTurnFiles } from './turn-files-composition.ts';
 import type { AttachmentBytes } from '@tulipfarm/conversations/attachments';
+import type { FileBytes } from '@tulipfarm/files';
+import type { GitHubSubscriptions } from '@tulipfarm/workflows/github-triggers';
 import { respondToConversation } from './conversation-responder.ts';
 import {
   apiCallSources,
@@ -153,6 +155,10 @@ export type MeteredReplyOptions = {
   planCredentials?: Partial<Record<PlanProvider, PlanCredentials | null>> | undefined;
   /** Who may use which members' plans. */
   subscriptions?: Subscriptions | undefined;
+  /** Keeps GitHub workflow subscriptions in step when chat activates or archives GitHub-triggered agents or workflows. */
+  githubSubscriptions?: GitHubSubscriptions | undefined;
+  /** Reads and writes workspace file objects when chat saves file or skill drafts. */
+  fileBytes?: FileBytes | undefined;
 };
 /** A paused family's replacement may not read images that the pinned family would have. */
 function withoutImages(messages: Parameters<ConversationReply>[0]['messages']) {
@@ -195,6 +201,8 @@ export function meteredReply(
     workspaceSlug,
     planCredentials,
     subscriptions = subscriptionsFromEnvironment(runtime),
+    githubSubscriptions,
+    fileBytes,
   }: MeteredReplyOptions = {},
 ): ConversationReply {
   const secretServices = secretsServices(runtime);
@@ -426,7 +434,10 @@ export function meteredReply(
       appPages: pageTools,
       telemetryRuntime: externalContext ? 'slack' : 'chat',
       wakePlan,
-      agentSetup: slackAgentSetupFromEnvironment(toolRuntime),
+      modelFamilyEligibility: request => catalogEligibility(modelEnvironment())(request),
+      githubSubscriptions,
+      fileBytes,
+      agentSetup: { ...slackAgentSetupFromEnvironment(toolRuntime), githubSubscriptions },
       chatFiles: chatFiles && { ...chatFiles, imageInput: routeCapabilities(validatedRoute).imageInput },
       // Secrets are given only to the member in their own chat in the app, never in Slack or a project chat.
       apiSecrets:
@@ -693,6 +704,8 @@ export function createConversationActivities(
   codingRuns?: CodingRunsFactory,
   apps?: AppEditing,
   appPages: AppPages | undefined = workerAppPages(storage),
+  githubSubscriptions?: GitHubSubscriptions,
+  fileBytes?: FileBytes,
 ) {
   const runtime = withFileSources(withKnowledgeSourceAuthorization(withGitHubSourceAuthorization(storage)));
   const slack = slackActionsFromEnvironment()?.(runtime);
@@ -736,6 +749,8 @@ export function createConversationActivities(
             compactor: effectiveCompactor,
             chatFiles: turnFiles ? { files, google: googleFiles, turnFiles } : undefined,
             workspaceSlug,
+            githubSubscriptions,
+            fileBytes,
           }),
         undefined,
         slack?.resumeConversation,
