@@ -10,6 +10,7 @@ export type TableTools = {
     | 'listRecords'
     | 'queryRecords'
     | 'summarizeRecords'
+    | 'classifyRecords'
     | 'resolveReference'
     | 'reverseRecords'
     | 'createRecord'
@@ -47,6 +48,14 @@ export function createToolRegistry(resources: TableTools) {
           ),
     'rows.summarize': (context: ToolContext, call: Extract<ToolCall, { tool: 'rows.summarize' }>) =>
       resources.records.summarizeRecords(
+        context.workspaceId,
+        context.actor,
+        call.tableId,
+        call.expectedAppliedRevision,
+        call,
+      ),
+    'rows.classify': (context: ToolContext, call: Extract<ToolCall, { tool: 'rows.classify' }>) =>
+      resources.records.classifyRecords(
         context.workspaceId,
         context.actor,
         call.tableId,
@@ -142,6 +151,8 @@ export function createToolRegistry(resources: TableTools) {
       case 'rows.list':
         return handlers[call.tool](context, call);
       case 'rows.summarize':
+        return handlers[call.tool](context, call);
+      case 'rows.classify':
         return handlers[call.tool](context, call);
       case 'rows.resolveReference':
         return handlers[call.tool](context, call);

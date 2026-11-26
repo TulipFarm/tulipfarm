@@ -48,6 +48,7 @@ export type WorkflowGraph = {
 
 const stepTitles: Record<Step['kind'], string> = {
   condition: 'Check a condition',
+  decide: 'Evaluate decision',
   transform: 'Prepare data',
   delay: 'Wait before continuing',
   'wait-until': 'Wait until a date',
@@ -99,6 +100,10 @@ function sourceText(step: Step, labels: WorkflowLabels, timezone: string): strin
   switch (step.kind) {
     case 'condition':
       return 'Only the selected steps continue';
+    case 'decide': {
+      const count = Object.keys(step.questions).length;
+      return `${count} decision ${count === 1 ? 'question' : 'questions'}`;
+    }
     case 'transform':
       return `${Object.keys(step.fields).length} output ${Object.keys(step.fields).length === 1 ? 'field' : 'fields'}`;
     case 'delay':
@@ -215,6 +220,14 @@ function stepFacts(step: Step, labels: WorkflowLabels): WorkflowStepDetails['fac
           label: 'Checks',
           value: `${describeValue(step.when.left)} ${comparisonWords[step.when.op]}${'right' in step.when ? ` ${describeValue(step.when.right)}` : ''}`,
         },
+      ];
+    case 'decide':
+      return [
+        { label: 'Input', value: describeValue(step.input) },
+        ...Object.entries(step.questions).map(([key, question]) => ({
+          label: key,
+          value: question.question,
+        })),
       ];
     case 'agent':
       return [{ label: 'Task', value: describeValue(step.prompt) }];

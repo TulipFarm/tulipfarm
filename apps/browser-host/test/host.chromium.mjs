@@ -194,10 +194,21 @@ before(async () => {
         'content-type': 'application/octet-stream',
         'content-disposition': `attachment; filename="${url.pathname.slice(1)}"`,
       });
-      response.flushHeaders();
-      if (url.search === '?frame') for (const waiting of downloadStarted.splice(0)) waiting.end();
       const fast = url.pathname === '/stream.bin';
-      const timer = setInterval(() => response.write(Buffer.alloc(fast ? 64 * 1024 : 1, 1)), fast ? 5 : 200);
+      const stream = () => setInterval(() => response.write(Buffer.alloc(fast ? 64 * 1024 : 1, 1)), fast ? 5 : 200);
+      let timer;
+      if (url.search === '?frame') {
+        // Removing the iframe before the browser turns the response into a download cancels the load instead,
+        // so the page waits, as with /trickle.bin, and the stream stays small until then.
+        response.write(Buffer.alloc(1024, 1));
+        timer = setTimeout(() => {
+          for (const waiting of downloadStarted.splice(0)) waiting.end();
+          timer = stream();
+        }, 200);
+      } else {
+        response.flushHeaders();
+        timer = stream();
+      }
       response.on('close', () => {
         clearInterval(timer);
         stopped.push(url.pathname + url.search);

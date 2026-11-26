@@ -33,6 +33,7 @@ export const toolActivityLabels = {
   'rows.list': 'Listing rows',
   'rows.page': 'Listing rows',
   'rows.summarize': 'Summarizing rows',
+  'rows.classify': 'Classifying rows',
   'rows.resolveReference': 'Looking up linked rows',
   'rows.reverse': 'Reading reverse relationship links',
   'rows.get': 'Reading a row',

@@ -37,6 +37,7 @@ import { LanguageLogo, type LogoLanguage } from './language-logo';
 export type WorkflowNodeKind =
   | 'trigger'
   | 'condition'
+  | 'decide'
   | 'transform'
   | 'delay'
   | 'wait-until'
@@ -111,6 +112,7 @@ const badges = {
 const icons: Record<WorkflowNodeKind, ComponentType<{ size?: number }>> = {
   trigger: PlugIcon,
   condition: BranchIcon,
+  decide: BranchIcon,
   transform: CodeIcon,
   delay: ClockIcon,
   'wait-until': ClockIcon,
@@ -127,6 +129,7 @@ const icons: Record<WorkflowNodeKind, ComponentType<{ size?: number }>> = {
 export const workflowKindLabels: Record<WorkflowNodeKind, string> = {
   trigger: 'Trigger',
   condition: 'Condition',
+  decide: 'Decision',
   transform: 'Transform',
   delay: 'Delay',
   'wait-until': 'Wait until',

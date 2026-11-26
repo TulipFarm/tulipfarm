@@ -1231,6 +1231,7 @@
                         "schema.status",
                         "rows.list",
                         "rows.summarize",
+                        "rows.classify",
                         "rows.resolveReference",
                         "rows.reverse",
                         "rows.get",
@@ -1345,6 +1346,29 @@
                         }
                       }
                     },
+                    "additionalProperties": false
+                  },
+                  "triggerFilter": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000
+                  },
+                  "escalationPolicy": {
+                    "type": "object",
+                    "properties": {
+                      "rules": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000
+                      },
+                      "minConfidence": {
+                        "default": 0.7,
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      }
+                    },
+                    "required": ["rules"],
                     "additionalProperties": false
                   },
                   "mcp": {

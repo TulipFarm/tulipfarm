@@ -5,6 +5,7 @@ const sharedTools = [
   'schema.status',
   'rows.list',
   'rows.summarize',
+  'rows.classify',
   'rows.resolveReference',
   'rows.reverse',
   'rows.get',

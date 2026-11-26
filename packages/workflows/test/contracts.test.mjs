@@ -615,6 +615,54 @@ test('condition steps branch over later steps and only read steps that run whene
   );
 });
 
+test('decide steps validate question sets and allow downstream condition branching', () => {
+  const parse = steps => definitionSchema.safeParse({ version: 1, name: 'Triage', triggers: [], steps }).success;
+  const decide = {
+    id: 'classify',
+    kind: 'decide',
+    input: { kind: 'input', path: ['body'] },
+    questions: {
+      urgent: { type: 'noul', question: 'Is this urgent?', criteria: 'Needs same-day response' },
+      route: {
+        type: 'choice',
+        question: 'Which team?',
+        criteria: { billing: 'Invoice issue', support: 'Technical issue' },
+      },
+    },
+    minConfidence: 0.7,
+    onUncertain: 'continue',
+  };
+  assert.equal(
+    parse([
+      decide,
+      {
+        id: 'branch',
+        kind: 'condition',
+        when: {
+          left: { kind: 'step', step: 'classify', path: ['answers', 'urgent', 'noul'] },
+          op: 'eq',
+          right: { kind: 'literal', value: true },
+        },
+        ifMet: ['done'],
+        otherwise: [],
+      },
+      { id: 'done', kind: 'transform', fields: { ok: { kind: 'literal', value: true } } },
+    ]),
+    true,
+  );
+  assert.equal(parse([{ ...decide, questions: {} }]), false, 'at least one question is required');
+  assert.equal(
+    parse([
+      {
+        ...decide,
+        questions: { bad: { type: 'choice', question: 'Pick', criteria: { only: 'One option' } } },
+      },
+    ]),
+    false,
+    'choice questions require at least two choices',
+  );
+});
+
 test('conditions compare typed table values, dates and plain JSON, and walk past skipped steps', () => {
   const when = (left, op, right) => ({
     left: { kind: 'literal', value: left },

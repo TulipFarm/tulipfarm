@@ -94,7 +94,13 @@ async function definition(tx: AgentTransaction, row: Pick<Turn, 'agent_id' | 'de
     ).rows[0]?.definition,
   );
 }
-const readTokenTools = new Set<string>(['rows.get', 'rows.list', 'rows.summarize', 'rows.resolveReference']);
+const readTokenTools = new Set<string>([
+  'rows.get',
+  'rows.list',
+  'rows.summarize',
+  'rows.classify',
+  'rows.resolveReference',
+]);
 const callsSchema = z.array(z.object({ call: toolCallSchema, status: z.string(), result: toolResultSchema }));
 function boundRuntime(runtime: Runtime, tx: Transaction, workspaceId: string): Runtime {
   return {

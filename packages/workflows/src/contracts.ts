@@ -132,6 +132,33 @@ const requestHeaderNameSchema = z
     'Restricted request header',
   );
 export const httpMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
+export const decideQuestionSchema = z.discriminatedUnion('type', [
+  z.strictObject({
+    type: z.literal('choice'),
+    question: z.string().trim().min(1).max(500),
+    criteria: z
+      .record(z.string().trim().min(1).max(64), z.string().trim().min(1).max(300))
+      .refine(c => Object.keys(c).length >= 2 && Object.keys(c).length <= 12, 'Define 2 to 12 choices'),
+  }),
+  z.strictObject({
+    type: z.literal('noul'),
+    question: z.string().trim().min(1).max(500),
+    criteria: z.string().trim().min(1).max(500),
+  }),
+]);
+export type DecideQuestion = z.infer<typeof decideQuestionSchema>;
+export const decideStepSchema = z.strictObject({
+  id: name,
+  kind: z.literal('decide'),
+  input: valueSchema,
+  questions: z
+    .record(name, decideQuestionSchema)
+    .refine(q => Object.keys(q).length >= 1 && Object.keys(q).length <= 16, 'Define 1 to 16 questions'),
+  minConfidence: z.number().min(0).max(1).default(0.7),
+  onUncertain: z.enum(['continue', 'fail']).default('continue'),
+});
+export type DecideStep = z.infer<typeof decideStepSchema>;
+
 export const httpStepSchema = z
   .strictObject({
     id: name,
@@ -246,6 +273,7 @@ export const stepSchema = z.discriminatedUnion('kind', [
     planConnectionId: idSchema.optional(),
   }),
   httpStepSchema,
+  decideStepSchema,
   z
     .strictObject({
       id: name,

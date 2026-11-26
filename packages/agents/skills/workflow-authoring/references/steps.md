@@ -118,6 +118,16 @@ Table steps act with the table permissions of the person who starts the run, or 
 
 An update with a token older than the row fails instead of overwriting a newer change.
 
+## Decide step
+
+`{"id","kind":"decide","input":value,"questions":{name:{"type":"choice","question","criteria":{choice:description}} or {"type":"noul","question","criteria"}},"minConfidence"?:0 to 1,"onUncertain"?:"continue" or "fail"}` answers 1 to 16 named questions about the input in one model pass and outputs `{"answers":{name:{"choice","noul","confidence","uncertain"}},"fallbackUsed"}`.
+
+- A `choice` question picks one of 2 to 12 named choices; its answer is in `choice`.
+- A `noul` question is a yes or no question; `noul` holds the chance of yes, from 0 to 1.
+- An answer whose confidence is below `minConfidence` (default 0.7) is marked `uncertain`.
+- With `"onUncertain":"fail"`, any uncertain answer or a used fallback fails the run; the default `"continue"` keeps going.
+- Pair it with a condition step to branch on an answer.
+
 ## Condition step
 
 `{"id","kind":"condition","when":{"left":value,"op":"eq", "ne", "lt", "lte", "gt" or "gte","right":value} or {"left":value,"op":"is-empty" or "not-empty"},"ifMet":[later step id],"otherwise":[later step id]}` checks a comparison and outputs `{"matched","ran","skipped"}`.
