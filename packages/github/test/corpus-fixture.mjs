@@ -30,6 +30,8 @@ function buildTrees(files) {
   };
   return { root: visit(root, ''), trees };
 }
+// Git's empty tree. GitHub answers 404 for its tree listing, though the commit that points at it reads fine.
+export const emptyTree = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 const iso = offsetDays => new Date(Date.now() + offsetDays * 86400000).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
 // A local GitHub REST and GraphQL fake with per-token repository access. No live GitHub account or network is involved.
@@ -355,7 +357,8 @@ export function fakeGitHub() {
       if (!found) return Response.json({ message: 'No commit found for SHA' }, { status: 422 });
       if (match[1]) {
         const value = commitBody(found);
-        return Response.json({ sha: found.sha, ...value.commit, parents: value.parents });
+        const tree = repo.files.size ? buildTrees(repo.files).root : emptyTree;
+        return Response.json({ sha: found.sha, tree: { sha: tree }, ...value.commit, parents: value.parents });
       }
       const per = Math.min(300, Number(url.searchParams.get('per_page') ?? 300));
       const number = Number(url.searchParams.get('page') ?? 1);
@@ -379,7 +382,7 @@ export function fakeGitHub() {
     if (rest.startsWith('/git/trees/')) {
       const { root, trees } = buildTrees(repo.files);
       const id = rest.slice('/git/trees/'.length);
-      const found = trees.get(id === commit(repo) ? root : id);
+      const found = repo.files.size ? trees.get(id === commit(repo) ? root : id) : undefined;
       if (!found) return Response.json({ message: 'Not Found' }, { status: 404 });
       if (url.searchParams.get('recursive')) {
         const entries = [];
