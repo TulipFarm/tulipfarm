@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { slackReplyProgress } from '@tulipfarm/agents/slack-default';
-import { chatDecisions, classifyTurnComplexity } from '@tulipfarm/agents/decisions';
+import {
+  chatDecisions,
+  classifyTurnComplexity,
+  containsSecretPattern,
+  isExternalReadTool,
+  isGatedSideEffectTool,
+} from '@tulipfarm/agents/decisions';
 import {
   createConversationExecutor,
   replyWorkSchema,
@@ -379,7 +385,10 @@ export function meteredReply(
     // Previews reach every project member before the saved answer's audience check, so project chats show only the saved answer.
     const answerText = project
       ? undefined
-      : ({ step, text }: { step: number; text: string }) => publisher.update(step, text);
+      : ({ step, text }: { step: number; text: string }) => {
+          if (containsSecretPattern(text)) return;
+          return publisher.update(step, text);
+        };
     const progress: ToolInferenceContext['progress'] = update => publisher.progress(update);
     const layout = externalContext ? { slack: { interactive: true } } : true;
     const layoutPreview: ToolInferenceContext['layoutPreview'] =
@@ -500,6 +509,32 @@ export function meteredReply(
           })
       : undefined;
     try {
+      if (decisions?.checkInputSecurity && latestUser?.text) {
+        const inputVerdict = await decisions.checkInputSecurity(
+          latestUser.text,
+          externalContext ? 'external' : 'chat',
+          session.leaseSignal,
+        );
+        if (inputVerdict === 'block' || (inputVerdict === 'review' && externalContext)) {
+          return {
+            text:
+              inputVerdict === 'block'
+                ? 'I cannot process that request because it was flagged by workspace security guardrails.'
+                : 'This request requires human review before proceeding.',
+            sources: [],
+          };
+        }
+      }
+      const trustedChatSources = new Set([
+        'private-conversation',
+        'shared-slack-turn',
+        'table',
+        'table-rows',
+        'table-schema',
+        'creation-team',
+        'agent-definition',
+        'workspace-skill',
+      ]);
       const reply = respondToConversation(
         { ...validatedRoute, maxOutputTokens: chat.price.maxOutputTokens },
         context,
@@ -510,6 +545,32 @@ export function meteredReply(
           const id = randomUUID();
           const title = activity ?? call.tool;
           void step?.step({ id, title, status: 'in_progress' });
+          if (decisions?.gateToolCall && isGatedSideEffectTool(call.tool)) {
+            const untrustedSourcesPresent = sources.some(source => {
+              if (trustedChatSources.has(source.kind)) return false;
+              if (source.kind === 'personal-memory' && requester && 'membershipId' in source) {
+                return source.membershipId !== requester.membershipId;
+              }
+              return true;
+            });
+            const gate = await decisions.gateToolCall({
+              userRequest: latestUser?.text ?? '',
+              toolName: call.tool,
+              args: call,
+              untrustedSourcesPresent,
+              signal: session.leaseSignal,
+            });
+            if (gate.outcome !== 'allow') {
+              void step?.step({ id, title, status: 'error' });
+              return {
+                result: {
+                  error: gate.reason ?? 'Tool call blocked by workspace safety gate.',
+                  gateOutcome: gate.outcome,
+                },
+                sources: [],
+              };
+            }
+          }
           const ran = executeTool(
             call.tool,
             isExternalTool(call.tool),
@@ -596,7 +657,24 @@ export function meteredReply(
             () => step?.step({ id, title, status: 'complete' }),
             () => step?.step({ id, title, status: 'error' }),
           );
-          return ran;
+          const output = await ran;
+          if (decisions?.checkToolOutput && isExternalReadTool(call.tool)) {
+            const isEnvelope =
+              output !== null && typeof output === 'object' && 'result' in output && 'sources' in output;
+            const innerOutput = isEnvelope ? (output as { result: unknown }).result : output;
+            const taint = await decisions.checkToolOutput({
+              toolName: call.tool,
+              output: innerOutput,
+              untrustedSourcesPresent: true,
+              signal: session.leaseSignal,
+            });
+            if (taint.tainted && taint.warning) {
+              return isEnvelope
+                ? { ...output, result: { warning: taint.warning, untrusted: true, data: innerOutput } }
+                : { warning: taint.warning, untrusted: true, data: output };
+            }
+          }
+          return output;
         },
         session.meter,
         session.authorizeSources,
@@ -694,6 +772,15 @@ export function meteredReply(
           await plans?.retire('reconnect');
         throw error;
       });
+      if (decisions?.checkOutputSecurity && answer.text) {
+        const outputVerdict = await decisions.checkOutputSecurity(answer.text, session.leaseSignal);
+        if (outputVerdict === 'block' || outputVerdict === 'review') {
+          answer.text =
+            outputVerdict === 'block'
+              ? 'I cannot share that response because it was flagged for potential credential leakage or unauthorized disclosure.'
+              : 'This response was held for review because it may contain sensitive disclosure.';
+        }
+      }
       if (!answer.fallback) await plans?.answered();
       return answer.fallbackReason && plans?.own() ? { ...answer, fallbackOwnPlan: true as const } : answer;
     } finally {

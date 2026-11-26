@@ -174,7 +174,10 @@
                   "decisions-skill-preload",
                   "decisions-row-and-calendar",
                   "decisions-model-routing",
-                  "decisions-task-completion"
+                  "decisions-task-completion",
+                  "decisions-tool-gate",
+                  "decisions-security-guardrails",
+                  "decisions-goal-loops"
                 ]
               },
               {
@@ -533,7 +536,10 @@
                   "decisions-skill-preload",
                   "decisions-row-and-calendar",
                   "decisions-model-routing",
-                  "decisions-task-completion"
+                  "decisions-task-completion",
+                  "decisions-tool-gate",
+                  "decisions-security-guardrails",
+                  "decisions-goal-loops"
                 ]
               },
               {
