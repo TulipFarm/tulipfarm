@@ -684,3 +684,86 @@ test('a workspace still on version 119 reads no identities and refuses to record
     { code: '42P01' },
   );
 });
+
+test('concurrent member deletion and manual identity creation never leave an orphaned external ID', async () => {
+  const waitForLock = async pid => {
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline) {
+      const { rowCount } = await db.platform.query(`SELECT 1 FROM pg_locks WHERE pid = $1 AND NOT granted`, [pid]);
+      if (rowCount) return true;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    return false;
+  };
+
+  const deleter = await connect(db.login(ws));
+  const writer = await connect(db.login(ws));
+  try {
+    const deleterPid = (await deleter.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+    const writerPid = (await writer.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+    const other = await admit();
+
+    const first = await handAdded();
+    await deleter.query('BEGIN');
+    await deleter.query(`UPDATE ${t('tf_table_identities')} SET live = false WHERE table_id = $1 AND row_id = $2`, [
+      membersTable,
+      first.memberId,
+    ]);
+    const adding = within(
+      tx =>
+        addManualMemberIdentity(tx, {
+          tableId: membersTable,
+          memberId: first.memberId,
+          createdByMembershipId: ws.membershipId,
+          provider: 'discord',
+          externalId: 'race-del-1',
+          handle: 'racedel',
+        }),
+      { client: writer },
+    ).then(
+      value => ({ ok: true, value }),
+      error => ({ ok: false, error }),
+    );
+    const writerBlocked = await waitForLock(writerPid);
+    await deleter.query('COMMIT');
+    assert.equal(writerBlocked, true, 'addManualMemberIdentity must wait for a concurrent soft-delete');
+    const addOutcome = await adding;
+    assert.equal(addOutcome.ok, false);
+    assert.equal(addOutcome.error.code, 'member-not-found');
+    assert.equal(addOutcome.error.status, 404);
+    const claimedAfterDelete = await add(other, { provider: 'discord', externalId: 'race-del-1' });
+    assert.equal(claimedAfterDelete.memberId, other.memberId);
+
+    const second = await handAdded();
+    await writer.query('BEGIN');
+    await addManualMemberIdentity(
+      { client: writer, schema: ws.names.schema, commonVersion: 118 },
+      {
+        tableId: membersTable,
+        memberId: second.memberId,
+        createdByMembershipId: ws.membershipId,
+        provider: 'discord',
+        externalId: 'race-add-1',
+        handle: 'raceadd',
+      },
+    );
+    const deleting = within(
+      async tx => {
+        await tx.client.query(
+          `UPDATE ${t('tf_table_identities')} SET live = false WHERE table_id = $1 AND row_id = $2`,
+          [membersTable, second.memberId],
+        );
+      },
+      { client: deleter },
+    );
+    const deleterBlocked = await waitForLock(deleterPid);
+    await writer.query('COMMIT');
+    assert.equal(deleterBlocked, true, 'soft-delete must wait for a concurrent addManualMemberIdentity');
+    await deleting;
+    const claimedAfterInsert = await add(other, { provider: 'discord', externalId: 'race-add-1' });
+    assert.equal(claimedAfterInsert.memberId, other.memberId);
+  } finally {
+    await deleter.end();
+    await writer.end();
+  }
+});

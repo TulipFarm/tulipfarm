@@ -656,7 +656,8 @@ export async function addManualMemberIdentity(
   if (!externalId && !handle) throw new MemberIdentityError('identity-incomplete');
   const member = await tx.client.query(
     `SELECT 1 FROM ${r.systemTables} s JOIN ${r.identities} ti ON ti.table_id = s.table_id
-    WHERE s.kind = 'workspace-members' AND s.table_id = $1 AND ti.row_id = $2 AND ti.live`,
+    WHERE s.kind = 'workspace-members' AND s.table_id = $1 AND ti.row_id = $2 AND ti.live
+    FOR SHARE OF ti`,
     [input.tableId, input.memberId],
   );
   if (!member.rowCount) throw new MemberIdentityError('member-not-found');
