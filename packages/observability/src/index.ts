@@ -319,6 +319,8 @@ const logOnlyAttributes = new Set([
   'decision.tools',
   'decision.source',
   'decision.kind',
+  'decision.agreement',
+  'decision.confidence_bucket',
   'table.generation_xmin',
   'table.catalog_xmin',
   'table.current_xid',
@@ -392,6 +394,9 @@ function safeAttribute(key: string, value: unknown, logLine = false): boolean {
       return typeof value === 'string' && /^[a-z][a-z-]{0,40}(,[a-z][a-z-]{0,40}){0,31}$/.test(value);
     if (key === 'decision.kind') return typeof value === 'string' && /^[a-z][a-z-]{0,40}$/.test(value);
     if (key === 'decision.source') return value === 'decision-model' || value === 'fallback';
+    if (key === 'decision.agreement') return value === 'agree' || value === 'false-accept' || value === 'false-reject';
+    if (key === 'decision.confidence_bucket')
+      return value === '0-25' || value === '25-50' || value === '50-75' || value === '75-90' || value === '90-100';
     if (key === 'decision.tools') return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
     return typeof value === 'string' && value.length > 0 && value.length <= providerMessageLimit;
   }

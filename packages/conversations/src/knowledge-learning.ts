@@ -69,6 +69,7 @@ export async function reconcileMaintenanceKnowledge(
   fence: MaintenanceFence,
   compactor: ConversationCompactor,
   learned: LearnedKnowledgePort | undefined,
+  options: { shouldLearn?: (workspaceId: string, content: string) => Promise<boolean> } = {},
 ): Promise<boolean> {
   const input = await transaction(async (tx, current) => {
     if (!knowledgeLearningInstalled(tx)) return { kind: 'done' } as const;
@@ -113,6 +114,18 @@ export async function reconcileMaintenanceKnowledge(
     } as const;
   });
   if (input.kind === 'done') return true;
+  if (
+    options.shouldLearn &&
+    !(await options.shouldLearn(fence.workspaceId, input.part.map(message => message.text).join('\n\n')))
+  ) {
+    return transaction(async tx => {
+      await tx.client.query(
+        `UPDATE ${table(tx, 'tf_conversation_maintenance')} SET knowledge_chunk=$2,knowledge_complete=$3 WHERE id=$1`,
+        [fence.jobId, input.chunk + 1, input.last],
+      );
+      return input.last;
+    });
+  }
   const port = learned!;
   try {
     const entries = await port.entries(fence.workspaceId, input.actor.userId);
