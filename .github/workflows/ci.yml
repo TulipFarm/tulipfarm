@@ -107,6 +107,7 @@ jobs:
         if: env.RUN == 'true' && matrix.task == 'test:apps'
         run: |
           pnpm exec turbo run build --filter='@tulipfarm/browser-host^...' --concurrency=2
+          pnpm --filter @tulipfarm/browser-host exec playwright-core install chromium
           pnpm --filter @tulipfarm/browser-host test:chromium
 
   # Every apps/web/test/*.browser.mjs, split by recorded duration. Tests share fixed ports, so each shard runs four

@@ -334,6 +334,14 @@ test(
     const note = entry('Team handbook'),
       file = entry('Old file title', { kind: 'file', fileId: randomUUID() });
     const { page, library, entries, requests } = await environment(t, { entries: [note, file] });
+    // Removing reads the entry's revision, so wait for the refreshed list before acting on it.
+    const refreshEntries = async () => {
+      const listed = page.waitForResponse(response =>
+        new URL(response.url()).pathname.endsWith('/knowledge/documents'),
+      );
+      await library.getByRole('button', { name: 'Refresh entries', exact: true }).click();
+      await (await listed).finished();
+    };
     await library.getByRole('button', { name: 'Edit Team handbook', exact: true }).click();
     let dialog = page.getByRole('dialog', { name: 'Edit Knowledge entry' });
     await dialog.getByLabel('Note text').fill('Revised policy: ask the team lead.');
@@ -355,7 +363,7 @@ test(
     await dialog.getByText(/This entry changed while you were working/).waitFor();
     assert.equal(entries[0].title, 'New handbook');
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
-    await library.getByRole('button', { name: 'Refresh entries', exact: true }).click();
+    await refreshEntries();
     await library.getByRole('button', { name: 'Remove New handbook', exact: true }).click();
     dialog = page.getByRole('dialog', { name: 'Remove New handbook?' });
     await dialog.getByText('This removes the Knowledge entry. The original in Files is not deleted.').waitFor();
@@ -364,7 +372,7 @@ test(
     await dialog.getByText(/This entry changed while you were working/).waitFor();
     assert.equal(entries.length, 2);
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
-    await library.getByRole('button', { name: 'Refresh entries', exact: true }).click();
+    await refreshEntries();
     await library.getByRole('button', { name: 'Remove New handbook', exact: true }).click();
     await dialog.getByRole('button', { name: 'Remove entry', exact: true }).click();
     await library.getByRole('heading', { name: 'New handbook', exact: true }).waitFor({ state: 'detached' });
