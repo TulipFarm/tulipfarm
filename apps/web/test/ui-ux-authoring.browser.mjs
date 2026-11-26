@@ -297,10 +297,10 @@ test('new agents choose other actions inside their app, and apps they do not use
   await evidence(page, 'a03-agent-tool-picker', async () => {
     await actions.getByText('No actions chosen.', { exact: false }).waitFor();
     const tables = actions.getByRole('region', { name: 'Tables actions', exact: true });
-    await tables.getByText('11 available', { exact: true }).waitFor();
+    await tables.getByText('12 available', { exact: true }).waitFor();
     await tables.getByRole('button').first().click();
     await tables.getByRole('checkbox', { name: 'Find rows', exact: true }).check();
-    await tables.getByText('1 of 11 selected', { exact: true }).waitFor();
+    await tables.getByText('1 of 12 selected', { exact: true }).waitFor();
     assert.equal(
       await tables.getByRole('checkbox', { name: 'Update rows', exact: true }).isChecked(),
       false,
