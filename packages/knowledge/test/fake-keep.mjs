@@ -3,7 +3,8 @@ import { createKnowledgeKeepFeed, createKnowledgeKeepIndex, createKnowledgeSearc
 
 /**
  * An in-memory Keep knowledge corpus: per-scope sources of episodes, keyword search and forget. `state.timeouts` holds
- * source ids whose ingest times out, and `state.beforeIngest` runs before each ingest.
+ * source ids whose ingest times out, and `state.beforeIngest` runs before each ingest; a result it returns is answered
+ * instead.
  */
 export function fakeKnowledgeKeep() {
   const corpora = new Map();
@@ -17,7 +18,8 @@ export function fakeKnowledgeKeep() {
   const client = {
     async ingestKnowledge(input) {
       calls.push({ op: 'ingest', ...input });
-      await state.beforeIngest?.(input);
+      const answer = await state.beforeIngest?.(input);
+      if (answer) return answer;
       if (!state.available) return down;
       if (state.timeouts.has(input.sourceId)) return { status: 'unavailable', reason: 'timeout' };
       const sources = corpus(input.scope);
