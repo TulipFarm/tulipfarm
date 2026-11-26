@@ -27,6 +27,10 @@
       "types": "./dist/contracts.d.ts",
       "default": "./dist/contracts.js"
     },
+    "./member-identities": {
+      "types": "./dist/member-identities.d.ts",
+      "default": "./dist/member-identities.js"
+    },
     "./subscriptions": {
       "types": "./dist/subscriptions.d.ts",
       "default": "./dist/subscriptions.js"
