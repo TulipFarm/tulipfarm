@@ -167,7 +167,10 @@
                   "code-sessions",
                   "decisions-tool-preload",
                   "decisions-completion-check",
-                  "decisions-creation-review"
+                  "decisions-creation-review",
+                  "decisions-learning-gate",
+                  "decisions-heartbeat-filter",
+                  "decisions-drift-audit"
                 ]
               },
               {
@@ -519,7 +522,10 @@
                   "code-sessions",
                   "decisions-tool-preload",
                   "decisions-completion-check",
-                  "decisions-creation-review"
+                  "decisions-creation-review",
+                  "decisions-learning-gate",
+                  "decisions-heartbeat-filter",
+                  "decisions-drift-audit"
                 ]
               },
               {

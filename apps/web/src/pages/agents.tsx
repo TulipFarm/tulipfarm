@@ -160,6 +160,7 @@ export function AgentsPage() {
                 {page.agents.map(agent => (
                   <ArchivedAgentRow
                     key={agent.id}
+                    id={agent.id}
                     name={agent.name}
                     state={restores.get(agent.id) ?? { kind: 'idle' }}
                     restore={() => void restore(agent.id)}
@@ -172,7 +173,7 @@ export function AgentsPage() {
                 {page.agents.map(agent => (
                   <DataListRow key={agent.id}>
                     <DataListCell>
-                      <AgentMark size={32} />
+                      <AgentMark agentId={agent.id} size={32} />
                       <DataListLink
                         render={
                           <Link
@@ -225,11 +226,13 @@ export function AgentsPage() {
 }
 
 function ArchivedAgentRow({
+  id,
   name,
   state,
   restore,
   refresh,
 }: {
+  id: string;
   name: string;
   state: WriteState<string>;
   restore: () => void;
@@ -238,7 +241,7 @@ function ArchivedAgentRow({
   return (
     <DataListRow>
       <DataListCell>
-        <AgentMark size={32} />
+        <AgentMark agentId={id} size={32} />
         {name}
       </DataListCell>
       <DataListActions>

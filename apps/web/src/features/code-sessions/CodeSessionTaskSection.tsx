@@ -4,15 +4,23 @@ import type { CodeSessionView } from '@tulipfarm/agents/code-session-contracts';
 import { codingAgentLabels, codingAgents, type CodingAgent } from '@tulipfarm/agents/coding-run-contracts';
 import { ArrowUpRightIcon, BranchIcon, CodeIcon } from '@tulipfarm/icons';
 import { Badge } from '@tulipfarm/sprout/badge';
+import { BrandIcon, type Brand } from '@tulipfarm/sprout/brand-icon';
 import { Button } from '@tulipfarm/sprout/button';
 import { Input } from '@tulipfarm/sprout/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 import { toast } from '@tulipfarm/sprout/toast';
 import { useFeatureRead } from '@/lib/query';
 import { codeSessionApi } from './api';
+import { GitHubRepositoryPicker } from './GitHubRepositoryPicker';
 import { useFlag } from '@/lib/feature-flags';
 
 const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+const codingAgentBrand: Record<CodingAgent, Brand> = {
+  'claude-code': 'claude',
+  codex: 'openai',
+  copilot: 'github',
+};
 
 export function CodeSessionTaskSection({
   workspaceId,
@@ -133,21 +141,31 @@ export function CodeSessionTaskSection({
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             <Select value={agent} onValueChange={value => value && setAgent(value as CodingAgent)}>
               <SelectTrigger aria-label="Coding agent">
-                <SelectValue />
+                <SelectValue>
+                  <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                    <BrandIcon brand={codingAgentBrand[agent]} size="inline" />
+                    <span>{codingAgentLabels[agent]}</span>
+                  </span>
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {codingAgents.map(candidate => (
                   <SelectItem key={candidate} value={candidate}>
-                    {codingAgentLabels[candidate]}
+                    <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                      <BrandIcon brand={codingAgentBrand[candidate]} size="inline" />
+                      <span>{codingAgentLabels[candidate]}</span>
+                    </span>
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <Input
-              aria-label="Repository"
-              placeholder={repoItems[0]?.fullName ?? 'owner/repo'}
-              value={repository}
-              onChange={event => setRepository(event.target.value)}
+            <GitHubRepositoryPicker
+              workspaceId={workspaceId}
+              items={repoItems}
+              value={effectiveRepo}
+              onChange={nextRepo => setRepository(nextRepo)}
+              ariaLabel="Repository"
+              placeholder="Choose a repository"
             />
             <Input
               aria-label="Base branch"
@@ -184,7 +202,10 @@ function TaskSessionSummary({
   return (
     <div className="space-y-2 text-xs">
       <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
-        <span className="font-medium text-foreground">{codingAgentLabels[session.agent]}</span>
+        <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+          <BrandIcon brand={codingAgentBrand[session.agent]} size="inline" />
+          <span>{codingAgentLabels[session.agent]}</span>
+        </span>
         <span>·</span>
         <span className="font-mono">{session.repository}</span>
         <span>·</span>

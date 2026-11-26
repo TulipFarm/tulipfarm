@@ -370,6 +370,10 @@ export function createConversationMaintenance(runtime: ConversationRuntime) {
     compactor: ConversationCompactor,
     publish: ConversationRecapPublisher,
     learned?: LearnedKnowledgePort,
+    learningGate?: {
+      memory?: (workspaceId: string, transcript: string) => Promise<boolean>;
+      knowledge?: (workspaceId: string, content: string) => Promise<boolean>;
+    },
   ) {
     const work = maintenanceWorkSchema.parse(value);
     const fence = await claim(work);
@@ -575,8 +579,19 @@ export function createConversationMaintenance(runtime: ConversationRuntime) {
           return operation(tx, { actor, coveredThrough: job.covered_through, policy: job.compaction_policy });
         });
       const learningComplete =
-        (await reconcileMaintenanceMemory(learning, fence, compactor)) &&
-        (await reconcileMaintenanceKnowledge(learning, fence, compactor, learned));
+        (await reconcileMaintenanceMemory(
+          learning,
+          fence,
+          compactor,
+          learningGate?.memory ? { shouldLearn: learningGate.memory } : undefined,
+        )) &&
+        (await reconcileMaintenanceKnowledge(
+          learning,
+          fence,
+          compactor,
+          learned,
+          learningGate?.knowledge ? { shouldLearn: learningGate.knowledge } : undefined,
+        ));
       if (!learningComplete) {
         await transaction(work.workspaceId, async tx => {
           await requireMaintenanceFence(tx, fence);

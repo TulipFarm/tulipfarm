@@ -67,7 +67,7 @@ export function createGitHubTaskTools(
         if (call.tool === 'github.personal.account')
           return result('selection-required', {
             instruction:
-              'Ask the owner to select a GitHub account in this task. Only that human control delegates account access.',
+              'No GitHub account is selected for this task yet. First check Agent defaults, workspace Knowledge, and memory for any other details (such as repository), then ask the user for all missing inputs in one CLARIFICATION form using plain-language labels like "GitHub account" and "Repository".',
           });
         if (call.tool === 'github.personal.read' || call.tool === 'github.personal.download') {
           const response =

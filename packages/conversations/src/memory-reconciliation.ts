@@ -78,6 +78,7 @@ export async function reconcileMaintenanceMemory(
   transaction: MemoryTransaction,
   fence: MaintenanceFence,
   compactor: ConversationCompactor,
+  options: { shouldLearn?: (workspaceId: string, transcript: string) => Promise<boolean> } = {},
 ): Promise<boolean> {
   const input = await transaction(async (tx, current) => {
     const keep = await keepFor(tx, current.actor);
@@ -133,6 +134,13 @@ export async function reconcileMaintenanceMemory(
     } as const;
   });
   if (input.kind === 'done') return true;
+  if (options.shouldLearn && !(await options.shouldLearn(fence.workspaceId, input.transcript))) {
+    return transaction(async tx => {
+      await repository(tx).finish([fence.jobId, input.chunk + 1, input.step + 1, input.last]);
+      await repository(tx).clearStep([fence.jobId]);
+      return input.last;
+    });
+  }
   const response = await compactor.summarize({
     fence,
     purpose: 'memory',

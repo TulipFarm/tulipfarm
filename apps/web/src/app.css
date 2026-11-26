@@ -1693,3 +1693,33 @@
     color: #ff6e6e;
   }
 }
+
+/* Agent marks: a white tulip on one of Linear's label colors, never the brand green. */
+[data-slot='agent-mark'] {
+  background-color: var(--agent-color);
+  &[data-color='indigo'] {
+    --agent-color: #5e6ad2;
+  }
+  &[data-color='cyan'] {
+    --agent-color: #26b5ce;
+  }
+  &[data-color='blue'] {
+    --agent-color: #4ea7fc;
+  }
+  &[data-color='purple'] {
+    --agent-color: #bb87fc;
+  }
+  &[data-color='red'] {
+    --agent-color: #eb5757;
+  }
+  &[data-color='orange'] {
+    --agent-color: #f2994a;
+  }
+  &[data-color='yellow'] {
+    --agent-color: #f2c94c;
+  }
+  & > span {
+    background-color: white;
+    mask: url('/favicon.svg') center / contain no-repeat;
+  }
+}

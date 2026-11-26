@@ -367,5 +367,37 @@ export function createTeamGitHubReads(options: {
         ],
       };
     },
+    async teamAgentToken(workspaceId: string, integrationIdInput: string, repository: string) {
+      denyMcpEgress();
+      const integrationId = uuidSchema.parse(integrationIdInput);
+      const [owner, repo] = repository.trim().split('/');
+      if (!owner || !repo || repository.includes('..') || /\s/.test(repository)) throw new AccessDenied();
+      const row = await options.runtime.transaction(workspaceId, compatibility, async tx => {
+        const integration = (
+          await tx.client.query(
+            `SELECT id, name, generation, credential FROM ${table(tx, 'tf_integrations')}
+             WHERE id = $1 AND enabled AND deleted_at IS NULL AND credential IS NOT NULL`,
+            [integrationId],
+          )
+        ).rows[0] as { id: string; name: string; generation: number; credential: string } | undefined;
+        if (!integration) throw new AccessDenied();
+        const source = (
+          await tx.client.query(
+            `SELECT id FROM ${table(tx, 'tf_integration_sources')}
+             WHERE integration_id = $1 AND lower(owner) = lower($2) AND lower(repo) = lower($3)
+             LIMIT 1`,
+            [integrationId, owner, repo],
+          )
+        ).rows[0];
+        if (!source) throw new AccessDenied();
+        return integration;
+      });
+      return {
+        integrationId: row.id,
+        name: row.name,
+        generation: row.generation,
+        accessToken: cipher.decrypt(workspaceId, row.id, row.generation, row.credential),
+      };
+    },
   };
 }

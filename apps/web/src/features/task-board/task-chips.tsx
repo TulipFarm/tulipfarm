@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { GitBranchIcon, UserCircleIcon } from '@tulipfarm/icons';
-import { AgentAvatar } from '@tulipfarm/sprout/agent-avatar';
+import { AgentMark } from '@/components/agent-mark';
 import { EntityAvatar } from '@tulipfarm/sprout/avatar';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@tulipfarm/sprout/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@tulipfarm/sprout/popover';
@@ -116,7 +116,7 @@ export const statusIcon = (state: StatusState) => <Status state={state} size="sm
 
 export function ActorAvatar({ actor, name, image = null }: { actor: Actor; name: string; image?: string | null }) {
   return actor.type === 'agent' ? (
-    <AgentAvatar agentId={actor.id} name={name} size="sm" />
+    <AgentMark agentId={actor.id} size={24} />
   ) : (
     <EntityAvatar seed={actor.id} name={name} image={image} size="sm" />
   );
