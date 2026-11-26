@@ -706,11 +706,14 @@ export function createTableService(
       direction?: 'asc' | 'desc';
       /** Leaves out the built-in Tasks table, which has its own page. */
       excludeTasks?: boolean;
+      /** Leaves out the built-in Workspace members table, which has its own Members page. */
+      excludeMembers?: boolean;
     } = {},
   ) {
     const query = z
       .object({
         excludeTasks: z.boolean().default(false),
+        excludeMembers: z.boolean().default(false),
         after: z.string().max(40).optional(),
         search: z.string().trim().min(1).max(255).optional(),
         archived: z.boolean().default(false),
@@ -755,7 +758,9 @@ export function createTableService(
       ]);
       const memberTableId = memberTable?.coreDefinition.id;
       const tasksTableId = tasks?.coreDefinition.id;
-      const shown = (row: { table_id: string }) => !(query.excludeTasks && row.table_id === tasksTableId);
+      const shown = (row: { table_id: string }) =>
+        !(query.excludeTasks && row.table_id === tasksTableId) &&
+        !(query.excludeMembers && row.table_id === memberTableId);
       if (!query.sort) {
         const rows = listed.rows.map(entry);
         const tables = (

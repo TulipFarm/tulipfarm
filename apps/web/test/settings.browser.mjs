@@ -157,6 +157,8 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 36
             canManage: current.role === 'admin',
           });
         if (path === `${base}/governance/directory`) return send({ members: [] });
+        // The Members page also lists people added by hand; this workspace has none to show.
+        if (path === `${base}/workspace-members`) return send({ error: 'not-found' }, 404);
         if (path === `${base}/subscriptions`) return send({ subscriptions: [] });
         // Model sources read the Claude and Copilot token plans, which are off here.
         for (const provider of ['claude', 'copilot'])

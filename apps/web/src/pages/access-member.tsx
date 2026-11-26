@@ -25,6 +25,7 @@ import { NoPolicies, PolicyEditor, PolicyTable, scopeChoices, type ScopeChoice }
 import type { PolicyPermission } from '@tulipfarm/workspaces/governance-contracts';
 import { failed, leaveConfirmation, leaveReason, personName } from './access-members';
 import type { AccessPage } from './governance';
+import { AccountProfile } from './access-person';
 
 export function MemberDetail({ page, membershipId }: { page: AccessPage; membershipId: string }) {
   const self = membershipId === page.access.membershipId;
@@ -116,6 +117,7 @@ function Detail({ page, access, stale }: { page: AccessPage; access: MemberAcces
           </AlertDescription>
         </Alert>
       )}
+      {access.member.workspaceMemberId && <AccountProfile page={page} memberId={access.member.workspaceMemberId} />}
       <Tabs defaultValue="policies">
         <TabsList variant="line" aria-label={`${name}’s access`}>
           <TabsTrigger value="policies">Access policies</TabsTrigger>

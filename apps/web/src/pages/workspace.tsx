@@ -242,14 +242,14 @@ const members: Page = {
   to: '/$workspaceSlug/members',
   icon: UserIcon,
   detail: 'Invite people and manage workspace roles',
-  keywords: ['invite', 'people', 'users', 'roles', 'permissions'],
+  keywords: ['invite', 'people', 'person', 'profiles', 'users', 'workspace members', 'roles', 'permissions'],
 };
 const membersAndTeams: Page = {
   label: 'Members & teams',
   to: members.to,
   icon: UsersIcon,
   detail: 'Manage workspace members, invites, and teams',
-  keywords: ['invite', 'people', 'users', 'roles', 'teams', 'permissions'],
+  keywords: ['invite', 'people', 'person', 'profiles', 'users', 'workspace members', 'roles', 'teams', 'permissions'],
 };
 const teams: Page = {
   label: 'Teams',

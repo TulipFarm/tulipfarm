@@ -58,15 +58,29 @@ const roleDescriptions = {
 type TeamChoice = { id: string; role: 'member' | 'manager' };
 type DraftPolicy = { scope: ScopeChoice; permissions: PolicyPermission[] };
 
+/** Someone already in Members to invite, from their profile or the members list. */
+export type InvitePreset = { member?: string | undefined; email?: string | undefined; name?: string | undefined };
+
 /** Invites people, or with `invitationId` changes the choices on one pending invite while its link keeps working. */
-export function InviteMembers({ page, invitationId }: { page: AccessPage; invitationId?: string }) {
+export function InviteMembers({
+  page,
+  invitationId,
+  preset,
+}: {
+  page: AccessPage;
+  invitationId?: string;
+  preset?: InvitePreset | undefined;
+}) {
   const { workspaceId, workspaceSlug, admin, data } = page;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const anchor = useComboboxAnchor();
   const emailInput = useRef<HTMLInputElement>(null);
   const invitations = useInvitations(workspaceId, admin, page.accessLost, '', true);
-  const [emails, setEmails] = useState<string[]>([]);
+  const [emails, setEmails] = useState<string[]>(() => {
+    const email = preset?.email ? parseRecipients(preset.email).recipients[0] : undefined;
+    return email ? [email] : [];
+  });
   const [query, setQuery] = useState('');
   const [duplicates, setDuplicates] = useState<string[]>([]);
   const [error, setError] = useState<string>();
@@ -349,6 +363,8 @@ export function InviteMembers({ page, invitationId }: { page: AccessPage; invita
       emailInput.current?.focus();
       return;
     }
+    // A chosen person's invite links to their existing profile when it's the only address entered.
+    const presetMember = preset?.member && ready.length === 1 ? preset.member : undefined;
     const next = ready.map(
       email =>
         operations.current.get(email) ??
@@ -357,6 +373,7 @@ export function InviteMembers({ page, invitationId }: { page: AccessPage; invita
           requestId: crypto.randomUUID(),
           memberRequestId: crypto.randomUUID(),
           memberRecordId: crypto.randomUUID(),
+          ...(presetMember ? { workspaceMemberId: presetMember } : {}),
           state: { kind: 'queued' },
         } satisfies RecipientRow),
     );
@@ -496,6 +513,13 @@ export function InviteMembers({ page, invitationId }: { page: AccessPage; invita
           >
             {error ?? 'Press Enter, Tab or comma after each address, or paste a list.'}
           </p>
+          {preset?.member && (
+            <p className="text-sm text-muted-foreground">
+              {preset.email
+                ? `This invite links to ${preset.name || 'their'} profile in Members.`
+                : `Enter ${preset.name || 'their'} email address. The invite links to their profile in Members.`}
+            </p>
+          )}
           <div id="invitation-emails-flags" className="flex flex-col gap-1 text-sm text-destructive">
             {duplicates.length > 0 && <p>Already in the list: {joinList(duplicates)}.</p>}
             {alreadyMembers.length > 0 && (
