@@ -119,8 +119,8 @@ try {
   await page.goto(`${origin}/${workspace.slug}/chat/${chatId}`);
   await page.getByRole('textbox', { name: 'Message', exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'GitHub account selection' }).count(), 0);
-  // The workspace shell's reauthorization banner reads the account list, and the composer's GitHub chip reads the
-  // chat's chosen account. Chat loads no batches, investigations or other GitHub data of its own.
+  // The workspace shell's reauthorization banner reads the account list. Chat loads no selection, batches,
+  // investigations or other GitHub data of its own until an account card appears.
   const githubReads = requests.filter(request => request.path.includes('/github/'));
   const accountReads = githubReads.filter(request => request.path.endsWith('/github/accounts'));
   const selectionReads = githubReads.filter(request => request.path.endsWith(`/github/chats/${chatId}/selection`));
@@ -129,12 +129,16 @@ try {
     'Ordinary chat loads only the GitHub accounts and the chat selection',
   );
   assert.ok(accountReads.length <= 1, 'Ordinary chat does not load GitHub accounts more than once');
-  assert.ok(selectionReads.length <= 1, 'Ordinary chat does not load its GitHub selection more than once');
+  assert.equal(
+    selectionReads.length,
+    0,
+    'Ordinary chat does not load its GitHub selection before an account card appears',
+  );
   f.decide([call, { tool: 'github.personal.account' }], 'Pick a GitHub account below.');
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Read my GitHub repository.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await page.getByText('Pick a GitHub account below.', { exact: true }).waitFor();
-  // The shell and composer already read the accounts and selection, so the card renders them without a loading state.
+  // The shell already read the accounts, and the account card reads the chat selection once when it appears.
   await cards.last().getByRole('button', { name: 'person-123', exact: true }).waitFor();
   delay = 0;
   const beforeFocus = requests.length;
@@ -153,8 +157,8 @@ try {
   await clearEditor(page.getByRole('textbox', { name: 'Message', exact: true }));
   assert.equal(f.providerCalls.length, 0);
   assert.equal((await f.reads.selection(f.one.id, f.member.userId, chatId)).accountId, null);
-  // The composer reads the selection once and the account card re-reads it once when it appears.
-  assert.equal(requests.filter(request => request.method === 'GET' && request.path.endsWith('/selection')).length, 2);
+  // The account card reads the chat selection once when it appears.
+  assert.equal(requests.filter(request => request.method === 'GET' && request.path.endsWith('/selection')).length, 1);
   assert.equal(
     requests.filter(request => request.method === 'GET' && request.path.endsWith('/github/accounts')).length,
     1,
