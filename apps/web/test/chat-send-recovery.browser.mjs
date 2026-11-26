@@ -430,7 +430,8 @@ test('chat sends reconcile transport failures and recover without reloading', { 
       async ({ page, state, composer, send }) => {
         let release;
         state.accessReads = new Promise(resolve => (release = resolve));
-        await page.getByRole('link', { name: 'New chat', exact: true }).click();
+        await page.getByRole('button', { name: 'New', exact: true }).click();
+        await page.getByRole('menuitem', { name: 'New chat', exact: true }).click();
         await page.waitForURL(url => url.pathname === '/acme');
         await composer.fill('First message in a new chat');
         await send.click();
@@ -557,7 +558,8 @@ test('chat sends reconcile transport failures and recover without reloading', { 
     await scenario(
       'a new chat that was never created shows its first message as not sent, and trying again sends it once',
       async ({ page, state, composer, send }) => {
-        await page.getByRole('link', { name: 'New chat', exact: true }).click();
+        await page.getByRole('button', { name: 'New', exact: true }).click();
+        await page.getByRole('menuitem', { name: 'New chat', exact: true }).click();
         await page.waitForURL(url => url.pathname === '/acme');
         state.dropCreate = true;
         await composer.fill('Send this when the chat exists');

@@ -6,6 +6,7 @@ import { Board, type BoardColumn } from '@tulipfarm/sprout/board';
 import { Button } from '@tulipfarm/sprout/button';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SearchField } from '@tulipfarm/sprout/search-field';
+import { Skeleton, SkeletonGroup } from '@tulipfarm/sprout/skeleton';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Status, type StatusState } from '@tulipfarm/sprout/status';
 import { toast } from '@tulipfarm/sprout/toast';
@@ -201,7 +202,7 @@ export function TaskBoard({
         </Button>
       </StatePanel>
     );
-  if (!table || rows.state.kind !== 'ready') return <p className="text-sm text-muted-foreground">Loading Tasks…</p>;
+  if (!table || rows.state.kind !== 'ready') return <TaskBoardSkeleton />;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
@@ -339,6 +340,53 @@ export function TaskBoard({
         />
       )}
     </div>
+  );
+}
+
+/** Holds the board's shape while its first read loads: header, filters and the five lanes with a few cards. */
+export function TaskBoardSkeleton() {
+  return (
+    <SkeletonGroup label="Loading tasks" gap="lg" data-task-board-skeleton="">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex w-72 max-w-full flex-col gap-2">
+          <Skeleton shape="title" />
+          <Skeleton />
+        </div>
+        <div className="flex gap-2">
+          <div className="w-24">
+            <Skeleton shape="action" />
+          </div>
+          <div className="w-24">
+            <Skeleton shape="action" />
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center gap-3">
+        <div className="w-56">
+          <Skeleton shape="action" />
+        </div>
+        <div className="w-64 max-w-full">
+          <Skeleton shape="action" />
+        </div>
+      </div>
+      <div className="flex min-h-0 gap-3 overflow-hidden">
+        {lanes.map((lane, index) => (
+          <div key={lane.id} className="flex w-72 shrink-0 flex-col gap-3 rounded-lg bg-muted/40 p-3">
+            <div className="w-24">
+              <Skeleton />
+            </div>
+            {Array.from({ length: 3 - (index % 2) }, (_, card) => (
+              <div key={card} className="flex flex-col gap-2 rounded-md border border-border bg-background p-3">
+                <Skeleton />
+                <div className="w-2/3">
+                  <Skeleton />
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </SkeletonGroup>
   );
 }
 

@@ -881,7 +881,8 @@ try {
   assert.equal(downloaded, false);
   await page.keyboard.press('Escape');
   await page.getByRole('dialog').waitFor({ state: 'detached' });
-  await page.getByRole('link', { name: 'New chat', exact: true }).click();
+  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'New chat', exact: true }).click();
   await page.getByRole('region', { name: 'Conversation', exact: true }).getByRole('heading', { level: 2 }).waitFor();
   assert.equal(await page.getByLabel('Message', { exact: true }).textContent(), '');
   assert.equal(chats.length, beforeAttachment + 1);
