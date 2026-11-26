@@ -78,7 +78,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       vite = spawn(
         process.execPath,
         [
-          new URL('../node_modules/vite/bin/vite.js', import.meta.url).pathname,
+          new URL('./serve-built-app.mjs', import.meta.url).pathname,
           '--host',
           '127.0.0.1',
           '--port',

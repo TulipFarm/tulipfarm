@@ -14,10 +14,14 @@ const workspace = {
 };
 const you = '40000000-0000-4000-8000-000000000001';
 const team = { id: '30000000-0000-4000-8000-000000000001', name: 'Finance' };
-const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', '5241', '--strictPort'], {
-  cwd: new URL('..', import.meta.url),
-  stdio: 'ignore',
-});
+const server = spawn(
+  process.execPath,
+  ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', '5241', '--strictPort'],
+  {
+    cwd: new URL('..', import.meta.url),
+    stdio: 'ignore',
+  },
+);
 let browser;
 try {
   for (let attempt = 0; ; attempt++) {

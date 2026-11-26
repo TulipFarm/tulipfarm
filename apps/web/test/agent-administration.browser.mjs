@@ -91,11 +91,15 @@ test(
   'agent administration saves one section at a time and explains every blocked action',
   { timeout: 240000 },
   async () => {
-    const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-      cwd: new URL('..', import.meta.url),
-      stdio: 'ignore',
-      detached: true,
-    });
+    const server = spawn(
+      process.execPath,
+      ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+      {
+        cwd: new URL('..', import.meta.url),
+        stdio: 'ignore',
+        detached: true,
+      },
+    );
     let browser;
     try {
       for (let attempt = 0; ; attempt++) {

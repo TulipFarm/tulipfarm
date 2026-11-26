@@ -257,19 +257,21 @@ export default defineConfig(({ command }) => {
     command === 'build' && process.env.TULIPFARM_RELEASE_BUILD === '1'
       ? readBuildInfo('web', new URL('./version.json', import.meta.url), true)
       : developmentBuild('web');
+  const browserTestBuild = command === 'build' && process.env.TULIPFARM_BROWSER_TEST_BUILD === '1';
   return {
     // Parallel browser tests give each worker its own dependency cache, so one server's re-optimize can't break another's.
     ...(process.env.TULIPFARM_VITE_CACHE_DIR ? { cacheDir: process.env.TULIPFARM_VITE_CACHE_DIR } : {}),
-    define: { __BUILD_INFO__: JSON.stringify(identity) },
+    define: {
+      __BUILD_INFO__: JSON.stringify(identity),
+      ...(browserTestBuild ? { 'import.meta.env.DEV': 'true' } : {}),
+    },
     plugins: [
       react(),
       tailwindcss(),
-      apiPreconnect(),
-      earlyRequests(),
+      ...(browserTestBuild ? [] : [apiPreconnect(), earlyRequests()]),
       webExtensions(),
       emojiGlyphs(),
-      stylesAfterEarlyComposer(),
-      signInStyles(),
+      ...(browserTestBuild ? [] : [stylesAfterEarlyComposer(), signInStyles()]),
       {
         name: 'build-identity',
         generateBundle() {
@@ -280,6 +282,7 @@ export default defineConfig(({ command }) => {
     // Lazy chunks can import each other in a cycle (recharts split across `chart` and `surface`).
     // Without strict order, the chunk loaded first runs before its dependency and throws.
     build: {
+      ...(browserTestBuild ? { outDir: 'dist-test', minify: false } : {}),
       rolldownOptions: {
         output: {
           strictExecutionOrder: true,

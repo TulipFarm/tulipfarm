@@ -1,4 +1,3 @@
-// browser-tests: run alone, since beside other tests it nears its own five-minute limit.
 import assert from 'node:assert/strict';
 import { stripVTControlCharacters } from 'node:util';
 import { spawn } from 'node:child_process';
@@ -519,11 +518,15 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
     const apiOrigin = `http://127.0.0.1:${server.address().port}`;
-    vite = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(webPort), '--strictPort'], {
-      cwd: new URL('..', import.meta.url),
-      env: { ...process.env, VITE_API_URL: apiOrigin },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    vite = spawn(
+      process.execPath,
+      ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(webPort), '--strictPort'],
+      {
+        cwd: new URL('..', import.meta.url),
+        env: { ...process.env, VITE_API_URL: apiOrigin },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
     vite.stdout.on('data', data => {
       output = (output + data).slice(-16000);
     });

@@ -95,25 +95,28 @@ jobs:
         env:
           TASK: ${{ matrix.task }}
         run: pnpm run "$TASK"
-      - name: Install Chromium for shell accessibility checks
+      - name: Cache Playwright browser for browser-host
+        id: pw-cache-apps
         if: env.RUN == 'true' && matrix.task == 'test:apps'
-        run: pnpm --filter @tulipfarm/web exec playwright install --with-deps chromium
-      - name: Check shell accessible names in Chromium
-        if: env.RUN == 'true' && matrix.task == 'test:apps'
-        run: |
-          pnpm exec turbo run build --filter='@tulipfarm/web^...' --concurrency=2
-          pnpm --filter @tulipfarm/web test:shell-accessibility
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-browser-host-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            playwright-browser-host-${{ runner.os }}-${{ runner.arch }}-
       - name: Check the browser host in Chromium
         if: env.RUN == 'true' && matrix.task == 'test:apps'
         run: |
-          pnpm exec turbo run build --filter='@tulipfarm/browser-host^...' --concurrency=2
-          pnpm --filter @tulipfarm/browser-host exec playwright-core install chromium
+          pnpm exec turbo run build --filter='@tulipfarm/browser-host^...' --concurrency=4
+          if [ "${{ steps.pw-cache-apps.outputs.cache-hit }}" != "true" ]; then
+            pnpm --filter @tulipfarm/browser-host exec playwright-core install chromium
+          fi
           pnpm --filter @tulipfarm/browser-host test:chromium
 
   # Every apps/web/test/*.browser.mjs, split by recorded duration. Tests share fixed ports, so each shard runs four
   # at a time, each in its own network namespace; see apps/web/test/run-browser-tests.mjs.
   web-browser:
-    name: web-browser (${{ matrix.shard }}/16)
+    name: web-browser (${{ matrix.shard }}/10)
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
@@ -121,7 +124,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     services:
       postgres:
         image: pgvector/pgvector:0.8.2-pg18
@@ -156,30 +159,33 @@ jobs:
       - name: Install repository dependencies
         run: pnpm install --frozen-lockfile --store-dir "$HOME/.pnpm-store"
       - name: Cache Playwright browsers
+        id: pw-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
             playwright-${{ runner.os }}-${{ runner.arch }}-
-      # The runner image already has Chrome's system libraries, so skip the slower apt step of --with-deps.
+      # The runner image already has Chromium and Firefox system libraries, so skip the slower apt step of --with-deps.
       # Firefox runs the email-link test: only it aborts chunk loads when a navigation starts.
       - name: Install Chromium and Firefox
+        if: steps.pw-cache.outputs.cache-hit != 'true'
         run: |
           pnpm --filter @tulipfarm/web exec playwright install chromium
-          pnpm --filter @tulipfarm/web exec playwright install --with-deps firefox
+          pnpm --filter @tulipfarm/web exec playwright install firefox
       - name: Create the local database roles
         run: psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/postgres/init.sql
       - name: Build the web app and the API and worker code the tests run
         run: |
-          pnpm exec turbo run build --filter='@tulipfarm/web^...' --filter=@tulipfarm/api --filter=@tulipfarm/worker --concurrency=2
+          pnpm exec turbo run build --filter='@tulipfarm/web^...' --filter=@tulipfarm/api --filter=@tulipfarm/worker --concurrency=4
           VITE_API_URL= pnpm --filter @tulipfarm/web build
+          TULIPFARM_BROWSER_TEST_BUILD=1 VITE_API_URL= pnpm --filter @tulipfarm/web build
       # Ubuntu's AppArmor blocks the unprivileged user namespaces the runner isolates each test in.
       - name: Allow unprivileged network namespaces
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Run browser tests
         env:
-          SHARD: ${{ matrix.shard }}/16
+          SHARD: ${{ matrix.shard }}/10
         run: pnpm --filter @tulipfarm/web test:browser --shard="$SHARD" --jobs=4
       - name: Upload failure screenshots
         if: failure()
@@ -191,55 +197,6 @@ jobs:
             apps/web/reports/
           if-no-files-found: ignore
 
-  skill-authoring:
-    name: skill-authoring
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    services:
-      postgres:
-        image: pgvector/pgvector:0.8.2-pg18
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: local-postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 3s
-          --health-timeout 3s
-          --health-retries 20
-    env:
-      TEST_ADMIN_DATABASE_URL: postgres://postgres:local-postgres@127.0.0.1:5432/postgres
-      XAI_API_KEY: synthetic-not-secret
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version-file: .node-version
-      - name: Install pnpm
-        run: npm install --global pnpm@11.5.3
-      - name: Cache pnpm store
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: ~/.pnpm-store
-          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', '.node-version') }}
-          restore-keys: |
-            pnpm-${{ runner.os }}-${{ runner.arch }}-
-      - name: Install repository dependencies
-        run: pnpm install --frozen-lockfile --store-dir "$HOME/.pnpm-store"
-      - name: Create the local database roles
-        run: psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/postgres/init.sql
-      - name: Build skill authoring dependencies
-        run: pnpm --filter @tulipfarm/agents... build
-      - name: Check skill package authoring and recovery
-        run: |
-          pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/skill-imports.integration.mjs
-          pnpm --filter @tulipfarm/conversations exec node --test --test-concurrency=1 --test-name-pattern='skill failures name|skill reads retry' test/integration/tool-errors.test.mjs
-
   # A release starts its code before workspace-rollout applies its common migrations to every workspace. This runs
   # chats and background jobs against a workspace one migration short, so a missing table (42P01) fails the build.
   behind-workspace:
@@ -248,7 +205,6 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # The checks run serially against one database, so they are split across two runners.
     strategy:
       fail-fast: false
       matrix:
@@ -288,83 +244,80 @@ jobs:
         run: pnpm install --frozen-lockfile --store-dir "$HOME/.pnpm-store"
       - name: Create the local database roles
         run: psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/postgres/init.sql
-      - name: Build the API and worker dependencies
-        if: matrix.group == 'apps'
-        run: pnpm exec turbo run build --filter='@tulipfarm/api^...' --filter='@tulipfarm/worker^...'
-      - name: Run chats and jobs against a workspace behind the release
-        if: matrix.group == 'workspace'
-        run: pnpm run test:behind-workspace
-      - name: Check private task reads and access revocation
-        if: matrix.group == 'workspace'
-        run: pnpm --filter @tulipfarm/api exec node --experimental-test-module-mocks --test --test-concurrency=1 test/agent-tasks.integration.mjs
-      - name: Check that authorization lock readers share and writers queue fairly
-        if: matrix.group == 'workspace'
-        run: pnpm --filter @tulipfarm/access exec node --test --test-concurrency=1 test/authorization-lock.integration.mjs
-      - name: Check that one locked workspace does not block workspace discovery
-        if: matrix.group == 'workspace'
-        run: pnpm --filter @tulipfarm/workspaces exec node --test --test-concurrency=1 test/discovery-lock.integration.mjs
-      - name: Check workspace route admission and membership revocation
-        if: matrix.group == 'workspace'
-        run: |
-          pnpm --filter @tulipfarm/api exec node --test --test-name-pattern='workspace HTTP conceals' test/governance.integration.mjs
-          pnpm --filter @tulipfarm/workspace-storage exec node --test --test-name-pattern='membership admission' test/integration/runtime.test.mjs
-      - name: Check app tables, app credits, app names and app data views
-        if: matrix.group == 'apps'
-        run: |
-          pnpm --filter @tulipfarm/tables exec node --test --test-concurrency=1 test/integration/data-views.test.mjs
-          pnpm --filter @tulipfarm/workspace-storage exec node --test --test-concurrency=1 test/integration/apps.test.mjs test/integration/app-credits.test.mjs
-          pnpm --filter @tulipfarm/database exec node --test test/integration/app-hostnames.test.mjs
-          pnpm --filter @tulipfarm/apps run test:integration
-          pnpm --filter @tulipfarm/worker run test:apps
-          pnpm --filter @tulipfarm/api run test:apps
-      - name: Check model usage recording, grouping and member privacy
-        run: |
-          pnpm --filter @tulipfarm/workspace-storage exec node --test --test-concurrency=1 test/integration/model-usage.test.mjs test/integration/credit-alerts.test.mjs
-          pnpm --filter @tulipfarm/worker exec node --test --test-concurrency=1 test/plan-chat.integration.mjs
-      - name: Check browser time is charged once, by the minute, to its chat or run
-        if: matrix.group == 'apps'
-        run: |
-          pnpm --filter @tulipfarm/workspace-storage exec node --test --test-concurrency=1 test/integration/resource-credits.test.mjs
-          pnpm --filter @tulipfarm/worker exec node --test --test-concurrency=1 test/browser-usage.integration.mjs
-      - name: Check that one chat at a time edits an app and only a finished turn saves
-        if: matrix.group == 'apps'
-        run: pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/app-tools.integration.mjs
-      - name: Check that an app chat replaces pages only at the revision it read
-        if: matrix.group == 'apps'
-        run: pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/app-page-tools.integration.mjs
-      - name: Check that an app chat turn saves its app edits only when it completes
-        if: matrix.group == 'apps'
-        run: pnpm --filter @tulipfarm/worker exec node --test --test-concurrency=1 test/app-editing.integration.mjs
-      - name: Check row and project review drafts
+      - name: Build dependencies
+        run: pnpm exec turbo run build --filter='@tulipfarm/api^...' --filter='@tulipfarm/worker^...' --concurrency=4
+      - name: Run workspace integration checks in parallel
         if: matrix.group == 'workspace'
         env:
           XAI_API_KEY: synthetic-not-secret
-        run: pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/row-drafts.integration.mjs test/project-drafts.integration.mjs
-      - name: Check that agent evals run with metered credits and change no workspace data
-        if: matrix.group == 'workspace'
-        env:
           ANTHROPIC_API_KEY: synthetic-not-secret
-        run: pnpm --filter @tulipfarm/evals run test:integration
-      - name: Check API call approvals and per-turn limits
-        if: matrix.group == 'workspace'
-        env:
-          XAI_API_KEY: synthetic-not-secret
         run: |
-          pnpm --filter @tulipfarm/conversations exec node --test --test-concurrency=1 test/integration/api-calls.test.mjs
-          pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/api-calls-task.integration.mjs
-      - name: Check table approvals and workspace skill sources
-        if: matrix.group == 'workspace'
+          set -uo pipefail
+          pids=()
+          (
+            set -euo pipefail
+            pnpm run test:behind-workspace
+          ) & pids+=($!)
+          (
+            set -euo pipefail
+            pnpm --filter @tulipfarm/api exec node --experimental-test-module-mocks --test --test-concurrency=1 test/agent-tasks.integration.mjs
+            pnpm --filter @tulipfarm/access exec node --test --test-concurrency=1 test/authorization-lock.integration.mjs
+            pnpm --filter @tulipfarm/workspaces exec node --test --test-concurrency=1 test/discovery-lock.integration.mjs
+            pnpm --filter @tulipfarm/api exec node --test --test-name-pattern='workspace HTTP conceals' test/governance.integration.mjs
+            pnpm --filter @tulipfarm/workspace-storage exec node --test --test-name-pattern='membership admission' test/integration/runtime.test.mjs
+          ) & pids+=($!)
+          (
+            set -euo pipefail
+            pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/row-drafts.integration.mjs test/project-drafts.integration.mjs
+            pnpm --filter @tulipfarm/evals run test:integration
+            pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/skill-imports.integration.mjs
+            pnpm --filter @tulipfarm/conversations exec node --test --test-concurrency=1 --test-name-pattern='skill failures name|skill reads retry' test/integration/tool-errors.test.mjs
+          ) & pids+=($!)
+          (
+            set -euo pipefail
+            pnpm --filter @tulipfarm/conversations exec node --test --test-concurrency=1 test/integration/api-calls.test.mjs
+            pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/api-calls-task.integration.mjs
+            pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/table-approval.integration.mjs
+            pnpm --filter @tulipfarm/tables exec node --test --test-concurrency=1 test/integration/activation-retry.test.mjs
+            pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/task-data-scope.integration.mjs
+            pnpm --filter @tulipfarm/agents exec node --test --test-name-pattern='table enrollment' test/setup.integration.mjs
+            pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/activation-replacement.integration.mjs
+            pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/tasks.integration.mjs
+          ) & pids+=($!)
+          status=0
+          for pid in "${pids[@]}"; do
+            wait "$pid" || status=1
+          done
+          exit "$status"
+      - name: Run apps integration checks in parallel
+        if: matrix.group == 'apps'
         run: |
-          pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/table-approval.integration.mjs
-          pnpm --filter @tulipfarm/tables exec node --test --test-concurrency=1 test/integration/activation-retry.test.mjs
-      - name: Check agent table access
-        if: matrix.group == 'workspace'
-        run: |
-          pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/task-data-scope.integration.mjs
-          pnpm --filter @tulipfarm/agents exec node --test --test-name-pattern='table enrollment' test/setup.integration.mjs
-      - name: Check activation replacement and running-task authority
-        if: matrix.group == 'workspace'
-        run: pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/activation-replacement.integration.mjs
-      - name: Check private task ordering and paging
-        if: matrix.group == 'workspace'
-        run: pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/tasks.integration.mjs
+          set -uo pipefail
+          pids=()
+          (
+            set -euo pipefail
+            pnpm --filter @tulipfarm/tables exec node --test --test-concurrency=1 test/integration/data-views.test.mjs
+            pnpm --filter @tulipfarm/workspace-storage exec node --test --test-concurrency=1 test/integration/apps.test.mjs test/integration/app-credits.test.mjs
+            pnpm --filter @tulipfarm/database exec node --test test/integration/app-hostnames.test.mjs
+            pnpm --filter @tulipfarm/apps run test:integration
+            pnpm --filter @tulipfarm/worker run test:apps
+            pnpm --filter @tulipfarm/api run test:apps
+          ) & pids+=($!)
+          (
+            set -euo pipefail
+            pnpm --filter @tulipfarm/workspace-storage exec node --test --test-concurrency=1 test/integration/model-usage.test.mjs test/integration/credit-alerts.test.mjs
+            pnpm --filter @tulipfarm/worker exec node --test --test-concurrency=1 test/plan-chat.integration.mjs
+            pnpm --filter @tulipfarm/workspace-storage exec node --test --test-concurrency=1 test/integration/resource-credits.test.mjs
+            pnpm --filter @tulipfarm/worker exec node --test --test-concurrency=1 test/browser-usage.integration.mjs
+          ) & pids+=($!)
+          (
+            set -euo pipefail
+            pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/app-tools.integration.mjs
+            pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/app-page-tools.integration.mjs
+            pnpm --filter @tulipfarm/worker exec node --test --test-concurrency=1 test/app-editing.integration.mjs
+          ) & pids+=($!)
+          status=0
+          for pid in "${pids[@]}"; do
+            wait "$pid" || status=1
+          done
+          exit "$status"

@@ -7,7 +7,7 @@
     "dev:storage": "node --env-file-if-exists=.env.storage.local src/storage-worker.ts",
     "build": "tsc -p tsconfig.json && node scripts/bundle-workflows.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test": "node --test test/*.test.mjs",
     "test:integration": "node --test test/workspace.integration.mjs",
     "test:behind-workspace": "node --test test/behind-workspace.integration.mjs",
     "test:telemetry": "node --test test/telemetry.integration.mjs",

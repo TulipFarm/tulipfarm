@@ -1,8 +1,7 @@
-// browser-tests: run alone, since beside other tests its waits time out.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { createServer } from 'vite';
+import { createBuiltAppServer as createServer } from './built-app.fixture.mjs';
 import { chromium } from 'playwright';
 import { clearEditor } from './browser-controls.mjs';
 

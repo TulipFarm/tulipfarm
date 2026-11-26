@@ -14,10 +14,14 @@ test('local approval mock keeps decisions reachable and shows execution outcomes
   await new Promise(resolve => socket.close(resolve));
   const origin = `http://127.0.0.1:${port}`;
   const url = `${origin}/approval-mock/chat/11111111-1111-4111-8111-111111111111`;
-  const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-    cwd: new URL('..', import.meta.url),
-    stdio: 'ignore',
-  });
+  const server = spawn(
+    process.execPath,
+    ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+    {
+      cwd: new URL('..', import.meta.url),
+      stdio: 'ignore',
+    },
+  );
   // Screenshots are evidence for design review; set APPROVAL_MOCK_SCREENSHOTS to a directory to keep them.
   const shots = process.env.APPROVAL_MOCK_SCREENSHOTS;
   if (shots) await mkdir(shots, { recursive: true });

@@ -12,7 +12,7 @@ const origin = `http://127.0.0.1:${port}`;
 const server = spawn(
   process.execPath,
   [
-    new URL('../node_modules/vite/bin/vite.js', import.meta.url).pathname,
+    new URL('./serve-built-app.mjs', import.meta.url).pathname,
     '--host',
     '127.0.0.1',
     '--port',
