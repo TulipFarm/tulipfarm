@@ -14,7 +14,7 @@ test('a plan model the catalog no longer lists shows the versioned name its ID c
   assert.equal(modelName(undefined, 'chatgpt-gpt-6--1-sol'), 'GPT-6.1 Sol');
 });
 
-test('an unlisted family without a version in its ID shows the ID', () => {
-  assert.equal(modelName(families, 'chatgpt-sol'), 'chatgpt-sol');
+test('a legacy short plan ID resolves to its model name and an unknown family shows the ID', () => {
+  assert.equal(modelName(families, 'chatgpt-sol'), 'GPT-6.1 Sol');
   assert.equal(modelName(families, 'retired-family'), 'retired-family');
 });

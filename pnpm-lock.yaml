@@ -1415,6 +1415,9 @@ importers:
       '@tulipfarm/access':
         specifier: workspace:*
         version: link:../access
+      '@tulipfarm/config':
+        specifier: workspace:*
+        version: link:../config
       '@tulipfarm/keyring':
         specifier: workspace:*
         version: link:../keyring

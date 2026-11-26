@@ -296,6 +296,7 @@ export function loadModelCatalog(env: Env = process.env): ServedModelCatalog {
     if (!model) return undefined;
     const served: ServedModel = Object.freeze({
       ...model,
+      id,
       route: firstRoute(`plan model ${id}`, model.routes).route!,
       rates: unmeteredRates,
     });

@@ -60,7 +60,16 @@ export type UsagePlanStatus = z.infer<typeof usagePlanStatusSchema>;
 
 export const usageConnectionSchema = z.object({
   id: z.string(),
-  provider: z.enum(['chatgpt', 'claude', 'copilot']),
+  provider: z.enum([
+    'chatgpt',
+    'claude',
+    'copilot',
+    'byok-anthropic',
+    'byok-openai',
+    'byok-google',
+    'byok-xai',
+    'byok-openai-compatible',
+  ]),
   ownerMembershipId: z.string(),
   plan: z.string().nullable(),
   status: usagePlanStatusSchema,

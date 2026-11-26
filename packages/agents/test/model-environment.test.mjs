@@ -103,7 +103,7 @@ test("a plan model answers on the member's plans in turn and never falls back", 
       next: async failure => {
         moved.push(failure);
         connection = 'connection-team';
-        return tokens[connection];
+        return { token: tokens[connection] };
       },
       source: () => ({ connectionId: connection, switched: null }),
       answered: async () => void answered++,
@@ -119,7 +119,13 @@ test("a plan model answers on the member's plans in turn and never falls back", 
   assert.deepEqual(result.decision, { kind: 'answer', text: 'Plan answer.' });
   assert.equal(result.planConnectionId, 'connection-team');
   assert.deepEqual(asked, [
-    { provider: 'chatgpt', workspaceId: member.workspaceId, membershipId: 'member-1', model: 'gpt-6-luna' },
+    {
+      provider: 'chatgpt',
+      workspaceId: member.workspaceId,
+      membershipId: 'member-1',
+      model: 'gpt-6-luna',
+      familyId: 'chatgpt-luna',
+    },
   ]);
   assert.deepEqual(moved, ['usage-limit']);
   assert.deepEqual(sent, ['Bearer synthetic-own', 'Bearer synthetic-team']);
