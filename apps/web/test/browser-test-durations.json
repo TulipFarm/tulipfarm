@@ -174,7 +174,7 @@
   "test/table-rows.browser.mjs": 87,
   "test/table-search-drafts.browser.mjs": 8,
   "test/tables-e2e.browser.mjs": 0,
-  "test/tables.browser.mjs": 171,
+  "test/tables.browser.mjs": 95,
   "test/task-board.browser.mjs": 7,
   "test/task-browser.browser.mjs": 4,
   "test/task-composer.browser.mjs": 49,

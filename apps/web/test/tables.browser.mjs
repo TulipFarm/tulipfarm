@@ -25,10 +25,14 @@ const server = process.env.TABLE_UI_PRODUCTION
       root: fileURLToPath(new URL('..', import.meta.url)),
       preview: { host: '127.0.0.1', port, strictPort: true },
     })
-  : spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-      cwd: new URL('..', import.meta.url),
-      stdio: 'ignore',
-    });
+  : spawn(
+      process.execPath,
+      ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+      {
+        cwd: new URL('..', import.meta.url),
+        stdio: 'ignore',
+      },
+    );
 const workspace = {
   id: randomUUID(),
   slug: 'acme',
