@@ -35,43 +35,9 @@ export function withRemoteSourceCheckMemo<T>(operation: () => Promise<T>): Promi
   return memos.run(new Map(), operation);
 }
 
-/**
- * Passed checks shared by every `withSharedRemoteSourceCheckMemo` call in this process, newest last. A key holds the
- * provider, workspace, actor and whole source, so one person's pass never counts for another.
- */
-const shared = new Map<string, number>();
-const sharedEntries = 1_000;
-
-/**
- * Runs `operation`, a read-only call such as a chat page load, poll or review request read, within one memo shared by
- * every such call in this process. Repeated loads then reuse a passed check for `reuseMilliseconds` instead of
- * rereading the provider each time. That is the security bound: access lost at the provider itself, such as removal
- * from a GitHub repository, can go unnoticed by these reads for at most `reuseMilliseconds`. Providers still
- * revalidate the database on every use, so disconnecting or deselecting an account takes effect at once. Writes must
- * not use this memo. Inside an existing memo, `operation` just runs.
- */
-export function withSharedRemoteSourceCheckMemo<T>(operation: () => Promise<T>): Promise<T> {
-  if (memos.getStore()) return operation();
-  return memos.run(shared, operation);
-}
-
 /** Records that the source behind `key` was just checked remotely, or freshly read, and passed. */
 export function rememberRemoteSourceCheck(key: string) {
-  const memo = memos.getStore();
-  if (!memo) return;
-  memo.delete(key);
-  memo.set(key, Date.now());
-  if (memo === shared && shared.size > sharedEntries) shared.delete(shared.keys().next().value!);
-}
-
-/**
- * Forgets any pass for `key`, in the surrounding memo and the shared one, once a check of it is denied, so later reads in
- * this process check it again instead of reusing the pass. An unavailable check proves nothing, so it forgets nothing.
- */
-export function forgetRemoteSourceCheck(key: string, error: unknown) {
-  if (error instanceof SourceAuthorizationUnavailable) return;
-  memos.getStore()?.delete(key);
-  shared.delete(key);
+  memos.getStore()?.set(key, Date.now());
 }
 
 function remembered(key: string) {
@@ -156,7 +122,6 @@ async function deferWithin<T>(budget: Budget, operation: () => Promise<T>, round
           rememberRemoteSourceCheck(key);
         } catch (error) {
           if (error instanceof SourceAuthorizationUnavailable) budget.unavailable = true;
-          forgetRemoteSourceCheck(key, error);
           scope.outcomes.set(key, { ok: false, error });
         }
       }
@@ -166,7 +131,7 @@ async function deferWithin<T>(budget: Budget, operation: () => Promise<T>, round
 
 /**
  * Called by a provider inside a transaction before it checks a source remotely. `inline` means check it now, as
- * before, then call `rememberRemoteSourceCheck` once it passes, or `forgetRemoteSourceCheck` if it fails. `verified` means `check` passed earlier in this call
+ * before, then call `rememberRemoteSourceCheck` once it passes. `verified` means `check` passed earlier in this call
  * or recently in the surrounding `withRemoteSourceCheckMemo`, so only cheap database revalidation is left; a failed
  * earlier check is rethrown here. `deferred` means `check` will run after this transaction, which the provider must
  * then end with `RemoteSourceChecksDeferred`; treat the source as allowed until then, since nothing commits. Once the

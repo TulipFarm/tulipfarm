@@ -117,10 +117,7 @@ test('review requests over many GitHub search results open, survive unavailable 
     assert.equal((await read()).status, 'pending');
     assert.equal(rereads, 62, 'every search target is reread once');
 
-    // A recently passed check is reused, so repeated loads don't reread GitHub, until it is older than the bound.
-    assert.equal((await read()).status, 'pending');
-    assert.equal(rereads, 62);
-    remoteSourceCheckLimits.reuseMilliseconds = 0;
+    // Each read checks GitHub again, so lost access is seen on the next open.
     assert.equal((await read()).status, 'pending');
     assert.equal(rereads, 124);
 

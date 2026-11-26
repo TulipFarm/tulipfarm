@@ -3,7 +3,6 @@ import { z } from 'zod';
 import {
   AccessDenied,
   deferRemoteSourceChecks,
-  forgetRemoteSourceCheck,
   rememberRemoteSourceCheck,
   remoteSourceCheck,
   remoteSourceCheckDeadline,
@@ -432,10 +431,7 @@ export function withGitHubSourceAuthorization<T extends AccountRuntime>(
                 operation =>
                   accounts.withCredential(workspaceId, actor, source.accountId, operation, source.generation),
                 { attempts: 0, deadline },
-              ).catch(error => {
-                forgetRemoteSourceCheck(remoteKey, error);
-                throw error;
-              });
+              );
               rememberRemoteSourceCheck(remoteKey);
             }
             checked.add(key);

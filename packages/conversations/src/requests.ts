@@ -3,7 +3,6 @@ import { z } from 'zod';
 import {
   AccessDenied,
   deferRemoteSourceChecks,
-  withSharedRemoteSourceCheckMemo,
   SourceAuthorizationUnavailable,
   lockAuthorization,
   resolveHuman,
@@ -372,39 +371,37 @@ export function createConversationRequests(runtime: ConversationRuntime) {
   async function read(workspaceId: string, userId: string, chatIdInput: string, requestIdInput: string) {
     const chatId = uuidSchema.parse(chatIdInput),
       requestId = uuidSchema.parse(requestIdInput);
-    // GitHub rereads run between transactions, each source with its own budget, and recent passes are reused, as chat
-    // page loads do. Repeating the transaction is safe: only its last run commits.
-    const result = await withSharedRemoteSourceCheckMemo(() =>
-      deferRemoteSourceChecks(() =>
-        transaction(workspaceId, async tx => {
-          const actor = await resolveHuman(tx, userId);
-          await owned(tx, actor, chatId);
-          const row = await request(tx, chatId, requestId);
-          const denied = await readableRequest(tx, workspaceId, actor, row, true);
-          if (denied) return denied;
-          if (row.status === 'pending' && row.expired) await settle(tx, row, 'expired');
-          const result = z
-            .object({
-              id: uuidSchema,
-              turnId: uuidSchema,
-              revision: z.number().int(),
-              prompt: z.string(),
-              answerSchema: answerDefinitionSchema,
-              status: requestViewSchema.shape.status,
-              expiresAt: z.date(),
-              response: z.unknown(),
-            })
-            .parse(
-              (
-                await tx.client.query(
-                  `SELECT r.id,r.turn_id AS "turnId",r.revision,r.prompt,r.answer_schema AS "answerSchema",r.status,r.expires_at AS "expiresAt", CASE WHEN s.id IS NULL THEN NULL ELSE jsonb_build_object('id',s.id,'answer',s.answer,'createdAt',s.created_at) END AS response FROM ${table(tx, 'tf_conversation_requests')} r LEFT JOIN ${table(tx, 'tf_conversation_responses')} s ON s.request_id=r.id WHERE r.id=$1`,
-                  [requestId],
-                )
-              ).rows[0],
-            );
-          return requestViewSchema.parse({ ...result, expiresAt: result.expiresAt.toISOString() });
-        }),
-      ),
+    // GitHub rereads run between transactions, each source with its own budget, as chat page loads do. Repeating the
+    // transaction is safe: only its last run commits.
+    const result = await deferRemoteSourceChecks(() =>
+      transaction(workspaceId, async tx => {
+        const actor = await resolveHuman(tx, userId);
+        await owned(tx, actor, chatId);
+        const row = await request(tx, chatId, requestId);
+        const denied = await readableRequest(tx, workspaceId, actor, row, true);
+        if (denied) return denied;
+        if (row.status === 'pending' && row.expired) await settle(tx, row, 'expired');
+        const result = z
+          .object({
+            id: uuidSchema,
+            turnId: uuidSchema,
+            revision: z.number().int(),
+            prompt: z.string(),
+            answerSchema: answerDefinitionSchema,
+            status: requestViewSchema.shape.status,
+            expiresAt: z.date(),
+            response: z.unknown(),
+          })
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT r.id,r.turn_id AS "turnId",r.revision,r.prompt,r.answer_schema AS "answerSchema",r.status,r.expires_at AS "expiresAt", CASE WHEN s.id IS NULL THEN NULL ELSE jsonb_build_object('id',s.id,'answer',s.answer,'createdAt',s.created_at) END AS response FROM ${table(tx, 'tf_conversation_requests')} r LEFT JOIN ${table(tx, 'tf_conversation_responses')} s ON s.request_id=r.id WHERE r.id=$1`,
+                [requestId],
+              )
+            ).rows[0],
+          );
+        return requestViewSchema.parse({ ...result, expiresAt: result.expiresAt.toISOString() });
+      }),
     );
     if (result instanceof ConversationRequestDenied) throw result;
     return result;
