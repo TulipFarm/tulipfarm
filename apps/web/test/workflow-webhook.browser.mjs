@@ -224,7 +224,12 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await setup.getByRole('button', { name: 'Replace webhook key' }).click();
       await keyStatus.getByText('Bearer key.').waitFor();
       await previousStatus.getByText('Still accepted', { exact: true }).waitFor();
-      const key = await setup.getByLabel('New webhook key').inputValue();
+      const keyInput = setup.getByLabel('New webhook key');
+      let key = await keyInput.inputValue();
+      for (let i = 0; key === signingKey && i < 50; i++) {
+        await setTimeout(100);
+        key = await keyInput.inputValue();
+      }
       assert.notEqual(key, signingKey);
       assert.match(
         await setup.getByRole('region', { name: 'curl example' }).textContent(),

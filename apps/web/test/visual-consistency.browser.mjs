@@ -273,7 +273,12 @@ try {
   if (capture) {
     for (const mode of modes) await runMode(mode);
   } else {
-    await Promise.all(modes.map(runMode));
+    const queue = [...modes];
+    await Promise.all(
+      Array.from({ length: 2 }, async () => {
+        while (queue.length) await runMode(queue.shift());
+      }),
+    );
   }
 } finally {
   await browser?.close();

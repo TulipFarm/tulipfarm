@@ -191,6 +191,7 @@ test('a table owned by the admin team is labelled Admin', async t => {
   await page.goto(`${app.origin}/acme/members/${memberId}`);
   await page.getByRole('button', { name: 'Create a policy', exact: true }).first().click();
   await page.getByRole('dialog').getByLabel('Applies to').click();
+  await page.getByRole('option', { name: adminLabel, exact: true }).waitFor();
   const options = await page.getByRole('option').allInnerTexts();
   assert.ok(options.includes(adminLabel), options.join(' | '));
   assert.ok(options.includes(opsLabel), options.join(' | '));
@@ -282,8 +283,9 @@ test('a policy change while your own table access refreshes is saved', async t =
   await (await savePolicy(page, opsLabel)).waitFor({ state: 'hidden' });
   await notice(page, `Ada can now read rows in ${opsLabel}.`).waitFor();
   assert.deepEqual(api.writes, ['admin: table.row.read', 'ops: table.row.read']);
+  const loadedAt = api.events.indexOf('refresh loaded');
   assert.ok(
-    api.events.indexOf('PUT ops: table.row.read') < api.events.indexOf('refresh loaded'),
+    loadedAt === -1 || api.events.indexOf('PUT ops: table.row.read') < loadedAt,
     `the second change was made while the refresh ran: ${api.events}`,
   );
   await waitFor(() => api.events.filter(event => event === 'refresh loaded').length === 2);
