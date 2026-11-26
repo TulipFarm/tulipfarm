@@ -16,6 +16,8 @@ import { knowledgeTenantRuntime, type KnowledgeRuntime, type KnowledgeTransactio
 
 /** The common migration that adds tf_keep_knowledge. */
 export const keepKnowledgeVersion = 93;
+/** The common migration that records how far a document's batches have reached Keep, so a retry resumes there. */
+export const keepKnowledgeResumeVersion = 116;
 const deliveryTimeoutMs = 30000;
 const searchTimeoutMs = 5000;
 const searchLimit = 30;
@@ -131,12 +133,20 @@ const stateSchema = z.object({
   canonical_url: z.string().nullable(),
   held: z.boolean().nullable(),
   delivered_publication_id: z.uuid().nullable(),
+  sending_publication_id: z.uuid().nullable(),
+  sending_chunks: z.number().int().nullable(),
+  sent_ordinal: z.number().int().nullable(),
 });
 const chunkSchema = z.object({ ordinal: z.number().int(), heading: z.string(), passage: z.string() });
 const dueSchema = z.object({ document_id: z.uuid(), action: z.enum(['deliver', 'forget']) });
 
 /** Transient failures of one document before its publication is pinned and not sent again until it changes. */
 export const keepKnowledgeMaxAttempts = 8;
+/**
+ * Keep timeouts in a row on one publication, with no batch acknowledged in between, before the document is treated as
+ * failing rather than Keep as busy: it then backs off like any failing document and the run moves on.
+ */
+export const keepKnowledgeMaxTimeouts = 3;
 // One sync holds a document's lease, so a timed-out attempt and its retry never send the same document at once. Each
 // Keep call is bounded by the client timeout, well inside the lease, and the lease is renewed before every call.
 const leaseSeconds = 180;
@@ -159,20 +169,35 @@ export type KnowledgeKeepOutcome =
   | { status: 'rejected'; error: string };
 
 /**
- * How far a failure reaches: `keep` when Keep cannot be reached or is not ready, which affects every document;
- * `document` when only this document's call failed, such as a timeout on a large document.
+ * How far a failure reaches:
+ * - `keep`: Keep cannot be reached or is not ready, which affects every document.
+ * - `busy`: Keep timed out. A timeout almost always means Keep is overloaded, so sending the next document would only add
+ *   to its load; the workflow waits as for an outage and retries the same document, which resumes where it stopped.
+ *   After {@link keepKnowledgeMaxTimeouts} timeouts in a row on one publication it is recorded as `document` instead.
+ * - `document`: only this document's call failed.
  */
-export type KnowledgeKeepFailureScope = 'keep' | 'document';
-/** How a failed sync is recorded: a Keep outage, a transient failure of this document, or a permanent one. */
+export type KnowledgeKeepFailureScope = 'keep' | 'busy' | 'document';
+/** How a failed sync is reported: a Keep outage, Keep busy, a transient failure of this document, or a permanent one. */
 export type KnowledgeKeepFailureKind = KnowledgeKeepFailureScope | 'permanent';
+/** How a failure was recorded. `busy` becomes `keep` while Keep may only be overloaded, and `document` after that. */
+export type KnowledgeKeepRecordedFailure = Exclude<KnowledgeKeepFailureKind, 'busy'>;
 
-/** Keep did not answer. The delivery is safe to retry: every send starts over with `replace`. */
+/**
+ * Keep did not answer. The delivery is safe to retry: a retry of the same publication resends only the batches Keep
+ * has not acknowledged, and re-sending an episode Keep already stores is a no-op; any other retry starts over with
+ * `replace`.
+ */
 export class KnowledgeKeepUnavailable extends Error {
   readonly scope: KnowledgeKeepFailureScope;
   constructor(readonly reason: string) {
     super(`Keep unavailable: ${reason}`);
     this.name = 'KnowledgeKeepUnavailable';
-    this.scope = reason.startsWith('unreachable') || reason.startsWith('not_ready') ? 'keep' : 'document';
+    this.scope =
+      reason.startsWith('unreachable') || reason.startsWith('not_ready')
+        ? 'keep'
+        : reason.startsWith('timeout')
+          ? 'busy'
+          : 'document';
   }
 }
 
@@ -190,6 +215,7 @@ export function createKnowledgeKeepFeed({
   const table = (tx: KnowledgeTransaction, name: string) => qualified(tx.schema, `tf_knowledge_${name}`);
   const keepTable = (tx: KnowledgeTransaction) => qualified(tx.schema, 'tf_keep_knowledge');
   const installed = (tx: KnowledgeTransaction) => tx.commonVersion >= keepKnowledgeVersion;
+  const resumable = (tx: KnowledgeTransaction) => tx.commonVersion >= keepKnowledgeResumeVersion;
   // Searchable is the same publication test the eligibility filter applies. Anything else, including a cleared
   // publication without a tombstone (lost access, unsupported content, a revision still parsing), is forgotten.
   const deliverable = `d.tombstoned_at IS NULL AND s.state IN ('active','paused') AND r.sources='[]'::jsonb`;
@@ -235,10 +261,13 @@ export function createKnowledgeKeepFeed({
   async function state(workspaceId: string, documentId: string) {
     return tenant.transaction(workspaceId, {}, async tx => {
       if (!installed(tx)) return undefined;
+      const progress = resumable(tx)
+        ? 'k.sending_publication_id, k.sending_chunks, k.sent_ordinal'
+        : 'NULL::uuid AS sending_publication_id, NULL::int AS sending_chunks, NULL::int AS sent_ordinal';
       const { rows } = await tx.client.query(
         `SELECT $1::uuid AS document_id, s.provider, coalesce(${searchable}, false) AS deliverable,
             p.id AS publication_id, r.id AS revision_id, r.title, r.canonical_url,
-            k.held, k.publication_id AS delivered_publication_id
+            k.held, k.publication_id AS delivered_publication_id, ${progress}
           FROM (SELECT 1) one
           LEFT JOIN ${table(tx, 'documents')} d ON d.id=$1
           LEFT JOIN ${table(tx, 'sources')} s ON s.id=d.source_id
@@ -247,7 +276,7 @@ export function createKnowledgeKeepFeed({
           LEFT JOIN ${keepTable(tx)} k ON k.document_id=$1`,
         [documentId],
       );
-      return stateSchema.parse(rows[0]);
+      return { ...stateSchema.parse(rows[0]), resumable: resumable(tx) };
     });
   }
 
@@ -303,6 +332,12 @@ export function createKnowledgeKeepFeed({
    * searchable. Reads current state each time, so a repeated or late call is harmless. `progress` is called before
    * each Keep call, and `signal` stops the sync between calls. Throws `KnowledgeKeepUnavailable` when Keep does not
    * answer.
+   *
+   * A publication is sent in batches of its chunks in ordinal order; the first batch replaces whatever Keep held and
+   * the rest append. Each acknowledged batch is recorded, so when a sync stops part way, a later sync of the same
+   * publication sends only the chunks after the last acknowledged one, all without `replace`, rather than making Keep
+   * purge and embed the document again. A different publication, or one whose chunk count no longer matches the record,
+   * starts over with `replace`.
    */
   async function sync(
     workspaceId: string,
@@ -355,37 +390,53 @@ export function createKnowledgeKeepFeed({
     };
     if (current.canonical_url && Buffer.byteLength(current.canonical_url) <= metadataValueBytes)
       metadata.url = current.canonical_url;
-    const episodes: KeepKnowledgeEpisode[] = chunks.map(chunk => ({
-      id: String(chunk.ordinal),
-      text: chunk.heading ? `${chunk.heading}\n\n${chunk.passage}` : chunk.passage,
-    }));
-    const batches: KeepKnowledgeEpisode[][] = [[]];
+    const resume =
+      current.resumable &&
+      current.sending_publication_id === publicationId &&
+      current.sending_chunks === chunks.length &&
+      current.sent_ordinal !== null;
+    const remaining = resume ? chunks.filter(chunk => chunk.ordinal > current.sent_ordinal!) : chunks;
+    const batches: { episodes: KeepKnowledgeEpisode[]; through: number }[] = [];
     let size = 0;
-    for (const episode of episodes) {
+    for (const chunk of remaining) {
+      const episode = {
+        id: String(chunk.ordinal),
+        text: chunk.heading ? `${chunk.heading}\n\n${chunk.passage}` : chunk.passage,
+      };
       const bytes = Buffer.byteLength(JSON.stringify(episode));
-      const last = batches.at(-1)!;
-      if (last.length && (size + bytes > batchBytes || last.length >= batchEpisodes)) {
-        batches.push([episode]);
+      const last = batches.at(-1);
+      if (!last || size + bytes > batchBytes || last.episodes.length >= batchEpisodes) {
+        batches.push({ episodes: [episode], through: chunk.ordinal });
         size = bytes;
       } else {
-        last.push(episode);
+        last.episodes.push(episode);
+        last.through = chunk.ordinal;
         size += bytes;
       }
     }
-    return leased(workspaceId, documentId, async renew => {
-      await write(workspaceId, `UPDATE $table SET held=true WHERE document_id=$1`, [documentId]);
+    return leased(workspaceId, documentId, async (renew, token) => {
+      await write(
+        workspaceId,
+        current.resumable && !resume
+          ? // Timeouts keep counting across restarts of the same publication; a new publication counts afresh.
+            `UPDATE $table SET held=true, sending_publication_id=$2, sending_chunks=$3, sent_ordinal=NULL,
+                timeouts=CASE WHEN sending_publication_id IS DISTINCT FROM $2 THEN 0 ELSE timeouts END
+              WHERE document_id=$1`
+          : `UPDATE $table SET held=true WHERE document_id=$1`,
+        current.resumable && !resume ? [documentId, publicationId, chunks.length] : [documentId],
+      );
       for (const [index, batch] of batches.entries()) {
         await before(renew);
-        // The first batch replaces any earlier revision; later batches append the rest of this one.
+        // Only the first batch of a fresh send replaces any earlier revision; every other batch appends.
         const result = await keep.ingestKnowledge({
           scope: keepWorkspaceKnowledgeScope(workspaceId),
           sourceId: documentId,
           title: z.string().parse(current.title),
           collection: metadata.provider!,
           kind: 'document',
-          episodes: batch,
+          episodes: batch.episodes,
           metadata,
-          ...(index === 0 ? { replace: true } : {}),
+          ...(index === 0 && !resume ? { replace: true } : {}),
         });
         if (result.status === 'unavailable') throw new KnowledgeKeepUnavailable(failure(result));
         if (result.status !== 'ok') {
@@ -399,11 +450,25 @@ export function createKnowledgeKeepFeed({
           );
           return { status: 'rejected', error };
         }
+        if (
+          current.resumable &&
+          !(await write(
+            workspaceId,
+            `UPDATE $table SET sent_ordinal=$4, timeouts=0
+              WHERE document_id=$1 AND lease_token=$2 AND sending_publication_id=$3`,
+            [documentId, token, publicationId, batch.through],
+          ))
+        )
+          throw new KnowledgeKeepUnavailable('lease-lost');
       }
       await write(
         workspaceId,
         `UPDATE $table SET publication_id=$2, delivered_at=clock_timestamp(), failed_publication_id=NULL,
-            failed_at=NULL, last_error=NULL, attempts=0, next_attempt_at=NULL
+            failed_at=NULL, last_error=NULL, attempts=0, next_attempt_at=NULL${
+              current.resumable
+                ? ', sending_publication_id=NULL, sending_chunks=NULL, sent_ordinal=NULL, timeouts=0'
+                : ''
+            }
           WHERE document_id=$1`,
         [documentId, publicationId],
       );
@@ -412,8 +477,11 @@ export function createKnowledgeKeepFeed({
   }
 
   /**
-   * Records a failed sync so it stays visible until a later run succeeds.
+   * Records a failed sync so it stays visible until a later run succeeds, and returns how it was recorded.
    * - `keep`: Keep itself was down. Recorded without backoff; the workflow waits for Keep instead.
+   * - `busy`: Keep timed out. Recorded as `keep` and counted against the document; the
+   *   {@link keepKnowledgeMaxTimeouts}th timeout in a row is recorded as `document`. Storage that cannot count
+   *   timeouts records every one as `document`.
    * - `document`: this document's call failed. It backs off exponentially (1 minute doubling to 6 hours), and after
    *   {@link keepKnowledgeMaxAttempts} failures its current publication is pinned instead, until the document changes.
    * - `permanent`: the current publication is pinned at once.
@@ -424,9 +492,26 @@ export function createKnowledgeKeepFeed({
     documentId: string,
     error: string,
     kind: KnowledgeKeepFailureKind = 'document',
-  ) {
-    await tenant.transaction(workspaceId, {}, async tx => {
-      if (!installed(tx)) return;
+  ): Promise<KnowledgeKeepRecordedFailure> {
+    return tenant.transaction(workspaceId, {}, async tx => {
+      const recorded: KnowledgeKeepRecordedFailure = kind !== 'busy' ? kind : resumable(tx) ? 'keep' : 'document';
+      if (!installed(tx)) return recorded;
+      if (kind === 'busy' && recorded === 'keep') {
+        const { rows } = await tx.client.query(
+          `INSERT INTO ${keepTable(tx)} AS k (document_id, timeouts) VALUES ($1, 1)
+            ON CONFLICT (document_id) DO UPDATE SET timeouts=k.timeouts + 1
+            RETURNING timeouts`,
+          [documentId],
+        );
+        const timeouts = z.object({ timeouts: z.number().int() }).parse(rows[0]).timeouts;
+        if (timeouts >= keepKnowledgeMaxTimeouts) {
+          await tx.client.query(`UPDATE ${keepTable(tx)} SET timeouts=0 WHERE document_id=$1`, [documentId]);
+          return record(tx, 'document');
+        }
+      }
+      return record(tx, recorded);
+    });
+    async function record(tx: KnowledgeTransaction, recorded: KnowledgeKeepRecordedFailure) {
       await tx.client.query(
         `WITH current AS (SELECT (SELECT lexical_publication_id FROM ${table(tx, 'documents')} WHERE id=$1) AS id),
           prior AS (SELECT attempts, failed_publication_id FROM ${keepTable(tx)} WHERE document_id=$1),
@@ -447,9 +532,10 @@ export function createKnowledgeKeepFeed({
           ON CONFLICT (document_id) DO UPDATE SET failed_publication_id=excluded.failed_publication_id,
             failed_at=excluded.failed_at, last_error=excluded.last_error, attempts=excluded.attempts,
             next_attempt_at=excluded.next_attempt_at`,
-        [documentId, error.slice(0, 1024), kind, keepKnowledgeMaxAttempts],
+        [documentId, error.slice(0, 1024), recorded, keepKnowledgeMaxAttempts],
       );
-    });
+      return recorded;
+    }
   }
 
   /** Whether the workspace has any Keep work due. */

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { NativeConnection } from '@temporalio/worker';
 import { Client, Connection } from '@temporalio/client';
-import { KnowledgeKeepUnavailable } from '@tulipfarm/knowledge';
+import { KnowledgeKeepUnavailable, keepKnowledgeMaxTimeouts } from '@tulipfarm/knowledge';
 import { startKnowledgeKeepWorkflow } from '../../api/dist/knowledge-keep-dispatch.js';
 import { createKnowledgeKeepActivities } from '../dist/knowledge-keep-activities.js';
 import { createKnowledgeWorker } from '../dist/knowledge-worker.js';
@@ -42,7 +42,10 @@ function fakeFeed(workspaceId, ids, fail) {
   const attempts = new Map();
   const failures = [];
   const pages = [];
+  const syncs = [];
+  const timeouts = new Map();
   return {
+    syncs,
     due,
     attempts,
     failures,
@@ -58,12 +61,18 @@ function fakeFeed(workspaceId, ids, fail) {
       },
       sync: async (workspace, document) => {
         attempts.set(document, (attempts.get(document) ?? 0) + 1);
+        syncs.push(document);
         fail(document, attempts.get(document));
         due.delete(document);
         return { status: 'delivered', publicationId: randomUUID() };
       },
       recordFailure: async (workspace, document, error, kind) => {
         failures.push({ document, error, kind });
+        // Like the feed: a timeout counts as Keep being busy until it repeats on the same document.
+        if (kind !== 'busy') return kind;
+        const count = (timeouts.get(document) ?? 0) + 1;
+        timeouts.set(document, count);
+        return count < keepKnowledgeMaxTimeouts ? 'keep' : 'document';
       },
     },
   };
@@ -76,17 +85,17 @@ test(
     const workspaceId = randomUUID();
     const [slow, broken, ...rest] = Array.from({ length: 103 }, () => randomUUID()).toSorted();
     const fake = fakeFeed(workspaceId, [slow, broken, ...rest], document => {
-      if (document === slow) throw new KnowledgeKeepUnavailable('timeout');
+      if (document === slow) throw new KnowledgeKeepUnavailable('invalid_response');
       if (document === broken) throw new Error('unexpected state');
     });
     await withWorker(fake.feed, async ({ client, clientConnection }) => {
       await startKnowledgeKeepWorkflow({ connection: clientConnection, client }, workspaceId);
       await client.workflow.getHandle(`knowledge-keep-${workspaceId}`).result();
     });
-    assert.equal(fake.attempts.get(slow), 1, 'a document timeout backs off in the feed instead of retrying at once');
+    assert.equal(fake.attempts.get(slow), 1, 'a document failure backs off in the feed instead of retrying at once');
     assert.equal(fake.attempts.get(broken), 1);
     assert.deepEqual(fake.failures, [
-      { document: slow, error: 'Keep unavailable: timeout', kind: 'document' },
+      { document: slow, error: 'Keep unavailable: invalid_response', kind: 'document' },
       { document: broken, error: 'unexpected state', kind: 'permanent' },
     ]);
     assert.deepEqual([...fake.due], [slow, broken], 'every later document was still delivered');
@@ -120,3 +129,34 @@ test('Keep sync waits out an unreachable Keep and resumes with the same document
   assert.deepEqual([...fake.due], []);
   assert.deepEqual(fake.pages, [null, null, null]);
 });
+
+test(
+  'Keep sync waits when Keep times out and retries the same document, moving on after repeated timeouts',
+  { timeout: 120000 },
+  async () => {
+    const workspaceId = randomUUID();
+    const [stuck, busy, last] = [randomUUID(), randomUUID(), randomUUID()].toSorted();
+    const fake = fakeFeed(workspaceId, [stuck, busy, last], (document, attempt) => {
+      if (document === stuck || (document === busy && attempt === 1)) throw new KnowledgeKeepUnavailable('timeout');
+    });
+    await withWorker(fake.feed, async ({ client, taskQueue }) => {
+      const handle = await client.workflow.start('knowledgeKeepSync', {
+        taskQueue,
+        workflowId: `knowledge-keep-${workspaceId}`,
+        args: [{ workspaceId, outageWait: 200 }],
+      });
+      await handle.result();
+    });
+    assert.deepEqual(
+      fake.syncs,
+      [...Array(keepKnowledgeMaxTimeouts).fill(stuck), busy, busy, last],
+      'no later document is sent while Keep is busy',
+    );
+    assert.ok(
+      fake.failures.every(failure => failure.kind === 'busy' && failure.error === 'Keep unavailable: timeout'),
+      'a timeout is reported as Keep being busy',
+    );
+    assert.deepEqual([...fake.due], [stuck], 'the document that kept timing out is left to back off');
+    assert.deepEqual(fake.pages, [...Array(keepKnowledgeMaxTimeouts).fill(null), stuck]);
+  },
+);

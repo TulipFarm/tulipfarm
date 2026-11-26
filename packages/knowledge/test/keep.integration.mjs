@@ -13,6 +13,8 @@ import {
   createKnowledgeSearch,
   createLocalKnowledge,
   keepKnowledgeMaxAttempts,
+  keepKnowledgeMaxTimeouts,
+  keepKnowledgeResumeVersion,
   KnowledgeKeepUnavailable,
   KnowledgeSearchUnavailable,
 } from '../dist/index.js';
@@ -39,7 +41,7 @@ test('Keep-backed Knowledge', async t => {
 ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', import.meta.url), 'utf8')}`);
     const stream = await workspaceTableMigrations();
 
-    async function setup({ index: customIndex, client } = {}) {
+    async function setup({ index: customIndex, client, feedRuntime = runtime } = {}) {
       const ws = await db.create(stream);
       const table = name => qualified(ws.names.schema, name.startsWith('tf_') ? name : `tf_knowledge_${name}`);
       await db.platform.query(`UPDATE ${table('tf_credit_account')} SET available=$1,granted=$1`, ['10000000000000']);
@@ -56,7 +58,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       // Clearing `connected.on` stands for a deployment without a Keep endpoint.
       const connected = { on: true };
       const endpoint = () => (connected.on ? keep.client : undefined);
-      const feed = createKnowledgeKeepFeed({ runtime, client: endpoint });
+      const feed = createKnowledgeKeepFeed({ runtime: feedRuntime, client: endpoint });
       const search = createKnowledgeSearch({
         runtime,
         index: customIndex?.(ws) ?? createKnowledgeKeepIndex({ client: endpoint }),
@@ -274,7 +276,8 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           await w.note('supplier payment deadline', 'Supplier policy'),
           await w.note('warehouse floor plan', 'Floor plan'),
         ].toSorted((a, b) => a.documentId.localeCompare(b.documentId));
-        w.keep.state.timeouts.add(failing.documentId);
+        const invalid = { status: 'unavailable', reason: 'invalid_response' };
+        w.keep.state.beforeIngest = input => (input.sourceId === failing.documentId ? invalid : undefined);
         const run = async () => {
           const outcomes = [];
           for (const work of await w.feed.due(w.ws.id, null, 100)) {
@@ -295,7 +298,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         ]);
         const backedOff = await w.row(failing.documentId);
         assert.equal(backedOff.attempts, 1);
-        assert.equal(backedOff.last_error, 'Keep unavailable: timeout');
+        assert.equal(backedOff.last_error, 'Keep unavailable: invalid_response');
         assert.ok(backedOff.next_attempt_at > new Date(), 'the document waits before it is sent again');
         assert.equal(backedOff.lease_token, null);
         assert.deepEqual(await w.feed.due(w.ws.id, null, 100), [], 'a backed-off document is not due');
@@ -310,12 +313,166 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         await w.ready(failing.documentId);
         assert.deepEqual(await w.feed.due(w.ws.id, null, 100), [], 'a pinned publication is not sent again');
 
-        w.keep.state.timeouts.clear();
+        w.keep.state.beforeIngest = undefined;
         await w.note('supplier prepayment', 'Supplier policy', failing.documentId, failing.revisionId);
         assert.deepEqual(await run(), [[failing.documentId, 'delivered']], 'a new revision is sent again');
         const delivered = await w.row(failing.documentId);
         assert.equal(delivered.attempts, 0);
         assert.equal(delivered.next_attempt_at, null);
+      },
+    );
+
+    const longText = (topic, sections = 400) =>
+      Array.from({ length: sections }, (_, index) =>
+        `Section ${index}. Clause ${index} covers ${topic} term ${index} in detail. `.repeat(12),
+      ).join('\n\n');
+    // Keep times out on the `at`th ingest call (counting from 1) after this is installed.
+    const timeoutOnCall = (w, at) => {
+      let calls = 0;
+      w.keep.state.beforeIngest = () => (++calls === at ? { status: 'unavailable', reason: 'timeout' } : undefined);
+    };
+    const ingests = w => w.keep.calls.filter(call => call.op === 'ingest');
+
+    await t.test(
+      'a timeout part way through a document resumes after the last batch Keep acknowledged, without replace',
+      async () => {
+        const w = await setup();
+        const doc = await w.note(longText('supplier'), 'Long supplier policy');
+        timeoutOnCall(w, 3);
+        const error = await w.feed.sync(w.ws.id, doc.documentId).catch(caught => caught);
+        assert.ok(error instanceof KnowledgeKeepUnavailable);
+        assert.equal(error.scope, 'busy', 'a timeout means Keep is busy');
+        assert.equal(await w.feed.recordFailure(w.ws.id, doc.documentId, error.message, error.scope), 'keep');
+        const first = ingests(w);
+        assert.equal(first.length, 3);
+        const publicationId = await w.publication(doc.documentId);
+        const stopped = await w.row(doc.documentId);
+        assert.equal(stopped.sending_publication_id, publicationId);
+        assert.equal(stopped.sent_ordinal, Number(first[1].episodes.at(-1).id));
+        assert.equal(stopped.timeouts, 1);
+        assert.equal(stopped.attempts, 0, 'Keep being busy is not counted as a failure of the document');
+        assert.equal(stopped.next_attempt_at, null, 'the document is retried as soon as the run has waited');
+        assert.deepEqual(await w.feed.due(w.ws.id, null, 100), [{ document_id: doc.documentId, action: 'deliver' }]);
+
+        w.keep.state.beforeIngest = undefined;
+        assert.deepEqual(await w.feed.sync(w.ws.id, doc.documentId), { status: 'delivered', publicationId });
+        const resumed = ingests(w).slice(3);
+        assert.ok(resumed.length >= 1);
+        assert.deepEqual(resumed[0].episodes, first[2].episodes, 'the batch that timed out is sent again');
+        assert.ok(
+          resumed.every(call => call.replace === undefined),
+          'a resumed send never makes Keep start over',
+        );
+        const chunks = (
+          await db.platform.query(
+            `SELECT count(*)::int AS n FROM ${qualified(w.ws.names.schema, 'tf_knowledge_chunks')}
+              WHERE publication_id=$1`,
+            [publicationId],
+          )
+        ).rows[0].n;
+        const sent = [...first.slice(0, 2), ...resumed].flatMap(call => call.episodes.map(episode => episode.id));
+        assert.equal(sent.length, chunks, 'every chunk is acknowledged exactly once');
+        assert.equal(new Set(sent).size, chunks);
+        const stored = w.keep.corpora.get(keepWorkspaceKnowledgeScope(w.ws.id).user).get(doc.documentId);
+        assert.equal(stored.episodes.size, chunks);
+        const done = await w.row(doc.documentId);
+        assert.equal(done.publication_id, publicationId);
+        assert.equal(done.sending_publication_id, null, 'progress is cleared once the document is delivered');
+        assert.equal(done.sent_ordinal, null);
+        assert.equal(done.timeouts, 0);
+      },
+    );
+
+    await t.test('a document changed between attempts starts over with replace', async () => {
+      const w = await setup();
+      const doc = await w.note(longText('supplier'), 'Long supplier policy');
+      timeoutOnCall(w, 2);
+      const error = await w.feed.sync(w.ws.id, doc.documentId).catch(caught => caught);
+      assert.equal(error.scope, 'busy');
+      await w.feed.recordFailure(w.ws.id, doc.documentId, error.message, error.scope);
+      assert.notEqual((await w.row(doc.documentId)).sent_ordinal, null);
+
+      w.keep.state.beforeIngest = undefined;
+      await w.note(longText('warehouse', 100), 'Long supplier policy', doc.documentId, doc.revisionId);
+      const publicationId = await w.publication(doc.documentId);
+      const before = ingests(w).length;
+      assert.deepEqual(await w.feed.sync(w.ws.id, doc.documentId), { status: 'delivered', publicationId });
+      const sent = ingests(w).slice(before);
+      assert.equal(sent[0].replace, true);
+      assert.equal(sent[0].episodes[0].id, '0', 'the new publication is sent from its first chunk');
+      assert.ok(sent.slice(1).every(call => call.replace === undefined));
+      assert.ok(sent.every(call => call.metadata.publicationId === publicationId));
+      const stored = w.keep.corpora.get(keepWorkspaceKnowledgeScope(w.ws.id).user).get(doc.documentId);
+      assert.ok([...stored.episodes.values()].every(text => !text.includes('supplier')));
+      assert.equal((await w.row(doc.documentId)).sending_publication_id, null);
+    });
+
+    await t.test(
+      `a document that times out ${keepKnowledgeMaxTimeouts} times in a row backs off; an acknowledged batch resets the count`,
+      async () => {
+        const w = await setup();
+        const doc = await w.note(longText('supplier'), 'Long supplier policy');
+        const attempt = async () => {
+          const error = await w.feed.sync(w.ws.id, doc.documentId).catch(caught => caught);
+          assert.equal(error.scope, 'busy');
+          return w.feed.recordFailure(w.ws.id, doc.documentId, error.message, error.scope);
+        };
+        timeoutOnCall(w, 1);
+        assert.equal(await attempt(), 'keep');
+        // One acknowledged batch shows Keep is making progress, so the count starts again.
+        timeoutOnCall(w, 2);
+        assert.equal(await attempt(), 'keep');
+        assert.equal((await w.row(doc.documentId)).timeouts, 1);
+
+        w.keep.state.timeouts.add(doc.documentId);
+        for (let count = 2; count < keepKnowledgeMaxTimeouts; count++) assert.equal(await attempt(), 'keep');
+        assert.equal(await attempt(), 'document');
+        const backedOff = await w.row(doc.documentId);
+        assert.equal(backedOff.attempts, 1);
+        assert.equal(backedOff.timeouts, 0);
+        assert.equal(backedOff.last_error, 'Keep unavailable: timeout');
+        assert.ok(backedOff.next_attempt_at > new Date(), 'the document waits before it is sent again');
+        assert.deepEqual(await w.feed.due(w.ws.id, null, 100), [], 'the run moves on past the document');
+        assert.notEqual(backedOff.sent_ordinal, null, 'progress survives the backoff');
+
+        w.keep.state.timeouts.clear();
+        w.keep.state.beforeIngest = undefined;
+        await w.ready(doc.documentId);
+        const before = ingests(w).length;
+        assert.equal((await w.feed.sync(w.ws.id, doc.documentId)).status, 'delivered');
+        assert.ok(
+          ingests(w)
+            .slice(before)
+            .every(call => call.replace === undefined),
+        );
+      },
+    );
+
+    await t.test(
+      'storage without delivery progress restarts with replace and treats timeouts as failures',
+      async () => {
+        // A workspace whose storage has not reached the progress migration yet.
+        const older = {
+          ...runtime,
+          transaction: (id, options, operation) =>
+            runtime.transaction(id, options, tx => operation({ ...tx, commonVersion: keepKnowledgeResumeVersion - 1 })),
+        };
+        const w = await setup({ feedRuntime: older });
+        await db.platform.query(
+          `ALTER TABLE ${qualified(w.ws.names.schema, 'tf_keep_knowledge')} DROP COLUMN sending_publication_id,
+            DROP COLUMN sending_chunks, DROP COLUMN sent_ordinal, DROP COLUMN timeouts`,
+        );
+        const doc = await w.note(longText('supplier'), 'Long supplier policy');
+        timeoutOnCall(w, 2);
+        const error = await w.feed.sync(w.ws.id, doc.documentId).catch(caught => caught);
+        assert.equal(error.scope, 'busy');
+        assert.equal(await w.feed.recordFailure(w.ws.id, doc.documentId, error.message, error.scope), 'document');
+        assert.equal((await w.row(doc.documentId)).attempts, 1);
+        w.keep.state.beforeIngest = undefined;
+        await w.ready(doc.documentId);
+        const before = ingests(w).length;
+        assert.equal((await w.feed.sync(w.ws.id, doc.documentId)).status, 'delivered');
+        assert.equal(ingests(w)[before].replace, true);
       },
     );
 

@@ -23,7 +23,7 @@ export function createKnowledgeKeepActivities(feed: Pick<KnowledgeKeepFeed, 'due
     /**
      * Syncs one document, heartbeating before each Keep call so a large document can take as long as its batches need
      * while a stalled attempt is noticed within the heartbeat timeout. Keep failures are not retried here: the feed
-     * backs the document off, and the workflow waits out an outage of Keep itself.
+     * backs the document off, and the workflow waits out an outage or overload of Keep itself.
      */
     async syncKnowledgeKeep(workspace: string, document: string) {
       const context = activityContext();
@@ -49,7 +49,7 @@ export function createKnowledgeKeepActivities(feed: Pick<KnowledgeKeepFeed, 'due
       error: string,
       kind: KnowledgeKeepFailureKind,
     ) {
-      await feed.recordFailure(workspaceId.parse(workspace), documentId.parse(document), error, kind);
+      return feed.recordFailure(workspaceId.parse(workspace), documentId.parse(document), error, kind);
     },
   };
 }

@@ -24,6 +24,7 @@ function failureKind(error: unknown): KnowledgeKeepFailureKind {
   const cause = error instanceof Error ? error.cause : undefined;
   if (cause instanceof ApplicationFailure) {
     if (cause.type === knowledgeKeepFailures.keep) return 'keep';
+    if (cause.type === knowledgeKeepFailures.busy) return 'busy';
     if (cause.type === knowledgeKeepFailures.permanent) return 'permanent';
   }
   return 'document';
@@ -32,8 +33,10 @@ function failureKind(error: unknown): KnowledgeKeepFailureKind {
 /**
  * Sends a workspace's published Knowledge to Keep and forgets what was removed, one document at a time in id order.
  * Every published document Keep does not hold yet is due, so the first run is the backfill. A document that fails
- * is recorded and backs off while the run moves on to the next. When Keep itself is unreachable the run waits, with a
- * growing delay, and tries the same document again, so no later run starts and hammers Keep in the meantime.
+ * is recorded and backs off while the run moves on to the next. When Keep itself is unreachable, or times out because
+ * it is overloaded, the run waits, with a growing delay, and tries the same document again, so no later run starts and
+ * hammers Keep in the meantime. The retry resumes the document after its last batch Keep acknowledged. A document that
+ * keeps timing out is recorded as failing by the feed after a few tries, and the run then moves on without waiting.
  */
 export async function knowledgeKeepSync(input: {
   workspaceId: string;
@@ -59,13 +62,14 @@ export async function knowledgeKeepSync(input: {
         wait = 0;
       } catch (error) {
         const kind = failureKind(error);
-        await recordKnowledgeKeepFailure(
+        const recorded = await recordKnowledgeKeepFailure(
           input.workspaceId,
           work.document_id,
           error instanceof Error ? (error.cause instanceof Error ? error.cause.message : error.message) : 'failed',
           kind,
         );
-        if (kind === 'keep') {
+        // Histories from before the activity returned how it recorded the failure replay an undefined result.
+        if ((recorded ?? kind) === 'keep') {
           wait = Math.min(Math.max(wait * 2, firstWait), longestWait);
           await sleep(wait);
           outage = true;
