@@ -207,7 +207,12 @@ test('HTTP options expose only the public key and preflight permits challenge to
   const app = buildApp({ agentModel: null });
   try {
     const options = await app.inject('/v1/auth/options');
-    assert.deepEqual(options.json(), { turnstileSiteKey: config.siteKey, google: false, magicLink: true });
+    assert.deepEqual(options.json(), {
+      turnstileSiteKey: config.siteKey,
+      google: false,
+      magicLink: true,
+      chatOnboarding: true,
+    });
     assert.equal(options.headers['cache-control'], 'no-store');
     const preflight = await app.inject({
       method: 'OPTIONS',
