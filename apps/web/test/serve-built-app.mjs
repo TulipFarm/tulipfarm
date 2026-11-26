@@ -18,6 +18,7 @@ const app = await startBuiltApp({
   host,
   port,
   apiUrl: process.env.VITE_API_URL || undefined,
+  supportEmail: process.env.VITE_SUPPORT_EMAIL || undefined,
   devMode: true,
 });
 

@@ -27,7 +27,7 @@ const mimeTypes = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
-export async function startBuiltApp({ host = '127.0.0.1', port = 0, apiUrl, devMode = false } = {}) {
+export async function startBuiltApp({ host = '127.0.0.1', port = 0, apiUrl, supportEmail, devMode = false } = {}) {
   const serveDir = devMode ? resolve(root, 'dist-test') : distDir;
   const indexFile = join(serveDir, 'index.html');
   try {
@@ -39,12 +39,12 @@ export async function startBuiltApp({ host = '127.0.0.1', port = 0, apiUrl, devM
     throw new Error(`Build dependencies, then prepare the web app: ${cmd}`);
   }
   const rawIndexHtml = await readFile(indexFile, 'utf8');
-  const indexHtml =
-    devMode && apiUrl
-      ? Buffer.from(
-          rawIndexHtml.replace('<head>', `<head><script>window.__TF_API_ORIGIN__=${JSON.stringify(apiUrl)};</script>`),
-        )
-      : Buffer.from(rawIndexHtml);
+  const scripts = [];
+  if (devMode && apiUrl) scripts.push(`window.__TF_API_ORIGIN__=${JSON.stringify(apiUrl)};`);
+  if (devMode && supportEmail) scripts.push(`window.__TF_SUPPORT_EMAIL__=${JSON.stringify(supportEmail)};`);
+  const indexHtml = scripts.length
+    ? Buffer.from(rawIndexHtml.replace('<head>', `<head><script>${scripts.join('')}</script>`))
+    : Buffer.from(rawIndexHtml);
   const upstream = apiUrl ? new URL(apiUrl) : null;
   const server = createServer(async (req, res) => {
     try {

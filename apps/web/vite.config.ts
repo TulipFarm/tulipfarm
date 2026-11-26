@@ -263,7 +263,13 @@ export default defineConfig(({ command }) => {
     ...(process.env.TULIPFARM_VITE_CACHE_DIR ? { cacheDir: process.env.TULIPFARM_VITE_CACHE_DIR } : {}),
     define: {
       __BUILD_INFO__: JSON.stringify(identity),
-      ...(browserTestBuild ? { 'import.meta.env.DEV': 'true' } : {}),
+      ...(browserTestBuild
+        ? {
+            'import.meta.env.DEV': 'true',
+            'import.meta.env.VITE_SUPPORT_EMAIL':
+              '(typeof window !== "undefined" ? window.__TF_SUPPORT_EMAIL__ : undefined)',
+          }
+        : {}),
     },
     plugins: [
       react(),
