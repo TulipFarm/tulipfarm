@@ -328,3 +328,34 @@ test('a question card adds no unknown lineage to later replies in the chat', asy
     await f.close();
   }
 });
+
+test('a recommended choice keeps a clean label and its recommended flag', async () => {
+  const f = await conversationFixture();
+  try {
+    const w = f.workspace,
+      chatId = randomUUID();
+    await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+    const choice = {
+      tool: 'present.choice',
+      prompt: 'Which day?',
+      choices: [
+        { id: 'mon', label: 'Monday', recommended: true },
+        { id: 'tue', label: 'Tuesday' },
+      ],
+    };
+    const executor = createConversationExecutor(f.runtime, async ({ executeTool }) => {
+      await executeTool(choice.tool, false, async () => ({ result: {}, sources: [] }), [], choice);
+      return { text: '', sources: [] };
+    });
+    await executor.process(await send(f, chatId, 'Book the review'));
+    const [{ answerSchema }] = (
+      await f.db.platform.query(`SELECT answer_schema AS "answerSchema" FROM ${f.table('tf_conversation_requests')}`)
+    ).rows;
+    assert.deepEqual(answerSchema.choices, [
+      { id: 'mon', label: 'Monday', recommended: true },
+      { id: 'tue', label: 'Tuesday' },
+    ]);
+  } finally {
+    await f.close();
+  }
+});

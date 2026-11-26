@@ -134,6 +134,7 @@ export function createWorkspaceTableAuthoring() {
       });
       return { ...prepared, projection: { ...prepared.projection, kind: 'agent' as const } };
     },
+    pool,
     async close() {
       await runtime.close();
       storage.client.destroy();

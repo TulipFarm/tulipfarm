@@ -227,12 +227,12 @@ export async function ownerTeamChoices(tx: AuthorizationTransaction, actor: Huma
       )
     ).rows,
   );
-  const choices: { id: string; label: string }[] = [];
+  const choices: { id: string; label: string; recommended?: boolean }[] = [];
   for (const team of rows)
     if (await canAccessTable(tx, actor, team.id, 'table.create'))
       choices.push({ id: team.id, label: team.member ? teamLabel(team.name) : 'Team (name hidden)' });
   choices.sort((a, b) => Number(b.label === 'Everyone') - Number(a.label === 'Everyone'));
-  if (choices[0]?.label === 'Everyone') choices[0] = { ...choices[0], label: 'Everyone (Recommended)' };
+  if (choices[0]?.label === 'Everyone') choices[0] = { ...choices[0], recommended: true };
   return choices;
 }
 // A button press reaches the model as data beside the words it sent. to_jsonb reads the column on older schemas too.

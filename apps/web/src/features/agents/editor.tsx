@@ -664,7 +664,7 @@ export function AgentEditor({
               className="grid min-w-0 content-start gap-5 rounded-xl border bg-card p-4 lg:sticky lg:top-4 lg:w-68 lg:shrink-0"
             >
               <div className="flex min-w-0 items-center gap-3">
-                <AgentMark size={40} />
+                <AgentMark agentId={id} size={40} />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-foreground">
                     {draft.name.trim() || 'Untitled agent'}

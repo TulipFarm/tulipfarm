@@ -105,7 +105,10 @@ test('table access selects a granting team and shows an editable access source',
   await form.getByText('Draft saved. Slack channels and workflow triggers are not started.', { exact: true }).waitFor();
   assert.deepEqual([...fixture.setups.values()][0].setup.enrollment, [fixture.team.id]);
   assert.deepEqual([...fixture.setups.values()][0].setup.scope, fixture.team.tableScope);
-  await form.getByRole('button', { name: 'Continue editing', exact: true }).click();
+  const continueEditing = form.getByRole('button', { name: 'Continue editing', exact: true });
+  await continueEditing.click();
+  // It reloads the saved setup, then opens Review; a step chosen before that is replaced.
+  await continueEditing.waitFor({ state: 'hidden' });
   await step('Access');
   const teamChoices = form.getByRole('button', { name: 'Change teams used for access', exact: true });
   if ((await teamChoices.getAttribute('aria-expanded')) !== 'true') await teamChoices.click();
@@ -363,7 +366,10 @@ test(
       const prompt = 'Prepare the weekly People Ops update.';
       Object.assign([...fixture.setups.values()][0].setup, { triggers: [trigger], prompt });
       await page.reload();
-      await form.getByRole('button', { name: 'Continue editing', exact: true }).click();
+      const continueEditing = form.getByRole('button', { name: 'Continue editing', exact: true });
+      await continueEditing.click();
+      // It reloads the saved setup, then opens Review; a step chosen before that is replaced.
+      await continueEditing.waitFor({ state: 'hidden' });
       await step('Triggers');
       assert.equal(await form.getByText('Check needed', { exact: true }).count(), 2);
       for (const recheck of await form.getByRole('button', { name: 'Recheck', exact: true }).all())

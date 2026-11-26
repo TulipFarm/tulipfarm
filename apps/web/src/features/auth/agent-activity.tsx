@@ -84,7 +84,7 @@ export function AgentActivity() {
           <GradientBannerPanel>
             <div className="grid w-full gap-4 py-1">
               <div className="flex items-center gap-3">
-                <AgentMark size={40} />
+                <AgentMark agentId={agent.id} size={40} />
                 <div className="min-w-0 flex-1">
                   <p className="font-medium">{agent.name}</p>
                   <p className="truncate text-sm opacity-70">{agent.task}</p>
@@ -124,7 +124,7 @@ export function AgentActivity() {
                 index === active ? 'transition-opacity duration-500' : 'opacity-40 transition-opacity duration-500'
               }
             >
-              <AgentMark size={24} />
+              <AgentMark agentId={item.id} size={24} />
             </span>
           ))}
         </div>

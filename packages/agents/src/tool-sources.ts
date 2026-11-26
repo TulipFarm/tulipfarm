@@ -504,6 +504,7 @@ export async function resultSources(
       return [];
     case 'bud.preference.ask':
     case 'bud.preference.propose':
+    case 'drafts.decide':
     case 'present.choice':
     case 'secrets.request':
     case 'secrets.list':

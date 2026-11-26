@@ -4,6 +4,9 @@ import { textPartSchema } from './contracts.ts';
 
 const text = textPartSchema.shape.text;
 const choiceId = z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/);
+const choiceOption = z.strictObject({ id: choiceId, label: text.max(256), recommended: z.boolean().optional() });
+const oneRecommended = (choices: { recommended?: boolean | undefined }[]) =>
+  choices.filter(choice => choice.recommended).length <= 1;
 /** What the agent learns from a secrets form: references, never values. Only the secrets service writes it. */
 export const secretsAnswerSchema = z.strictObject({
   kind: z.literal('secrets'),
@@ -40,31 +43,26 @@ export const answerDefinitionSchema = z.discriminatedUnion('kind', [
   z
     .strictObject({
       kind: z.literal('choices'),
-      choices: z
-        .array(z.strictObject({ id: choiceId, label: text.max(256) }))
-        .min(1)
-        .max(1000),
+      choices: z.array(choiceOption).min(1).max(1000),
       multiple: z.boolean(),
       allowText: z.boolean().optional(),
       searchable: z.boolean().optional(),
     })
-    .refine(value => new Set(value.choices.map(choice => choice.id)).size === value.choices.length),
+    .refine(value => new Set(value.choices.map(choice => choice.id)).size === value.choices.length)
+    .refine(value => oneRecommended(value.choices)),
 ]);
 export const presentChoiceSchema = z
   .strictObject({
     tool: z.literal('present.choice'),
     prompt: text,
-    choices: z
-      .array(z.strictObject({ id: choiceId, label: text.max(256) }))
-      .min(2)
-      .max(32)
-      .optional(),
+    choices: z.array(choiceOption).min(2).max(32).optional(),
     searchable: z.boolean().optional(),
     // The server lists the teams that can own a new table; the model never writes these options.
     from: z.literal('owner-teams').optional(),
   })
   .refine(value => (value.from ? !value.choices : Boolean(value.choices)))
-  .refine(value => !value.choices || new Set(value.choices.map(choice => choice.id)).size === value.choices.length);
+  .refine(value => !value.choices || new Set(value.choices.map(choice => choice.id)).size === value.choices.length)
+  .refine(value => !value.choices || oneRecommended(value.choices));
 export const requestInputSchema = z.strictObject({
   producerId: uuidSchema,
   prompt: text,
