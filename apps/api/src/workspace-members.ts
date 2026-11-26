@@ -1,7 +1,16 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied } from '@tulipfarm/access';
+import { MemberIdentityError } from '@tulipfarm/integrations/member-identities';
 import { createWorkspaceMembers } from '@tulipfarm/workspaces/members';
+import {
+  addWorkspaceMemberIdentityInputSchema,
+  removeWorkspaceMemberIdentityResultSchema,
+  updateWorkspaceMemberIdentityInputSchema,
+  workspaceMemberIdentitiesSchema,
+  workspaceMemberIdentityResultSchema,
+  workspaceMemberIdentitySearchSchema,
+} from '@tulipfarm/workspaces/member-identities-contracts';
 import {
   workspaceMemberIdSchema,
   workspaceMemberMutationSchema,
@@ -29,11 +38,17 @@ export function registerWorkspaceMembers(
   const recordRequests = createRecordRequests(dependencies.runtime);
   const params = z.object({ workspaceId: z.uuid() });
   const memberParams = params.extend({ memberId: workspaceMemberIdSchema });
+  const identityParams = memberParams.extend({ identityId: z.uuid() });
   const query = z.object({
     ids: z.string().max(3700).optional(),
     after: workspaceMemberIdSchema.optional(),
     limit: z.coerce.number().int().min(1).max(100).default(50),
     attention: z.enum(['true', 'false']).default('false'),
+  });
+  const identitySearchQuery = z.object({
+    q: z.string().max(200).default(''),
+    provider: z.string().min(1).max(64).optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(20),
   });
   const validation = routeValidation({
     missing: 'Missing workspace member validator',
@@ -48,6 +63,7 @@ export function registerWorkspaceMembers(
     routes.setErrorHandler((error, _request, reply) => {
       if (requestBoundaryError(error, reply)) return;
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'member-not-found' });
+      if (error instanceof MemberIdentityError) return reply.code(error.status).send({ error: error.code });
       if (error instanceof WorkspaceMemberError) return reply.code(error.status).send({ error: error.code });
       if (error instanceof GenerationError) return reply.code(409).send({ error: error.code });
       if (error instanceof TableError) return reply.code(error.status).send({ error: error.code });
@@ -78,6 +94,100 @@ export function registerWorkspaceMembers(
           ...(input.after ? { after: input.after } : {}),
           ...(input.ids ? { ids: input.ids.split(',') } : {}),
         });
+      },
+    );
+    routes.get(
+      `${base}/identities/search`,
+      {
+        logLevel: 'silent',
+        schema: {
+          operationId: 'searchWorkspaceMemberIdentities',
+          params: validation.json(params),
+          querystring: validation.json(identitySearchQuery),
+          response: { 200: validation.json(workspaceMemberIdentitySearchSchema), ...errors },
+        },
+      },
+      request => {
+        const p = params.parse(request.params),
+          input = identitySearchQuery.parse(request.query);
+        return service.searchIdentities(p.workspaceId, user(request), {
+          q: input.q,
+          limit: input.limit,
+          ...(input.provider ? { provider: input.provider } : {}),
+        });
+      },
+    );
+    routes.get(
+      `${base}/:memberId/identities`,
+      {
+        logLevel: 'silent',
+        schema: {
+          operationId: 'workspaceMemberIdentities',
+          params: validation.json(memberParams),
+          response: { 200: validation.json(workspaceMemberIdentitiesSchema), ...errors },
+        },
+      },
+      request => {
+        const p = memberParams.parse(request.params);
+        return service.identities(p.workspaceId, user(request), p.memberId);
+      },
+    );
+    routes.post(
+      `${base}/:memberId/identities`,
+      {
+        logLevel: 'silent',
+        schema: {
+          operationId: 'addWorkspaceMemberIdentity',
+          params: validation.json(memberParams),
+          body: validation.json(addWorkspaceMemberIdentityInputSchema),
+          response: { 200: validation.json(workspaceMemberIdentityResultSchema), ...errors },
+        },
+      },
+      request => {
+        const p = memberParams.parse(request.params);
+        return service.addIdentity(
+          p.workspaceId,
+          user(request),
+          p.memberId,
+          addWorkspaceMemberIdentityInputSchema.parse(request.body),
+        );
+      },
+    );
+    routes.patch(
+      `${base}/:memberId/identities/:identityId`,
+      {
+        logLevel: 'silent',
+        schema: {
+          operationId: 'updateWorkspaceMemberIdentity',
+          params: validation.json(identityParams),
+          body: validation.json(updateWorkspaceMemberIdentityInputSchema),
+          response: { 200: validation.json(workspaceMemberIdentityResultSchema), ...errors },
+        },
+      },
+      request => {
+        const p = identityParams.parse(request.params);
+        return service.updateIdentity(
+          p.workspaceId,
+          user(request),
+          p.memberId,
+          p.identityId,
+          updateWorkspaceMemberIdentityInputSchema.parse(request.body),
+        );
+      },
+    );
+    routes.delete(
+      `${base}/:memberId/identities/:identityId`,
+      {
+        logLevel: 'silent',
+        schema: {
+          operationId: 'removeWorkspaceMemberIdentity',
+          params: validation.json(identityParams),
+          response: { 200: validation.json(removeWorkspaceMemberIdentityResultSchema), ...errors },
+        },
+      },
+      request => {
+        const p = identityParams.parse(request.params);
+        return service.removeIdentity(p.workspaceId, user(request), p.memberId, p.identityId);
       },
     );
     routes.post(

@@ -284,7 +284,7 @@ try {
   await page.getByRole('button', { name: 'Show more invites', exact: true }).click();
   await memberTable.getByText('older-match@example.test', { exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Show more invites', exact: true }).count(), 0);
-  const search = page.getByLabel('Search by name or email', { exact: true });
+  const search = page.getByLabel('Search by name, email, or handle', { exact: true });
   await search.fill('older-match');
   await memberTable.getByText('recent@example.test', { exact: true }).waitFor({ state: 'detached' });
   await memberTable.getByText('older-match@example.test', { exact: true }).waitFor();

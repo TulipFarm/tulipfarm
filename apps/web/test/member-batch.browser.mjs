@@ -256,7 +256,7 @@ try {
   const actions = name => page.getByRole('button', { name: `Actions for ${name}`, exact: true });
   const confirm = page.getByRole('alertdialog');
   await page.goto(`${origin}/acme/members`);
-  const search = page.getByLabel('Search by name or email');
+  const search = page.getByLabel('Search by name, email, or handle');
   await search.fill('absent');
   await page.getByRole('heading', { name: 'No one matches that search' }).waitFor();
   await search.fill('bob');
