@@ -172,7 +172,7 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
             clearOutcome={clearChatGptOutcome}
           />
         )}
-        {source === 'keys' && <ApiKeysPane />}
+        {source === 'keys' && <ApiKeysPane workspaceId={workspaceId} />}
         {source.startsWith('plan:') && (
           <SharedPlanPane workspaceId={workspaceId} connectionId={source.slice('plan:'.length)} />
         )}

@@ -5,9 +5,11 @@ import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { AddIcon } from '@tulipfarm/icons';
 import { useChatGptPlan } from './chatgpt-plan';
 import { useTokenPlan } from './token-plan';
-import { PlanAccounts, maxPlanAccounts, type PlanConnector, type PlanProvider } from './plan-accounts';
+import { PlanAccounts, maxPlanAccounts, type PlanConnector } from './plan-accounts';
 
-export const providerDetails: Record<PlanProvider, { name: string; description: string }> = {
+type SubscriptionPanelProvider = 'chatgpt' | 'claude' | 'copilot';
+
+export const providerDetails: Record<SubscriptionPanelProvider, { name: string; description: string }> = {
   chatgpt: {
     name: 'ChatGPT',
     description: 'Use your ChatGPT plan for chat models and Codex coding, instead of workspace credits.',
@@ -48,7 +50,7 @@ export function ProviderPanel({
   nested,
 }: {
   workspaceId: string;
-  provider: PlanProvider;
+  provider: SubscriptionPanelProvider;
   outcome?: string | undefined;
   clearOutcome?: (() => void) | undefined;
   /** Shows the provider's name and logo; the Integrations page already has them. */
@@ -106,7 +108,7 @@ function ConnectorPanel({
   const { provider } = connector;
   const [others, setOthers] = useState(false);
   if (!connector.offered) return null;
-  const details = providerDetails[provider];
+  const details = providerDetails[provider as SubscriptionPanelProvider];
   const { accounts, read, message } = connector;
   const count = accounts.length;
   const ready = read.kind === 'ready';

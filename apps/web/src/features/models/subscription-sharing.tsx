@@ -30,7 +30,16 @@ export type { Subscription };
 
 export const subscriptionsKey = ['models', 'subscriptions'] as const;
 
-export const providerLabels = { chatgpt: 'ChatGPT', claude: 'Claude', copilot: 'GitHub Copilot' } as const;
+export const providerLabels = {
+  chatgpt: 'ChatGPT',
+  claude: 'Claude',
+  copilot: 'GitHub Copilot',
+  'byok-anthropic': 'Anthropic API key',
+  'byok-openai': 'OpenAI API key',
+  'byok-google': 'Google AI Studio API key',
+  'byok-xai': 'xAI API key',
+  'byok-openai-compatible': 'OpenAI-compatible API key',
+} as const;
 
 const errors: Record<string, string> = {
   'subscription-not-found': 'This plan is no longer connected. Reload to see the current plans.',

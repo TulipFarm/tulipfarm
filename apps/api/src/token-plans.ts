@@ -1,7 +1,7 @@
 import type { FastifyError, FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied, uuidSchema } from '@tulipfarm/access';
-import { loadModelCatalog, planModelName } from '@tulipfarm/config';
+import { planModelName } from '@tulipfarm/config';
 import { integrationCredentialKeyring } from '@tulipfarm/integrations';
 import {
   copilotGitHubClient,
@@ -34,14 +34,23 @@ function vendorFailure(provider: TokenPlanProvider, error: unknown): 'limited' {
   throw new TokenPlanError(provider, 'unavailable');
 }
 
-/** The catalog's model slugs for `provider`, with versioned names. */
+/** Fallback model slugs used only when a rate-limited Claude/Copilot sign-in cannot fetch its live list yet. */
+const rateLimitedFallbackModels: Record<TokenPlanProvider, readonly { slug: string; label: string }[]> = {
+  claude: [
+    { slug: 'claude-sonnet-5.5', label: 'Claude Sonnet 5.5' },
+    { slug: 'claude-opus-5.5', label: 'Claude Opus 5.5' },
+    { slug: 'claude-haiku-5.5', label: 'Claude Haiku 5.5' },
+  ],
+  copilot: [
+    { slug: 'claude-sonnet-5.5', label: 'Claude Sonnet 5.5' },
+    { slug: 'claude-opus-5.5', label: 'Claude Opus 5.5' },
+    { slug: 'gpt-6-sol', label: 'GPT-6 Sol' },
+    { slug: 'gpt-6-luna', label: 'GPT-6 Luna' },
+  ],
+};
+
 function catalogModels(provider: TokenPlanProvider) {
-  const families = loadModelCatalog().catalog.models;
-  return families.flatMap(family =>
-    family.routes
-      .filter(route => route.provider === provider)
-      .map(route => ({ slug: route.model, label: planModelName(route.model, family.name) })),
-  );
+  return [...rateLimitedFallbackModels[provider]];
 }
 
 export function claudeVerifier(

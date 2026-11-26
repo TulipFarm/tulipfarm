@@ -26,9 +26,10 @@ import { githubAccounts } from './github-composition.ts';
 import { registerGitHubAccounts } from './github-accounts.ts';
 import { chatGptPlan, registerChatGptPlan } from './chatgpt-plan.ts';
 import { registerTokenPlan, tokenPlan } from './token-plans.ts';
+import { byokPlansFromEnvironment, registerByokPlans } from './byok-plans.ts';
 import { createDevPlans } from './dev-plans.ts';
 import type { TokenPlan, TokenPlanProvider } from '@tulipfarm/integrations/token-plans';
-import { planModelFamilyId, type PlanProvider } from '@tulipfarm/config';
+import { isByokProvider, planModelFamilyId, type PlanProvider } from '@tulipfarm/config';
 import { registerSubscriptions } from './subscriptions.ts';
 import { createSubscriptions } from '@tulipfarm/integrations/subscriptions';
 import { createPlanUsage } from './plan-usage.ts';
@@ -185,13 +186,17 @@ export function buildApp(
         registerChatGptPlan(business, auth.auth, chatGpt, auth.pool);
         registerTokenPlan(business, auth.auth, 'claude', tokenPlans.claude);
         registerTokenPlan(business, auth.auth, 'copilot', tokenPlans.copilot);
+        const byokPlans = byokPlansFromEnvironment(runtime ?? null);
+        registerByokPlans(business, auth.auth, byokPlans);
         const subscriptions = runtime ? createSubscriptions({ runtime }) : null;
         const planUsage = createPlanUsage({ copilotToken: copilot?.accessToken });
         if (runtime) registerUsage(business, { runtime, auth: auth.auth, planUsage });
-        registerSubscriptions(business, auth.auth, subscriptions, (provider, slug) => {
-          const id = planModelFamilyId(provider, slug);
-          return id !== null && models.catalog.model(id) !== undefined;
-        });
+        registerSubscriptions(
+          business,
+          auth.auth,
+          subscriptions,
+          (provider, slug) => planModelFamilyId(provider, slug) !== null,
+        );
         if (runtime && github)
           registerGitHubInvestigation(business, auth.auth, createGitHubInvestigation({ runtime, accounts: github }));
         registerStorageComposition(
@@ -213,11 +218,17 @@ export function buildApp(
             runtime,
             compatibility: commonCompatibility,
             ...(options.modelCatalog ?? { modelCatalogSnapshot: models.modelCatalogSnapshot }),
-            ...(subscriptions && (chatGpt || tokenPlans.claude || tokenPlans.copilot)
+            ...(subscriptions && (chatGpt || tokenPlans.claude || tokenPlans.copilot || byokPlans)
               ? {
                   planModels: async (workspaceId: string, userId: string, providers: readonly PlanProvider[]) => {
                     await devPlans?.ensure(workspaceId, userId);
-                    const on = providers.filter(provider => (provider === 'chatgpt' ? chatGpt : tokenPlans[provider]));
+                    const on = providers.filter(provider =>
+                      isByokProvider(provider)
+                        ? Boolean(byokPlans)
+                        : provider === 'chatgpt'
+                          ? Boolean(chatGpt)
+                          : Boolean(tokenPlans[provider]),
+                    );
                     const models = on.length ? await subscriptions.modelsFor(workspaceId, userId, on) : new Map();
                     return new Map(
                       await Promise.all(

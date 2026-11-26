@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { ChevronDownIcon, CoinsIcon } from '@tulipfarm/icons';
+import { ChevronDownIcon, CoinsIcon, KeyIcon } from '@tulipfarm/icons';
 import { BrandIcon, type Brand } from '@tulipfarm/sprout/brand-icon';
 import {
   DropdownMenu,
@@ -24,12 +24,27 @@ import type { PlanAccountChoice } from './plan-account';
 /** Where a model runs: one of the member's own plans, or the workspace's credits. */
 export type ModelSource = PlanProvider | 'credits';
 
-const sourceOrder: readonly ModelSource[] = ['chatgpt', 'claude', 'copilot', 'credits'];
+const sourceOrder: readonly ModelSource[] = [
+  'chatgpt',
+  'claude',
+  'copilot',
+  'byok-anthropic',
+  'byok-openai',
+  'byok-google',
+  'byok-xai',
+  'byok-openai-compatible',
+  'credits',
+];
 
 const sources: Record<ModelSource, { name: string; hint: string; brand: Brand | null }> = {
   chatgpt: { name: 'ChatGPT plan', hint: 'Counts toward your plan', brand: 'openai' },
   claude: { name: 'Claude plan', hint: 'Counts toward your plan', brand: 'claude' },
   copilot: { name: 'GitHub Copilot plan', hint: 'Counts toward your plan', brand: 'github' },
+  'byok-anthropic': { name: 'Anthropic API key', hint: 'Billed to your API key', brand: 'claude' },
+  'byok-openai': { name: 'OpenAI API key', hint: 'Billed to your API key', brand: 'openai' },
+  'byok-google': { name: 'Google AI Studio key', hint: 'Billed to your API key', brand: 'gemini' },
+  'byok-xai': { name: 'xAI API key', hint: 'Billed to your API key', brand: 'grok' },
+  'byok-openai-compatible': { name: 'Custom API key', hint: 'Billed to your API key', brand: null },
   credits: { name: 'Workspace credits', hint: 'Uses workspace credits', brand: null },
 };
 
@@ -71,7 +86,9 @@ function UnavailableTag({ model }: { model: ComposerModel }) {
 
 function SourceMark({ source }: { source: ModelSource }) {
   const brand = sources[source].brand;
-  return brand ? <BrandIcon brand={brand} size="inline" /> : <CoinsIcon size="md" aria-hidden="true" />;
+  if (brand) return <BrandIcon brand={brand} size="inline" />;
+  if (source === 'byok-openai-compatible') return <KeyIcon size="sm" aria-hidden="true" />;
+  return <CoinsIcon size="md" aria-hidden="true" />;
 }
 
 /** A model's logo; a warning dot marks a plan at its usage limit, though the model stays selectable. */

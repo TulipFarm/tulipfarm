@@ -626,7 +626,23 @@ test('plan models carry the usage status of the plan each runs on; models the wo
   };
   const { request } = fixture(t, undefined, null, modelCatalogSnapshot, {
     planModels: async (id, user, providers) => {
-      assert.deepEqual([id, user, providers], [workspaceId, userId, ['chatgpt', 'claude', 'copilot']]);
+      assert.deepEqual(
+        [id, user, providers],
+        [
+          workspaceId,
+          userId,
+          [
+            'chatgpt',
+            'claude',
+            'copilot',
+            'byok-anthropic',
+            'byok-openai',
+            'byok-google',
+            'byok-xai',
+            'byok-openai-compatible',
+          ],
+        ],
+      );
       return new Map([
         [
           'chatgpt',
@@ -645,6 +661,10 @@ test('plan models carry the usage status of the plan each runs on; models the wo
   const usage = Object.fromEntries(
     families.filter(family => family.planUsage).map(family => [family.id, family.planUsage]),
   );
-  assert.deepEqual(usage, { 'chatgpt-sol': limited, 'chatgpt-gpt-7': limited, 'copilot-gpt-luna': counted });
+  assert.deepEqual(usage, {
+    'chatgpt-gpt-6--1-sol': limited,
+    'chatgpt-gpt-7': limited,
+    'copilot-gpt-6-luna': counted,
+  });
   assert.equal('planUsage' in families.find(family => family.id === 'gpt-sol'), false);
 });

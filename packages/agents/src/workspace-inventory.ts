@@ -11,6 +11,7 @@ import { withHuman } from './saved-policy.ts';
 import type { AgentStorage } from './store.ts';
 import { relation } from './store.ts';
 import { activeMembers } from './members.ts';
+import { memberModelInventory } from './model-availability.ts';
 import { directoryNameLimit } from './workspace-directory.ts';
 import { z } from 'zod';
 
@@ -147,12 +148,14 @@ async function listWorkspaceInventory(runtime: AgentStorage, workspaceId: string
       }
       return kept;
     }
+    const availableModels = await memberModelInventory(tx, actor.membershipId);
     return {
       tables: await keep(tables, tableSource),
       agents: await keep(agents, agentSource),
       skills: await keep(skills, skillSource),
       inherited,
       directoryNames,
+      availableModels,
     };
   });
   return {
@@ -164,6 +167,7 @@ async function listWorkspaceInventory(runtime: AgentStorage, workspaceId: string
       workflows,
       skills: readable.skills,
       directoryNames: readable.directoryNames,
+      availableModels: readable.availableModels,
     },
     sources: [
       ...readable.tables.map(tableSource),

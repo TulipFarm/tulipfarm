@@ -288,6 +288,11 @@ export function createSlackActions(options: Options) {
             undefined,
             false,
             true,
+            undefined,
+            undefined,
+            false,
+            false,
+            true,
           );
           continue;
         }
@@ -299,7 +304,20 @@ export function createSlackActions(options: Options) {
         ).rowCount;
         if (!prior || (await standaloneTurn(tx, draft.conversation_id, draft.turn_id)))
           dependencies = dependencies.filter(source => !ownChat(source));
-        await requireDraftSources(tx, actor, dependencies, new Set(), undefined, true);
+        await requireDraftSources(
+          tx,
+          actor,
+          dependencies,
+          new Set(),
+          undefined,
+          true,
+          false,
+          undefined,
+          undefined,
+          false,
+          false,
+          true,
+        );
       }
       return;
     }

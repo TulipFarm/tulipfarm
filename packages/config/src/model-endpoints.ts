@@ -15,6 +15,11 @@ export const defaultModelEndpoints = Object.freeze({
   chatgpt: chatGptEndpoint,
   claude: claudePlanEndpoint,
   copilot: copilotPlanEndpoint,
+  'byok-anthropic': 'https://api.anthropic.com/',
+  'byok-openai': 'https://api.openai.com/',
+  'byok-xai': 'https://api.x.ai/',
+  'byok-google': 'https://generativelanguage.googleapis.com/',
+  'byok-openai-compatible': 'https://api.openai.com/v1/',
 } as const satisfies Partial<Record<ModelProvider, string>>);
 
 const azureHost =
@@ -67,8 +72,17 @@ export function modelEndpointProblem(
 ): string | null {
   const shape = modelEndpointShapeProblem(endpoint);
   if (shape) return shape;
-  if (provider === 'chatgpt' || provider === 'claude' || provider === 'copilot')
+  if (
+    provider === 'chatgpt' ||
+    provider === 'claude' ||
+    provider === 'copilot' ||
+    provider === 'byok-anthropic' ||
+    provider === 'byok-openai' ||
+    provider === 'byok-xai' ||
+    provider === 'byok-google'
+  )
     return endpoint === defaultModelEndpoints[provider] ? null : `must be ${defaultModelEndpoints[provider]}`;
+  if (provider === 'byok-openai-compatible') return byokEndpointProblem(endpoint, env);
   const url = new URL(endpoint);
   if (endpoint !== normalizeModelEndpoint(endpoint)) return 'must be normalized with a trailing slash';
   const host = bare(url.hostname);
@@ -88,4 +102,42 @@ export function modelEndpointProblem(
     return (error as Error).message;
   }
   return allowed.has(host) ? null : `host ${host} is not in MODEL_ENDPOINT_HOSTS`;
+}
+
+const privateIpv4 =
+  /^(?:10\.|127\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.|0\.|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/;
+const privateIpv6 =
+  /^(?:::1?$|fc|fd|fe[89ab]|::ffff:(?:10\.|127\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.|0\.|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.))/i;
+
+/** Whether a bare IPv4 or IPv6 address is loopback, link-local, private, or carrier-grade NAT. */
+export function isPrivateModelIp(address: string): boolean {
+  const normalized = bare(address);
+  return privateIpv4.test(normalized) || privateIpv6.test(normalized);
+}
+
+/**
+ * Validates a member-supplied BYOK OpenAI-compatible base URL. Allows public HTTPS origins (and loopback HTTP outside
+ * production) while blocking private/link-local IP literals, `.local`/`.internal` hosts, embedded credentials, queries,
+ * and fragments. Requires the normalized trailing-slash form of `normalizeModelEndpoint`.
+ */
+export function byokEndpointProblem(
+  endpoint: string,
+  env: Record<string, string | undefined> = process.env,
+): string | null {
+  const shape = modelEndpointShapeProblem(endpoint);
+  if (shape) return shape;
+  if (endpoint !== normalizeModelEndpoint(endpoint)) return 'must be normalized with a trailing slash';
+  const url = new URL(endpoint);
+  const host = bare(url.hostname);
+  const allowLocal = env.NODE_ENV !== 'production';
+  const isLoopback = loopbackHosts.has(host);
+  if (url.protocol === 'http:') {
+    if (!isLoopback) return 'must use https (http is allowed only for localhost)';
+    if (!allowLocal) return 'must use https in production';
+    return null;
+  }
+  if (isLoopback) return allowLocal ? null : 'must not target a loopback address in production';
+  if (isPrivateModelIp(host) || host.endsWith('.local') || host.endsWith('.internal'))
+    return 'must not target a private or internal address';
+  return null;
 }
