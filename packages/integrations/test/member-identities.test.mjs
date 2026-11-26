@@ -128,10 +128,10 @@ test('errors carry the HTTP status the API returns', () => {
   });
 });
 
-test('identities need workspace storage at version 118', () => {
+test('identities need workspace storage at version 120', () => {
   assert.equal(hasMemberIdentities({}), false);
-  assert.equal(hasMemberIdentities({ commonVersion: 117 }), false);
-  assert.equal(hasMemberIdentities({ commonVersion: 118 }), true);
+  assert.equal(hasMemberIdentities({ commonVersion: 119 }), false);
+  assert.equal(hasMemberIdentities({ commonVersion: 120 }), true);
 });
 
 test('the wire schema rejects unknown trust and conflict values', () => {
