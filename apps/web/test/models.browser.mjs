@@ -1014,7 +1014,7 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
         await sources.getByText('Grace’s plan').click();
         await page.getByText('Only Grace can turn these models on or off.').waitFor();
         assert.equal(await page.getByRole('switch', { name: 'GPT-6 Sol' }).isDisabled(), true);
-        await sources.getByText('Add API key').click();
+        await sources.getByRole('link', { name: /API keys/ }).click();
         await page.getByRole('heading', { name: /API keys/ }).waitFor();
       },
     );
