@@ -587,7 +587,7 @@ export const settings: readonly Setting[] = [
     services: ['browser-host'],
     requirement: 'optional',
     secret: false,
-    default: '3',
+    default: '10000',
     description:
       'Browser sessions one workspace runs at once. A new session beyond this waits up to a minute for one to close, then the agent is told to try again.',
   },
