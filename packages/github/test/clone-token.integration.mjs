@@ -60,3 +60,38 @@ test('an approved coding run gets its clone token while its turn waits on it', a
     await f.close();
   }
 });
+
+test('an active code session gets its clone token and refuses terminal or foreign sessions', async t => {
+  const f = await githubFixture();
+  try {
+    const actor = { kind: 'human', ...f.member };
+    await f.connect();
+    const reads = createGitHubReads({
+      runtime: f.runtime,
+      accounts: f.service,
+      fetcher: async () => Response.json({}),
+    });
+    const sessionId = randomUUID();
+    await f.db.platform.query(
+      `INSERT INTO ${f.table('tf_code_sessions')} (id, owner_membership_id, title, request, agent, repository, base_branch, session_branch, stage, reviewers, open_pull_requests, open_as_draft, budget_ms, workflow_id)
+       VALUES ($1,$2,'Fix border','Change border to purple','copilot','octocat/hello','main','tulipfarm/fix-border','brainstorm','[]'::jsonb,true,false,14400000,$3)`,
+      [sessionId, actor.membershipId, `code-session-${sessionId}`],
+    );
+
+    await t.test('an active code session gets the token even without a conversation origin', async () => {
+      const result = await reads.codeSessionToken(f.one.id, actor, sessionId);
+      assert.deepEqual(result, { token: 'synthetic-access-token', login: 'person-123' });
+    });
+
+    await t.test('an unknown session is refused', async () => {
+      await assert.rejects(reads.codeSessionToken(f.one.id, actor, randomUUID()), AccessDenied);
+    });
+
+    await t.test('a terminal code session is refused', async () => {
+      await f.db.platform.query(`UPDATE ${f.table('tf_code_sessions')} SET stage='failed' WHERE id=$1`, [sessionId]);
+      await assert.rejects(reads.codeSessionToken(f.one.id, actor, sessionId), AccessDenied);
+    });
+  } finally {
+    await f.close();
+  }
+});

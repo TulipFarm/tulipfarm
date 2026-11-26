@@ -44,7 +44,13 @@ export function LiveTerminalCanvas({ workspaceId, sessionId }: { workspaceId: st
     lastChunkIdRef.current = 0;
   }, [sessionId]);
 
+  const terminalFinished = session ? codeSessionTerminalStages.has(session.stage) : false;
+
   useEffect(() => {
+    if (terminalFinished) {
+      setConnected(false);
+      return;
+    }
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     const source = new EventSource(api.terminalStreamUrl(sessionId, lastChunkIdRef.current), {
       withCredentials: true,
@@ -73,7 +79,7 @@ export function LiveTerminalCanvas({ workspaceId, sessionId }: { workspaceId: st
       clearTimeout(retryTimer);
       source.close();
     };
-  }, [api, sessionId, attempt]);
+  }, [api, sessionId, attempt, terminalFinished]);
 
   useEffect(() => {
     scrollEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -124,8 +130,14 @@ export function LiveTerminalCanvas({ workspaceId, sessionId }: { workspaceId: st
             {session && (
               <>
                 <Badge variant="secondary">{codingAgentLabels[session.agent]}</Badge>
-                <Badge variant="secondary">{codeSessionStageLabels[session.stage]}</Badge>
-                <Badge variant={runStateVariants[session.runState]}>{session.runState}</Badge>
+                {active ? (
+                  <>
+                    <Badge variant="secondary">{codeSessionStageLabels[session.stage]}</Badge>
+                    <Badge variant={runStateVariants[session.runState]}>{session.runState}</Badge>
+                  </>
+                ) : (
+                  <Badge variant={runStateVariants[session.runState]}>{codeSessionStageLabels[session.stage]}</Badge>
+                )}
               </>
             )}
           </div>
@@ -140,7 +152,7 @@ export function LiveTerminalCanvas({ workspaceId, sessionId }: { workspaceId: st
                 {session.baseBranch} → {session.sessionBranch}
               </span>
               <span className="code-live-terminal-status-dot" data-connected={connected ? 'true' : 'false'}>
-                {connected ? 'live' : 'reconnecting…'}
+                {!active ? 'finished' : connected ? 'live' : 'reconnecting…'}
               </span>
             </div>
           )}

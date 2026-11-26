@@ -143,7 +143,7 @@ export function createCodeSessionService(options: {
           const ghRes = await tx.client.query(
             `SELECT id, COALESCE(identity->>'login', identity->>'name', id::text) AS login
              FROM ${githubTable}
-             WHERE state = 'active' AND owner_membership_id = $1
+             WHERE state = 'active' AND owner_membership_id = $1 AND use_for_coding = true
              ORDER BY created_at DESC`,
             [actor.membershipId],
           );
@@ -155,6 +155,7 @@ export function createCodeSessionService(options: {
             `SELECT DISTINCT c.provider
              FROM ${connectionsTable} c
              WHERE c.state = 'connected'
+               AND c.use_for_coding = true
                AND (
                  c.owner_membership_id = $1
                  OR EXISTS (
@@ -757,6 +758,13 @@ export function registerCodeSessions(
               lastSessionKey = nextSessionKey;
               await writeEvent('session', next.session);
             }
+            if (
+              !closed &&
+              (next.session.stage === 'merged' || next.session.stage === 'stopped' || next.session.stage === 'failed')
+            ) {
+              close();
+              return;
+            }
           } catch {
             close();
             return;
@@ -767,10 +775,19 @@ export function registerCodeSessions(
         };
 
         void (async () => {
-          await writeEvent('session', initial.session);
           for (const chunk of initial.chunks) {
             if (closed) return;
             await writeEvent('chunk', chunk);
+          }
+          await writeEvent('session', initial.session);
+          if (
+            !closed &&
+            (initial.session.stage === 'merged' ||
+              initial.session.stage === 'stopped' ||
+              initial.session.stage === 'failed')
+          ) {
+            close();
+            return;
           }
           if (!closed) {
             pollTimer = setTimeout(() => void runPoll(), 500);

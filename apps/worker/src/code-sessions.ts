@@ -5,7 +5,6 @@ import { temporalConnectionOptions } from '@tulipfarm/config/temporal';
 import type { ExecutionBackend, ExecutionConfiguration } from '@tulipfarm/execution-contract';
 import type { ConversationRuntime } from '@tulipfarm/conversations/runtime';
 import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
-import { runIsolated } from '@tulipfarm/agents/chat-execution';
 import {
   CODE_SESSION_COMMIT_TRAILER,
   parseCodeStageMarker,
@@ -21,15 +20,10 @@ import {
   readCodeSessionSystem,
   recordCodeSessionStep,
 } from '@tulipfarm/agents/code-session-store';
-import {
-  codingAgentProviders,
-  codingRunLimitMs,
-  codingRunScript,
-  codingRunSecrets,
-  planRequiredMessage,
-} from '@tulipfarm/agents/coding-runs';
+import { codingAgentProviders, planRequiredMessage, runCodingJob } from '@tulipfarm/agents/coding-runs';
 import { codingAgentLabels } from '@tulipfarm/agents/coding-run-contracts';
 import { codingRunServices } from './coding-runs.ts';
+import { githubChatReads } from './github-composition.ts';
 import { codeSessionSignal, type CodeSessionActivities } from './code-session-workflows.ts';
 
 function buildStagePrompt(
@@ -118,6 +112,14 @@ async function githubApiRequest<T>(
   return { ok: true, status: response.status, data: parsed as T };
 }
 
+function stripStageMarkerLines(output: string): string {
+  return output
+    .split(/\r?\n/)
+    .filter(line => !line.trim().startsWith('TULIPFARM_CODE_STAGE '))
+    .join('\n')
+    .trim();
+}
+
 export function createCodeSessionActivities(
   runtime: ConversationRuntime,
   coding?: {
@@ -126,6 +128,7 @@ export function createCodeSessionActivities(
   },
 ): CodeSessionActivities {
   const services = codingRunServices(runtime);
+  let reads: ReturnType<typeof githubChatReads> | undefined;
 
   const resolveGitHubToken = async (
     workspaceId: string,
@@ -133,12 +136,13 @@ export function createCodeSessionActivities(
   ): Promise<{ token: string; login: string } | null> => {
     const actor = await resolveOwnerActor(runtime, workspaceId, session.ownerMembershipId);
     if (!actor) return null;
-    return services.github(
-      workspaceId,
-      actor,
-      { conversationId: session.originConversationId ?? session.id, turnId: session.id, runId: session.id },
-      session.githubAccount,
-    );
+    return (reads ??= githubChatReads(runtime)).codeSessionToken(workspaceId, actor, session.id, session.githubAccount);
+  };
+
+  const remoteBranchExists = async (token: string, repository: string, branch: string): Promise<boolean> => {
+    const encoded = branch.split('/').map(encodeURIComponent).join('/');
+    const res = await githubApiRequest<unknown>(token, 'GET', `/repos/${repository}/branches/${encoded}`);
+    return res.ok;
   };
 
   return {
@@ -221,41 +225,40 @@ export function createCodeSessionActivities(
       }
 
       const prompt = buildStagePrompt(stage, session, context);
-      const cloneBranch = stage === 'verify' ? session.sessionBranch : session.baseBranch;
-      const pushBranch = stage === 'code' ? session.sessionBranch : '';
+      const cloneBranch =
+        stage === 'verify'
+          ? session.sessionBranch
+          : stage === 'code' && (await remoteBranchExists(github.token, session.repository, session.sessionBranch))
+            ? session.sessionBranch
+            : session.baseBranch;
       const commitMessage = `${session.title}\n\n${CODE_SESSION_COMMIT_TRAILER}`;
-      const limitSeconds = String(Math.floor(codingRunLimitMs / 1000) - 60);
       const heartbeatTimer = setInterval(() => {
         Context.current().heartbeat({ stage, sessionId });
       }, 30_000);
-      let result;
+      let job;
       try {
-        result = await runIsolated(
+        job = await runCodingJob(
           coding.backend,
           coding.configuration,
           {
             workspaceId,
             areaId: sessionId,
-            template: session.agent,
-            command: {
-              program: 'bash',
-              args: [
-                '-c',
-                codingRunScript(session.agent),
-                '--',
-                session.repository,
-                prompt,
-                cloneBranch,
-                session.agent,
-                limitSeconds,
-                pushBranch,
-                github.login,
-                `${github.login}@users.noreply.github.com`,
-                commitMessage,
-              ],
-            },
-            secrets: codingRunSecrets(session.agent, plan.token, github.token),
-            timeoutMs: codingRunLimitMs,
+            repository: session.repository,
+            task: prompt,
+            branch: cloneBranch,
+            agent: session.agent,
+            planToken: plan.token,
+            githubToken: github.token,
+            ...(stage === 'code'
+              ? {
+                  push: {
+                    branch: session.sessionBranch,
+                    name: github.login,
+                    email: `${github.login}@users.noreply.github.com`,
+                    message: commitMessage,
+                  },
+                }
+              : {}),
           },
           Context.current().cancellationSignal,
         );
@@ -264,31 +267,52 @@ export function createCodeSessionActivities(
       }
 
       const activeMs = Date.now() - startedAt;
-      if (result.stdout.trim()) {
+      const readableMessage = stripStageMarkerLines(job.message);
+      if (readableMessage) {
         await appendCodeSessionTerminalChunk(runtime, workspaceId, {
           sessionId,
           stage,
           stream: 'stdout',
-          chunk: result.stdout.trim(),
+          chunk: readableMessage,
         });
       }
-      if (result.stderr.trim()) {
+      if (job.log?.trim()) {
         await appendCodeSessionTerminalChunk(runtime, workspaceId, {
           sessionId,
           stage,
           stream: 'stderr',
-          chunk: result.stderr.trim(),
+          chunk: job.log.trim(),
         });
       }
-      const combinedOutput = `${result.stdout}\n${result.stderr}`;
-      const succeeded = result.state === 'completed' && result.exitCode === 0;
-      const parsed = parseCodeStageMarker(combinedOutput);
+      if (stage === 'code' && job.pushed) {
+        await appendCodeSessionTerminalChunk(runtime, workspaceId, {
+          sessionId,
+          stage,
+          stream: 'system',
+          chunk: `Pushed ${job.files.length} changed file(s) to ${session.sessionBranch}.`,
+        });
+      }
+
+      const parsed = parseCodeStageMarker(job.message);
+      const failureDetail = (
+        job.log?.trim() ||
+        readableMessage ||
+        `Stage ${stage} ended with status ${job.status}.`
+      ).slice(-2000);
       const outcome: CodeSessionStageOutcome = (() => {
         if (parsed?.kind === 'limit') return parsed;
-        if (!succeeded) {
+        if (job.status !== 'completed') {
+          const prefix =
+            job.status === 'clone-failed'
+              ? `Could not clone ${session.repository} (${cloneBranch}): `
+              : job.status === 'push-failed'
+                ? `Could not push changes to ${session.sessionBranch}: `
+                : job.status === 'timed-out'
+                  ? `Stage ${stage} timed out: `
+                  : '';
           return {
             kind: 'blocked',
-            reason: combinedOutput.trim().slice(-2000) || `Stage ${stage} exited with state ${result.state}.`,
+            reason: `${prefix}${failureDetail}`.slice(0, 4000),
           };
         }
         if (stage === 'verify') {
@@ -296,15 +320,24 @@ export function createCodeSessionActivities(
           if (parsed?.kind === 'blocked') return parsed;
           return {
             kind: 'blocked',
-            reason:
-              combinedOutput.trim().slice(-2000) || 'Verification finished without a structured verification result.',
+            reason: readableMessage.slice(-2000) || 'Verification finished without a structured verification result.',
           };
         }
-        if (parsed) return parsed;
+        if (parsed) {
+          if (parsed.kind === 'done') {
+            return {
+              ...parsed,
+              changedFiles: parsed.changedFiles.length > 0 ? parsed.changedFiles : job.files,
+              diffSummary: parsed.diffSummary ?? (job.diff ? job.diff.slice(0, 8000) : undefined),
+            };
+          }
+          return parsed;
+        }
         return {
           kind: 'done',
-          summary: combinedOutput.trim().slice(-2000) || `${stage} completed.`,
-          changedFiles: [],
+          summary: readableMessage.slice(-2000) || `${stage} completed.`,
+          changedFiles: job.files,
+          ...(job.diff ? { diffSummary: job.diff.slice(0, 8000) } : {}),
           checks: [],
           screenshots: [],
         };
@@ -342,10 +375,19 @@ export function createCodeSessionActivities(
     },
 
     async advanceCodeSession(workspaceId, sessionId, patch) {
-      return advanceCodeSessionStage(runtime, workspaceId, sessionId, {
+      const updated = await advanceCodeSessionStage(runtime, workspaceId, sessionId, {
         ...patch,
         usageLimitUntil: patch.usageLimitUntil ? new Date(patch.usageLimitUntil) : null,
       });
+      if (patch.stage === 'failed' && patch.errorMessage) {
+        await appendCodeSessionTerminalChunk(runtime, workspaceId, {
+          sessionId,
+          stage: 'failed',
+          stream: 'stderr',
+          chunk: `Session failed: ${patch.errorMessage}`,
+        }).catch(() => undefined);
+      }
+      return updated;
     },
 
     async openCodeSessionPullRequest(workspaceId, sessionId, draft) {
@@ -454,45 +496,40 @@ export function createCodeSessionActivities(
           `Inspect the git diff ("git diff origin/${session.baseBranch}...HEAD") for bugs, security flaws, or missing tests.`,
           'Emit a single final line: TULIPFARM_CODE_STAGE {"kind":"done","summary":"<concise review>"} if approved, or TULIPFARM_CODE_STAGE {"kind":"blocked","reason":"<issues to fix>"} if changes are requested.',
         ].join('\n');
-        const limitSeconds = String(Math.floor(codingRunLimitMs / 1000) - 60);
-        const result = await runIsolated(
-          coding.backend,
-          coding.configuration,
-          {
-            workspaceId,
-            areaId: sessionId,
-            template: reviewer.agent,
-            command: {
-              program: 'bash',
-              args: [
-                '-c',
-                codingRunScript(reviewer.agent),
-                '--',
-                session.repository,
-                reviewPrompt,
-                session.sessionBranch,
-                reviewer.agent,
-                limitSeconds,
-                '',
-                '',
-                '',
-                '',
-              ],
+        Context.current().heartbeat({ stage: 'review', sessionId, reviewer: reviewer.agent });
+        const heartbeatTimer = setInterval(() => {
+          Context.current().heartbeat({ stage: 'review', sessionId, reviewer: reviewer.agent });
+        }, 30_000);
+        let job;
+        try {
+          job = await runCodingJob(
+            coding.backend,
+            coding.configuration,
+            {
+              workspaceId,
+              areaId: sessionId,
+              repository: session.repository,
+              task: reviewPrompt,
+              branch: session.sessionBranch,
+              agent: reviewer.agent,
+              planToken: plan.token,
+              githubToken: github.token,
             },
-            secrets: codingRunSecrets(reviewer.agent, plan.token, github.token),
-            timeoutMs: codingRunLimitMs,
-          },
-          Context.current().cancellationSignal,
-        );
-        const combined = `${result.stdout}\n${result.stderr}`;
-        const parsed = parseCodeStageMarker(combined);
-        const approved = result.state === 'completed' && result.exitCode === 0 && parsed?.kind === 'done';
+            Context.current().cancellationSignal,
+          );
+        } finally {
+          clearInterval(heartbeatTimer);
+        }
+        const parsed = parseCodeStageMarker(job.message);
+        const approved = job.status === 'completed' && parsed?.kind === 'done';
+        const readable = stripStageMarkerLines(job.message);
         const summary =
           parsed?.kind === 'done'
             ? parsed.summary
             : parsed?.kind === 'blocked'
               ? parsed.reason
-              : combined.trim().slice(-1200) || `Review by ${codingAgentLabels[reviewer.agent]} did not approve.`;
+              : (job.log?.trim() || readable).slice(-1200) ||
+                `Review by ${codingAgentLabels[reviewer.agent]} did not approve.`;
         verdicts.push({
           reviewerAgent: reviewer.agent,
           reviewerModel: reviewer.model,
@@ -562,11 +599,8 @@ export function createCodeSessionActivities(
       }
 
       // Best-effort remote session branch cleanup after squash merge.
-      await githubApiRequest(
-        github.token,
-        'DELETE',
-        `/repos/${session.repository}/git/refs/heads/${encodeURIComponent(session.sessionBranch)}`,
-      );
+      const encodedBranch = session.sessionBranch.split('/').map(encodeURIComponent).join('/');
+      await githubApiRequest(github.token, 'DELETE', `/repos/${session.repository}/git/refs/heads/${encodedBranch}`);
 
       const message = `Squash-merged PR #${session.pullRequestNumber} (${session.sessionBranch} into ${session.baseBranch}).`;
       await appendCodeSessionTerminalChunk(runtime, workspaceId, {

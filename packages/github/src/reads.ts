@@ -193,6 +193,41 @@ export function createGitHubReads(options: {
       );
       return { token, login: chosen.login };
     },
+    /**
+     * The access token and login of the member's GitHub account on for coding for an active code session.
+     * Verifies the session exists in `tf_code_sessions`, belongs to the actor, and is not in a terminal stage.
+     */
+    async codeSessionToken(
+      workspaceId: string,
+      actor: HumanActor,
+      sessionId: string,
+      login?: string | null,
+    ): Promise<{ token: string; login: string } | null> {
+      const chosen = await options.accounts.codingAccount(workspaceId, actor, login);
+      if (!chosen) return null;
+      const validSessionId = z.uuid().parse(sessionId);
+      const token = await options.accounts.withCredential(
+        workspaceId,
+        actor,
+        chosen.accountId,
+        async credential => credential.accessToken,
+        undefined,
+        async (tx, owner) => {
+          const live = await tx.client.query(
+            `SELECT origin_conversation_id FROM ${table(tx, 'tf_code_sessions')}
+             WHERE id=$1 AND owner_membership_id=$2 AND stage NOT IN ('merged', 'stopped', 'failed')`,
+            [validSessionId, owner.membershipId],
+          );
+          if (!live.rowCount) throw new AccessDenied();
+          const originConversationId = live.rows[0]?.origin_conversation_id as string | null | undefined;
+          if (originConversationId) {
+            await requireNoMcpDerived(tx, [{ kind: 'private-conversation', conversationId: originConversationId }]);
+          }
+        },
+        true,
+      );
+      return { token, login: chosen.login };
+    },
     async prepareDownload(workspaceId: string, actor: HumanActor, origin: ReadOrigin, callId: string, input: unknown) {
       denyMcpEgress();
       const operation = githubDownloadSchema.parse(input);
