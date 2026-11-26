@@ -186,10 +186,7 @@ test('chat row writes after untrusted content become member-approved review draf
     assert.equal(draft.operation, 'create');
     assert.match(draft.reviewSummary, /1 row in "Notes".*ready in this chat/);
     assert.match(draft.reviewSummary, /No rows from this card have been written/);
-    assert.match(
-      draft.instruction,
-      /^No row has been created\..*choose Approve\. Never treat chat text as approval\.$/,
-    );
+    assert.match(draft.instruction, /^No row has been created yet\..*confirm in a later chat message/);
     assert.equal('id' in draft, false);
     assert.deepEqual(await live(), before);
 
@@ -720,7 +717,7 @@ test('chat row writes after untrusted content become member-approved review draf
     };
     const stale = await chatTool(update);
     assert.equal(stale.result.status, 'review-required');
-    assert.match(stale.result.instruction, /^No row has been updated\./);
+    assert.match(stale.result.instruction, /^No row has been updated yet\./);
     const view = await drafts.read(w.id, owner.userId, stale.chatId, stale.result.draftId);
     assert.deepEqual(view.rowCurrent, { [note.id]: text('original') });
 
@@ -753,7 +750,7 @@ test('chat row writes after untrusted content become member-approved review draf
       recordId: existing,
       expectedToken: updated.token,
     });
-    assert.match(removal.result.instruction, /^No row has been deleted\./);
+    assert.match(removal.result.instruction, /^No row has been deleted yet\./);
     assert.equal((await live()).includes(existing), true);
     assert.deepEqual((await drafts.read(w.id, owner.userId, removal.chatId, removal.result.draftId)).rowCurrent, {
       [note.id]: text('from web'),

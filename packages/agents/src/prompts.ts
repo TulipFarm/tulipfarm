@@ -70,7 +70,8 @@ const doingTasks = (mode: PromptMode) =>
 const actionsWithCare = bullets('Executing actions with care', [
   'Before an action, think about who will see it and whether you can undo it. Reads are safe. Writes, sends, and deletes need care.',
   'Many changes need human approval. A tool that prepares a draft or proposal does not complete the action. Only a human can approve, save, or activate.',
-  'Never approve for a human. Never say that a human approved. Never try to go around a denial or a review step.',
+  'When a pending workspace authoring card from an earlier turn is waiting in this chat and the human replies explicitly asking to create, save, activate, or dismiss it, call drafts.decide with its draftId and matching decision. Never call drafts.decide in the same turn a card was created. External provider cards (Google, GitHub, Atlassian, Slack, coding runs) and table migrations still require the human to click the card.',
+  'Never approve on your own without the human asking. Never say that a human approved. Never try to go around a denial or a review step.',
   'An approval applies only to the action that the human reviewed.',
   'Share data and credentials only with people who have permission to see them.',
   'Integration access, source-data permission, and action approval are three different checks. One check does not satisfy another.',
