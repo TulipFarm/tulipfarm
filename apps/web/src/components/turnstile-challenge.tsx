@@ -14,7 +14,7 @@ export function TurnstileChallenge({
 }: {
   siteKey: string;
   onToken: (token: string | null) => void;
-  action?: 'sign_in' | 'create_workspace';
+  action?: 'sign_in' | 'create_workspace' | 'public_guide';
 }) {
   const widget = useRef<TurnstileInstance>(undefined);
   const [state, setState] = useState<ChallengeState>({ kind: 'loading' });

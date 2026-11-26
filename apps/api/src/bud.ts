@@ -1,4 +1,7 @@
+import type { Pool } from 'pg';
 import { z } from 'zod';
+import { takeOnboardingProfile } from '@tulipfarm/workspaces/onboarding';
+import { onboardingSeed } from './onboarding-continuation.ts';
 import type { FastifyInstance } from 'fastify';
 import { AccessDenied } from '@tulipfarm/access';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
@@ -43,6 +46,8 @@ export function registerBud(
   dependencies: {
     auth: Pick<ReturnType<typeof registerAuth>['auth'], 'api'>;
     service: ReturnType<typeof createBudAssistant>;
+    /** The control database, which keeps the creator's onboarding profile. */
+    pool?: Pool;
   },
 ) {
   app.register(async routes => {
@@ -71,6 +76,22 @@ export function registerBud(
       '/workspaces/:workspaceId/bud',
       { logLevel: 'silent', schema: schema('commandBudV1', budCommandSchema) },
       request => dependencies.service.command(params.parse(request.params).workspaceId, user(request), request.body),
+    );
+    // The creator's first visit after the onboarding chat: Bud continues it once. Anyone else, or a second call, gets
+    // Bud as it is.
+    routes.post(
+      '/workspaces/:workspaceId/bud/onboarding',
+      { logLevel: 'silent', schema: schema('continueBudOnboardingV1') },
+      async request => {
+        const { workspaceId } = params.parse(request.params);
+        const userId = user(request);
+        const continued =
+          dependencies.pool &&
+          (await takeOnboardingProfile(dependencies.pool, workspaceId, userId, saved =>
+            dependencies.service.continueOnboarding(workspaceId, userId, onboardingSeed(saved)),
+          ));
+        return continued || dependencies.service.read(workspaceId, userId);
+      },
     );
   });
 }

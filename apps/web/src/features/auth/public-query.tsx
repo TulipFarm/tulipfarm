@@ -11,6 +11,8 @@ const optionsSchema = z.object({
   // Sign-in methods the server has credentials for; hidden unless the API reports them.
   google: z.boolean().default(false),
   magicLink: z.boolean().default(false),
+  // The chat-onboarding flag, answered for signed-out visitors.
+  chatOnboarding: z.boolean().default(false),
 });
 const PublicQueryContext = createContext<QueryClient | null>(null);
 
@@ -39,7 +41,11 @@ function takeEarlyOptions(url: string) {
 }
 
 export function PublicAuthQueryProvider({ children }: { children: ReactNode }) {
+  // A nested provider reuses the outer client, so a page that reads the options before
+  // rendering AuthLayout does not fetch them twice.
+  const parent = useContext(PublicQueryContext);
   const [client] = useState(() => {
+    if (parent) return parent;
     const created = new QueryClient();
     // Options that already arrived seed the query, so the form doesn't grow when they land.
     const early = globalThis.window?.__tfAuthOptions;
@@ -52,9 +58,10 @@ export function PublicAuthQueryProvider({ children }: { children: ReactNode }) {
     return created;
   });
   useEffect(() => {
+    if (client === parent) return;
     client.mount();
     return () => client.unmount();
-  }, [client]);
+  }, [client, parent]);
   return <PublicQueryContext.Provider value={client}>{children}</PublicQueryContext.Provider>;
 }
 

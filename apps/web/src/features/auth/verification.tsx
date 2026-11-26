@@ -13,7 +13,7 @@ export function AuthVerification({
   action = 'sign_in',
 }: {
   onToken: (token: string | null) => void;
-  action?: 'sign_in' | 'create_workspace';
+  action?: 'sign_in' | 'create_workspace' | 'public_guide';
 }) {
   const options = useAuthOptions();
   const unchallenged = options.data?.turnstileSiteKey === null;

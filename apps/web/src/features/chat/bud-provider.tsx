@@ -17,6 +17,7 @@ import { MaximizeIcon, MinusIcon } from '@tulipfarm/icons';
 import { useLocation, useNavigate, useRouter } from '@tanstack/react-router';
 import { budStateSchema, type BudState } from '@tulipfarm/conversations/bud-contracts';
 import { apiOrigin } from '@/lib/auth';
+import { takeOnboardingToContinue } from '@/lib/onboarding';
 import { jsonResponse, readJson, requestSignal, responseError } from '@/lib/http';
 import { featureKey, freshness, useFeatureRead } from '@/lib/query';
 import { useFeatureContext } from '@/lib/query/provider';
@@ -55,6 +56,18 @@ async function request(workspaceId: string, signal: AbortSignal, command?: BudCo
     signal: requestSignal(signal),
     cache: 'no-store',
     ...(command ? { method: 'POST', body: command } : {}),
+  });
+  const body = await readJson(response);
+  if (!response.ok) throw new BudRequestError(response.status, responseError(body, 'bud-unavailable'));
+  return budStateSchema.parse(body);
+}
+/** Bud continues the creator's onboarding chat; the API does it once and otherwise returns Bud as it is. */
+async function continueOnboarding(workspaceId: string) {
+  const response = await jsonResponse(`${apiOrigin}/v1/workspaces/${workspaceId}/bud/onboarding`, {
+    method: 'POST',
+    body: {},
+    cache: 'no-store',
+    signal: AbortSignal.timeout(30_000),
   });
   const body = await readJson(response);
   if (!response.ok) throw new BudRequestError(response.status, responseError(body, 'bud-unavailable'));
@@ -148,6 +161,25 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
       mounted.current = false;
     };
   }, []);
+  // The first landing after sign-up: Bud's chat opens full page, continuing the onboarding chat and starting to build
+  // the agents picked there.
+  const ready = !!data;
+  useEffect(() => {
+    if (!ready || !takeOnboardingToContinue(workspace.id)) return;
+    void continueOnboarding(workspace.id)
+      .then(async next => {
+        if (!mounted.current || !current()) return;
+        runtime.client.setQueryData(featureKey(scope, key), next);
+        if (!next.conversationId) return;
+        await changes.created(next.conversationId);
+        await navigate({
+          to: '/$workspaceSlug/chat/$chatId',
+          params: { workspaceSlug: workspace.slug, chatId: next.conversationId },
+          replace: true,
+        });
+      })
+      .catch(() => {});
+  }, [ready, workspace.id, workspace.slug, current, runtime, scope, changes, navigate]);
   const command = useCallback(
     async (input: BudCommand) => {
       if (writing.current || !current()) return null;

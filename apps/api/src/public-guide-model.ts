@@ -130,7 +130,8 @@ export function publicGuideWarnings(env: NodeJS.ProcessEnv = process.env) {
     : [];
 }
 
-export function publicGuideModel(env: NodeJS.ProcessEnv = process.env, fetcher: typeof fetch = fetch) {
+/** The guide model's chat-completions client, or null when the guide has no served model. */
+export function guideClient(env: NodeJS.ProcessEnv, fetcher: typeof fetch) {
   const selected = publicGuideRoute(env);
   if (!selected) return null;
   const config = inferenceRouteSchema.parse(selected.route);
@@ -171,6 +172,13 @@ export function publicGuideModel(env: NodeJS.ProcessEnv = process.env, fetcher: 
       }),
     );
   }
+  return { model, request, classificationSchema, chunkSchema };
+}
+
+export function publicGuideModel(env: NodeJS.ProcessEnv = process.env, fetcher: typeof fetch = fetch) {
+  const client = guideClient(env, fetcher);
+  if (!client) return null;
+  const { model, request, classificationSchema, chunkSchema } = client;
   return async (history: GuideMessage[], message: string, emit: (text: string) => void, signal: AbortSignal) => {
     return observeInference({ provider: 'azure', model, operation: 'chat' }, async report => {
       const classifier = [
