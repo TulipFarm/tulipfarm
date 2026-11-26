@@ -15,6 +15,12 @@ export const base = `/v1/workspaces/${workspace.id}`;
 export const tableId = '55555555-5555-4555-8555-555555555555';
 export const agentId = '66666666-6666-4666-8666-666666666666';
 export const teammate = governance.members[1];
+export const teammatePhoto = `${base}/workspace-members/77777777-7777-4777-8777-777777777777/photos/${'b'.repeat(64)}`;
+// A 1×1 PNG, served for the teammate's Members table photo.
+const photoPng = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+  'base64',
+);
 export const revision = 'a'.repeat(40);
 const options = Object.entries(runStateOptions).map(([state, id]) => ({ id, label: state, retired: false }));
 export const customField = {
@@ -135,11 +141,24 @@ export function tasksApi() {
       if (path === `${base}/actors`)
         return json({
           members: [
-            { membershipId: membership.membershipId, name: 'Ada', email: 'ada@example.test', current: true },
-            { membershipId: teammate.id, name: teammate.name, email: teammate.email, current: false },
+            {
+              membershipId: membership.membershipId,
+              name: 'Ada',
+              email: 'ada@example.test',
+              photo: null,
+              current: true,
+            },
+            {
+              membershipId: teammate.id,
+              name: teammate.name,
+              email: teammate.email,
+              photo: teammatePhoto,
+              current: true,
+            },
           ],
           agents: [{ id: agentId, name: 'Ops Helper', available: true }],
         });
+      if (path === teammatePhoto) return route.fulfill({ status: 200, contentType: 'image/png', body: photoPng });
       if (path === `${base}/tasks-table`) return json({ tableId });
       if (path === `${base}/tasks/activity`) return json(activity());
       if (path === `${base}/tasks/keys`)

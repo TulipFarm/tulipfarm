@@ -17,7 +17,13 @@ import { TableRequestError } from './request-state';
 
 export const actorDirectorySchema = z.object({
   members: z.array(
-    z.object({ membershipId: z.uuid(), name: z.string(), email: z.string().nullable(), current: z.boolean() }),
+    z.object({
+      membershipId: z.uuid(),
+      name: z.string(),
+      email: z.string().nullable(),
+      photo: z.string().nullable().default(null),
+      current: z.boolean(),
+    }),
   ),
   agents: z.array(z.object({ id: z.uuid(), name: z.string(), available: z.boolean() })),
 });
@@ -70,6 +76,13 @@ export function actorLabel(directory: ActorDirectory | undefined, actor: Actor) 
   return agent ? agent.name : 'Deleted agent';
 }
 
+/** The member's photo URL, or null for agents, unknown members and members without a photo. */
+export function actorImage(workspaceId: string, directory: ActorDirectory | undefined, actor: Actor) {
+  if (actor.type !== 'member') return null;
+  const photo = directory?.members.find(item => item.membershipId === actor.id)?.photo;
+  return photo?.startsWith(`/v1/workspaces/${workspaceId}/workspace-members/`) ? `${apiOrigin}${photo}` : null;
+}
+
 export function ActorName({
   workspaceId,
   actor,
@@ -89,7 +102,7 @@ export function ActorName({
         {actor.type === 'agent' ? (
           <AgentAvatar agentId={actor.id} name={label} size="sm" />
         ) : (
-          <EntityAvatar seed={actor.id} name={label} size="sm" />
+          <EntityAvatar seed={actor.id} name={label} image={actorImage(workspaceId, data, actor)} size="sm" />
         )}
       </span>
       <span

@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { CheckIcon, MoreIcon, UserIcon } from '@tulipfarm/icons';
 import { createdInvitationSchema, invitationLinkSchema } from '@tulipfarm/workspaces/governance-contracts';
+import { EntityAvatar } from '@tulipfarm/sprout/avatar';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
 import { SearchField } from '@tulipfarm/sprout/search-field';
@@ -37,6 +38,7 @@ type Row = {
   kind: 'member' | 'invite';
   name: string;
   email: string;
+  image: string | null;
   sortName: string;
   admin: string;
   teams: string[];
@@ -66,6 +68,7 @@ export function MembersList({ page }: { page: AccessPage }) {
     kind: 'member',
     name: member.name,
     email: member.email,
+    image: member.image,
     sortName: personName(member).toLowerCase(),
     admin: member.role === 'admin' ? 'Admin' : '',
     teams: teamsOf(member.id),
@@ -80,6 +83,7 @@ export function MembersList({ page }: { page: AccessPage }) {
           kind: 'invite',
           name: '',
           email: item.email!,
+          image: null,
           sortName: item.email!.toLowerCase(),
           admin: item.role === 'admin' ? 'Admin' : '',
           teams: item.teams.map(team => team.name),
@@ -351,23 +355,33 @@ export function MembersList({ page }: { page: AccessPage }) {
             header: 'Name / email',
             sort: true,
             cell: row => (
-              <span className="flex min-w-0 flex-col">
-                {row.kind === 'member' && (row.self || admin) ? (
-                  <span className="font-medium wrap-anywhere underline-offset-4 hover:underline">
-                    <Link to="/$workspaceSlug/members/$membershipId" params={{ workspaceSlug, membershipId: row.id }}>
-                      {personName(row)}
-                      {row.self && ' (you)'}
-                    </Link>
-                  </span>
-                ) : (
-                  <span className="font-medium wrap-anywhere">
-                    {row.kind === 'invite' ? row.email : personName(row)}
-                  </span>
-                )}
-                {row.kind === 'member' && row.name && (
-                  <span className="text-xs text-muted-foreground wrap-anywhere">{row.email}</span>
-                )}
-                {row.kind === 'invite' && <Delivery invitation={row.invitation!} />}
+              <span className="flex min-w-0 items-center gap-3">
+                <span aria-hidden="true" className="flex shrink-0">
+                  <EntityAvatar
+                    seed={row.kind === 'member' ? row.id : row.email}
+                    name={row.kind === 'member' ? personName(row) : row.email}
+                    image={row.image}
+                    size="sm"
+                  />
+                </span>
+                <span className="flex min-w-0 flex-col">
+                  {row.kind === 'member' && (row.self || admin) ? (
+                    <span className="font-medium wrap-anywhere underline-offset-4 hover:underline">
+                      <Link to="/$workspaceSlug/members/$membershipId" params={{ workspaceSlug, membershipId: row.id }}>
+                        {personName(row)}
+                        {row.self && ' (you)'}
+                      </Link>
+                    </span>
+                  ) : (
+                    <span className="font-medium wrap-anywhere">
+                      {row.kind === 'invite' ? row.email : personName(row)}
+                    </span>
+                  )}
+                  {row.kind === 'member' && row.name && (
+                    <span className="text-xs text-muted-foreground wrap-anywhere">{row.email}</span>
+                  )}
+                  {row.kind === 'invite' && <Delivery invitation={row.invitation!} />}
+                </span>
               </span>
             ),
           },

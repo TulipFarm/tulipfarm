@@ -19,7 +19,12 @@ const text = (value: unknown) => {
  * Active members with the name and email from the workspace's Members table. A member whose profile has not been
  * projected yet, or a workspace without the table, reads as "Unnamed member" with no email.
  */
-export async function activeMembers(tx: AgentTransaction, membershipIds?: readonly string[]) {
+export async function activeMembers(tx: AgentTransaction, membershipIds?: readonly string[]): Promise<MemberSummary[]> {
+  return (await activeMemberProfiles(tx, membershipIds)).map(({ photo: _photo, ...member }) => member);
+}
+
+/** Active members as {@link activeMembers} reads them, plus each one's Members table photo path, if any. */
+export async function activeMemberProfiles(tx: AgentTransaction, membershipIds?: readonly string[]) {
   const rows = z
     .array(z.object({ membership_id: z.uuid(), user_id: z.string(), member_id: z.uuid().nullable() }))
     .parse(
@@ -46,7 +51,7 @@ export async function activeMembers(tx: AgentTransaction, membershipIds?: readon
     } catch (error) {
       if (!(error instanceof GenerationError)) throw error;
     }
-  return rows.map((row): MemberSummary => {
+  return rows.map((row): MemberSummary & { photo: string | null } => {
     const record = row.member_id ? values.get(row.member_id) : undefined;
     const email =
       text(record?.[workspaceMemberFields.contactEmail]) ?? text(record?.[workspaceMemberFields.accountEmail]);
@@ -55,6 +60,7 @@ export async function activeMembers(tx: AgentTransaction, membershipIds?: readon
       userId: row.user_id,
       name: text(record?.[workspaceMemberFields.name]) ?? email ?? unnamed,
       email,
+      photo: text(record?.[workspaceMemberFields.photo]),
     };
   });
 }

@@ -3,7 +3,7 @@ import { chromium } from 'playwright';
 import { taskFields } from '@tulipfarm/tables/tasks-table';
 import { membership } from './chat-query.fixture.mjs';
 import { startBuiltApp, builderBrowserOptions, captureBrowserFailure } from './built-app.fixture.mjs';
-import { tableId, tasksApi, until } from './tasks.fixture.mjs';
+import { tableId, tasksApi, teammate, teammatePhoto, until } from './tasks.fixture.mjs';
 
 // The new task dialog: compact chips with the creator as Reporter, a reminder for the assignee set right after the
 // task is created, Create more to keep the dialog open for the next task, and ⌘/Ctrl+Enter to create.
@@ -43,6 +43,9 @@ try {
   await page.getByText('Reminders go to the assignee. Assign the task to a person first.').waitFor();
   await page.keyboard.press('Escape');
   await chip('Assignee: Assignee').click();
+  // Every member is listed, not only the person assigning, each with their Members table photo.
+  const teammateOption = page.getByRole('option', { name: teammate.name });
+  await teammateOption.locator(`img[src$="${teammatePhoto}"]`).waitFor();
   await page.getByRole('option', { name: 'Ada' }).click();
   await chip('Assignee: Ada').waitFor();
   await chip('Reminder: Reminder').click();
