@@ -234,6 +234,7 @@ export function createDocumentStore<Context, Source extends { kind: string }>({
     if (prior && (prior.source_id !== input.sourceId || prior.native_id !== input.nativeId || prior.tombstoned_at))
       throw new KnowledgeError('conflict');
     if ((prior?.observed_revision_id ?? null) !== input.expectedRevisionId) throw new KnowledgeError('conflict');
+    if (prior?.observed_revision_id) await repository(tx).pruneRevisions([input.documentId]);
     const usage = z
       .object({ documents: z.number(), revisions: z.number(), bytes: z.coerce.number() })
       .parse((await repository(tx).documentUsage([input.documentId])).rows[0]);

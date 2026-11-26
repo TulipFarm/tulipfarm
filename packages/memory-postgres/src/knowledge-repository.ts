@@ -72,6 +72,9 @@ export function createPostgresKnowledgeRepository(
     insertWork(values: [revisionId: string]) {
       return client.query(`INSERT INTO ${table('work')} (revision_id) VALUES ($1)`, values);
     },
+    pruneRevisions(values: [documentId: string]) {
+      return client.query(`SELECT ${table('prune_revisions')}($1) AS pruned`, values);
+    },
     observeDocument(values: [documentId: string, revisionId: string]) {
       return client.query(
         `UPDATE ${table('documents')} SET observed_revision_id=$2,lexical_publication_id=NULL WHERE id=$1`,

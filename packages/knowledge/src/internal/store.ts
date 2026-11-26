@@ -18,6 +18,7 @@ import {
   knowledgeAuthorization,
   knowledgeAccessErrors,
   tracksKnowledgeUsage,
+  prunesKnowledgeRevisions,
   transactionRepository,
   type KnowledgeRuntime as Runtime,
   type KnowledgeTransaction,
@@ -47,13 +48,16 @@ export function createKnowledgeStore({
 }: KnowledgeOptions) {
   return createDocumentStore<KnowledgeTransaction, SourceDependency>({
     runtime: knowledgeTenantRuntime(runtime),
-    repository: transactionRepository(tx =>
-      createPostgresKnowledgeRepository(
+    repository: transactionRepository(tx => {
+      const repository = createPostgresKnowledgeRepository(
         tx.client,
         { schema: tx.schema, tablePrefix: 'tf_knowledge_' },
         { usageTotals: tracksKnowledgeUsage(tx) },
-      ),
-    ),
+      );
+      return prunesKnowledgeRevisions(tx)
+        ? repository
+        : { ...repository, pruneRevisions: async () => ({ rows: [], rowCount: 0 }) };
+    }),
     authorization: knowledgeAuthorization({
       ...(requireExternalSource ? { requireExternalSource } : {}),
       ...(requireExternalProof ? { requireExternalProof } : {}),
