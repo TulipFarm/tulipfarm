@@ -1215,6 +1215,112 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         assert.equal(await live(), before);
       });
 
+      await t.test(
+        'a repository that cannot be listed is set aside on its own without resetting the others',
+        async () => {
+          const before = await live();
+          const head = id => createHash('sha1').update(`marked:${id}`).digest('hex');
+          const listed = id => [...state.repos.get(id).items.keys()].map(nativeId => observation(id, nativeId));
+          const calls = [];
+          let failure = null;
+          state.lister = async (id, cursor, history) => {
+            calls.push({ id, cursor, mark: history?.mark });
+            if (id === '7001' && failure) throw failure(cursor);
+            return { observations: listed(id), mark: { head: head(id) }, nextCursor: null };
+          };
+          const cursor = async () =>
+            (await db.platform.query(`SELECT cursor FROM ${table('github_sources')} WHERE source_id=$1`, [sourceId]))
+              .rows[0].cursor;
+          const pass = async () => {
+            await db.platform.query(
+              `UPDATE ${table('github_sources')} SET next_attempt_at=clock_timestamp() WHERE source_id=$1`,
+              [sourceId],
+            );
+            const work = (await github.due(ws.id)).find(w => w.sourceId === sourceId);
+            assert.equal((await github.process(work)).disposition, 'ready');
+          };
+          try {
+            await sync();
+            const marks = (await cursor()).marks;
+            assert.equal(marks['7001'].head, head('7001'));
+            for (const error of [
+              new GitHubCorpusError('invalid-cursor'),
+              new GitHubCorpusError('not-found'),
+              new GitHubCorpusError('source-changed'),
+              new TypeError('a tree entry the provider cannot handle'),
+            ]) {
+              failure = () => error;
+              calls.length = 0;
+              await pass();
+              assert.deepEqual(
+                calls.map(call => call.id),
+                ['7001', '7002'],
+                `${error.message}: the repository after it is still listed`,
+              );
+              assert.equal(calls[1].mark?.head, head('7002'), 'the others stay incremental');
+              const listedSource = (await github.list(ws.id, ws.userId)).items.find(s => s.sourceId === sourceId);
+              assert.equal(listedSource.syncState, 'ready');
+              assert.ok(listedSource.repositories.every(r => r.state === 'active'));
+              const after = await cursor();
+              assert.deepEqual(after.marks, marks, 'no repository loses its mark');
+              assert.ok(after.reconciledAt, 'the last full pass is kept');
+              assert.equal(await live(), before, 'a set-aside repository never tombstones');
+            }
+
+            // A saved listing cursor GitHub no longer accepts lists that repository again from its start, once.
+            let rejected = 0;
+            failure = cursor =>
+              cursor === 'resume' && rejected++ === 0 ? new GitHubCorpusError('invalid-cursor') : null;
+            state.lister = async (id, cursor, history) => {
+              calls.push({ id, cursor, mark: history?.mark });
+              const error = id === '7001' ? failure(cursor) : null;
+              if (error) throw error;
+              return {
+                observations: listed(id),
+                mark: { head: head(id) },
+                nextCursor: id === '7001' && cursor === null ? 'resume' : null,
+              };
+            };
+            calls.length = 0;
+            await pass();
+            assert.deepEqual(
+              calls.map(call => [call.id, call.cursor]),
+              [
+                ['7001', null],
+                ['7001', 'resume'],
+                ['7001', null],
+                ['7001', 'resume'],
+                ['7002', null],
+              ],
+            );
+            const restarted = (await github.list(ws.id, ws.userId)).items.find(s => s.sourceId === sourceId);
+            assert.equal(restarted.failure, null, 'the restarted repository listed to the end');
+
+            // A repository whose cursor keeps failing is set aside instead of restarting forever.
+            failure = cursor => (cursor === 'resume' ? new GitHubCorpusError('invalid-cursor') : null);
+            calls.length = 0;
+            await pass();
+            assert.deepEqual(
+              calls.map(call => [call.id, call.cursor]),
+              [
+                ['7001', null],
+                ['7001', 'resume'],
+                ['7001', null],
+                ['7001', 'resume'],
+                ['7002', null],
+              ],
+            );
+            assert.deepEqual((await cursor()).marks, marks);
+          } finally {
+            state.lister = null;
+          }
+          await sync();
+          const recovered = (await github.list(ws.id, ws.userId)).items.find(s => s.sourceId === sourceId);
+          assert.equal(recovered.failure, null);
+          assert.equal(await live(), before);
+        },
+      );
+
       await t.test('a transient owner access check is retried instead of blocking the repository', async () => {
         let failures = 0;
         state.accessError = userId =>

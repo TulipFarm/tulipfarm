@@ -110,6 +110,7 @@ const commitDetailSchema = commitSchema.extend({ files: z.array(commitFileSchema
 // The Git database view of a commit has no GitHub logins or files; it stands in when GitHub cannot return the diff.
 const gitCommitSchema = z.object({
   sha: z.string().regex(shaPattern),
+  tree: z.object({ sha: z.string().regex(shaPattern) }).optional(),
   message: z.string().max(limits.responseBytes),
   author: gitPersonSchema,
   committer: gitPersonSchema,
@@ -127,6 +128,11 @@ const treeEntrySchema = z.object({
   size: z.number().int().nonnegative().optional(),
 });
 type TreeEntry = z.infer<typeof treeEntrySchema>;
+// Git's empty tree, in SHA-1 and SHA-256 repositories: the root of a commit with no files.
+const emptyTrees = new Set([
+  '4b825dc642cb6eb9a060e54bf8d69288fbee4904',
+  '6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321',
+]);
 const treeSchema = z.object({ truncated: z.boolean().optional(), tree: z.array(treeEntrySchema).max(200000) });
 // A comparison lists changed files only on its first page, and never more than 300 for the whole comparison.
 const compareFileLimit = 300;
@@ -1001,10 +1007,26 @@ export function createGitHubCorpusProvider(options: {
     if (response.status !== 200) throw new GitHubCorpusError('invalid-response');
     return parse(treeSchema, response.json());
   }
+  /**
+   * A commit's root tree. GitHub answers 404 for the tree of a commit with no files (git's empty tree), so a missing
+   * root is checked against the commit itself: an empty root lists no files, anything else stays an invalid cursor.
+   */
+  async function rootTree(token: string, body: RepositoryBody, commit: string, recursive = false) {
+    try {
+      return await tree(token, body, commit, recursive);
+    } catch (error) {
+      if (!(error instanceof GitHubCorpusError) || error.code !== 'invalid-cursor') throw error;
+      const response = await call(token, 'github-commit', `/repositories/${body.id}/git/commits/${commit}`);
+      const found = response.status === 200 ? gitCommitSchema.safeParse(response.json()) : null;
+      if (found?.success && found.data.sha === commit && emptyTrees.has(found.data.tree?.sha ?? ''))
+        return { truncated: false, tree: [] as TreeEntry[] };
+      throw error;
+    }
+  }
   // The whole tree in one response when GitHub returns it complete and small enough; otherwise null, and the tree is walked.
   async function recursiveTree(token: string, body: RepositoryBody, commit: string) {
     try {
-      const value = await tree(token, body, commit, true);
+      const value = await rootTree(token, body, commit, true);
       return value.truncated || value.tree.length > limits.recursiveTreeEntries ? null : value.tree;
     } catch (error) {
       if (error instanceof GitHubCorpusError && ['response-too-large', 'invalid-response'].includes(error.code))
@@ -1073,7 +1095,7 @@ export function createGitHubCorpusProvider(options: {
     let requests = 0;
     const enter = async (sha: string, prefix: string, index: number, fresh: boolean) => {
       requests++;
-      const value = await tree(token, body, sha);
+      const value = sha === commit ? await rootTree(token, body, sha) : await tree(token, body, sha);
       if (value.truncated && fresh) observations.push(omitted(body, kind, commit, sha, accessedAt));
       stack.push({ prefix, entries: value.tree, index });
     };
@@ -1393,7 +1415,7 @@ export function createGitHubCorpusProvider(options: {
         let entries = directories.get(prefix);
         if (!entries) {
           if (++requests > limits.treeRequestsPerPage) return 'overflow';
-          const value = await tree(token, body, sha);
+          const value = prefix ? await tree(token, body, sha) : await rootTree(token, body, sha);
           if (value.truncated) return 'overflow';
           entries = new Map(value.tree.map(entry => [entry.path, entry]));
           directories.set(prefix, entries);
@@ -1553,7 +1575,7 @@ export function createGitHubCorpusProvider(options: {
     for (const [index, name] of names.entries()) {
       let value;
       try {
-        value = await tree(token, body, sha);
+        value = index ? await tree(token, body, sha) : await rootTree(token, body, sha);
       } catch (error) {
         if (error instanceof GitHubCorpusError && error.code === 'invalid-cursor')
           throw new GitHubCorpusError('not-found');

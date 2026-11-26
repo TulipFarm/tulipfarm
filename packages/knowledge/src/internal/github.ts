@@ -73,7 +73,7 @@ const cursorSchema = z.strictObject({
   after: z.string().max(1200).nullable(),
   // Progress counter only. A pass has no page cap; the stuck-loop guard rejects a cursor that repeats.
   pages: z.number().int().min(0),
-  // Repositories set aside for the rest of this pass after a transient failure. They are retried on the next pass.
+  // Repositories set aside for the rest of this pass after a failure of their own. They are retried on the next pass.
   isolated: z.record(z.string().max(20), z.string().max(64)).optional(),
   // A full pass lists and sweeps everything; an incremental pass lists only what changed since each repository's mark.
   mode: z.enum(['full', 'incremental']).optional(),
@@ -81,6 +81,8 @@ const cursorSchema = z.strictObject({
   marks: z.record(z.string().max(20), markSchema).optional(),
   // The mark the repository being listed has reached so far; it becomes its mark once the repository's listing completes.
   pending: markSchema.optional(),
+  // The repository being listed again from its start after its saved listing cursor stopped working.
+  restarted: z.string().max(20).optional(),
   // When the last full pass completed, and whether an incremental listing asked for the next pass to be full.
   reconciledAt: z.iso.datetime().optional(),
   reconcile: z.boolean().optional(),
@@ -173,6 +175,15 @@ const ownerDenied = (error: unknown): error is GitHubCorpusError =>
 // Failures that stay with one item or repository so the rest of the pass continues.
 const isolatable = (error: unknown): error is GitHubCorpusError =>
   error instanceof GitHubCorpusError && ['transient', 'invalid-response', 'response-too-large'].includes(error.code);
+// Failures of the connection, its credential or its selection, which no other repository could list past.
+const sourceFailures = [...credentialDenials, 'not-configured', 'rate-limited', 'invalid-selection'];
+/**
+ * Whether a repository's listing failed on its own: any GitHub failure but the source's. Such a repository is set aside
+ * for the rest of the pass and listed again from its start on the next, so one unlistable repository never stops or
+ * resets the others.
+ */
+const repositoryFailure = (error: unknown): error is GitHubCorpusError =>
+  error instanceof GitHubCorpusError && !sourceFailures.includes(error.code);
 const rateLimited = (error: unknown): error is GitHubCorpusError =>
   error instanceof GitHubCorpusError && error.code === 'rate-limited';
 const leaseMs = 15 * 60_000;
@@ -1833,7 +1844,7 @@ export function createGitHubKnowledge({
       cursor.isolated = { ...cursor.isolated, [repositoryId]: code };
     };
     const owner: HumanActor = { kind: 'human', membershipId: claim.owner_membership_id, userId: claim.owner_user_id };
-    // Owner check for one repository: false when GitHub denies it, isolated when GitHub is transiently unavailable.
+    // Owner check for one repository: false when GitHub denies it, isolated when the check fails for that repository.
     // Each run asks GitHub first; later pages and sweep batches reuse that answer while it is still fresh.
     const verified = new Set<string>();
     const verify = async (repositoryId: string) => {
@@ -1852,7 +1863,7 @@ export function createGitHubKnowledge({
       } catch (error) {
         verified.delete(repositoryId);
         if (ownerDenied(error)) return false;
-        if (!isolatable(error)) throw error;
+        if (!repositoryFailure(error)) throw error;
         isolate(repositoryId, error.code);
         return false;
       }
@@ -1863,6 +1874,22 @@ export function createGitHubKnowledge({
     let selected: Repository[] = [];
     // Repositories another of the owner's sources indexes; an all-repositories source neither lists nor sweeps them.
     let deferred = new Set<string>();
+    // One listing page. A provider fault other than a GitHub failure, such as data it cannot handle, stays with the
+    // repository as an invalid response; cancellation still ends the run.
+    async function discover(...args: Parameters<typeof corpus.discover>) {
+      try {
+        return await corpus.discover(...args);
+      } catch (error) {
+        if (
+          error instanceof GitHubCorpusError ||
+          error instanceof KnowledgeError ||
+          error instanceof AccessDenied ||
+          options.signal?.aborted
+        )
+          throw error;
+        throw Object.assign(new GitHubCorpusError('invalid-response'), { cause: error });
+      }
+    }
     async function listing() {
       cursor.pages++;
       const repository: Repository | undefined = selected[cursor.index];
@@ -1893,7 +1920,7 @@ export function createGitHubKnowledge({
       if (accessible && selection.kinds.length) {
         try {
           const mark = cursor.marks?.[repository.repository_id];
-          const page = await corpus.discover(
+          const page = await discover(
             work.workspaceId,
             claim.owner_user_id,
             claim.binding,
@@ -1969,12 +1996,27 @@ export function createGitHubKnowledge({
         } catch (error) {
           if (ownerDenied(error))
             await fenced(work, token, tx => unavailable(tx, claim.source_id, repository.repository_id, error.code));
-          else if (isolatable(error)) isolate(repository.repository_id, error.code);
-          else throw error;
+          else if (
+            error instanceof GitHubCorpusError &&
+            error.code === 'invalid-cursor' &&
+            cursor.page &&
+            cursor.restarted !== repository.repository_id
+          ) {
+            // A saved cursor GitHub no longer accepts lists this repository again from its start, once per pass.
+            cursor.restarted = repository.repository_id;
+            cursor.page = null;
+            delete cursor.pending;
+            for (const key of seen) if (key.startsWith(`${repository.repository_id}\n`)) seen.delete(key);
+            return;
+          } else if (repositoryFailure(error)) {
+            isolate(repository.repository_id, error.code);
+            telemetry.recordImport('source', 'skipped', error.code, { error });
+          } else throw error;
           cursor.page = null;
         }
       } else cursor.page = null;
       if (!cursor.page) {
+        delete cursor.restarted;
         // Only a repository listed to the end advances its mark; an interrupted one lists from its old mark next time.
         if (listed && !cursor.isolated?.[repository.repository_id])
           cursor.marks = {
@@ -2091,15 +2133,14 @@ export function createGitHubKnowledge({
           } else if (error instanceof GitHubCorpusError && ['not-found', 'outside-selection'].includes(error.code)) {
             const documentId = row.document_id;
             if (documentId) await fenced(work, token, tx => clear(tx, documentId, true));
-          } else if (isolatable(error))
+          } else if (repositoryFailure(error) && !['too-large', 'unsupported'].includes(error.code))
             await fenced(work, token, tx =>
               tx.client.query(
                 `UPDATE ${table(tx, 'github_items')} SET failure=$3 WHERE source_id=$1 AND native_id=$2`,
                 [claim.source_id, row.native_id, error.code],
               ),
             );
-          else if (!(error instanceof GitHubCorpusError) || !['too-large', 'unsupported'].includes(error.code))
-            throw error;
+          else if (!repositoryFailure(error)) throw error;
         }
       };
       const { completed, failure } = await bounded(rows, tuning.concurrency, async row => {
@@ -2245,7 +2286,12 @@ export function createGitHubKnowledge({
               failure,
               Math.max(30000, error instanceof GitHubCorpusError ? (error.retryAfterMs ?? 0) : 0),
               invalidCursor,
-              initialCursor(),
+              // A source cursor that no longer works restarts the pass, keeping every repository's incremental mark.
+              initialCursor({
+                ...(cursor.marks ? { marks: cursor.marks } : {}),
+                ...(cursor.reconciledAt ? { reconciledAt: cursor.reconciledAt } : {}),
+                ...(cursor.reconcile ? { reconcile: true } : {}),
+              }),
               work.generation,
               token,
             ],

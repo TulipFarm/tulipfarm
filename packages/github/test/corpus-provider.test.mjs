@@ -926,6 +926,27 @@ test('an empty repository still indexes issues and discussions, then its files o
   assert.match((await readAs(provider, binding, 'doc:7001:README.md', all)).markdown, /Orchid onboarding steps/);
 });
 
+test('a repository whose only commit has an empty tree lists no files and moves on to its other kinds', async () => {
+  const { github, provider, binding, repo } = setup();
+  repo.files.clear();
+  const only = github.push(repo, { message: 'Initial commit' });
+  const all = { ...selection, kinds: ['code', 'commits', 'discussions', 'docs', 'issues', 'pulls'] };
+  const items = await listAll(provider, binding, '7001', all);
+  assert.deepEqual(
+    items.map(item => item.nativeId),
+    ['issue:7001:1', 'pull:7001:2', 'discussion:7001:5', `commit:7001:${only.sha}`],
+  );
+  // A walk resumed at the empty root, and a path read through it, find nothing rather than a bad cursor.
+  const walked = await provider.list(workspaceId, 'reader', binding, '7001', code, `code:${only.sha}:w0`);
+  assert.deepEqual(walked, { observations: [], nextCursor: null });
+  await assert.rejects(readAs(provider, binding, 'code:7001:src/index.ts'), error => error.code === 'not-found');
+  // A missing root tree that is not the empty tree is still an invalid cursor.
+  await assert.rejects(
+    provider.list(workspaceId, 'reader', binding, '7001', code, `code:${'b'.repeat(40)}:0`),
+    error => error.code === 'invalid-cursor',
+  );
+});
+
 const commitsOnly = { ...selection, kinds: ['commits'] };
 async function listPages(provider, binding, value, history) {
   const pages = [];
