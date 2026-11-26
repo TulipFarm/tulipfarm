@@ -35,6 +35,7 @@ import { RowThreadPanel } from '@/features/tables/row-thread';
 import { CodeSessionTaskSection } from '@/features/code-sessions/CodeSessionTaskSection';
 import { taskCards, type TaskCard } from './api';
 import { AgentWork, stateLabels } from './agent-work';
+import { TaskClarificationCard } from './TaskClarificationCard';
 import { useNow } from './live';
 import { applyTaskMove, taskMove, type TaskMove } from './moves';
 import { TaskReminders } from './reminders';
@@ -244,6 +245,12 @@ function TaskLoaded({
             />
             <RecordMutationFeedback mutation={update} />
           </div>
+          <TaskClarificationCard
+            workspaceId={workspace.id}
+            tableId={task.tableId}
+            rowId={task.rowId}
+            onAnswered={refreshAll}
+          />
           <CodeSessionTaskSection
             workspaceId={workspace.id}
             workspaceSlug={workspace.slug}

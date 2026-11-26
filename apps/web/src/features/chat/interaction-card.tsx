@@ -6,7 +6,6 @@ import { useRegisterPendingQuestion } from './pending-question';
 import { useResultAttention } from './canvas-state';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
-import { Badge } from '@tulipfarm/sprout/badge';
 import { ChoiceList } from '@tulipfarm/sprout/choice-list';
 import {
   Combobox,
@@ -365,10 +364,10 @@ function InformationCard({
             <QuestionPrompt>{request.prompt}</QuestionPrompt>
           </h4>
           {recordedAnswer && (
-            <Badge variant="secondary">
-              <CheckIcon aria-hidden="true" />
+            <span className="inline-flex min-w-0 items-start gap-1 rounded-lg bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground">
+              <CheckIcon aria-hidden="true" className="mt-0.5 size-3 shrink-0" />
               <span className="min-w-0 whitespace-pre-wrap break-words">{recordedAnswer}</span>
-            </Badge>
+            </span>
           )}
         </div>
         {request.status !== 'answered' && (

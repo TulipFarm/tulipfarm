@@ -79,6 +79,27 @@ export const agentBrowserSettingsSchema = z.strictObject({
   logins: z.array(uuidSchema).max(10).optional(),
 });
 export type AgentBrowserSettings = z.infer<typeof agentBrowserSettingsSchema>;
+export const agentDefaultsSchema = z.strictObject({
+  /** Default context instructions injected into every task run (team conventions, product details, etc.). */
+  context: z.string().trim().min(1).max(4000).optional(),
+  /** Default GitHub repository ("owner/repo") for coding and GitHub tasks. */
+  githubRepository: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/)
+    .optional(),
+  /** Default GitHub connection bound to this agent (personal or team). */
+  githubConnection: z
+    .strictObject({
+      kind: z.enum(['personal', 'team']),
+      id: uuidSchema,
+      allowWrites: z.boolean().default(false),
+    })
+    .optional(),
+  /** Default Knowledge source IDs checked first during self-discovery. */
+  knowledgeSourceIds: z.array(uuidSchema).max(20).optional(),
+});
+export type AgentDefaults = z.infer<typeof agentDefaultsSchema>;
 export const agentDefinitionSchema = z.strictObject({
   name: z.string().trim().min(1).max(120),
   instructions: z.string().min(1).max(32000),
@@ -89,6 +110,8 @@ export const agentDefinitionSchema = z.strictObject({
   mcp: mcpPermissionSlotsSchema.optional(),
   /** How the agent uses a browser when its tools list `browser.act`. */
   browser: agentBrowserSettingsSchema.optional(),
+  /** Default context and external connections inherited by tasks assigned to this agent. */
+  defaults: agentDefaultsSchema.optional(),
 });
 export const definitionRevisionSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const resource = { tableId: uuidSchema };

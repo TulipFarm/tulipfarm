@@ -2,7 +2,7 @@ import type { ComponentType, ReactNode } from 'react';
 import { CpuIcon, KeyIcon, RepeatIcon, UserIcon, UsersIcon, WalletIcon } from '@tulipfarm/icons';
 import type { ModelFallbackReason } from '@tulipfarm/config/model-fallback';
 import type { UsageDimension, UsageReport } from '@tulipfarm/workspace-storage/model-usage-contracts';
-import { AgentAvatar } from '@tulipfarm/sprout/agent-avatar';
+import { AgentMark } from '@/components/agent-mark';
 import { EntityAvatar } from '@tulipfarm/sprout/avatar';
 import { BrandIcon, type Brand } from '@tulipfarm/sprout/brand-icon';
 import { modelBrand, planModelVendor } from '@/features/models/model-brand';
@@ -162,14 +162,14 @@ export function usageDimensions(report: UsageReport, members: ReadonlyMap<string
       },
       icon: value => {
         const [kind, id = ''] = value.split(/:(.*)/s);
-        return kind === 'agent' ? <AgentAvatar agentId={id} name={agentName(id)} size="sm" /> : memberIcon(id);
+        return kind === 'agent' ? <AgentMark agentId={id} size={24} /> : memberIcon(id);
       },
     },
     member: { label: 'Member', name: memberName, icon: memberIcon },
     agent: {
       label: 'Agent',
       name: agentName,
-      icon: value => (value === 'none' ? null : <AgentAvatar agentId={value} name={agentName(value)} size="sm" />),
+      icon: value => (value === 'none' ? null : <AgentMark agentId={value} size={24} />),
     },
     activity: { label: 'Activity', name: activityName },
     fallback: {

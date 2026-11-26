@@ -7,6 +7,8 @@ import type { TableDefinition, TableValues } from '@tulipfarm/tables/definition'
 import { agentCompatibility, relation, type AgentStorage, type AgentTransaction } from './store.ts';
 import { lockTask } from './task-approval-gate.ts';
 import { relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
+import { agentDefinitionSchema } from './contracts.ts';
+import { createRowClarification, parseClarificationBlock } from './task-clarifications.ts';
 
 /** Run limits for one wake: the agent's usual defaults. */
 const runLimits = { toolCalls: 100, activeMilliseconds: 300000, credits: 100 };
@@ -129,7 +131,24 @@ export async function rowTitle(tx: AgentTransaction, tableId: string, rowId: str
   };
 }
 
-async function runBrief(tx: AgentTransaction, tableId: string, rowId: string, agentName: string) {
+async function loadAgentDefaults(tx: AgentTransaction, agentId: string) {
+  const row = (
+    await tx.client.query(
+      `SELECT d.definition
+       FROM ${relation(tx, 'tf_agent_activations')} a
+       JOIN ${relation(tx, 'tf_agent_definitions')} d
+         ON d.agent_id = a.agent_id AND d.revision = a.definition_revision
+       WHERE a.agent_id = $1 AND a.revoked_at IS NULL AND a.superseded_by_activation_id IS NULL
+       ORDER BY a.activated_at DESC NULLS LAST, a.id DESC
+       LIMIT 1`,
+      [agentId],
+    )
+  ).rows[0] as { definition?: unknown } | undefined;
+  const parsed = agentDefinitionSchema.safeParse(row?.definition);
+  return parsed.success ? (parsed.data.defaults ?? null) : null;
+}
+
+async function runBrief(tx: AgentTransaction, tableId: string, rowId: string, agentName: string, agentId?: string) {
   const generation = await activeGeneration(tx, tableId);
   const row = await readRecord(tx, generation, rowId);
   if (!row) return null;
@@ -173,9 +192,19 @@ async function runBrief(tx: AgentTransaction, tableId: string, rowId: string, ag
           : `- ${item.kind} by ${item.author ?? 'a member'}: ${(item.body ?? '').slice(0, 600)}`,
     )
     .filter(Boolean);
+  const defaults = agentId ? await loadAgentDefaults(tx, agentId) : null;
+  const defaultLines: string[] = [];
+  if (defaults?.context) defaultLines.push(`- Default context: ${defaults.context.slice(0, 1200)}`);
+  if (defaults?.githubRepository) defaultLines.push(`- Default GitHub repository: ${defaults.githubRepository}`);
+  if (defaults?.githubConnection) {
+    defaultLines.push(
+      `- Default GitHub connection: ${defaults.githubConnection.kind} (${defaults.githubConnection.id})${defaults.githubConnection.allowWrites ? ', authorized for commits and pull requests' : ', read-only'}`,
+    );
+  }
   const text = [
     `You are ${agentName}, assigned to a row in the table "${definition.label}" (table ${tableId}, row ${rowId}). Work on it now, on behalf of the member who assigned it.`,
     '',
+    ...(defaultLines.length ? ['Agent defaults:', ...defaultLines, ''] : []),
     'Row fields:',
     ...fields,
     '',
@@ -183,6 +212,8 @@ async function runBrief(tx: AgentTransaction, tableId: string, rowId: string, ag
     ...thread,
     '',
     'The row and its thread are your only memory between runs. Use your table tools to read or edit the row when you have access.',
+    'Before asking a person for missing details, first check your Agent defaults, the row thread, workspace Knowledge, and memory to infer anything unambiguous on your own (such as which repository, project, or channel applies).',
+    'If inputs are still genuinely missing or ambiguous, gather ALL missing items into ONE structured clarification form instead of asking piecemeal. Include a fenced JSON block right after a "CLARIFICATION:" line with shape {"title":"...","summary":"...","fields":[{"id":"...","kind":"github_account|github_repository|select|text","label":"Plain label","description":"optional","required":true}]} (for select include "options":[{"value":"...","label":"..."}]). Use plain-language labels like "GitHub account" or "Repository", never vague terms like "GitHub source".',
     'Your reply is posted to the row thread as a progress note: say what you did, what you are waiting for and what comes next.',
     'End your reply with exactly one line: "STATUS: done" when the work is finished, "STATUS: waiting <short reason>" when you need a person, or "STATUS: continue" to keep working later.',
     `With "STATUS: continue" you may add a line "WAKE: <ISO 8601 time>" up to ${maxWakeDays} days ahead to be woken then.`,
@@ -412,13 +443,16 @@ export function createRowAssignments(options: {
               )
             ).rows[0],
           );
-        const parsed = readRunReply(reply?.text ?? '');
-        if (parsed.note) await postNote(tx, row, taskId, 'progress', parsed.note);
+        const rawReply = reply?.text ?? '';
+        const { draft: clarificationDraft, text: replyWithoutClarification } = parseClarificationBlock(rawReply);
+        const parsed = readRunReply(replyWithoutClarification);
         let outcome: string;
         let state: string;
         let reason: string | null = null;
         if (row.status === 'completed') {
-          if (parsed.outcome === 'done') [outcome, state] = ['done', 'done'];
+          if (clarificationDraft)
+            [outcome, state, reason] = ['waiting', 'waiting', parsed.reason ?? clarificationDraft.title];
+          else if (parsed.outcome === 'done') [outcome, state] = ['done', 'done'];
           else if (parsed.outcome === 'waiting')
             [outcome, state, reason] = ['waiting', 'waiting', parsed.reason ?? 'Needs a person'];
           else [outcome, state] = ['finished', parsed.wakeAt ? 'working' : 'done'];
@@ -427,6 +461,41 @@ export function createRowAssignments(options: {
         else if (row.status === 'paused')
           [outcome, state, reason] = ['waiting', 'waiting', pauseReasons[row.pause_reason ?? ''] ?? 'Paused'];
         else [outcome, state, reason] = ['failed', 'failed', 'The run failed'];
+        let persistedClarification = false;
+        if (state === 'waiting') {
+          const fallbackDraft =
+            !clarificationDraft && /Choose a GitHub (account|source)/i.test(rawReply)
+              ? {
+                  title: 'Select a GitHub account to continue',
+                  summary: 'Pick which GitHub account or team connection this task should use.',
+                  fields: [
+                    {
+                      id: 'github_account',
+                      kind: 'github_account' as const,
+                      label: 'GitHub account',
+                      required: true,
+                    },
+                  ],
+                }
+              : null;
+          const draft = clarificationDraft ?? fallbackDraft;
+          if (draft) {
+            const created = await createRowClarification(tx, {
+              tableId: row.table_id,
+              rowId: row.row_id,
+              agentTaskId: taskId,
+              agentId: row.agent_id,
+              sponsorMembershipId: row.sponsor_membership_id,
+              draft,
+            });
+            persistedClarification = created !== null;
+          }
+        }
+        const visibleNote =
+          persistedClarification || !clarificationDraft
+            ? parsed.note
+            : [parsed.note, clarificationDraft.summary].filter(Boolean).join('\n\n');
+        if (visibleNote) await postNote(tx, row, taskId, 'progress', visibleNote);
         await close(outcome, state, reason);
         // A comment delivered after the run's last model call never reached the model, so one more run reads it.
         const unseen = (
@@ -588,7 +657,7 @@ export function createRowAssignments(options: {
           await hold(row, 'queued', 'Waiting: the workspace limit on working rows is reached');
           continue;
         }
-        const text = await runBrief(tx, row.table_id, row.row_id, row.agent_name);
+        const text = await runBrief(tx, row.table_id, row.row_id, row.agent_name, row.agent_id);
         if (!text) {
           await hold(row, 'waiting', 'Row unavailable');
           continue;
