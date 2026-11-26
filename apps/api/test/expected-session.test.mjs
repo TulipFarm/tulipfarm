@@ -13,6 +13,26 @@ import {
 
 const id = '22222222-2222-4222-8222-222222222222';
 const session = { user: { id, email: 'reader@example.test' }, session: { id: 'current-session' } };
+// Token-authenticated: the public REST API and MCP server, registered only with workspace storage.
+const publicApiOperations = [
+  'publicListTablesV1',
+  'publicDescribeTableV1',
+  'publicQueryRowsV1',
+  'publicListRowsV1',
+  'publicGetRowV1',
+  'publicCreateRowsV1',
+  'publicUpdateRowV1',
+  'publicDeleteRowV1',
+  'publicRowRequestStatusV1',
+  'publicListFilesV1',
+  'publicGetFileV1',
+  'publicDownloadFileV1',
+  'publicUploadFileV1',
+  'publicListAgentsV1',
+  'publicRunAgentV1',
+  'publicGetTaskV1',
+  'publicMcpV1',
+];
 const expectedSessionIndependentOperations = [
   'getApiIndex',
   'getWorkspaceMcpClientMetadata',
@@ -44,6 +64,7 @@ const expectedSessionIndependentOperations = [
   'listAppDataV1',
   'readAppDataV1',
   'mutateAppDataV1',
+  ...publicApiOperations,
 ];
 const expectedSessionIndependentRoutes = [
   '/v1/auth/*',
@@ -51,6 +72,7 @@ const expectedSessionIndependentRoutes = [
   '/v1/dev/sign-in-link',
   '/v1/dev/session',
   '/v1/viewer',
+  '/v1/mcp',
 ];
 const signedInWithoutUnauthorizedResponse = new Set([
   'retiredSaveWorkspaceSkillV1',
@@ -229,6 +251,7 @@ for (const isolated of [false, true]) {
             'listAppDataV1',
             'readAppDataV1',
             'mutateAppDataV1',
+            ...publicApiOperations,
           ]
         : []),
     ]);

@@ -34,6 +34,24 @@ export const sessionIndependentOperations: ReadonlySet<string> = new Set([
   'listAppDataV1',
   'readAppDataV1',
   'mutateAppDataV1',
+  // The public API and MCP server authenticate with access tokens and never read a session.
+  'publicListTablesV1',
+  'publicDescribeTableV1',
+  'publicQueryRowsV1',
+  'publicListRowsV1',
+  'publicGetRowV1',
+  'publicCreateRowsV1',
+  'publicUpdateRowV1',
+  'publicDeleteRowV1',
+  'publicRowRequestStatusV1',
+  'publicListFilesV1',
+  'publicGetFileV1',
+  'publicDownloadFileV1',
+  'publicUploadFileV1',
+  'publicListAgentsV1',
+  'publicRunAgentV1',
+  'publicGetTaskV1',
+  'publicMcpV1',
 ]);
 
 export const sessionIndependentRoutes: ReadonlySet<string> = new Set([
@@ -42,6 +60,7 @@ export const sessionIndependentRoutes: ReadonlySet<string> = new Set([
   '/v1/dev/sign-in-link',
   '/v1/dev/session',
   '/v1/viewer',
+  '/v1/mcp',
 ]);
 
 export function rejectChangedSession(

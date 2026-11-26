@@ -501,6 +501,7 @@ test('isolated buildApp documents success responses for all route groups while d
         'Onboarding',
         'Personal memory',
         'Projects',
+        'Public API',
         'Public guide',
         'Secrets',
         'Skills',

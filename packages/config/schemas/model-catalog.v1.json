@@ -166,6 +166,7 @@
               {
                 "type": "string",
                 "enum": [
+                  "external-access",
                   "openai-models",
                   "anthropic-models",
                   "openai-image-models",
@@ -528,6 +529,7 @@
               {
                 "type": "string",
                 "enum": [
+                  "external-access",
                   "openai-models",
                   "anthropic-models",
                   "openai-image-models",

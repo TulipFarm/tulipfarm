@@ -19,6 +19,7 @@ import {
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronUpIcon,
+  CodeIcon,
   ComposeIcon,
   CpuIcon,
   DatabaseIcon,
@@ -98,7 +99,7 @@ import { useOwnMembership } from '@/features/governance/queries';
 import { BudProvider } from '@/features/chat/bud-provider';
 import { WorkspaceQueryProvider } from '@/lib/query';
 import { setAnalyticsWorkspace } from '@/lib/analytics';
-import { setFlagWorkspace } from '@/lib/feature-flags';
+import { setFlagWorkspace, useFlag } from '@/lib/feature-flags';
 import { useWorkspaceSettings } from '@/features/settings/queries';
 import { useSecretsCapabilities } from '@/features/secrets/queries';
 import type { RecentSection } from '@/features/navigation/recent-queries';
@@ -130,6 +131,7 @@ export type WorkspacePath =
   | '/$workspaceSlug/settings/code'
   | '/$workspaceSlug/settings/models'
   | '/$workspaceSlug/settings/usage'
+  | '/$workspaceSlug/settings/api'
   | '/$workspaceSlug/teams'
   | '/$workspaceSlug/grants'
   | '/$workspaceSlug/members'
@@ -364,6 +366,13 @@ const usage: Page = {
   detail: 'Credits balance, spend history, and model usage',
   keywords: ['billing', 'credits', 'spend', 'cost', 'plan'],
 };
+const externalAccess: Page = {
+  label: 'API and MCP',
+  to: '/$workspaceSlug/settings/api',
+  icon: CodeIcon,
+  detail: 'Access tokens for the REST API and the MCP server',
+  keywords: ['token', 'rest', 'mcp', 'integration', 'developer', 'claude code'],
+};
 const soul: Page = {
   label: 'Soul repository',
   to: '/$workspaceSlug/settings/soul',
@@ -386,6 +395,7 @@ const settingsPages: Page[] = [
   models,
   codeSettingsPage,
   usage,
+  externalAccess,
   soul,
 ];
 // Pages without a sidebar entry still resolve as the current page, so New chat isn't marked current on them.
@@ -408,6 +418,7 @@ const pages = [
   codeSettingsPage,
   models,
   usage,
+  externalAccess,
   soul,
   settings,
   help,
@@ -426,6 +437,7 @@ export const searchPages = [
   models,
   codeSettingsPage,
   usage,
+  externalAccess,
   account,
   secrets,
   browserLogins,
@@ -813,6 +825,7 @@ function SettingsNavigation({ backHref }: { backHref: string }) {
     workspaceSettings.state.data.membership.role === 'admin';
   const capabilities = useSecretsCapabilities(workspace.id);
   const secretsVisible = capabilities.state.kind === 'ready' && capabilities.state.data.enabled;
+  const externalAccessVisible = useFlag('external-access');
   const { setOpenMobile } = useSidebar();
   const backLabel = `Back to ${workspace.name}`;
   return (
@@ -851,7 +864,7 @@ function SettingsNavigation({ backHref }: { backHref: string }) {
             <SidebarGroupLabel>{workspace.name}</SidebarGroupLabel>
             <SidebarMenu>
               {settingsPages
-                .filter(page => page !== soul || soulVisible)
+                .filter(page => (page !== soul || soulVisible) && (page !== externalAccess || externalAccessVisible))
                 .map(page => (
                   <NavItem key={page.to} page={page} />
                 ))}
