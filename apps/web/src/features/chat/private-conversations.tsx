@@ -24,7 +24,7 @@ import { Alert, AlertDescription, AlertTitle } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { ChatCanvasToggle, ChatWithCanvas } from './canvas-items';
 import { CanvasProvider, useCanvas, useResultAttention, type LayoutHost } from './canvas-state';
-import { NewChatDrafts, WorkflowCanvasButton, workflowCanvasItem } from './workflow-canvas';
+import { WorkflowCanvasButton, workflowCanvasItem } from './workflow-canvas';
 import { useWorkflowHandoff, WorkflowHandoffNotice } from './workflow-handoff';
 import type { WorkflowReference } from '@/features/workflows/workflow-detail';
 import { recordChangesForTools } from './record-changes';
@@ -1781,14 +1781,6 @@ function ConversationDetail({
                     slug={workspaceSlug}
                     chatId={chatId}
                     messages={history.messages}
-                  />
-                )}
-                {!draft && !empty && (
-                  <NewChatDrafts
-                    workspaceId={workspace.id}
-                    chatId={chatId}
-                    tools={history.messages.flatMap(message => message.tools)}
-                    foreground={visible && !compact}
                   />
                 )}
                 {!draft && !empty && (
