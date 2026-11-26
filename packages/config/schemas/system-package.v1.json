@@ -1303,6 +1303,50 @@
                     },
                     "additionalProperties": false
                   },
+                  "defaults": {
+                    "type": "object",
+                    "properties": {
+                      "context": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4000
+                      },
+                      "githubRepository": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$"
+                      },
+                      "githubConnection": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["personal", "team"]
+                          },
+                          "id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "allowWrites": {
+                            "default": false,
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["kind", "id"],
+                        "additionalProperties": false
+                      },
+                      "knowledgeSourceIds": {
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  },
                   "mcp": {
                     "maxItems": 20,
                     "type": "array",
