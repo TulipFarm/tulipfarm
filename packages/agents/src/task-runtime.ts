@@ -53,7 +53,12 @@ import { AgentError } from './saved-contracts.ts';
 import { requireTaskDefinitionSources } from './draft-sources.ts';
 import type { SlackActionsFactory } from './slack-actions.ts';
 import { activeTaskWork, reserveTaskWork, withTaskWork, type TaskWork } from './task-activity.ts';
-import { checkOutputSecurity, taskCompletionStatus } from './decisions.ts';
+import {
+  checkOutputSecurity,
+  evaluateEscalationPolicy,
+  evaluateTriggerFilter,
+  taskCompletionStatus,
+} from './decisions.ts';
 import { observeTaskModel, recoverTaskModelUsage, settleTaskModelTime } from './task-model-accounting.ts';
 import { isMcpCall, mcpExecutionResultSchema } from './mcp-contracts.ts';
 import type { McpExecutionFactory } from './mcp-runtime.ts';
@@ -984,6 +989,9 @@ export function createTaskRuntime(
         runId,
         step: step.step,
         reads: materializing?.reads ?? [],
+        triggerFilter: c.definition.triggerFilter,
+        escalationPolicy: c.definition.escalationPolicy,
+        taskPrompt: input.prompt,
       };
     });
   }
@@ -1180,6 +1188,32 @@ export function createTaskRuntime(
       return;
     }
     if (!claim || claim.kind !== 'model' || !model) return;
+    if (claim.triggerFilter && claim.taskGeneration === 1 && claim.step === 1) {
+      const filterResult = await evaluateTriggerFilter({
+        workspaceId,
+        triggerFilter: claim.triggerFilter,
+        event: claim.taskPrompt,
+      });
+      if (!filterResult.run) {
+        await locked(workspaceId, taskId, async tx => {
+          const current = await context(tx, workspaceId, taskId);
+          if (current.task.status !== 'pending' || current.task.generation !== claim.taskGeneration) return;
+          await message(
+            tx,
+            taskId,
+            claim.taskGeneration,
+            'Skipped: incoming event did not match the agent trigger filter.',
+          );
+          const changed = await tx.client.query(
+            `UPDATE ${relation(tx, 'tf_agent_tasks')} SET status='completed',pause_reason=NULL WHERE id=$1 AND status='pending'`,
+            [taskId],
+          );
+          await secrets?.tools.endRun(tx, { kind: 'task', taskId, runId: claim.runId });
+          taskTransition(tx, 'completed', changed.rowCount, taskId);
+        });
+        return;
+      }
+    }
     let result: InferenceResult;
     const timeoutMs = Math.max(1, Math.min(modelCallTimeoutMs, claim.dispatchDeadline - Date.now()));
     const controller = new AbortController();
@@ -1270,6 +1304,7 @@ export function createTaskRuntime(
     let continuing = false;
     let jevTaskCompletion: 'done' | 'continue' | undefined;
     let outputBlocked = false;
+    let escalatedToInbox = false;
     if (result.kind === 'success') {
       try {
         const parsed = parseModelDecision(result.decision, claim.input);
@@ -1277,8 +1312,20 @@ export function createTaskRuntime(
           const securityVerdict = await checkOutputSecurity({ workspaceId, text: parsed.text });
           if (securityVerdict === 'block' || securityVerdict === 'review') {
             outputBlocked = true;
-          } else if (parsed.incomplete === undefined) {
-            jevTaskCompletion = await taskCompletionStatus(workspaceId, parsed.text);
+          } else {
+            if (parsed.incomplete === undefined) {
+              jevTaskCompletion = await taskCompletionStatus(workspaceId, parsed.text);
+            }
+            if (claim.escalationPolicy) {
+              const escalation = await evaluateEscalationPolicy({
+                workspaceId,
+                rules: claim.escalationPolicy.rules,
+                minConfidence: claim.escalationPolicy.minConfidence,
+                taskPrompt: claim.taskPrompt,
+                agentOutput: parsed.text,
+              });
+              if (escalation.escalate) escalatedToInbox = true;
+            }
           }
         }
       } catch {
@@ -1459,6 +1506,7 @@ export function createTaskRuntime(
               throw new TaskDecisionRejected(new Error('task-has-unfinished-proposal'));
             incomplete =
               !outputBlocked &&
+              !escalatedToInbox &&
               decision.kind === 'answer' &&
               (decision.incomplete ??
                 (jevTaskCompletion !== undefined
@@ -1466,7 +1514,7 @@ export function createTaskRuntime(
                   : announcesFurtherWork(decision.text)));
             continuing = incomplete && !(await answered(tx, taskId, c.task.generation));
             if (!incomplete) {
-              const status = decision.kind === 'answer' ? 'completed' : 'waiting-clarification';
+              const status = decision.kind === 'answer' && !escalatedToInbox ? 'completed' : 'waiting-clarification';
               const changed = await tx.client.query(
                 `UPDATE ${relation(tx, 'tf_agent_tasks')} SET status=$2 WHERE id=$1 AND status IS DISTINCT FROM $2`,
                 [taskId, status],

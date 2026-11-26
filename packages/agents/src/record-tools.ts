@@ -41,7 +41,8 @@ import {
 import { readableTableFiles } from './table-sources.ts';
 import { matchesTableName } from './chat-table-lookup.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
-import { createRecordBatchSchema, updateRecordBatchSchema } from './contracts.ts';
+import { agentRowClassificationResultSchema, createRecordBatchSchema, updateRecordBatchSchema } from './contracts.ts';
+import { classifyTableRows, MAX_CLASSIFY_ROWS_BATCH } from './decisions.ts';
 import { visiblePage } from './visible-page.ts';
 
 type Transaction = AgentTransaction & { workspaceId: string; commonVersion: number };
@@ -705,6 +706,80 @@ export function createAgentRecordTools(runtime: AgentStorage, taskCapability?: o
           });
         }),
       ),
+    fetchRowsForClassification: (
+      workspaceId: string,
+      actor: string | Actor,
+      tableId: string,
+      revision: string,
+      input: { recordIds?: readonly string[] | undefined; limit: number },
+    ) =>
+      run(workspaceId, actor, tableId, (tx, principal) =>
+        queryOutcome(async () => {
+          const service = tableService(tx);
+          if (input.recordIds?.length) {
+            const rows: { id: string; values: Record<string, unknown> }[] = [];
+            for (const recordId of input.recordIds.slice(0, MAX_CLASSIFY_ROWS_BATCH)) {
+              const record = await service.read(workspaceId, principal, { tableId, revision, recordId });
+              if (record) rows.push({ id: record.id, values: record.values });
+            }
+            return rows;
+          }
+          const page = await service.listPage(workspaceId, principal, {
+            tableId,
+            revision,
+            query: recordQuerySchema.parse({ limit: Math.min(input.limit, MAX_CLASSIFY_ROWS_BATCH) }),
+          });
+          return page.records.map(record => ({ id: record.id, values: record.values }));
+        }),
+      ),
+    classifyRecords: async (
+      workspaceId: string,
+      actor: string | Actor,
+      tableId: string,
+      revision: string,
+      input: {
+        recordIds?: readonly string[] | undefined;
+        limit: number;
+        question: string;
+        labels?: readonly string[] | undefined;
+        criteria?: string | undefined;
+        minConfidence: number;
+      },
+    ) => {
+      const fetched = await run(workspaceId, actor, tableId, (tx, principal) =>
+        queryOutcome(async () => {
+          const service = tableService(tx);
+          if (input.recordIds?.length) {
+            const rows: { id: string; values: Record<string, unknown> }[] = [];
+            for (const recordId of input.recordIds.slice(0, MAX_CLASSIFY_ROWS_BATCH)) {
+              const record = await service.read(workspaceId, principal, { tableId, revision, recordId });
+              if (record) rows.push({ id: record.id, values: record.values });
+            }
+            return rows;
+          }
+          const page = await service.listPage(workspaceId, principal, {
+            tableId,
+            revision,
+            query: recordQuerySchema.parse({ limit: Math.min(input.limit, MAX_CLASSIFY_ROWS_BATCH) }),
+          });
+          return page.records.map(record => ({ id: record.id, values: record.values }));
+        }),
+      );
+      if (!Array.isArray(fetched)) return fetched;
+      const classified = await classifyTableRows({
+        workspaceId,
+        rows: fetched,
+        question: input.question,
+        labels: input.labels,
+        criteria: input.criteria,
+        minConfidence: input.minConfidence,
+      });
+      return agentRowClassificationResultSchema.parse({
+        tableId,
+        results: classified.results,
+        fallbackUsed: classified.fallbackUsed,
+      });
+    },
     /** Bounded name lookup in one relationship field's target table, which the reader must also be able to read. */
     resolveReference: (
       workspaceId: string,

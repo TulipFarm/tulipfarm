@@ -100,6 +100,11 @@ export const agentDefaultsSchema = z.strictObject({
   knowledgeSourceIds: z.array(uuidSchema).max(20).optional(),
 });
 export type AgentDefaults = z.infer<typeof agentDefaultsSchema>;
+export const agentEscalationPolicySchema = z.strictObject({
+  rules: z.string().trim().min(1).max(2000),
+  minConfidence: z.number().min(0).max(1).default(0.7),
+});
+export type AgentEscalationPolicy = z.infer<typeof agentEscalationPolicySchema>;
 export const agentDefinitionSchema = z.strictObject({
   name: z.string().trim().min(1).max(120),
   instructions: z.string().min(1).max(32000),
@@ -112,6 +117,10 @@ export const agentDefinitionSchema = z.strictObject({
   browser: agentBrowserSettingsSchema.optional(),
   /** Default context and external connections inherited by tasks assigned to this agent. */
   defaults: agentDefaultsSchema.optional(),
+  /** Plain-English Jev gate for event/webhook triggers; fails open on outage or uncertainty. */
+  triggerFilter: z.string().trim().min(1).max(1000).optional(),
+  /** Plain-English rules and confidence threshold that pause and escalate a run to the Inbox. */
+  escalationPolicy: agentEscalationPolicySchema.optional(),
 });
 export const definitionRevisionSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const resource = { tableId: uuidSchema };
@@ -196,6 +205,30 @@ const rowsSummarizeSchema = z
     ...rsql,
   })
   .superRefine(oneFilter);
+const rowsClassifySchema = z.strictObject({
+  tool: z.literal('rows.classify'),
+  ...resource,
+  expectedAppliedRevision: revisionSchema,
+  recordIds: z.array(uuidSchema).min(1).max(100).optional(),
+  limit: z.int().min(1).max(100).default(50),
+  question: z.string().trim().min(1).max(500),
+  labels: z.array(z.string().trim().min(1).max(64)).min(2).max(12).optional(),
+  criteria: z.string().trim().min(1).max(500).optional(),
+  minConfidence: z.number().min(0).max(1).default(0.7),
+});
+export const agentRowClassificationResultSchema = z.strictObject({
+  tableId: uuidSchema,
+  results: z.array(
+    z.strictObject({
+      id: uuidSchema,
+      label: z.string().optional(),
+      match: z.boolean().optional(),
+      confidence: z.number(),
+      uncertain: z.boolean(),
+    }),
+  ),
+  fallbackUsed: z.boolean(),
+});
 export const referenceLookupLimit = 20;
 const rowsResolveReferenceSchema = z.strictObject({
   tool: z.literal('rows.resolveReference'),
@@ -273,6 +306,7 @@ export const toolCallSchema = z.discriminatedUnion('tool', [
   z.strictObject({ tool: z.literal('schema.status'), ...resource }),
   rowsListSchema,
   rowsSummarizeSchema,
+  rowsClassifySchema,
   rowsResolveReferenceSchema,
   z.strictObject({
     tool: z.literal('rows.reverse'),
@@ -391,6 +425,7 @@ export const toolResultSchema = z.union([
   tableStatusSchema,
   agentQueryRecordListSchema,
   agentQuerySummarySchema,
+  agentRowClassificationResultSchema,
   agentReferenceChoicesSchema,
   agentQueryErrorSchema,
   agentStaleRevisionSchema,

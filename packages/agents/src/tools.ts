@@ -707,6 +707,7 @@ export const readOnlyTools: ReadonlySet<ToolName> = new Set([
   'rows.get',
   'rows.list',
   'rows.summarize',
+  'rows.classify',
   'rows.resolveReference',
   'rows.reverse',
   'rows.page',
@@ -871,6 +872,8 @@ const descriptions: Record<ToolName, string> = {
     'Read a page of rows at the applied revision after schema.inspect. Send query {version:2,mode:"rows",where,search,sort,select} with field and option ids, or put an RSQL filter in rsql instead of where. Get linked row ids from rows.resolveReference; never invent ids and ask when a name is ambiguous. Rows include their token and any unavailableFileIds the run owner cannot open. Only page one reports total, and 10000+ means capped; say so. Pass nextCursor unchanged as query.after. Use rows.summarize to count. On stale-revision call schema.inspect again; on denial stop.',
   'rows.summarize':
     'Count or total rows by group at the applied revision: query {version:2,mode:"summary",where,groupBy,metrics}, or an RSQL filter in rsql. Each group has keys in groupBy order and values in metrics order; groupCount and nextCursor page the groups. Returns figures only, never rows. Field, link, and revision rules match rows.list.',
+  'rows.classify':
+    'Classify or score up to 100 caller-readable rows at the applied revision against a yes/no question or label set using the decision model. Pass recordIds or limit (max 100), question, and optional labels (2-12 choices) or criteria. Serializes only readable non-file field values; marks uncertain rows without spawning per-row LLM calls.',
   'rows.resolveReference':
     'Find linked row ids by name or email for one relationship field before filtering on it or writing it, such as a person to assign. Returns up to limit choices with id and label from the linked table you can read, and more when other rows also match. Ask the human when several choices fit. It changes nothing.',
   'rows.reverse':
@@ -4672,6 +4675,7 @@ const tableIdTools = new Set([
   'schema.status',
   'rows.list',
   'rows.summarize',
+  'rows.classify',
   'rows.resolveReference',
   'rows.reverse',
   'rows.get',

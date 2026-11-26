@@ -43,6 +43,7 @@ import { createPlanComposition, createPlanDispatcher } from './plan-composition.
 import { createPlanDocumentComposition, createPlanDocumentDispatcher } from './plan-document-composition.ts';
 import { createKnowledgeTools } from './knowledge-tools-composition.ts';
 import { createAgentTasks } from '@tulipfarm/agents/tasks';
+import { evaluateWorkflowDecision } from '@tulipfarm/agents/decisions';
 import { createSlackPromptComposition } from './slack-composition.ts';
 import { chatObjectStore } from '@tulipfarm/workspaces/chat-objects';
 import { createObjectCleanupSweep, createTableSearchSweep } from './table-cleanup.ts';
@@ -463,6 +464,7 @@ async function run() {
       ? {
           advanceWorkflow: meteredWorkflowStep(
             createWorkflows(coreResources.runtime, {
+              decide: evaluateWorkflowDecision,
               ...(workflowSlack ? { slackActions: workflowSlack } : {}),
               ...(snippets ? { snippets } : {}),
               ...(workflowCoding ? { codingRuns: workflowCoding.runner } : {}),

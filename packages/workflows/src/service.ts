@@ -279,6 +279,22 @@ export function createWorkflows(
     codingRuns?: CodingStepRunner;
     codingSteps?: boolean;
     slackActions?: SlackClient;
+    decide?: (input: {
+      workspaceId: string;
+      input: unknown;
+      questions: Record<
+        string,
+        | { type: 'choice'; question: string; criteria: Record<string, string> }
+        | { type: 'noul'; question: string; criteria: string }
+      >;
+      minConfidence: number;
+    }) => Promise<{
+      answers: Record<
+        string,
+        { choice?: string | undefined; noul?: boolean | undefined; confidence: number; uncertain: boolean }
+      >;
+      fallbackUsed: boolean;
+    }>;
     wake?: (work: Work) => Promise<void>;
     webhookToleranceSeconds?: number;
     githubSubscriptions?: GitHubSubscriptions;
@@ -3130,6 +3146,35 @@ export function createWorkflows(
         }
       | undefined;
   };
+  type DecideClient = (input: {
+    workspaceId: string;
+    input: unknown;
+    questions: Record<
+      string,
+      | { type: 'choice'; question: string; criteria: Record<string, string> }
+      | { type: 'noul'; question: string; criteria: string }
+    >;
+    minConfidence: number;
+  }) => Promise<{
+    answers: Record<
+      string,
+      { choice?: string | undefined; noul?: boolean | undefined; confidence: number; uncertain: boolean }
+    >;
+    fallbackUsed: boolean;
+  }>;
+  type DecideWork = {
+    kind: 'decide';
+    workspaceId: string;
+    stepId: string;
+    input: unknown;
+    questions: Record<
+      string,
+      | { type: 'choice'; question: string; criteria: Record<string, string> }
+      | { type: 'noul'; question: string; criteria: string }
+    >;
+    minConfidence: number;
+    onUncertain: 'continue' | 'fail';
+  };
   type HttpWork = {
     kind: 'http';
     method: string;
@@ -3139,8 +3184,9 @@ export function createWorkflows(
   };
   type SlackWork = { kind: 'slack'; workspaceId: string; runId: string; stepId: string; actionId: string };
   type CodingWork = { kind: 'coding'; workspaceId: string; runId: string; stepId: string; jobId: string };
-  const isProgress = (work: Progress | CodeWork | AgentWork | HttpWork | SlackWork | CodingWork): work is Progress =>
-    work.kind === 'continue' || work.kind === 'wait' || work.kind === 'done';
+  const isProgress = (
+    work: Progress | CodeWork | AgentWork | HttpWork | DecideWork | SlackWork | CodingWork,
+  ): work is Progress => work.kind === 'continue' || work.kind === 'wait' || work.kind === 'done';
   const agentRequestId = (runId: string, stepId: string) => {
     const hash = createHash('sha256').update(`${runId}:${stepId}`).digest('hex');
     return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-8${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
@@ -3157,7 +3203,12 @@ export function createWorkflows(
     http?: { work: HttpWork; result?: Awaited<ReturnType<typeof requestHttp>>; error?: string },
     slack?: { work: SlackWork; result: Awaited<ReturnType<SlackClient['workflow']>> },
     coding?: { work: CodingWork; started: boolean },
-  ): Promise<Progress | CodeWork | AgentWork | HttpWork | SlackWork | CodingWork> {
+    decide?: {
+      work: DecideWork;
+      result?: Awaited<ReturnType<DecideClient>>;
+      error?: string;
+    },
+  ): Promise<Progress | CodeWork | AgentWork | HttpWork | DecideWork | SlackWork | CodingWork> {
     const work = workSchema.parse(value);
     return transaction(
       work.workspaceId,
@@ -3568,6 +3619,54 @@ export function createWorkflows(
           }
           return task;
         }
+        if (step.kind === 'decide') {
+          const fail = async (error: string): Promise<Progress> => {
+            await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='failed',error=$2 WHERE id=$1`, [
+              work.runId,
+              error,
+            ]);
+            return { kind: 'done' };
+          };
+          let resolvedInput: unknown;
+          try {
+            resolvedInput = resolveValue(step.input, payloadSchema.parse(raw.input), outputs);
+          } catch {
+            return fail('decide-input-invalid');
+          }
+          const request: DecideWork = {
+            kind: 'decide',
+            workspaceId: work.workspaceId,
+            stepId: step.id,
+            input: resolvedInput,
+            questions: step.questions,
+            minConfidence: step.minConfidence,
+            onUncertain: step.onUncertain,
+          };
+          if (!receipt) {
+            await tx.client.query(
+              `INSERT INTO ${table(tx, 'tf_workflow_steps')} (run_id,step_id,ordinal,status) VALUES ($1,$2,$3,'waiting')`,
+              [work.runId, step.id, ordinal],
+            );
+            await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='waiting' WHERE id=$1`, [
+              work.runId,
+            ]);
+          }
+          if (decide?.work.stepId === step.id && decide.error) return fail(`decide-${decide.error}`);
+          if (decide?.work.stepId === step.id && decide.result) {
+            const anyUncertain =
+              decide.result.fallbackUsed || Object.values(decide.result.answers).some(answer => answer.uncertain);
+            if (step.onUncertain === 'fail' && anyUncertain) return fail('decide-uncertain');
+            await tx.client.query(
+              `UPDATE ${table(tx, 'tf_workflow_steps')} SET status='completed',output=$3 WHERE run_id=$1 AND step_id=$2`,
+              [work.runId, step.id, JSON.stringify(decide.result)],
+            );
+            await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='running' WHERE id=$1`, [
+              work.runId,
+            ]);
+            return { kind: 'continue' };
+          }
+          return request;
+        }
         if (step.kind === 'http') {
           const fail = async (error: string): Promise<Progress> => {
             await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='failed',error=$2 WHERE id=$1`, [
@@ -3773,6 +3872,39 @@ export function createWorkflows(
         } catch {
           return { kind: 'wait', seconds: 5 };
         }
+      }
+    }
+    if (progress.kind === 'decide') {
+      try {
+        const result = options.decide
+          ? await options.decide({
+              workspaceId: progress.workspaceId,
+              input: progress.input,
+              questions: progress.questions,
+              minConfidence: progress.minConfidence,
+            })
+          : {
+              answers: Object.fromEntries(
+                Object.keys(progress.questions).map(key => [key, { confidence: 0, uncertain: true }]),
+              ),
+              fallbackUsed: true,
+            };
+        const next = await advanceTransaction(value, undefined, undefined, undefined, undefined, undefined, {
+          work: progress,
+          result,
+        });
+        return isProgress(next) ? next : { kind: 'continue' };
+      } catch (error) {
+        log('warn', 'activity', 'call_failed', {
+          operation: 'workflow.decide',
+          outcome: 'error',
+          'error.type': error instanceof Error ? error.message.slice(0, 100) : 'unknown',
+        });
+        const next = await advanceTransaction(value, undefined, undefined, undefined, undefined, undefined, {
+          work: progress,
+          error: 'failed',
+        });
+        return isProgress(next) ? next : { kind: 'continue' };
       }
     }
     if (progress.kind === 'http') {

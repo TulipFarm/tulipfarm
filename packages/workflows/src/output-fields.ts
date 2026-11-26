@@ -44,6 +44,8 @@ export function stepValueEntries(step: Step): { value: Value; path: (string | nu
         : [{ value: step.text, path: ['text'] }];
     case 'http':
       return [...entries('headers', step.headers), ...(step.body ? [{ value: step.body, path: ['body'] }] : [])];
+    case 'decide':
+      return [{ value: step.input, path: ['input'] }];
     case 'wait-until':
       return [{ value: step.at, path: ['at'] }];
     case 'find-rows':
@@ -142,6 +144,19 @@ export function stepOutputShapes(steps: readonly Step[], tables: readonly Output
         break;
       case 'http':
         shape = object({ status: scalar, headers: { kind: 'record', item: scalar }, body: scalar });
+        break;
+      case 'decide':
+        shape = object({
+          answers: object(
+            Object.fromEntries(
+              Object.keys(step.questions).map(key => [
+                key,
+                object({ choice: scalar, noul: scalar, confidence: scalar, uncertain: scalar }),
+              ]),
+            ),
+          ),
+          fallbackUsed: scalar,
+        });
         break;
       case 'condition':
         shape = object({ matched: scalar, ran: array(scalar), skipped: array(scalar) });

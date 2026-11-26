@@ -400,6 +400,18 @@ function describeStep(step: Step, sources: TableStepSources, workspaceId: string
         summary: `${name}: update the row in ${describeValue(step.row)} in ${table}, writing ${fieldCount(step.fields)}`,
         detail: <ReviewValues values={rowFields(step.fields, source?.fields)} />,
       };
+    case 'decide':
+      return {
+        summary: `${name}: evaluate ${Object.keys(step.questions).length} decision ${Object.keys(step.questions).length === 1 ? 'question' : 'questions'} on ${describeValue(step.input)}`,
+        detail: (
+          <ReviewValues
+            values={Object.entries(step.questions).map(([key, question]) => ({
+              name: key,
+              value: question.question,
+            }))}
+          />
+        ),
+      };
     case 'condition':
       return {
         summary: `${name}: check whether ${describeValue(step.when.left)} ${comparisonWords[step.when.op]}${'right' in step.when ? ` ${describeValue(step.when.right)}` : ''}`,

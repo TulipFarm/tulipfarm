@@ -7,11 +7,16 @@ import {
   checkOutputSecurity,
   checkToolOutputInjection,
   classifyDriftAgreement,
+  classifyTableRows,
   classifyTurnComplexity,
   confidenceBucket,
   containsSecretPattern,
   creationRequested,
+  DecisionUnavailableError,
+  evaluateEscalationPolicy,
   evaluateGoalRubric,
+  evaluateTriggerFilter,
+  evaluateWorkflowDecision,
   formatUnmetCriteriaFeedback,
   gateToolCall,
   heartbeatMatches,
@@ -425,4 +430,101 @@ test('evaluateGoalRubric scores criteria in one batched call and formats unmet c
   assert.deepEqual(evaluation?.unmet, ['Includes cash runway in months']);
   assert.match(formatUnmetCriteriaFeedback(evaluation?.unmet ?? [], false), /Includes cash runway in months/);
   assert.match(formatUnmetCriteriaFeedback(evaluation?.unmet ?? [], true), /retry limit/);
+});
+
+test('evaluateWorkflowDecision scores noul and choice questions and enforces minConfidence', async t => {
+  process.env.TYPESAFE_API_KEY = 'test-key';
+  t.after(() => delete process.env.TYPESAFE_API_KEY);
+  t.mock.method(globalThis, 'fetch', async () =>
+    jevResponse({
+      urgent: { noul: 1, confidence: 0.91 },
+      route: { choice: 'billing', confidence: 0.62 },
+    }),
+  );
+  const result = await evaluateWorkflowDecision({
+    workspaceId,
+    input: { subject: 'Invoice overdue' },
+    questions: {
+      urgent: { type: 'noul', question: 'Is this urgent?', criteria: 'Needs response today' },
+      route: {
+        type: 'choice',
+        question: 'Which team?',
+        criteria: { billing: 'Invoice or payment question', support: 'Technical help' },
+      },
+    },
+    minConfidence: 0.75,
+  });
+  assert.equal(result.answers.urgent.noul, true);
+  assert.equal(result.answers.urgent.uncertain, false);
+  assert.equal(result.answers.route.choice, 'billing');
+  assert.equal(result.answers.route.uncertain, true);
+  assert.equal(result.fallbackUsed, false);
+});
+
+test('evaluateTriggerFilter fails open when decision service is unavailable', async () => {
+  delete process.env.TYPESAFE_API_KEY;
+  const result = await evaluateTriggerFilter({
+    workspaceId,
+    triggerFilter: 'Is this a bug?',
+    event: { text: 'hi' },
+  });
+  assert.equal(result.run, true);
+  assert.equal(result.fallbackUsed, true);
+});
+
+test('evaluateEscalationPolicy returns escalate verdict on yes/high-confidence', async t => {
+  process.env.TYPESAFE_API_KEY = 'test-key';
+  t.after(() => delete process.env.TYPESAFE_API_KEY);
+  t.mock.method(globalThis, 'fetch', async () => jevResponse({ escalate: { noul: 1, confidence: 0.88 } }));
+  const decision = await evaluateEscalationPolicy({
+    workspaceId,
+    rules: 'Escalate if the reply promises a refund.',
+    minConfidence: 0.7,
+    taskPrompt: 'Handle refund request',
+    agentOutput: 'We will refund $500 immediately.',
+  });
+  assert.equal(decision.escalate, true);
+  assert.equal(decision.confidence, 0.88);
+});
+
+test('classifyTableRows strips file fields, enforces batch limit, and throws when unconfigured', async t => {
+  delete process.env.TYPESAFE_API_KEY;
+  await assert.rejects(
+    () =>
+      classifyTableRows({
+        workspaceId,
+        rows: [{ id: 'r1', values: { title: 'Test' } }],
+        question: 'Valid?',
+      }),
+    DecisionUnavailableError,
+  );
+
+  process.env.TYPESAFE_API_KEY = 'test-key';
+  t.after(() => delete process.env.TYPESAFE_API_KEY);
+  const bodies = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    bodies.push(JSON.parse(init.body));
+    return jevResponse({ classify: { choice: 'enterprise', confidence: 0.9 } });
+  });
+  const { results, fallbackUsed } = await classifyTableRows({
+    workspaceId,
+    rows: [
+      {
+        id: 'r1',
+        values: {
+          company: 'Acme Corp',
+          attachment: { kind: 'file', fileId: 'f1' },
+          links: { kind: 'reverse-link', items: [] },
+        },
+      },
+    ],
+    question: 'Segment?',
+    labels: ['smb', 'enterprise'],
+  });
+  assert.equal(fallbackUsed, false);
+  assert.equal(results.length, 1);
+  assert.equal(results[0].label, 'enterprise');
+  assert.equal(results[0].uncertain, false);
+  assert.ok(!JSON.stringify(bodies[0]).includes('fileId'));
+  assert.ok(!JSON.stringify(bodies[0]).includes('reverse-link'));
 });

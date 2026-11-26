@@ -34,6 +34,7 @@ export const helperToolNames = [
   'rows.get',
   'rows.list',
   'rows.summarize',
+  'rows.classify',
   'rows.page',
   'agents.list',
   'agents.read',

@@ -256,6 +256,7 @@ export async function resultSources(
       return [];
     case 'rows.list':
     case 'rows.summarize':
+    case 'rows.classify':
     case 'rows.resolveReference': {
       if (agentStaleRevisionSchema.safeParse(result).success) return [];
       const targets = await queryTargetTables(tx, call, result);

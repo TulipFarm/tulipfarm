@@ -37,6 +37,7 @@ import { GenerationError } from '@tulipfarm/tables/store';
 import { WorkspaceMemberError } from '@tulipfarm/tables/workspace-members';
 import {
   agentDefinitionSchema,
+  agentRowClassificationResultSchema,
   executionIdsSchema,
   recordConflict,
   toolCallSchema,
@@ -46,6 +47,7 @@ import {
   type ExecutionStatus,
   type ToolCall,
 } from './contracts.ts';
+import { classifyTableRows, DecisionUnavailableError } from './decisions.ts';
 import { agentCompatibility, createAgentStore, relation, type AgentStorage } from './store.ts';
 import { createToolRegistry } from './registry.ts';
 import { requireHumanRun } from './internal-privacy.ts';
@@ -1236,6 +1238,42 @@ export function createAgentExecutor(options: Options) {
                   [ids.runId, row.sequence, JSON.stringify(recordConflict)],
                 );
                 if (!batch && !taskAssociated && predecessor.rowCount) return 'waiting';
+                if (row.call.tool === 'rows.classify') {
+                  const fetched = await resources.records.fetchRowsForClassification(
+                    ids.workspaceId,
+                    actor,
+                    row.call.tableId,
+                    row.call.expectedAppliedRevision,
+                    { recordIds: row.call.recordIds, limit: row.call.limit },
+                  );
+                  if (Array.isArray(fetched)) {
+                    await transaction.client.query(
+                      `UPDATE ${relation(transaction, 'tf_agent_tool_calls')} SET status = 'waiting' WHERE id = $1`,
+                      [ids.callId],
+                    );
+                    return {
+                      kind: 'rows-classify' as const,
+                      actor,
+                      call: row.call,
+                      rows: fetched,
+                      taskAssociated,
+                    };
+                  }
+                  await transaction.client.query(
+                    `UPDATE ${relation(transaction, 'tf_agent_tool_calls')} SET status = 'completed', result = $2 WHERE id = $1`,
+                    [ids.callId, JSON.stringify(toolResultSchema.parse(fetched))],
+                  );
+                  if (taskAssociated)
+                    await transaction.client.query(
+                      `INSERT INTO ${relation(transaction, 'tf_agent_task_action_receipts')} (call_id,status) VALUES ($1,'completed') ON CONFLICT DO NOTHING`,
+                      [ids.callId],
+                    );
+                  await transaction.client.query(
+                    `UPDATE ${relation(transaction, 'tf_agent_runs')} SET status = 'running' WHERE id = $1`,
+                    [ids.runId],
+                  );
+                  return 'completed';
+                }
                 const result = await registry.invoke(
                   { workspaceId: ids.workspaceId, actor, callId: ids.callId },
                   row.call,
@@ -1280,6 +1318,7 @@ export function createAgentExecutor(options: Options) {
                   'tables.list',
                   'rows.list',
                   'rows.summarize',
+                  'rows.classify',
                   'rows.resolveReference',
                   'rows.reverse',
                   'rows.get',
@@ -1323,6 +1362,59 @@ export function createAgentExecutor(options: Options) {
             Boolean(batch),
           );
           if (typeof outcome === 'string') return z.enum(['completed', 'waiting', 'blocked', 'failed']).parse(outcome);
+          if ('kind' in outcome && outcome.kind === 'rows-classify') {
+            const classified = await classifyTableRows({
+              workspaceId: ids.workspaceId,
+              rows: outcome.rows,
+              question: outcome.call.question,
+              labels: outcome.call.labels,
+              criteria: outcome.call.criteria,
+              minConfidence: outcome.call.minConfidence,
+            });
+            const result = agentRowClassificationResultSchema.parse({
+              tableId: outcome.call.tableId,
+              results: classified.results,
+              fallbackUsed: classified.fallbackUsed,
+            });
+            return await executionTransaction(ids, async transaction => {
+              await lockAuthorization(transaction);
+              const run = runRowSchema
+                .optional()
+                .parse(
+                  (
+                    await transaction.client.query(
+                      `SELECT * FROM ${relation(transaction, 'tf_agent_runs')} WHERE id = $1 FOR UPDATE`,
+                      [ids.runId],
+                    )
+                  ).rows[0],
+                );
+              if (!run || !['ready', 'running', 'waiting'].includes(run.status)) throw new AccessDenied();
+              await requireTablePermission(transaction, outcome.actor, outcome.call.tableId, 'table.row.read');
+              const row = callRowSchema.parse(
+                (
+                  await transaction.client.query(
+                    `SELECT * FROM ${relation(transaction, 'tf_agent_tool_calls')} WHERE id = $1 AND run_id = $2 FOR UPDATE`,
+                    [ids.callId, ids.runId],
+                  )
+                ).rows[0],
+              );
+              if (row.status === 'completed' || row.status === 'blocked' || row.status === 'failed') return row.status;
+              await transaction.client.query(
+                `UPDATE ${relation(transaction, 'tf_agent_tool_calls')} SET status = 'completed', result = $2 WHERE id = $1`,
+                [ids.callId, JSON.stringify(toolResultSchema.parse(result))],
+              );
+              if (outcome.taskAssociated)
+                await transaction.client.query(
+                  `INSERT INTO ${relation(transaction, 'tf_agent_task_action_receipts')} (call_id,status) VALUES ($1,'completed') ON CONFLICT DO NOTHING`,
+                  [ids.callId],
+                );
+              await transaction.client.query(
+                `UPDATE ${relation(transaction, 'tf_agent_runs')} SET status = 'running' WHERE id = $1`,
+                [ids.runId],
+              );
+              return 'completed';
+            });
+          }
           if (isGitHubTaskCall(outcome.call)) {
             if (
               !options.github ||
@@ -1965,7 +2057,8 @@ export function createAgentExecutor(options: Options) {
             !(error instanceof z.ZodError) &&
             !(error instanceof TableValidationError) &&
             !(error instanceof GenerationError) &&
-            !(error instanceof WorkspaceMemberError)
+            !(error instanceof WorkspaceMemberError) &&
+            !(error instanceof DecisionUnavailableError)
           )
             throw new Error('Agent tool execution unavailable');
           const status = error instanceof AccessDenied ? 'blocked' : 'failed';
@@ -1994,6 +2087,7 @@ export function createAgentExecutor(options: Options) {
                 ? recordConflict
                 : null;
             const memberError = error instanceof WorkspaceMemberError ? { code: error.code } : null;
+            const decisionError = error instanceof DecisionUnavailableError ? { code: error.code } : null;
             await transaction.client.query(
               `UPDATE ${relation(transaction, 'tf_agent_tool_calls')} SET status = $3, result = $4 WHERE id = $1 AND run_id = $2 AND status <> 'completed'`,
               [
@@ -2003,6 +2097,7 @@ export function createAgentExecutor(options: Options) {
                 JSON.stringify(
                   conflict ??
                     memberError ??
+                    decisionError ??
                     googleToolError(error) ?? { code: status === 'blocked' ? 'access-denied' : 'tool-failed' },
                 ),
               ],

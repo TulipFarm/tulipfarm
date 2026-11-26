@@ -29,6 +29,7 @@ export const agentDefinitionSchema = z.strictObject({
         'schema.status',
         'rows.list',
         'rows.summarize',
+        'rows.classify',
         'rows.resolveReference',
         'rows.reverse',
         'rows.create',
@@ -101,6 +102,13 @@ export const agentDefinitionSchema = z.strictObject({
         })
         .optional(),
       knowledgeSourceIds: z.array(z.uuid()).max(20).optional(),
+    })
+    .optional(),
+  triggerFilter: z.string().trim().min(1).max(1000).optional(),
+  escalationPolicy: z
+    .strictObject({
+      rules: z.string().trim().min(1).max(2000),
+      minConfidence: z.number().min(0).max(1).default(0.7),
     })
     .optional(),
 });

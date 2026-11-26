@@ -724,6 +724,8 @@ const agentFieldLabels: Record<AgentDefinitionField, string> = {
   mcp: 'Connected app permissions',
   browser: 'Browser settings',
   defaults: 'Default context & connections',
+  triggerFilter: 'Trigger filter',
+  escalationPolicy: 'Escalation policy',
 };
 
 const badges = {

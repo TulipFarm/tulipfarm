@@ -102,6 +102,7 @@ const toolGroups: Record<string, { purpose: string; tools: readonly string[] }> 
       'tables_list',
       'rows_get',
       'rows_summarize',
+      'rows_classify',
       'rows_resolveReference',
       'rows_reverse',
       'rows_create',
@@ -1220,4 +1221,332 @@ export function formatUnmetCriteriaFeedback(unmet: readonly string[], exhausted 
   return exhausted
     ? `Unmet acceptance criteria after reaching the retry limit:\n${list}`
     : `Your previous output did not satisfy these acceptance criteria. Revise only to fix them:\n${list}`;
+}
+
+export class DecisionUnavailableError extends Error {
+  readonly code = 'decision-service-unavailable';
+  constructor(message = 'Decision service is not configured for this workspace.') {
+    super(message);
+    this.name = 'DecisionUnavailableError';
+  }
+}
+
+export type WorkflowDecideQuestion =
+  | { type: 'choice'; question: string; criteria: Record<string, string> }
+  | { type: 'noul'; question: string; criteria: string };
+
+export type WorkflowDecideAnswer = {
+  choice?: string | undefined;
+  noul?: boolean | undefined;
+  confidence: number;
+  uncertain: boolean;
+};
+
+export type WorkflowDecideResult = {
+  answers: Record<string, WorkflowDecideAnswer>;
+  fallbackUsed: boolean;
+};
+
+/** Evaluates user-defined choice or yes/no questions for a workflow `decide` step via Jev. */
+export async function evaluateWorkflowDecision(input: {
+  workspaceId?: string | undefined;
+  input: unknown;
+  questions: Record<string, WorkflowDecideQuestion>;
+  minConfidence?: number | undefined;
+  signal?: AbortSignal | undefined;
+}): Promise<WorkflowDecideResult> {
+  const minConfidence = input.minConfidence ?? 0.7;
+  const entries = Object.entries(input.questions).slice(0, 16);
+  const uncertainResult = (): WorkflowDecideResult => ({
+    answers: Object.fromEntries(entries.map(([key]) => [key, { confidence: 0, uncertain: true }])),
+    fallbackUsed: true,
+  });
+  if (!entries.length) return { answers: {}, fallbackUsed: false };
+  const started = performance.now();
+  const questions: Record<string, Question> = Object.fromEntries(
+    entries.map(([key, q]) => [
+      key,
+      q.type === 'choice'
+        ? { type: 'choice', instructions: q.question, criteria: q.criteria }
+        : {
+            type: 'noul',
+            instructions: q.question,
+            criteria: { yes: q.criteria, no: `Does not satisfy: ${q.criteria}` },
+          },
+    ]),
+  );
+  const rawInput = typeof input.input === 'string' ? input.input : JSON.stringify(input.input ?? null);
+  const raw = await ask(
+    'workflow-decide',
+    { input: scrubDecisionText(rawInput).slice(0, 4000) },
+    questions,
+    5000,
+    input.signal,
+  );
+  const duration_ms = Math.round(performance.now() - started);
+  if (!raw) {
+    log('info', 'inference', 'call_completed', {
+      operation: 'decisions.workflow-decide',
+      outcome: 'fallback',
+      'decision.kind': 'workflow-decide',
+      'decision.source': 'fallback',
+      duration_ms,
+    });
+    return uncertainResult();
+  }
+  let anyUncertain = false;
+  const answers: Record<string, WorkflowDecideAnswer> = {};
+  for (const [key, q] of entries) {
+    const answer = raw[key];
+    const confidence = typeof answer?.confidence === 'number' ? answer.confidence : 0;
+    if (q.type === 'choice') {
+      const choice =
+        typeof answer?.choice === 'string' && Object.hasOwn(q.criteria, answer.choice) ? answer.choice : undefined;
+      const uncertain = !choice || confidence < minConfidence;
+      if (uncertain) anyUncertain = true;
+      answers[key] = { ...(choice ? { choice } : {}), confidence, uncertain };
+    } else {
+      const noul = answer?.noul === 1 ? true : answer?.noul === 0 ? false : undefined;
+      const uncertain = noul === undefined || confidence < minConfidence;
+      if (uncertain) anyUncertain = true;
+      answers[key] = { ...(noul !== undefined ? { noul } : {}), confidence, uncertain };
+    }
+  }
+  log('info', 'inference', 'call_completed', {
+    operation: 'decisions.workflow-decide',
+    outcome: anyUncertain ? 'uncertain' : 'decided',
+    'decision.kind': 'workflow-decide',
+    'decision.source': 'decision-model',
+    duration_ms,
+  });
+  return { answers, fallbackUsed: false };
+}
+
+/** Plain-English event/webhook gate for a saved agent. Fails open on Jev outage or uncertainty so events are never lost. */
+export async function evaluateTriggerFilter(input: {
+  workspaceId?: string | undefined;
+  triggerFilter: string;
+  event: unknown;
+  signal?: AbortSignal | undefined;
+}): Promise<{ run: boolean; confidence?: number | undefined; fallbackUsed: boolean }> {
+  const filter = input.triggerFilter.trim();
+  if (!filter) return { run: true, fallbackUsed: false };
+  const started = performance.now();
+  const serialized = typeof input.event === 'string' ? input.event : JSON.stringify(input.event ?? null);
+  const raw = await ask(
+    'trigger-filter',
+    { event: scrubDecisionText(serialized).slice(0, 4000) },
+    {
+      matches: {
+        type: 'noul',
+        instructions: 'Does this incoming event match the trigger filter and warrant running the saved agent?',
+        criteria: {
+          yes: filter.slice(0, 1000),
+          no: `The event does not match: ${filter.slice(0, 800)}`,
+        },
+      },
+    },
+    3000,
+    input.signal,
+  );
+  const duration_ms = Math.round(performance.now() - started);
+  const answer = raw?.matches;
+  const confidence = answer?.confidence;
+  if (!answer || (answer.noul !== 0 && answer.noul !== 1) || (typeof confidence === 'number' && confidence < 0.6)) {
+    log('info', 'inference', 'call_completed', {
+      operation: 'decisions.trigger-filter',
+      outcome: 'fail-open',
+      'decision.kind': 'trigger-filter',
+      'decision.source': 'fallback',
+      'decision.confidence_bucket': confidenceBucket(confidence ?? 0),
+      duration_ms,
+    });
+    return { run: true, confidence, fallbackUsed: true };
+  }
+  const run = answer.noul === 1;
+  log('info', 'inference', 'call_completed', {
+    operation: 'decisions.trigger-filter',
+    outcome: run ? 'run' : 'skip',
+    'decision.kind': 'trigger-filter',
+    'decision.source': 'decision-model',
+    'decision.confidence_bucket': confidenceBucket(confidence ?? 0),
+    duration_ms,
+  });
+  return { run, confidence, fallbackUsed: false };
+}
+
+/** Evaluates a saved agent's plain-English escalation policy against its task output. */
+export async function evaluateEscalationPolicy(input: {
+  workspaceId?: string | undefined;
+  rules: string;
+  minConfidence?: number | undefined;
+  taskPrompt: string;
+  agentOutput: string;
+  signal?: AbortSignal | undefined;
+}): Promise<{ escalate: boolean; confidence?: number | undefined; fallbackUsed: boolean }> {
+  const rules = input.rules.trim();
+  if (!rules) return { escalate: false, fallbackUsed: false };
+  const minConfidence = input.minConfidence ?? 0.7;
+  const started = performance.now();
+  const raw = await ask(
+    'escalation-policy',
+    {
+      taskPrompt: scrubDecisionText(input.taskPrompt).slice(0, 1500),
+      agentOutput: scrubDecisionText(input.agentOutput).slice(0, 3000),
+    },
+    {
+      escalate: {
+        type: 'noul',
+        instructions: 'Does this agent run require human escalation to the Inbox under the escalation policy?',
+        criteria: {
+          yes: rules.slice(0, 2000),
+          no: `No escalation needed under: ${rules.slice(0, 1800)}`,
+        },
+      },
+    },
+    3000,
+    input.signal,
+  );
+  const duration_ms = Math.round(performance.now() - started);
+  const answer = raw?.escalate;
+  const confidence = answer?.confidence;
+  if (!answer || (answer.noul !== 0 && answer.noul !== 1)) {
+    log('info', 'inference', 'call_completed', {
+      operation: 'decisions.escalation-policy',
+      outcome: 'fallback',
+      'decision.kind': 'escalation-policy',
+      'decision.source': 'fallback',
+      duration_ms,
+    });
+    return { escalate: false, confidence, fallbackUsed: true };
+  }
+  const escalate = answer.noul === 1 && (typeof confidence !== 'number' || confidence >= minConfidence);
+  log('info', 'inference', 'call_completed', {
+    operation: 'decisions.escalation-policy',
+    outcome: escalate ? 'escalate' : 'pass',
+    'decision.kind': 'escalation-policy',
+    'decision.source': 'decision-model',
+    'decision.confidence_bucket': confidenceBucket(confidence ?? 0),
+    duration_ms,
+  });
+  return { escalate, confidence, fallbackUsed: false };
+}
+
+export const MAX_CLASSIFY_ROWS_BATCH = 100;
+
+function sanitizeTableFieldValues(values: Record<string, unknown>): Record<string, unknown> {
+  const safe: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(values)) {
+    if (val === null || val === undefined) {
+      safe[key] = null;
+      continue;
+    }
+    if (typeof val === 'string') {
+      safe[key] = scrubDecisionText(val).slice(0, 500);
+      continue;
+    }
+    if (typeof val === 'number' || typeof val === 'boolean') {
+      safe[key] = val;
+      continue;
+    }
+    if (typeof val === 'object' && !Array.isArray(val)) {
+      const obj = val as Record<string, unknown>;
+      // Never serialize file attachments, bytes, metadata, or reverse links.
+      if (obj.kind === 'file' || obj.kind === 'reverse-link') continue;
+      if (obj.kind === 'single-select' && typeof obj.optionId === 'string') {
+        safe[key] = obj.optionId;
+      } else if (obj.kind === 'multi-select' && Array.isArray(obj.optionIds)) {
+        safe[key] = obj.optionIds.filter((id): id is string => typeof id === 'string').slice(0, 20);
+      } else if ('value' in obj) {
+        const inner = obj.value;
+        safe[key] = typeof inner === 'string' ? scrubDecisionText(inner).slice(0, 500) : inner;
+      }
+    }
+  }
+  return safe;
+}
+
+export type RowClassificationResult = {
+  id: string;
+  label?: string | undefined;
+  match?: boolean | undefined;
+  confidence: number;
+  uncertain: boolean;
+};
+
+/** Bulk-classifies or scores up to 100 table rows via Jev without falling back to N LLM calls. */
+export async function classifyTableRows(input: {
+  workspaceId?: string | undefined;
+  rows: readonly { id: string; values: Record<string, unknown> }[];
+  question: string;
+  labels?: readonly string[] | undefined;
+  criteria?: string | undefined;
+  minConfidence?: number | undefined;
+  signal?: AbortSignal | undefined;
+}): Promise<{ results: RowClassificationResult[]; fallbackUsed: boolean }> {
+  if (!process.env.TYPESAFE_API_KEY) throw new DecisionUnavailableError();
+  const minConfidence = input.minConfidence ?? 0.7;
+  const rows = input.rows.slice(0, MAX_CLASSIFY_ROWS_BATCH);
+  if (!rows.length) return { results: [], fallbackUsed: false };
+
+  const labels = input.labels?.map(l => l.trim()).filter(Boolean);
+  const isChoice = Boolean(labels && labels.length >= 2);
+  const questionSpec: Question = isChoice
+    ? {
+        type: 'choice',
+        instructions: input.question.slice(0, 500),
+        criteria: Object.fromEntries(labels!.slice(0, 12).map(label => [label, `Row belongs to category: ${label}`])),
+      }
+    : {
+        type: 'noul',
+        instructions: input.question.slice(0, 500),
+        criteria: {
+          yes: (input.criteria ?? input.question).slice(0, 500),
+          no: `Does not satisfy: ${(input.criteria ?? input.question).slice(0, 450)}`,
+        },
+      };
+
+  const results: RowClassificationResult[] = Array.from({ length: rows.length });
+  let fallbackUsed = false;
+  const concurrency = 10;
+  const started = performance.now();
+
+  for (let offset = 0; offset < rows.length; offset += concurrency) {
+    const batch = rows.slice(offset, offset + concurrency);
+    await Promise.all(
+      batch.map(async (row, idx) => {
+        const safeFields = sanitizeTableFieldValues(row.values);
+        const raw = await ask('rows-classify', { row: safeFields }, { classify: questionSpec }, 5000, input.signal);
+        const answer = raw?.classify;
+        const confidence = typeof answer?.confidence === 'number' ? answer.confidence : 0;
+        if (!answer) {
+          fallbackUsed = true;
+          results[offset + idx] = { id: row.id, confidence: 0, uncertain: true };
+          return;
+        }
+        if (isChoice) {
+          const label =
+            typeof answer.choice === 'string' && labels!.includes(answer.choice) ? answer.choice : undefined;
+          const uncertain = !label || confidence < minConfidence;
+          if (uncertain) fallbackUsed = true;
+          results[offset + idx] = { id: row.id, ...(label ? { label } : {}), confidence, uncertain };
+        } else {
+          const match = answer.noul === 1 ? true : answer.noul === 0 ? false : undefined;
+          const uncertain = match === undefined || confidence < minConfidence;
+          if (uncertain) fallbackUsed = true;
+          results[offset + idx] = { id: row.id, ...(match !== undefined ? { match } : {}), confidence, uncertain };
+        }
+      }),
+    );
+  }
+
+  log('info', 'inference', 'call_completed', {
+    operation: 'decisions.rows-classify',
+    outcome: fallbackUsed ? 'partial-uncertain' : 'classified',
+    'decision.kind': 'rows-classify',
+    'decision.source': 'decision-model',
+    rowCount: rows.length,
+    duration_ms: Math.round(performance.now() - started),
+  });
+  return { results, fallbackUsed };
 }

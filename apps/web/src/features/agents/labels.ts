@@ -19,6 +19,7 @@ export const toolLabels: Record<ReturnType<typeof toolNameSchema.parse>, string>
   'schema.status': 'Check field changes',
   'rows.list': 'Find rows',
   'rows.summarize': 'Count and total rows',
+  'rows.classify': 'Classify and score rows',
   'rows.resolveReference': 'Look up linked rows',
   'rows.get': 'Read a row',
   'skills.execute': 'Run skill scripts',

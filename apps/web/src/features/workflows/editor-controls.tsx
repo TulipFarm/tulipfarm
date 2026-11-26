@@ -28,8 +28,10 @@ import { cronDayChoices, ordinaryCron, validateCron } from './calendar-schedule'
 import { OutputPathControl } from './output-picker';
 import type { TriggerBody } from './triggers';
 
-export function stepTitle(step: Definition['steps'][number]) {
+export function stepTitle(step: Definition['steps'][number]): string {
   switch (step.kind) {
+    case 'decide':
+      return 'Evaluate decision';
     case 'agent':
       return 'Run an agent task';
     case 'coding':
