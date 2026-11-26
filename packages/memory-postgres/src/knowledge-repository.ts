@@ -2,11 +2,14 @@ import type { KnowledgeRepository } from '@tulipfarm/memory-core/ports/knowledge
 import type { MemoryQueryClient } from './query-client.ts';
 import { memoryTable, type PostgresMemoryNames } from './names.ts';
 
-/** `usageTotals` reads quota usage from the maintained `usage` row instead of summing every stored row. */
+/**
+ * `usageTotals` reads quota usage from the maintained `usage` row instead of summing every stored row.
+ * `pruning` means storage has the `prune_revisions` function; without it, pruning does nothing.
+ */
 export function createPostgresKnowledgeRepository(
   client: MemoryQueryClient,
   names: PostgresMemoryNames,
-  { usageTotals = false }: { usageTotals?: boolean } = {},
+  { usageTotals = false, pruning = false }: { usageTotals?: boolean; pruning?: boolean } = {},
 ): KnowledgeRepository {
   const table = (name: string) => memoryTable(names, name);
   const total = (column: string) => `(SELECT ${column} FROM ${table('usage')} WHERE id=1)`;
@@ -71,6 +74,10 @@ export function createPostgresKnowledgeRepository(
     },
     insertWork(values: [revisionId: string]) {
       return client.query(`INSERT INTO ${table('work')} (revision_id) VALUES ($1)`, values);
+    },
+    async pruneRevisions(values: [documentId: string]) {
+      if (!pruning) return { rows: [], rowCount: 0 };
+      return client.query(`SELECT ${table('prune_revisions')}($1) AS pruned`, values);
     },
     observeDocument(values: [documentId: string, revisionId: string]) {
       return client.query(

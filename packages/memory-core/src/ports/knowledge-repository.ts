@@ -34,6 +34,8 @@ export interface KnowledgeRepository {
     ],
   ): Promise<RepositoryResult>;
   insertWork(values: [revisionId: string]): Promise<RepositoryResult>;
+  /** Deletes a synced document's older revisions, keeping the observed one and the newest superseded one. */
+  pruneRevisions(values: [documentId: string]): Promise<RepositoryResult>;
   observeDocument(values: [documentId: string, revisionId: string]): Promise<RepositoryResult>;
   readParsing(values: [revisionId: string]): Promise<RepositoryResult>;
   publicationFingerprint(values: [id: string]): Promise<RepositoryResult>;

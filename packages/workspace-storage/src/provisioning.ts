@@ -357,6 +357,11 @@ export async function verifyWorkspaceIsolation(client: SqlClient, workspaceId: s
           AND NOT p.proretset AND p.proconfig = ARRAY['search_path=pg_catalog']
           AND pg_get_function_identity_arguments(p.oid) = 'target uuid'
           AND NOT has_function_privilege($1,p.oid,'EXECUTE WITH GRANT OPTION'))
+        AND NOT ($1 = $3 AND n.nspname = $2 AND p.proowner = n.nspowner
+          AND p.proname = 'tf_knowledge_prune_revisions' AND p.prorettype = 'pg_catalog.int4'::regtype
+          AND NOT p.proretset AND p.proconfig = ARRAY['search_path=pg_catalog']
+          AND pg_get_function_identity_arguments(p.oid) = 'target uuid'
+          AND NOT has_function_privilege($1,p.oid,'EXECUTE WITH GRANT OPTION'))
         AND NOT ($1 = $3 AND n.nspname = $2 AND p.proowner = n.nspowner AND p.proname = 'tf_set_action_review'
           AND p.prorettype = 'pg_catalog.bool'::regtype AND NOT p.proretset
           AND p.proconfig = ARRAY['search_path=pg_catalog']

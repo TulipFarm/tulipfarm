@@ -680,6 +680,48 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         );
       await assert.rejects(service.publishLexical(one.id, owner, publication(republished)), code('quota'));
       await matches('publication quota');
+
+      const synced = createKnowledge({
+        runtime,
+        requireExternalSource: async () => {},
+        refreshExternalProof: async context => {
+          const now = Date.now() - 1000;
+          return {
+            id: randomUUID(),
+            documentId: context.documentId,
+            accessEpoch: context.accessEpoch,
+            principal: 'user:1',
+            aclVersion: '1',
+            membershipVersion: '1',
+            aclCheckedAt: new Date(now),
+            membershipCheckedAt: new Date(now),
+            expiresAt: new Date(now + 300000),
+          };
+        },
+      });
+      const changing = revision(await source('github', synced));
+      await synced.observeRevision(one.id, owner, changing);
+      await synced.recordAccessProof(one.id, owner, { documentId: changing.documentId, accessEpoch: 1 });
+      await synced.publishLexical(one.id, owner, publication(changing));
+      let current = changing;
+      for (let index = 1; index <= 40; index++) {
+        const next = revision(changing.sourceId, {
+          documentId: changing.documentId,
+          nativeId: changing.nativeId,
+          expectedRevisionId: current.id,
+        });
+        await synced.observeRevision(one.id, owner, next);
+        if (index % 2) await synced.publishLexical(one.id, owner, publication(next));
+        current = next;
+      }
+      const kept = (
+        await db.platform.query(`SELECT id FROM ${table('revisions')} WHERE document_id=$1`, [changing.documentId])
+      ).rows.map(row => row.id);
+      assert.equal(kept.length, 3, 'a synced document keeps its observed revision and the two before it');
+      assert.ok(kept.includes(current.id));
+      const latest = await synced.publishLexical(one.id, owner, publication(current, { markdown: '# Handbook\nNew.' }));
+      assert.equal((await synced.readEvidence(one.id, owner, latest)).text, 'Return orders in 30 days.');
+      await matches('pruned revisions release their usage');
     });
   } finally {
     await runtime?.close();

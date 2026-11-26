@@ -27,6 +27,10 @@ export type KnowledgeTransaction = AuthorizationTransaction & { workspaceId: str
 export const knowledgeUsageVersion = 99;
 export const tracksKnowledgeUsage = (tx: { commonVersion?: number }) =>
   (tx.commonVersion ?? 0) >= knowledgeUsageVersion;
+/** The common migration that deletes a synced document's superseded revisions. */
+export const knowledgePruningVersion = 118;
+export const prunesKnowledgeRevisions = (tx: { commonVersion?: number }) =>
+  (tx.commonVersion ?? 0) >= knowledgePruningVersion;
 export type KnowledgeRuntime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
 export const knowledgeAccessErrors = { AccessDenied, SourceAuthorizationUnavailable };
 export const knowledgeStorageErrors = {

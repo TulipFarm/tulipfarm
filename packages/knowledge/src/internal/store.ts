@@ -18,6 +18,7 @@ import {
   knowledgeAuthorization,
   knowledgeAccessErrors,
   tracksKnowledgeUsage,
+  prunesKnowledgeRevisions,
   transactionRepository,
   type KnowledgeRuntime as Runtime,
   type KnowledgeTransaction,
@@ -51,7 +52,7 @@ export function createKnowledgeStore({
       createPostgresKnowledgeRepository(
         tx.client,
         { schema: tx.schema, tablePrefix: 'tf_knowledge_' },
-        { usageTotals: tracksKnowledgeUsage(tx) },
+        { usageTotals: tracksKnowledgeUsage(tx), pruning: prunesKnowledgeRevisions(tx) },
       ),
     ),
     authorization: knowledgeAuthorization({

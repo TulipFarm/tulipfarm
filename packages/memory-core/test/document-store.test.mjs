@@ -59,6 +59,7 @@ function fixture({ afterChunkRead, afterChunkWrite, refreshExternalProof } = {})
       work.set(id, { parsing: 'queued', embedding: 'queued', failure: null, attempts: 0 });
       return result();
     },
+    pruneRevisions: () => result(),
     observeDocument: ([id, revisionId]) => {
       documents.get(id).observed_revision_id = revisionId;
       return result();
