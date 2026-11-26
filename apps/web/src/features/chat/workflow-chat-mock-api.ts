@@ -15,25 +15,93 @@ const commandSchema = z.object({
   answer: answerSchema.optional(),
 });
 
+const samplePrompt =
+  'Which message should the workflow post in #github-notify after the review is done? The samples use example values. The real message uses the data of each pull request.';
+const sampleChoices = [
+  {
+    id: 'short',
+    label:
+      '✅ Review done for PR #142 "Add retry to webhook sender" in TulipFarm/tulipfarm by @asha. [Open PR](https://github.com/TulipFarm/tulipfarm/pull/142)',
+  },
+  {
+    id: 'detailed',
+    label:
+      '🤖 **PR Code Reviewer** finished a review **Repo:** TulipFarm/tulipfarm **PR:** [#142 Add retry to webhook sender](https://github.com/TulipFarm/tulipfarm/pull/142) **Author:** @asha **Result:** 3 comments, 1 blocking',
+  },
+  {
+    id: 'minimal',
+    label:
+      'Code review finished: TulipFarm/tulipfarm #142 – Add retry to webhook sender (https://github.com/TulipFarm/tulipfarm/pull/142)',
+  },
+];
+// Local scenarios for long and many options; each starts pending unless its name says answered or cancelled.
+const choiceScenarios: Record<string, { prompt?: string; choices: { id: string; label: string }[] }> = {
+  'workflow-sample-choices': { prompt: samplePrompt, choices: sampleChoices },
+  'workflow-many-choices': {
+    choices: [
+      '#general',
+      '#tech',
+      '#github-notify',
+      '#releases',
+      '#design',
+      '#support',
+      '#sales',
+      '#random',
+      '#ops',
+      '#alerts',
+    ].map(name => ({ id: name.slice(1), label: name })),
+  },
+  'workflow-url-choice': {
+    choices: [
+      {
+        id: 'url',
+        label:
+          'https://github.com/TulipFarm/tulipfarm/pull/142/files?diff=split&w=1&file-filters%5B%5D=.ts&show-viewed-files=true',
+      },
+      {
+        id: 'mixed',
+        label:
+          'Post one short line, then link the review: https://github.com/TulipFarm/tulipfarm/pull/142#pullrequestreview-2468013579',
+      },
+      { id: 'none', label: 'No link' },
+    ],
+  },
+  'workflow-sample-prompt': {
+    prompt: `Which message should the workflow post in #github-notify?\n\n**Short:** ✅ Review done for [#142 Add retry to webhook sender](https://github.com/TulipFarm/tulipfarm/pull/142) by @asha.\n\n**Detailed:** 🤖 **PR Code Reviewer** finished a review of [#142](https://github.com/TulipFarm/tulipfarm/pull/142). 3 comments, 1 blocking.\n\n**Minimal:** Code review finished: TulipFarm/tulipfarm #142.`,
+    choices: [
+      { id: 'short', label: 'Short (Recommended)' },
+      { id: 'detailed', label: 'Detailed' },
+      { id: 'minimal', label: 'Minimal' },
+    ],
+  },
+  'workflow-answered-long': { prompt: samplePrompt, choices: sampleChoices },
+  'workflow-answered-short': { choices: [] },
+  'workflow-answered-text': { prompt: samplePrompt, choices: sampleChoices },
+  'workflow-cancelled': { prompt: samplePrompt, choices: sampleChoices },
+};
+
 export function createWorkflowChatMock(scenario: string) {
-  const choices = [
-    { id: 'app', label: 'TulipFarm app (Recommended)' },
-    { id: 'personal', label: 'My personal Slack account' },
-    ...(['workflow-three-choices', 'workflow-four-choices', 'workflow-long-choices'].includes(scenario)
-      ? [{ id: 'release', label: 'Release bot' }]
-      : []),
-    ...(['workflow-four-choices', 'workflow-long-choices'].includes(scenario)
-      ? [
-          {
-            id: 'team',
-            label:
-              scenario === 'workflow-long-choices'
-                ? 'A dedicated team account used only for engineering release notifications'
-                : 'Team account',
-          },
-        ]
-      : []),
-  ];
+  const preset = choiceScenarios[scenario];
+  const choices = preset?.choices.length
+    ? preset.choices
+    : [
+        { id: 'app', label: 'TulipFarm app (Recommended)' },
+        { id: 'personal', label: 'My personal Slack account' },
+        ...(['workflow-three-choices', 'workflow-four-choices', 'workflow-long-choices'].includes(scenario)
+          ? [{ id: 'release', label: 'Release bot' }]
+          : []),
+        ...(['workflow-four-choices', 'workflow-long-choices'].includes(scenario)
+          ? [
+              {
+                id: 'team',
+                label:
+                  scenario === 'workflow-long-choices'
+                    ? 'A dedicated team account used only for engineering release notifications'
+                    : 'Team account',
+              },
+            ]
+          : []),
+      ];
   const createdAt = new Date().toISOString();
   const chat = {
     id: workflowChatMockId,
@@ -72,11 +140,27 @@ export function createWorkflowChatMock(scenario: string) {
     id: requestId,
     turnId,
     revision: 1,
-    prompt: 'Who should send the Slack notification?',
+    prompt: preset?.prompt ?? 'Who should send the Slack notification?',
     expiresAt: new Date(Date.now() + 86400000).toISOString(),
     answerSchema: { kind: 'choices', multiple: false, allowText: true, choices },
-    status: 'pending',
-    response: null,
+    status: scenario.startsWith('workflow-answered')
+      ? 'answered'
+      : scenario === 'workflow-cancelled'
+        ? 'cancelled'
+        : 'pending',
+    response: scenario.startsWith('workflow-answered')
+      ? {
+          id: '20202020-2020-4020-8020-202020202020',
+          answer:
+            scenario === 'workflow-answered-text'
+              ? {
+                  kind: 'text',
+                  text: 'Post a short line with the PR title and link, then put the full review summary in a thread reply so the channel stays quiet. Mention the author only when there is a blocking comment.',
+                }
+              : { kind: 'choices', choiceIds: [choices[0]!.id] },
+          createdAt,
+        }
+      : null,
   };
   let definitionReads = 0;
   const actionReads = new Map<string, number>();
