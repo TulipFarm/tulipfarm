@@ -128,12 +128,14 @@ test('chat list keeps clear columns, responsive actions, filters, and recovery',
     await first.waitFor({ state: 'detached' });
     await open('chats-error');
     await page.getByRole('heading', { name: 'Could not load chats', exact: true }).waitFor();
-    // The demo fails the first four list reads (chats-mock-api.ts); the page makes three as it opens, so the first retry fails too.
+    // The demo fails the first four list reads (chats-mock-api.ts), but the page makes two or three as it opens,
+    // and a click while a retry is still reading joins that read, so retry until the list loads.
     const retry = page.getByRole('button', { name: 'Retry loading chats', exact: true });
-    await retry.click();
-    await page.getByRole('heading', { name: 'Could not load chats', exact: true }).waitFor();
-    await retry.click();
-    await first.waitFor();
+    for (let attempt = 0; !(await first.isVisible()); attempt++) {
+      assert.ok(attempt < 6, 'Retrying loads the chats');
+      await retry.click({ timeout: 1000 }).catch(() => {});
+      await first.waitFor({ timeout: 1000 }).catch(() => {});
+    }
     await open('chats-empty');
     await page.getByRole('heading', { name: 'No chats yet', exact: true }).waitFor();
     // The demo holds the list read for 2s in the page (chats-mock-api.ts:47); waiting for network idle can outlast it.
