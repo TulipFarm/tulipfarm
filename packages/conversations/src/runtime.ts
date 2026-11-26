@@ -235,6 +235,11 @@ export async function ownerTeamChoices(tx: AuthorizationTransaction, actor: Huma
   if (choices[0]?.label === 'Everyone') choices[0] = { ...choices[0], label: 'Everyone (Recommended)' };
   return choices;
 }
+// The choice list shows its Recommended badge only for a trailing marker.
+const recommendedLast = (choice: { id: string; label: string }) => {
+  const rest = choice.label.replace(/^\s*\(recommended\)\s*/i, '');
+  return rest === choice.label ? choice : { ...choice, label: `${rest} (Recommended)` };
+};
 // A button press reaches the model as data beside the words it sent. to_jsonb reads the column on older schemas too.
 const modelPartText = `CASE p.kind WHEN 'layout-action' THEN E'\\n\\n[Layout action] The person used a control in your reply instead of typing: ' || (to_jsonb(p)->'layout_action')::text ELSE p.text END`;
 // Where the requester can see for themselves what a failed read would have returned.
@@ -2580,7 +2585,9 @@ export function createConversationExecutor(
             if (!interactiveChat || external) throw new AccessDenied();
             const choice = presentChoiceSchema.parse(call);
             await guarded(async (tx, context) => {
-              const choices = choice.from ? await ownerTeamChoices(tx, context.actor) : choice.choices;
+              const choices = choice.from
+                ? await ownerTeamChoices(tx, context.actor)
+                : choice.choices?.map(recommendedLast);
               if (!choices || choices.length < 2) throw new AccessDenied();
               if (
                 source.project &&

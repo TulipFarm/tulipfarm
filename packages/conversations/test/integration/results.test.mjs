@@ -328,3 +328,34 @@ test('a question card adds no unknown lineage to later replies in the chat', asy
     await f.close();
   }
 });
+
+test('a leading Recommended marker on a choice moves to the end of its label', async () => {
+  const f = await conversationFixture();
+  try {
+    const w = f.workspace,
+      chatId = randomUUID();
+    await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+    const choice = {
+      tool: 'present.choice',
+      prompt: 'Which day?',
+      choices: [
+        { id: 'mon', label: '(Recommended) Monday' },
+        { id: 'tue', label: 'Tuesday (Recommended)' },
+      ],
+    };
+    const executor = createConversationExecutor(f.runtime, async ({ executeTool }) => {
+      await executeTool(choice.tool, false, async () => ({ result: {}, sources: [] }), [], choice);
+      return { text: '', sources: [] };
+    });
+    await executor.process(await send(f, chatId, 'Book the review'));
+    const [{ answerSchema }] = (
+      await f.db.platform.query(`SELECT answer_schema AS "answerSchema" FROM ${f.table('tf_conversation_requests')}`)
+    ).rows;
+    assert.deepEqual(
+      answerSchema.choices.map(c => c.label),
+      ['Monday (Recommended)', 'Tuesday (Recommended)'],
+    );
+  } finally {
+    await f.close();
+  }
+});
