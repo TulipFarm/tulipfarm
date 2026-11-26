@@ -5,6 +5,7 @@ import { useFeatureRead } from '@/lib/query';
 import { TableRequestError } from '@/features/tables/request-state';
 import { tableValuesSchema } from '@/features/tables/review-contracts';
 import { rowThreadSchema } from '@/features/tables/row-thread';
+import { taskKeysSchema } from './api';
 
 const workspaceBase = (workspaceId: string) => `${apiOrigin}/v1/workspaces/${encodeURIComponent(workspaceId)}`;
 
@@ -19,10 +20,6 @@ export function canonicalTaskKey(text: string) {
   return number <= 2147483647 ? formatTaskKey(number) : null;
 }
 
-export const taskKeysSchema = z.object({
-  tableId: z.uuid().nullable(),
-  keys: z.array(z.object({ rowId: z.uuid(), key: z.string(), number: z.number().int().nonnegative() })),
-});
 export type TaskKeys = z.infer<typeof taskKeysSchema>;
 
 const upgrading = 'Tasks are being upgraded. Try again in a few minutes.';

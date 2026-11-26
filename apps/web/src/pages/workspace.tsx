@@ -158,6 +158,9 @@ const SearchPalette = lazy(() =>
 const InviteMembersPrompt = lazy(() =>
   import('@/features/governance/invite-members-prompt').then(module => ({ default: module.InviteMembersPrompt })),
 );
+const QuickTask = lazy(() =>
+  import('@/features/task-board/quick-task').then(module => ({ default: module.QuickTask })),
+);
 const InboxList = lazy(() => import('@/features/inbox/inbox-list').then(module => ({ default: module.InboxList })));
 const SidebarNavItem = lazy(() =>
   import('@/features/navigation/sidebar-nav-item').then(module => ({ default: module.SidebarNavItem })),
@@ -630,8 +633,10 @@ function WorkspacePeopleMenuItem({
 }
 
 function WorkspaceHeader() {
-  const { workspace } = workspaceRoute.useRouteContext();
+  const { workspace, sessionId, membershipId } = workspaceRoute.useRouteContext();
   const { setOpenMobile } = useSidebar();
+  const [composingTask, setComposingTask] = useState(false);
+  const closeTask = useCallback(() => setComposingTask(false), []);
   return (
     <div className="flex items-center gap-1">
       <div className="min-w-0 flex-1">
@@ -663,18 +668,37 @@ function WorkspaceHeader() {
         </DropdownMenu>
       </div>
       <div className="flex shrink-0 items-center [[data-sprout-sidebar][data-state=collapsed]_&]:hidden">
-        <Button
-          variant="secondary"
-          size="icon-sm"
-          aria-label="New chat"
-          title="New chat"
-          nativeButton={false}
-          render={<Link to="/$workspaceSlug" params={{ workspaceSlug: workspace.slug }} />}
-          onClick={() => setOpenMobile(false)}
-        >
-          <ComposeIcon size="md" aria-hidden="true" />
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger render={<Button variant="secondary" size="icon-sm" aria-label="New" title="New" />}>
+            <ComposeIcon size="md" aria-hidden="true" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="bottom" align="end">
+            <DropdownMenuItem
+              render={<Link to="/$workspaceSlug" params={{ workspaceSlug: workspace.slug }} />}
+              onClick={() => setOpenMobile(false)}
+            >
+              <ChatIcon size="sm" aria-hidden="true" />
+              New chat
+            </DropdownMenuItem>
+            {membershipId && workspace.status === 'ready' && (
+              <DropdownMenuItem
+                onClick={() => {
+                  setOpenMobile(false);
+                  setComposingTask(true);
+                }}
+              >
+                <TasksIcon size="sm" aria-hidden="true" />
+                New task
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
+      {composingTask && (
+        <Suspense fallback={null}>
+          <QuickTask workspace={{ id: workspace.id, slug: workspace.slug, sessionId }} close={closeTask} />
+        </Suspense>
+      )}
     </div>
   );
 }

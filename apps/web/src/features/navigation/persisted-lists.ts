@@ -7,8 +7,9 @@ import type { PersistedRead } from '@/lib/query/persisted-reads';
 import { appSummarySchema } from '@/features/apps/api';
 import { knowledgeEntrySchema } from '@/features/files/knowledge-api';
 import { skillListSchema } from '@/features/skills/api';
-import { tableListSchema } from '@/features/tables/api';
+import { recordSchema, tableListSchema } from '@/features/tables/api';
 import { taskListSchema } from '@/features/tasks/api';
+import { taskActivitySchema, taskKeysSchema } from '@/features/task-board/api';
 
 const matches = (schema: z.ZodType) => (key: QueryKey) => schema.safeParse(key).success;
 const firstPage = <T extends z.ZodRawShape>(domain: string, shape: T) =>
@@ -22,6 +23,19 @@ const tablesKey = firstPage('tables', { search: z.null(), sort: z.string().nulla
 const skillsKey = firstPage('skills', { search: z.literal(''), view: z.string() });
 const appsKey = z.tuple([z.literal('apps'), z.literal('list')]);
 const knowledgeKey = z.tuple([z.literal('knowledge'), z.literal('personal')]);
+// The Tasks board: which table holds the workspace's tasks, its newest rows, agent progress and task keys.
+const id = z.string().min(1);
+const tasksTableKey = z.tuple([z.literal('tasks-table'), id]);
+const taskBoardRowsKey = z.tuple([
+  z.literal('tables'),
+  z.literal('detail'),
+  id,
+  z.literal('records'),
+  z.literal('task-board'),
+  z.string(),
+]);
+const taskActivityKey = z.tuple([z.literal('task-board'), z.literal('activity'), id]);
+const taskKeysKey = z.tuple([z.literal('tasks'), z.literal('keys'), id]);
 // Unsearched, unfiltered first pages of a files section, at its root or in a folder.
 const filesKey = z.tuple([
   z.literal('files'),
@@ -46,6 +60,15 @@ export const persistedListReads: PersistedRead[] = [
   { name: 'agents', limit: 2, match: matches(agentsKey), schema: agentListSchema },
   { name: 'agent-context', limit: 1, match: matches(agentContextKey), schema: agentContextSchema },
   { name: 'tasks', limit: 1, match: matches(tasksKey), schema: taskListSchema },
+  { name: 'tasks-table', limit: 1, match: matches(tasksTableKey), schema: z.uuid().nullable() },
+  {
+    name: 'task-board-rows',
+    limit: 1,
+    match: matches(taskBoardRowsKey),
+    schema: z.object({ records: z.array(recordSchema), more: z.boolean() }),
+  },
+  { name: 'task-activity', limit: 1, match: matches(taskActivityKey), schema: taskActivitySchema },
+  { name: 'task-keys', limit: 1, match: matches(taskKeysKey), schema: taskKeysSchema },
   { name: 'workflows', limit: 1, match: matches(workflowsKey), schema: workflowSchema.array() },
   { name: 'tables', limit: 3, match: matches(tablesKey), schema: tableListSchema },
   { name: 'skills', limit: 3, match: matches(skillsKey), schema: skillListSchema },

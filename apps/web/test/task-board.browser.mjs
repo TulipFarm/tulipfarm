@@ -5,7 +5,8 @@ import { rowId, tasksApi, until } from './tasks.fixture.mjs';
 
 // The Tasks page shows tasks as a board by status, each card with its key. Dragging a card marks it done, reopens it
 // or runs its agent; drops that would mean nothing are refused, and opening a card shows the task's own page. The board
-// keeps up on its own: new tasks and run changes appear without a reload, and no column header spins.
+// keeps up on its own: new tasks and run changes appear without a reload, and no column header spins. The sidebar's
+// New task opens the composer in place.
 const server = await startBuiltApp();
 const { origin } = server;
 const api = tasksApi();
@@ -100,6 +101,13 @@ try {
   }, 'Opening a card shows the task on its own page');
   await page.getByRole('heading', { name: 'TUL-001' }).or(page.getByText('TUL-001').first()).waitFor();
   assert.equal(await page.getByRole('textbox', { name: 'Title' }).inputValue(), 'Order new labels');
+
+  // The sidebar's New task opens the composer over the current page instead of leaving it.
+  const before = page.url();
+  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'New task', exact: true }).click();
+  await page.getByRole('dialog', { name: 'New task' }).waitFor();
+  assert.equal(page.url(), before, 'New task stays on the current page');
   assert.deepEqual(errors, [], 'No browser runtime errors');
   console.log('Tasks board moves cards by meaning and refuses the rest.');
 } catch (error) {

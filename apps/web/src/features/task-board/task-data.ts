@@ -1,10 +1,40 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { z } from 'zod';
+import { apiOrigin } from '@/lib/auth';
+import { jsonResponse, readJson, responseError } from '@/lib/http';
 import { useFeatureRead } from '@/lib/query';
+import { TableRequestError } from '@/features/tables/request-state';
 import type { TableApi, TableDefinition } from '@/features/tables/api';
 import { useTableDetail } from '@/features/tables/hooks';
 import { tableKeys } from '@/features/tables/queries';
 import { readTaskActivity, readTaskRows, type TaskActivity, type TaskCard } from './api';
 import { taskPolling, type TaskKeys } from './task-api';
+
+const tasksTableSchema = z.object({ tableId: z.uuid().nullable() });
+
+async function readTasksTable(workspaceId: string, signal: AbortSignal) {
+  const response = await jsonResponse(`${apiOrigin}/v1/workspaces/${encodeURIComponent(workspaceId)}/tasks-table`, {
+    method: 'GET',
+    signal,
+    cache: 'no-store',
+  });
+  const value = await readJson(response, true);
+  if (!response.ok)
+    throw new TableRequestError(
+      response.status,
+      responseError(value, 'tasks-unavailable'),
+      'Tasks could not be loaded. Try again.',
+    );
+  return tasksTableSchema.parse(value).tableId;
+}
+
+/** Which table holds the workspace's tasks, or null when the workspace has none. */
+export const useTasksTableRead = (workspaceId: string) =>
+  useFeatureRead({
+    key: ['tasks-table', workspaceId] as const,
+    load: signal => readTasksTable(workspaceId, signal),
+    staleTime: 5 * 60_000,
+  });
 
 /** The Tasks table's definition and what the person may do with its rows. */
 export function useTasksTable(api: TableApi, tableId: string) {

@@ -1,19 +1,15 @@
 import { ChatIcon } from '@tulipfarm/icons';
 import { Link, Navigate } from '@tanstack/react-router';
-import { z } from 'zod';
 import { tableDetailRoute, tableEditRoute, taskRoute, tasksRoute, workspaceRoute } from '@/router';
 import { Button } from '@tulipfarm/sprout/button';
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { CreateInChatSample, StatePanel } from '@tulipfarm/sprout/state-panel';
 import { TableDetail } from '@/features/tables/tables';
-import { TaskBoard } from '@/features/task-board/task-board';
+import { TaskBoard, TaskBoardSkeleton } from '@/features/task-board/task-board';
 import { canonicalTaskKey } from '@/features/task-board/task-api';
 import { TaskView } from '@/features/task-board/task-page';
-import { TableRequestError } from '@/features/tables/request-state';
-import { apiOrigin } from '@/lib/auth';
-import { jsonResponse, readJson, responseError } from '@/lib/http';
-import { useFeatureRead } from '@/lib/query';
+import { useTasksTableRead as useTasksRead } from '@/features/task-board/task-data';
 
 export function TableDetailPage() {
   const { tableId } = tableDetailRoute.useParams();
@@ -45,31 +41,6 @@ export function TableDetailPage() {
   );
 }
 
-const tasksTableSchema = z.object({ tableId: z.uuid().nullable() });
-
-async function readTasksTable(workspaceId: string, signal: AbortSignal) {
-  const response = await jsonResponse(`${apiOrigin}/v1/workspaces/${encodeURIComponent(workspaceId)}/tasks-table`, {
-    method: 'GET',
-    signal,
-    cache: 'no-store',
-  });
-  const value = await readJson(response, true);
-  if (!response.ok)
-    throw new TableRequestError(
-      response.status,
-      responseError(value, 'tasks-unavailable'),
-      'Tasks could not be loaded. Try again.',
-    );
-  return tasksTableSchema.parse(value).tableId;
-}
-
-const useTasksRead = (workspaceId: string) =>
-  useFeatureRead({
-    key: ['tasks-table', workspaceId] as const,
-    load: signal => readTasksTable(workspaceId, signal),
-    staleTime: 5 * 60_000,
-  });
-
 /** The Tasks table ID, or `missing` when it can't be read, so table pages still open. */
 function useTasksTableId(workspaceId: string) {
   const state = useTasksRead(workspaceId).state;
@@ -94,7 +65,7 @@ export function TasksPage() {
           changeSearch={next => void navigate({ search: current => ({ ...current, ...next }), replace: true })}
         />
       ) : state.kind === 'loading' ? (
-        <p className="text-sm text-muted-foreground">Loading Tasks…</p>
+        <TaskBoardSkeleton />
       ) : state.kind === 'error' ? (
         <StatePanel
           heading="h1"

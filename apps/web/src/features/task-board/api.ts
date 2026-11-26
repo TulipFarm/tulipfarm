@@ -33,6 +33,12 @@ export const taskActivitySchema = z.object({
   comments: z.array(z.object({ rowId: z.uuid(), count: z.number() })),
   me: z.uuid(),
 });
+/** Every task's key, such as TUL-042, by row. */
+export const taskKeysSchema = z.object({
+  tableId: z.uuid().nullable(),
+  keys: z.array(z.object({ rowId: z.uuid(), key: z.string(), number: z.number().int().nonnegative() })),
+});
+
 export type TaskActivity = z.infer<typeof taskActivitySchema>;
 export type AssignmentActivity = TaskActivity['tasks'][number];
 
