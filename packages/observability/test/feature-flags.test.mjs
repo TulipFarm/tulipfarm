@@ -267,7 +267,7 @@ test('a snapshot uses evaluateMany once per scope; false decides, missing and fa
   assert.equal(singles.length, 0);
   assert.deepEqual(
     batches.map(([, scope]) => scope),
-    ['workspace', 'workspace'],
+    ['global', 'workspace', 'global', 'workspace'],
   );
   for (const [flags, scope] of batches) for (const name of flags) assert.equal(featureFlags[name].scope, scope);
   assert.deepEqual(snapshot, {
