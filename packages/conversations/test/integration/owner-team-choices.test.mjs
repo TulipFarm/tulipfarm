@@ -12,7 +12,7 @@ test('owner team choices list real teams, Everyone first, with no model-written 
     const actor = { kind: 'human', userId: w.userId, membershipId: w.membershipId };
     const choices = await f.runtime.transaction(w.id, commonCompatibility, tx => ownerTeamChoices(tx, actor));
     const real = (await f.db.platform.query(`SELECT id, name FROM ${f.table('tf_teams')}`)).rows;
-    assert.equal(choices[0].label, 'Everyone (Recommended)');
+    assert.deepEqual(choices[0], { id: choices[0].id, label: 'Everyone', recommended: true });
     assert.equal(choices.length, real.length);
     assert.ok(choices.every(choice => real.some(team => team.id === choice.id)));
     assert.ok(choices.some(choice => choice.label === 'Admin'));
