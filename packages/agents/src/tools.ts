@@ -2288,7 +2288,7 @@ export function createChatTools(
           };
         const problem = await createWorkflowDrafts(runtime, workspaceId).problem(actor, definition);
         if (problem) return problem;
-        if (!call.workflowId && !call.activate) {
+        if (!call.workflowId) {
           const origin = context.origin;
           const applied = await policyWrite(
             runtime,

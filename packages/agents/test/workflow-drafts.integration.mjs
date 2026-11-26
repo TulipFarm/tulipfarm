@@ -1248,3 +1248,84 @@ test('a workflow saved from a chat that read personal memory opens for its autho
     "another member cannot read a workflow derived from someone else's personal memory",
   );
 });
+
+test('Auto mode auto-saves new workflows inactive even with activate: true and across clarifying turns', async t => {
+  const f = await conversationFixture();
+  t.after(() => f.close());
+  const { workspace: w, store, runtime } = f;
+  const service = createWorkflows(runtime);
+  const runTurn = async (chatId, text, call) => {
+    const sent = await store.send(w.id, w.userId, chatId, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      parts: [{ kind: 'text', text }],
+    });
+    let output;
+    const executor = createConversationExecutor(runtime, async input => {
+      if (call)
+        output = (
+          await input.executeTool(
+            call.tool,
+            false,
+            context =>
+              createChatTools(context.runtime, {
+                privateBud: { link: async (_, kind, id) => `/test/${kind}/${id}` },
+              }).invokeWithSources(context, call),
+            [],
+            call,
+          )
+        ).result;
+      return { text: call ? 'Done.' : 'What schedule should it use?', sources: [] };
+    });
+    assert.equal(
+      await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
+      'completed',
+    );
+    return output;
+  };
+
+  // Direct create request with activate: true auto-saves inactive in Auto mode.
+  const directChat = randomUUID();
+  await store.create(w.id, w.userId, { chatId: directChat, commandId: randomUUID() });
+  const direct = await runTurn(directChat, 'Create a weekday review workflow.', {
+    tool: 'workflows.draft',
+    definition: JSON.stringify(weekdayReview),
+    activate: true,
+  });
+  assert.equal(direct.status, 'saved');
+  assert.equal(direct.decision, 'workspace-policy');
+  assert.equal(direct.enabled, false);
+  const [directWorkflow] = (await service.list(w.id, w.userId)).filter(item => item.id === direct.workflowId);
+  assert.equal(directWorkflow.enabled, false);
+
+  // Multi-turn clarifying answer inherits the earlier create request and auto-saves inactive.
+  const multiChat = randomUUID();
+  await store.create(w.id, w.userId, { chatId: multiChat, commandId: randomUUID() });
+  await runTurn(multiChat, 'Create a weekday review workflow.');
+  const clarified = await runTurn(multiChat, 'Weekdays at 9am is good.', {
+    tool: 'workflows.draft',
+    definition: JSON.stringify(weekdayReview),
+    activate: true,
+  });
+  assert.equal(clarified.status, 'saved');
+  assert.equal(clarified.decision, 'workspace-policy');
+  assert.equal(clarified.enabled, false);
+
+  // Preview-only requests and questions still require review even after an earlier create request.
+  const previewChat = randomUUID();
+  await store.create(w.id, w.userId, { chatId: previewChat, commandId: randomUUID() });
+  await runTurn(previewChat, 'Create a weekday review workflow.');
+  const preview = await runTurn(previewChat, 'Show me the draft before saving.', {
+    tool: 'workflows.draft',
+    definition: JSON.stringify(weekdayReview),
+    activate: true,
+  });
+  assert.equal(preview.status, 'review-required');
+
+  const question = await runTurn(previewChat, 'Should we run it at 9am?', {
+    tool: 'workflows.draft',
+    definition: JSON.stringify(weekdayReview),
+    activate: true,
+  });
+  assert.equal(question.status, 'review-required');
+});

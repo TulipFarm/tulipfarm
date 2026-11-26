@@ -115,25 +115,28 @@ export function WorkflowViewer({
                   : [],
               )}
             />
-            <span className="text-xs text-muted-foreground">
-              {view.run
-                ? view.revisionLabel
-                : `${view.definition.steps.length} ${view.definition.steps.length === 1 ? 'step' : 'steps'}`}
-            </span>
-            <p className="text-xs text-muted-foreground">
-              {view.run?.note ??
-                (view.source === 'Draft'
-                  ? 'Review this draft before saving.'
-                  : view.source === 'Active'
-                    ? 'Active. Each matching trigger event starts a run.'
-                    : 'Definition only. A saved workflow does not confirm a run or delivery.')}
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+              <span>
+                {view.run
+                  ? view.revisionLabel
+                  : `${view.definition.steps.length} ${view.definition.steps.length === 1 ? 'step' : 'steps'}`}
+              </span>
+              <span aria-hidden="true">·</span>
+              <span>
+                {view.run?.note ??
+                  (view.source === 'Draft'
+                    ? 'Review before saving.'
+                    : view.source === 'Active'
+                      ? 'Active — runs on matching triggers.'
+                      : 'Saved — turn on to run.')}
+              </span>
             </p>
           </div>
           {actions}
         </header>
       )}
       {view.notice && (
-        <div className="px-4">
+        <div className="px-4 pb-3">
           <Alert>
             <AlertDescription>{view.notice}</AlertDescription>
           </Alert>
@@ -159,7 +162,7 @@ export function WorkflowViewer({
           </Button>
         </div>
         {header ? (
-          (navigation ?? <p className="text-xs text-muted-foreground">Select a step to inspect</p>)
+          navigation
         ) : (
           <div className="flex flex-wrap items-center gap-2">
             {navigation}
@@ -168,7 +171,7 @@ export function WorkflowViewer({
         )}
       </div>
       <div className="workflow-viewer-body">
-        <div className="min-w-0">
+        <div className="workflow-viewer-diagram-col min-w-0">
           {mode === 'diagram' ? (
             <WorkflowDiagram
               key={view.key}

@@ -602,6 +602,7 @@ test(
           );
           await created.getByText('First run Monday, October 12, 2026 at 9:00 AM EDT.', { exact: true }).waitFor();
           const canvas = page.getByRole('region', { name: 'Canvas', exact: true });
+          assert.equal(await canvas.count(), 0, 'canvas stays closed until the user clicks the draft card');
           const returnToChat = async () => {
             if (mobile && (await canvas.count()))
               await canvas.getByRole('button', { name: 'Back to chat', exact: true }).click();
@@ -610,12 +611,22 @@ test(
             await returnToChat();
             await card.getByRole('button', { name: 'View diagram', exact: true }).click();
             const viewer = canvas.getByRole('region', { name: `${name} workflow`, exact: true });
-            await viewer.getByText('Awaiting your review', { exact: true }).waitFor();
+            await viewer.getByText('Awaiting review', { exact: true }).waitFor();
             await viewer.getByRole('button', { name: 'Edit in chat', exact: true }).waitFor();
             return viewer;
           };
           const createdViewer = await openDraft(created, definition.name);
-          await canvas.getByRole('button', { name: 'A draft needs your review. Back to chat', exact: true }).waitFor();
+          if (mobile)
+            await canvas
+              .getByRole('button', { name: 'A draft needs your review. Back to chat', exact: true })
+              .waitFor();
+          else
+            assert.equal(
+              await canvas
+                .getByRole('button', { name: 'A draft needs your review. Back to chat', exact: true })
+                .isVisible(),
+              false,
+            );
           if (shots) {
             await createdViewer.getByRole('figure').scrollIntoViewIfNeeded();
             await page.waitForFunction(() => {
@@ -744,7 +755,7 @@ test(
           await webhookViewer.getByRole('button', { name: 'Edit in chat', exact: true }).click();
           await composer
             .getByText(
-              `Help me revise workflow draft ${webhookDraft} in this chat. Ask what I want to change, keep unrelated steps, and prepare a fresh draft for review.`,
+              `Help me revise the "${webhookDefinition.name}" workflow in this chat. Ask what I want to change and keep unrelated steps.`,
               { exact: true },
             )
             .waitFor();

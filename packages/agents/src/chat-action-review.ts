@@ -105,8 +105,8 @@ export async function policyWrite(
     if (policy.mode === 'legacy') return null;
     const name = (s: string) => relation(tx, s);
     const turn = (
-      await tx.client.query<{ text: string }>(
-        `SELECT string_agg(p.text,' ' ORDER BY p.ordinal) AS text
+      await tx.client.query<{ text: string; sequence: number }>(
+        `SELECT string_agg(p.text,' ' ORDER BY p.ordinal) AS text, m.sequence
       FROM ${name('tf_conversations')} c JOIN ${name('tf_conversation_turns')} t ON t.conversation_id=c.id
       JOIN ${name('tf_conversation_messages')} m ON m.id=t.source_message_id AND m.conversation_id=c.id AND m.sequence=t.accepted_sequence
       JOIN ${name('tf_conversation_parts')} p ON p.message_id=m.id AND p.kind='text'
@@ -115,7 +115,7 @@ export async function policyWrite(
       AND t.id=$2 AND t.status NOT IN ('completed','blocked','cancelled','failed') AND NOT COALESCE((to_jsonb(t)->>'planning_mode')::boolean,false)
       AND m.author_kind='human' AND m.membership_id=$3 AND NOT EXISTS (SELECT 1 FROM ${name('tf_slack_dm_roots')} WHERE conversation_id=c.id)
       AND NOT EXISTS (SELECT 1 FROM ${name('tf_slack_default_turns')} WHERE conversation_id=c.id)
-      GROUP BY t.id`,
+      GROUP BY t.id, m.sequence`,
         [origin.conversationId, origin.turnId, actor.membershipId, actor.userId],
       )
     ).rows[0];
@@ -136,7 +136,29 @@ export async function policyWrite(
     if (shouldAsk(policy, action)) return { review: true };
     if (!row) {
       const kind = action.slice(7);
-      if (!((await creationRequested(workspaceId, turn.text, kind)) ?? explicitCreation(turn.text, kind))) return null;
+      let requested = (await creationRequested(workspaceId, turn.text, kind)) ?? explicitCreation(turn.text, kind);
+      if (!requested && !turn.text.includes('?') && !previewOnlyPhrase.test(turn.text)) {
+        const priorTurns = (
+          await tx.client.query<{ text: string }>(
+            `SELECT string_agg(p.text,' ' ORDER BY p.ordinal) AS text
+          FROM ${name('tf_conversation_messages')} m
+          JOIN ${name('tf_conversation_parts')} p ON p.message_id=m.id AND p.kind='text'
+          WHERE m.conversation_id=$1 AND m.sequence<$2 AND m.author_kind='human' AND m.membership_id=$3
+          GROUP BY m.id, m.sequence
+          ORDER BY m.sequence DESC
+          LIMIT 2`,
+            [origin.conversationId, turn.sequence, actor.membershipId],
+          )
+        ).rows;
+        for (const prior of priorTurns) {
+          if (previewOnlyPhrase.test(prior.text)) break;
+          if ((await creationRequested(workspaceId, prior.text, kind)) ?? explicitCreation(prior.text, kind)) {
+            requested = true;
+            break;
+          }
+        }
+      }
+      if (!requested) return null;
       if (
         (
           await protectedSourceClosure(tx, [

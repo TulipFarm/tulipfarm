@@ -396,7 +396,12 @@ for (const width of [375, 390, 414, 768, 1440])
         await notifyChange(page, workspace.id, fixture.session.user.id, 'detail', chatId);
         await page.getByRole('button', { name: 'Review agent', exact: true }).waitFor();
         await page.getByText('Draft · Waiting for your review', { exact: true }).waitFor();
-        if (width < 768) await page.getByRole('button', { name: 'Review agent', exact: true }).click();
+        assert.equal(
+          await page.getByRole('region', { name: 'Canvas', exact: true }).count(),
+          0,
+          'canvas stays closed until the user clicks the draft card',
+        );
+        await page.getByRole('button', { name: 'Review agent', exact: true }).click();
         const canvas = page.getByRole('region', { name: 'Canvas', exact: true });
         const form = canvas.getByRole('form', { name: 'Agent setup', exact: true });
         await form.getByLabel('Agent name', { exact: true }).waitFor();

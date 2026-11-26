@@ -326,12 +326,12 @@ function WorkflowViewport({ adjusted }: { adjusted: RefObject<boolean> }) {
       fitted.current = { width, height };
       const bounds = flow.getNodesBounds(flow.getNodes());
       const zoom = Math.max(
-        bounds.height * 0.85 > maxDiagramHeight ? 0.85 : 0.15,
-        Math.min(1, (width - 48) / bounds.width, (height - 80) / bounds.height),
+        bounds.height * 0.85 > maxDiagramHeight ? 0.85 : 0.35,
+        Math.min(1, (width - 48) / bounds.width, (height - 64) / bounds.height),
       );
       void flow.setViewport({
         x: width / 2 - (bounds.x + bounds.width / 2) * zoom,
-        y: Math.max(40, (height - bounds.height * zoom) / 2) - bounds.y * zoom,
+        y: Math.max(32, (height - bounds.height * zoom) / 2) - bounds.y * zoom,
         zoom,
       });
     };
@@ -348,9 +348,15 @@ function WorkflowViewport({ adjusted }: { adjusted: RefObject<boolean> }) {
       });
       return;
     }
-    // Wait for the opening Canvas to reach its measured size; later reads must not reset pan/zoom.
-    const timer = window.setTimeout(fit, 220);
-    return () => window.clearTimeout(timer);
+    const frame = window.requestAnimationFrame(fit);
+    // Refit once the opening Canvas reaches its settled size if the person has not panned/zoomed.
+    const timer = window.setTimeout(() => {
+      if (!adjusted.current) fit();
+    }, 220);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
   }, [width, height, flow, adjusted]);
   return null;
 }
@@ -433,7 +439,7 @@ export function WorkflowDiagram({
     <div
       ref={element}
       className="workflow-diagram"
-      style={{ height: surface === 'canvas' ? `min(${height}px, max(280px, calc(100dvh - 360px)))` : height }}
+      style={surface === 'canvas' ? undefined : { height }}
       data-surface={surface}
       data-motion={motion}
       role="figure"
@@ -454,9 +460,9 @@ export function WorkflowDiagram({
         selectionKeyCode={null}
         minZoom={0.15}
         maxZoom={1.5}
-        zoomOnScroll={false}
+        zoomOnScroll={surface === 'canvas'}
         zoomOnDoubleClick={false}
-        preventScrolling={false}
+        preventScrolling={surface === 'canvas'}
         proOptions={{ hideAttribution: true }}
         onMoveStart={event => {
           if (event) adjusted.current = true;

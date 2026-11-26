@@ -8,7 +8,6 @@ import { Badge } from '@tulipfarm/sprout/badge';
 import { ReviewCard } from '@tulipfarm/sprout/review-card';
 import { Spinner } from '@tulipfarm/sprout/spinner';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
-import { canvasSplitMinWidth } from '@tulipfarm/sprout/canvas';
 import { Disclosure } from '@/components/disclosure';
 import { Table } from '@tulipfarm/sprout/table';
 import { TableRead, WriteFeedback } from '@/features/tables/feedback';
@@ -425,14 +424,6 @@ function ValidTableProposalCard({ workspaceId, chatId, id, userId, membershipId,
     const timer = setTimeout(() => void refresh(), Math.max(0, wait));
     return () => clearTimeout(timer);
   }, [pending, expiresAt]);
-  const autoOpened = useRef(false);
-  useEffect(() => {
-    if (autoOpened.current || !canvas || !dock?.latest || loaded?.status !== 'pending' || !hasSchemaPlan) return;
-    autoOpened.current = true;
-    // On a narrow screen Canvas would cover the chat, so it waits for the user to open it.
-    if (window.innerWidth >= canvasSplitMinWidth && !window.matchMedia('(max-width: 767px)').matches)
-      canvas.show(schemaCanvasItem(workspaceId, chatId, id, title));
-  }, [canvas, dock?.latest, loaded?.status, hasSchemaPlan, workspaceId, chatId, id, title]);
   const heading = useRef<HTMLHeadingElement>(null);
   const approvalFocus = useRef<Element | null>(null);
   useEffect(() => {
