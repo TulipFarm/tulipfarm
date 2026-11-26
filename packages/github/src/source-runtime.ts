@@ -78,6 +78,14 @@ export function rememberFreshGitHubSources(
       rememberRemoteSourceCheck(personalCheckKey(workspaceId, actor, source));
 }
 
+/** How many GitHub reads one source's check may make, such as rereading each target of a pinned search. */
+const rereadsPerSource = 32;
+
+// Running out of rereads proves nothing about access, so the source is unavailable rather than denied.
+function spendReread(limits: { attempts: number }) {
+  if (limits.attempts++ >= rereadsPerSource) throw new GitHubSourceUnavailable('github-unavailable');
+}
+
 /** How many of a pinned search's access targets are reread from GitHub at once. */
 const accessTargetConcurrency = 8;
 
@@ -122,7 +130,7 @@ async function verifyGitHubProof(
         });
         z.object({ ownerIdentity: z.object({ id: z.literal(proof.projectList.ownerNodeId) }) }).parse(output.data);
         for (const identity of proof.projectList.projects) {
-          if (limits.attempts++ >= 32) throw new AccessDenied();
+          spendReread(limits);
           if (identity.deleted)
             await checkDeletedProjectOwner(identity, credential, projectReader(credential, fetcher));
           else {
@@ -149,7 +157,7 @@ async function verifyGitHubProof(
         const identity = proof.projectIdentity;
         if (proof.transport !== 'graphql') throw new AccessDenied();
         for (const repository of identity.repositories) {
-          if (limits.attempts++ >= 32) throw new AccessDenied();
+          spendReread(limits);
           const [owner, repo] = repository.nameWithOwner.split('/');
           const operation = githubReadSchema.parse({ kind: 'repository.read', owner, repo });
           const output = await dispatchGitHubRead({ operation, credential, bindings: [], fetcher });
@@ -178,8 +186,10 @@ async function verifyGitHubProof(
         return output;
       }
       if (pinnedSearch && proof.accessTargets) {
-        for (const operation of proof.accessTargets)
-          if (!hasFixedAccessTarget(operation) || limits.attempts++ >= 32) throw new AccessDenied();
+        for (const operation of proof.accessTargets) {
+          if (!hasFixedAccessTarget(operation)) throw new AccessDenied();
+          spendReread(limits);
+        }
         const targets = [...proof.accessTargets];
         let failure: { error: unknown } | undefined;
         // Workers stop taking targets after the first failure and all settle before it is thrown.
@@ -413,19 +423,15 @@ export function withGitHubSourceAuthorization<T extends AccountRuntime>(
               await requireUsable(accounts, workspaceId, actor, source);
             } else {
               deadline ??= Date.now() + 10000;
-              const limits = { attempts, deadline };
-              try {
-                await verifyGitHubProof(
-                  source,
-                  proof,
-                  bindings,
-                  operation =>
-                    accounts.withCredential(workspaceId, actor, source.accountId, operation, source.generation),
-                  limits,
-                );
-              } finally {
-                attempts = limits.attempts;
-              }
+              // Each source gets its own rereads, so several large search results in one call cannot exhaust them.
+              await verifyGitHubProof(
+                source,
+                proof,
+                bindings,
+                operation =>
+                  accounts.withCredential(workspaceId, actor, source.accountId, operation, source.generation),
+                { attempts: 0, deadline },
+              );
               rememberRemoteSourceCheck(remoteKey);
             }
             checked.add(key);
