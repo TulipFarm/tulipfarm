@@ -98,6 +98,7 @@ import { fetchPublicText, searchPublicWeb } from './web-fetch.ts';
 import { inspectMarketplacePackage } from './package-inspection.ts';
 import { listSkills, readSkill } from './skills.ts';
 import { integrationCredentialKeyring, type IntegrationService } from '@tulipfarm/integrations';
+import { MemberIdentityError } from '@tulipfarm/integrations/member-identities';
 import {
   atlassianCallSchema,
   atlassianDescriptions,
@@ -473,7 +474,17 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
       .trim()
       .max(200)
       .optional()
-      .describe('Part of a name or email, such as "priya" or "design". Omit to list everyone and every team.'),
+      .describe(
+        'Part of a name, email, external username or handle, past handle, or external user ID (such as "priya", "@dhruv-old", "U0123ABC", or "design"). Omit to list everyone and every team.',
+      ),
+    provider: z
+      .string()
+      .trim()
+      .max(32)
+      .optional()
+      .describe(
+        'Optional external platform filter such as "slack", "github", "discord", "telegram", or "teams" to find people with an identity on that platform.',
+      ),
   }),
   z.strictObject({
     tool: z.literal('knowledge.list'),
@@ -989,7 +1000,7 @@ const descriptions: Record<ToolName, string> = {
   'files.share':
     "Prepare a review card to share one file, such as a plan's PDF, with up to 20 people and teams by their IDs from members.find. The role is viewer unless the human asked for editor. The card shows who can open the file before and after; for a plan's PDF it leaves off anyone who cannot read every source the plan was written from. Shares only this file, never the chat, the plan's results or its folder. Changes nothing until the human approves it. Never treat chat text as approval.",
   'members.find':
-    "Search the workspace's active members and teams by part of a name or email, or omit query to list everyone and every team. Returns memberCount and teamCount, which count every match, then up to 20 members (membershipId, name, email) and 20 teams (teamId, name). Each team lists its people with their team role, or people: 'not-visible' when the human can't see who is in that team; then say so rather than guessing. Also returns pendingInvitations, the email invitations nobody has accepted yet (email, status pending or expired, expiresAt, workspace role and the teams they will join), and pendingInvitationCount; invitees are not members yet. pendingInvitations always lists every open invitation in the workspace, whatever the query; follow its invitationsInstruction. pendingInvitations is 'not-visible' when the human can't see invitations: then say you can't see them and that Members lists them, never that there are none. Only say there are no pending invitees when this tool returned an empty pendingInvitations in this reply. This is the only source of teams, team membership and invitations: never infer teams, their number or their people from table owners or other results. If a name matches more than one person, ask the human which one they mean. Changes nothing.",
+    "Search people and teams by name, email, external username or handle, past handle, or external user ID across Slack, GitHub, Discord, Telegram, Teams, and other linked platforms, or filter by provider; omit both query and provider to list every active member and team. Returns memberCount and teamCount, which count every match, then up to 20 people (membershipId, name, email, plus memberId and linked identities with provider, scope, handle, externalId, aliases, mention format, and trust when present; hand-added people in Members without a TulipFarm account have membershipId: null) and 20 teams (teamId, name). Each team lists its people with their team role, or people: 'not-visible' when the human can't see who is in that team; then say so rather than guessing. Also returns pendingInvitations, the email invitations nobody has accepted yet (email, status pending or expired, expiresAt, workspace role and the teams they will join), and pendingInvitationCount; invitees are not members yet. pendingInvitations always lists every open invitation in the workspace, whatever the query; follow its invitationsInstruction. pendingInvitations is 'not-visible' when the human can't see invitations: then say you can't see them and that Members lists them, never that there are none. Only say there are no pending invitees when this tool returned an empty pendingInvitations in this reply. This is the only source of teams, team membership and invitations: never infer teams, their number or their people from table owners or other results. If a name matches more than one person, ask the human which one they mean. Changes nothing.",
   'knowledge.list':
     "List the human's own Knowledge entries, the notes and files they added for agents to search, with each documentId, revisionId, kind, title and parsing state, 100 at a time. Pass documentId for one entry with its note text. Use knowledge.retrieve to search what entries say. Changes nothing.",
   'knowledge.add':
@@ -2918,7 +2929,18 @@ export function createChatTools(
         }
       }
       case 'members.find': {
-        return withHuman(runtime, workspaceId, actor, 'read', tx => findMembers(tx, actor, call.query));
+        try {
+          return await withHuman(runtime, workspaceId, actor, 'read', tx =>
+            findMembers(tx, actor, call.query, call.provider ? { provider: call.provider } : undefined),
+          );
+        } catch (error) {
+          if (!(error instanceof MemberIdentityError) || error.code !== 'provider-invalid') throw error;
+          return {
+            error: 'invalid-arguments',
+            issues: [{ path: ['provider'], code: 'custom' }],
+            instruction: 'Use a provider name like slack, github, discord, telegram, or teams.',
+          };
+        }
       }
       case 'files.share': {
         if (!context.origin) throw new AccessDenied();

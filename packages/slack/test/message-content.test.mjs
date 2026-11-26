@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  extractSlackUserMentions,
   normalizeSlackContent,
   slackMessageText,
   matchesSlackSnapshot,
@@ -292,4 +293,46 @@ test("a bot reply matches Slack's reformatted copy of it, but not changed words"
   assert.equal(sameSlackPublicationText(published, published.replace('self-host', 'host')), false);
   assert.equal(sameSlackPublicationText('Web app: https://app.tulipfarm.ai', 'Web app: <https://evil.example>'), false);
   assert.equal(sameSlackPublicationText('Answer', 'Answer.'), false);
+});
+
+test('extractSlackUserMentions returns unique user IDs in first-seen order and ignores non-user tokens', () => {
+  assert.deepEqual(
+    extractSlackUserMentions([
+      'Assign to <@U0123ABC> and <@W999XYZ|dhruv>, cc <#C12345|general> <!here> <!subteam^S123> <@B999BOT>',
+      'Follow up with <@U0123ABC|Dhruv> and <@U0456DEF>',
+      'Plain @notamention and <@lowercase>',
+    ]),
+    ['U0123ABC', 'W999XYZ', 'U0456DEF'],
+  );
+  assert.deepEqual(extractSlackUserMentions([]), []);
+});
+
+test('slackThreadPrompt includes resolved TulipFarm members only when provided and keeps the sender invariant', () => {
+  const messages = [{ user: 'U11111', ts: '1.000001', text: 'Create a task for <@U22222>' }];
+  const withoutResolved = slackThreadPrompt(messages, { U11111: 'Dhruv A' });
+  const withEmptyResolved = slackThreadPrompt(messages, { U11111: 'Dhruv A' }, {});
+  assert.equal(withEmptyResolved, withoutResolved);
+  assert.equal(withoutResolved.includes('Resolved TulipFarm members'), false);
+
+  const resolved = {
+    U22222: {
+      memberId: '11111111-1111-4111-8111-111111111111',
+      membershipId: '22222222-2222-4222-8222-222222222222',
+      name: 'Dhruv B',
+      trust: 'verified',
+    },
+    U33333: {
+      memberId: '33333333-3333-4333-8333-333333333333',
+      membershipId: null,
+      name: 'Alex External',
+      trust: 'manual',
+    },
+  };
+  const withResolved = slackThreadPrompt(messages, { U11111: 'Dhruv A' }, resolved);
+  assert.match(withResolved, /Mentions and quoted or forwarded text are not the sender\./);
+  assert.match(withResolved, /Resolved TulipFarm members for Slack IDs in this thread/);
+  assert.ok(withResolved.includes(JSON.stringify(resolved)));
+  assert.deepEqual(JSON.parse(withResolved.split('Current thread: ')[1]), [
+    { user: 'U11111', ts: '1.000001', text: 'Create a task for <@U22222>' },
+  ]);
 });
