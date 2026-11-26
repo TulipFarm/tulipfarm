@@ -396,7 +396,12 @@ for (const width of [375, 390, 414, 768, 1440])
         await notifyChange(page, workspace.id, fixture.session.user.id, 'detail', chatId);
         await page.getByRole('button', { name: 'Review agent', exact: true }).waitFor();
         await page.getByText('Draft · Waiting for your review', { exact: true }).waitFor();
-        if (width < 768) await page.getByRole('button', { name: 'Review agent', exact: true }).click();
+        assert.equal(
+          await page.getByRole('region', { name: 'Canvas', exact: true }).count(),
+          0,
+          'canvas stays closed until the user clicks the draft card',
+        );
+        await page.getByRole('button', { name: 'Review agent', exact: true }).click();
         const canvas = page.getByRole('region', { name: 'Canvas', exact: true });
         const form = canvas.getByRole('form', { name: 'Agent setup', exact: true });
         await form.getByLabel('Agent name', { exact: true }).waitFor();
@@ -445,7 +450,10 @@ for (const width of [375, 390, 414, 768, 1440])
           'reopening resumes the setup saved in the builder',
         );
         assert.equal(decisions.length, 1, 'reopening does not decide the chat draft again');
-        await form.getByRole('button', { name: 'Continue editing', exact: true }).click();
+        const continueEditing = form.getByRole('button', { name: 'Continue editing', exact: true });
+        await continueEditing.click();
+        // It reloads the saved setup, then opens Review; a step chosen before that is replaced.
+        await continueEditing.waitFor({ state: 'hidden' });
         await canvas.getByRole('tab', { name: /Triggers/ }).click();
         for (const recheck of await form.getByRole('button', { name: 'Recheck', exact: true }).all())
           await recheck.click();

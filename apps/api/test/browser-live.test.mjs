@@ -4,7 +4,9 @@ import { test } from 'node:test';
 import Fastify from 'fastify';
 import { AccessDenied } from '@tulipfarm/access';
 import { BrowserHostError, browserSessionId } from '@tulipfarm/browser';
-import { registerBrowserLive } from '../src/browser-live.ts';
+import { registerExtension, resetExtensions } from '@tulipfarm/extensions';
+import { browserDiscard, registerBrowserLive } from '../src/browser-live.ts';
+import { registerConversations } from '../src/conversations.ts';
 
 const origin = 'http://localhost:5173';
 const auth = {
@@ -157,4 +159,107 @@ test('watching a browser is recorded for its charge', async t => {
     recorded.map(([workspace, session, browser]) => [workspace, session, browser.title]),
     [[workspaceId, sessionId, 'Example']],
   );
+});
+
+test('browserDiscard closes the session and ends billing without failing on host errors', async t => {
+  const workspaceId = randomUUID();
+  const chatId = randomUUID();
+  const runId = randomUUID();
+  const closed = [];
+  const queries = [];
+  const logged = [];
+  const runtime = {
+    async transaction(ws, _compat, action) {
+      return action({
+        schema: 'ws_test',
+        commonVersion: 112,
+        client: {
+          async query(sql, params) {
+            queries.push({ ws, sql, params });
+            return { rows: [], rowCount: 0 };
+          },
+        },
+      });
+    },
+  };
+  assert.equal(
+    browserDiscard(undefined, runtime, () => {}),
+    undefined,
+  );
+  registerExtension({
+    name: 'test-meter',
+    register(api) {
+      api.resourceMeter({
+        pricing: {
+          databasePicoUsdPerGibMonth: 0n,
+          objectPicoUsdPerGibMonth: 0n,
+          runPicoUsdPerHour: 0n,
+          browserPicoUsdPerHour: 0n,
+        },
+        databaseBytes: async function* () {},
+        objectBytes: async function* () {},
+      });
+    },
+  });
+  t.after(() => resetExtensions());
+  const discard = browserDiscard(
+    {
+      close: async id => {
+        closed.push(id);
+        if (id === browserSessionId(workspaceId, { runId })) throw new Error('host-down');
+      },
+    },
+    runtime,
+    (error, ws) => logged.push([ws, error.message]),
+  );
+  await discard(workspaceId, { conversationId: chatId });
+  await discard(workspaceId, { runId });
+  assert.deepEqual(closed, [
+    browserSessionId(workspaceId, { conversationId: chatId }),
+    browserSessionId(workspaceId, { runId }),
+  ]);
+  assert.deepEqual(logged, [[workspaceId, 'host-down']]);
+  const updates = queries.filter(q => q.sql.includes('tf_browser_usage'));
+  assert.equal(updates.length, 2, 'billing ends for both chat delete and run cancel even if host close fails');
+  assert.equal(updates[0].params[0], browserSessionId(workspaceId, { conversationId: chatId }));
+  assert.equal(updates[1].params[0], browserSessionId(workspaceId, { runId }));
+});
+
+test('deleting a chat closes its browser session after removal succeeds', async t => {
+  const previousKey = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY ??= 'test-placeholder';
+  t.after(() => {
+    if (previousKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = previousKey;
+  });
+  const app = Fastify();
+  t.after(() => app.close());
+  const workspaceId = randomUUID();
+  const chatId = randomUUID();
+  const closed = [];
+  let allow = true;
+  registerConversations(app, {
+    auth,
+    service: {
+      remove: async () => {
+        if (!allow) throw new AccessDenied();
+        return { deleted: true };
+      },
+    },
+    closeBrowser: async (ws, chat) => {
+      closed.push([ws, chat]);
+    },
+  });
+  const del = () =>
+    app.inject({
+      method: 'DELETE',
+      url: `/workspaces/${workspaceId}/conversations/${chatId}`,
+      payload: { commandId: randomUUID() },
+      headers: { cookie: 'session=reader', origin },
+    });
+  assert.equal((await del()).statusCode, 200);
+  assert.deepEqual(closed, [[workspaceId, chatId]]);
+  allow = false;
+  assert.equal((await del()).statusCode, 404);
+  assert.equal(closed.length, 1, 'a refused delete does not close the browser');
 });

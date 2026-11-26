@@ -2,6 +2,7 @@ import { createWorkspaceTableAuthoring } from '@tulipfarm/workspaces/table-autho
 import { withGitHubSourceAuthorization } from '@tulipfarm/github/source-runtime';
 import { createAgentAuthoring } from '@tulipfarm/agents/authoring';
 import { createTablePublication } from '@tulipfarm/tables/execution';
+import { createAuthoringGitHubSubscriptions } from '@tulipfarm/workflows/github-triggers';
 import { retryError } from '@tulipfarm/observability';
 import { tableExecutionAccess } from './table-access.ts';
 
@@ -9,6 +10,7 @@ export function createTableAuthoringComposition() {
   const tables = createWorkspaceTableAuthoring();
   const runtime = withGitHubSourceAuthorization(tables.runtime);
   const agents = createAgentAuthoring(runtime).withWriter(tables.prepareAgentRevision);
+  const githubSubscriptions = createAuthoringGitHubSubscriptions(tables.pool);
   const publishTableProposal = createTablePublication({
     ...tableExecutionAccess,
     runtime,
@@ -16,6 +18,7 @@ export function createTableAuthoringComposition() {
   });
   return {
     runtime,
+    githubSubscriptions,
     readyTaskWorkspaces: tables.readyTaskWorkspaces,
     convertTableName: tables.convertTableName,
     memberProfiles: tables.memberProfiles,

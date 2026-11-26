@@ -435,6 +435,9 @@ async function run() {
             start: appBuilds!.start,
             builders: () => appBuilders(appBuilder(), appHost()),
           }),
+          undefined,
+          coreResources.githubSubscriptions,
+          chatObjects ?? undefined,
         )
       : undefined;
     const gmail = coreResources ? createGoogleHeartbeatActivities(coreResources.runtime) : undefined;

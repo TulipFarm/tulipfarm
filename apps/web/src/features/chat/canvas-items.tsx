@@ -117,7 +117,7 @@ export function ChatWithCanvas({
           onClose={() => canvas.setOpen(false)}
           activity={
             canvas.attention ? (
-              <div className="border-b px-4 py-2">
+              <div className="border-b px-4 py-2 md:hidden">
                 <Button variant="link" size="sm" onClick={() => canvas.setOpen(false)}>
                   {canvas.attention}. Back to chat
                 </Button>

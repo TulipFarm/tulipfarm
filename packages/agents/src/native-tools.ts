@@ -186,6 +186,7 @@ function nativeTools(
 const coreChatTools = new Set(
   [
     'present.choice',
+    'drafts.decide',
     'tables.definitions',
     'rows.page',
     'schema.context',

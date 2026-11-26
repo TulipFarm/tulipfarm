@@ -13,7 +13,11 @@ import {
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { errorAttributes } from '@tulipfarm/observability';
 import { resourceMeter } from '@tulipfarm/extensions';
-import { browserUsageCompatibility, recordBrowserUsage } from '@tulipfarm/workspace-storage/resource-credits';
+import {
+  browserUsageCompatibility,
+  endBrowserUsage,
+  recordBrowserUsage,
+} from '@tulipfarm/workspace-storage/resource-credits';
 import type { SqlClient } from '@tulipfarm/workspace-storage/runtime';
 import type { registerAuth } from './auth.ts';
 import { authConfig } from './auth.ts';
@@ -83,6 +87,40 @@ export function browserUsage(
           closesAt: new Date(closesAt),
           at: new Date(activeAt),
         }),
+      );
+    } catch (error) {
+      log(error, workspaceId);
+    }
+  };
+}
+
+/**
+ * Closes a chat's or run's browser session at once and stops its billing, without saving login state back. Best effort:
+ * a failure is logged and never blocks deleting the chat or stopping the run.
+ */
+export function browserDiscard(
+  client: Pick<BrowserHostClient, 'close'> | undefined,
+  runtime: {
+    transaction<T>(
+      workspaceId: string,
+      compatibility: { readonly minimum: number; readonly maximum: number },
+      action: (tx: { client: SqlClient; schema: string; commonVersion?: number }) => Promise<T>,
+    ): Promise<T>;
+  },
+  log: (error: unknown, workspaceId: string) => void,
+): ((workspaceId: string, owner: { conversationId: string } | { runId: string }) => Promise<void>) | undefined {
+  if (!client) return undefined;
+  return async (workspaceId, owner) => {
+    const sessionId = browserSessionId(workspaceId, owner);
+    try {
+      await client.close(sessionId);
+    } catch (error) {
+      log(error, workspaceId);
+    }
+    if (!resourceMeter()) return;
+    try {
+      await runtime.transaction(workspaceId, browserUsageCompatibility, tx =>
+        endBrowserUsage(tx, sessionId, new Date()),
       );
     } catch (error) {
       log(error, workspaceId);

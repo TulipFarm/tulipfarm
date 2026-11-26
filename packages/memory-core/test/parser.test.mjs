@@ -262,6 +262,20 @@ test('token counts match the cl100k_base encoder', async () => {
   }
 });
 
+test('long unbroken runs chunk in bounded time without losing text', async () => {
+  for (const run of ['漢字'.repeat(10_000), 'a'.repeat(20_000), '=-'.repeat(10_000), '🌻'.repeat(10_000)]) {
+    const started = performance.now();
+    const result = await chunkMarkdown(`# Notes\n\n${run}\n`);
+    assert.ok(performance.now() - started < 5_000, 'a long run must not stall the event loop');
+    assert.ok(result.chunks.length > 1);
+    for (const chunk of result.chunks) {
+      assert.ok(chunk.tokens <= 800);
+      assert.ok(chunk.text.isWellFormed());
+    }
+    assert.ok(result.chunks.at(-1).text.trimEnd().endsWith(run.slice(-4)));
+  }
+});
+
 test('code fences do not create headings and special-token strings are literal text', async () => {
   const result = await parse('# Policy\n\n```md\n# Not a heading\n```\n\n<|endoftext|>');
   assert.equal(result.chunks[0].heading, 'Policy');

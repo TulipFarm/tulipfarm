@@ -283,12 +283,11 @@ test('a policy change while your own table access refreshes is saved', async t =
   await (await savePolicy(page, opsLabel)).waitFor({ state: 'hidden' });
   await notice(page, `Ada can now read rows in ${opsLabel}.`).waitFor();
   assert.deepEqual(api.writes, ['admin: table.row.read', 'ops: table.row.read']);
-  const loadedAt = api.events.indexOf('refresh loaded');
+  await waitFor(() => api.events.filter(event => event === 'refresh loaded').length === 2);
   assert.ok(
-    loadedAt === -1 || api.events.indexOf('PUT ops: table.row.read') < loadedAt,
+    api.events.indexOf('PUT ops: table.row.read') < api.events.indexOf('refresh loaded'),
     `the second change was made while the refresh ran: ${api.events}`,
   );
-  await waitFor(() => api.events.filter(event => event === 'refresh loaded').length === 2);
   assert.equal(await directRows(page).count(), 2);
   assert.equal(await page.evaluate(() => window.loadingSeen), false);
   assert.deepEqual(api.errors, []);

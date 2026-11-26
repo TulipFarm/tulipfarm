@@ -48,6 +48,7 @@ export const toolActivityLabels = {
   'agents.read': 'Reading agent instructions',
   'agents.context': 'Checking agent authoring permissions',
   'agents.draft': 'Preparing agent instructions for review',
+  'drafts.decide': 'Applying confirmed draft',
   'agents.status': 'Checking whether agent instructions were saved',
   'agents.task.start': 'Delegating work to an agent',
   'agents.delegate': 'Running sub-agents',

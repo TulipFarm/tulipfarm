@@ -91,6 +91,28 @@ export function createGitHubSubscriptions(pool: Pool): GitHubSubscriptions {
   };
 }
 
+/** Keeps app.github_workflow_subscriptions in step using the worker authoring login's security-definer routines. */
+export function createAuthoringGitHubSubscriptions(pool: Pool): GitHubSubscriptions {
+  return {
+    async replace({ workspaceId, workflowId, revision, generation, triggers }) {
+      await pool.query('SELECT app.replace_github_workflow_subscriptions($1,$2,$3,$4,$5::jsonb)', [
+        workspaceId,
+        workflowId,
+        revision,
+        generation,
+        JSON.stringify(triggers),
+      ]);
+    },
+    async remove(workspaceId, workflowId, generation) {
+      await pool.query('SELECT app.remove_github_workflow_subscriptions($1,$2,$3)', [
+        workspaceId,
+        workflowId,
+        generation,
+      ]);
+    },
+  };
+}
+
 const subscriptionSchema = z.object({
   workspace_id: idSchema,
   workflow_id: idSchema,

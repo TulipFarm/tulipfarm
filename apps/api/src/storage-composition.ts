@@ -27,7 +27,7 @@ import type { createTemporalClient } from './temporal.ts';
 import { emailDeliveryKeys } from '@tulipfarm/workspaces/email-delivery';
 import { authConfig } from './auth.ts';
 import { registerConversations } from './conversations.ts';
-import { browserUsage, registerBrowserLive } from './browser-live.ts';
+import { browserDiscard, browserUsage, registerBrowserLive } from './browser-live.ts';
 import { registerBrowserLogins } from './browser-logins.ts';
 import { createBrowserLogins } from '@tulipfarm/browser/logins';
 import { createBrowserHostClient } from '@tulipfarm/browser';
@@ -223,6 +223,11 @@ export function registerStorageComposition(
     identity: dependencies.pool,
     ...(chatObjects ? { documents: { objects: chatObjects, start: planDocumentStart(app, temporal) } } : {}),
   });
+  const browserHost = browserHostConfiguration();
+  const browserClient = browserHost ? createBrowserHostClient(browserHost) : undefined;
+  const discardBrowser = browserDiscard(browserClient, runtime, (error, workspaceId) =>
+    app.log.warn({ ...errorAttributes(error), workspaceId }, 'browser_session_not_closed'),
+  );
   registerAgentTasks(app, {
     runtime,
     auth: dependencies.auth,
@@ -233,6 +238,9 @@ export function registerStorageComposition(
     }),
     claimMcpSelection: mcp.claimTaskSelection,
     wake: wakeTask,
+    ...(discardBrowser
+      ? { closeBrowser: (workspaceId, taskId) => discardBrowser(workspaceId, { runId: taskId }) }
+      : {}),
   });
   const accounts = atlassianAccounts(runtime);
   registerAtlassianOperations(
@@ -295,9 +303,10 @@ export function registerStorageComposition(
     events,
     replies,
     codeSessions: codeSessionWorkflows,
+    ...(discardBrowser
+      ? { closeBrowser: (workspaceId, chatId) => discardBrowser(workspaceId, { conversationId: chatId }) }
+      : {}),
   });
-  const browserHost = browserHostConfiguration();
-  const browserClient = browserHost ? createBrowserHostClient(browserHost) : undefined;
   const browserTasks = createAgentTasks(runtime);
   registerBrowserLive(app, {
     auth: dependencies.auth,
