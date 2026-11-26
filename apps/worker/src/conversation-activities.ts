@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { slackReplyProgress } from '@tulipfarm/agents/slack-default';
-import { chatDecisions } from '@tulipfarm/agents/decisions';
+import { chatDecisions, classifyTurnComplexity } from '@tulipfarm/agents/decisions';
 import {
   createConversationExecutor,
   replyWorkSchema,
@@ -51,6 +51,7 @@ import {
   chatReplyModel,
   conversationFamilyPaused,
   conversationModel,
+  fastRouteModel,
   roleModel,
   type ConversationModel,
 } from './conversation-model.ts';
@@ -248,8 +249,21 @@ export function meteredReply(
           pausedFamilyReplacement(tx, model, conversationFamilyPaused),
         )
       : null;
-    const chat = chatReplyModel(replacement ?? model);
-    if (!chat) throw new Error('conversation-model-unavailable');
+    const baseChat = chatReplyModel(replacement ?? model);
+    if (!baseChat) throw new Error('conversation-model-unavailable');
+    const hasRichTurn = messages.some(turn => !('text' in turn)) || sourceMessages.some(turn => !('text' in turn));
+    const fastCandidate = !isPlanProvider(baseChat.route.provider) && !hasRichTurn ? fastRouteModel(baseChat) : null;
+    const textTurns = sourceMessages.map(turn => ({
+      role: turn.role,
+      text: 'text' in turn && typeof turn.text === 'string' ? turn.text : '',
+    }));
+    const latestUser = [...textTurns].reverse().find(turn => turn.role === 'user');
+    const chat =
+      fastCandidate && latestUser?.text
+        ? (await classifyTurnComplexity(fence.workspaceId, latestUser.text, textTurns.slice(0, -1))) === 'simple'
+          ? fastCandidate
+          : baseChat
+        : baseChat;
     // A plan model (ChatGPT, Claude or Copilot) runs on the first plan the requester may use: their own, then one shared with them, their
     // teams or the workspace. Slack and project chats use workspace shares only. When every plan is spent, the
     // workspace's fallback model answers. Tokens are read here, inside the activity, so they never enter workflow history.
@@ -464,6 +478,27 @@ export function meteredReply(
     const mcpDerived = (sources: SourceDependency[]) =>
       runtime.transaction(fence.workspaceId, commonCompatibility, tx => hasMcpDerivedSources(tx, sources));
     const decisions = await chatDecisions(fence.workspaceId);
+    const loadPreloadedSkills = requester
+      ? async (selected: readonly { id: string; revision: string }[]) =>
+          runtime.transaction(fence.workspaceId, commonCompatibility, async tx => {
+            const loaded: { id: string; name: string; description?: string; instructions: string }[] = [];
+            for (const item of selected) {
+              const resolved = await chatSkills.resolve(tx, requester, {
+                skillId: item.id,
+                revision: item.revision,
+              });
+              if (resolved) {
+                loaded.push({
+                  id: resolved.skillId,
+                  name: resolved.name,
+                  ...(resolved.description === undefined ? {} : { description: resolved.description }),
+                  instructions: resolved.instructions,
+                });
+              }
+            }
+            return loaded;
+          })
+      : undefined;
     try {
       const reply = respondToConversation(
         { ...validatedRoute, maxOutputTokens: chat.price.maxOutputTokens },
@@ -590,6 +625,7 @@ export function meteredReply(
               ...replyContext,
               completionCheck: completionCheck?.route,
               decisions,
+              loadPreloadedSkills,
               ...nextPlanCredential,
               ...(fallback
                 ? {
@@ -631,6 +667,7 @@ export function meteredReply(
               ...replyContext,
               completionCheck: completionCheck?.route,
               decisions,
+              loadPreloadedSkills,
               ...nextPlanCredential,
               ...(fallback
                 ? {

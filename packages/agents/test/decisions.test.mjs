@@ -2,20 +2,26 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   acceptedCompletion,
+  calendarTextFastPath,
   classifyDriftAgreement,
+  classifyTurnComplexity,
   confidenceBucket,
   containsSecretPattern,
   creationRequested,
   heartbeatMatches,
+  preloadSkills,
   preloadTools,
   recordDecisionDrift,
   recordHumanOverride,
+  rowReviewIntent,
   sampleDecisionDrift,
   scrubDecisionText,
+  taskCompletionStatus,
   worthLearning,
 } from '../src/decisions.ts';
 
 const workspaceId = '00000000-0000-4000-8000-000000000001';
+const jevResponse = answers => new Response(JSON.stringify({ answers }), { status: 200 });
 
 function jev(t, answer) {
   t.mock.method(process.stdout, 'write', () => true);
@@ -192,4 +198,102 @@ test('drift helpers classify agreement, bucket confidence, and sample asynchrono
     ),
     true,
   );
+});
+
+test('preloadSkills ranks matching skills above 0.6 and caps at 3', async t => {
+  process.env.TYPESAFE_API_KEY = 'test-key';
+  t.after(() => delete process.env.TYPESAFE_API_KEY);
+  t.mock.method(globalThis, 'fetch', async () =>
+    jevResponse({
+      s0: { noul: 0.91 },
+      s1: { noul: 0.22 },
+      s2: { noul: 0.78 },
+      s3: { noul: 0.65 },
+      s4: { noul: 0.84 },
+    }),
+  );
+  const picked = await preloadSkills({
+    request: 'Prepare our quarterly investor update',
+    skills: [
+      { id: 'sk-0', name: 'Investor update', description: 'Draft investor emails' },
+      { id: 'sk-1', name: 'Bug triage', description: 'Triage GitHub issues' },
+      { id: 'sk-2', name: 'Financial summary', description: 'Summarize revenue' },
+      { id: 'sk-3', name: 'Board deck', description: 'Outline board slides' },
+      { id: 'sk-4', name: 'Quarterly metrics', description: 'Compute quarterly KPIs' },
+    ],
+  });
+  assert.deepEqual(picked, ['sk-0', 'sk-4', 'sk-2']);
+});
+
+test('rowReviewIntent filters confident false positives and preserves uncertain review', async t => {
+  process.env.TYPESAFE_API_KEY = 'test-key';
+  t.after(() => delete process.env.TYPESAFE_API_KEY);
+  let score = 0.1;
+  t.mock.method(globalThis, 'fetch', async () => jevResponse({ wantsReview: { noul: score } }));
+  assert.equal(await rowReviewIntent('What rows did we update yesterday?'), false);
+  score = 0.28;
+  assert.equal(await rowReviewIntent('Maybe check the rows later'), undefined);
+  score = 0.85;
+  assert.equal(await rowReviewIntent('Prepare row updates for me to review before saving'), true);
+});
+
+test('calendarTextFastPath skips full LLM only when confident both fields are unspecified', async t => {
+  process.env.TYPESAFE_API_KEY = 'test-key';
+  t.after(() => delete process.env.TYPESAFE_API_KEY);
+  let score = 0.92;
+  t.mock.method(globalThis, 'fetch', async () => jevResponse({ bothUnspecified: { noul: score } }));
+  assert.equal(
+    await calendarTextFastPath({ kind: 'calendar.events.create' }, [
+      { role: 'user', text: 'Book 30m tomorrow at 2pm' },
+    ]),
+    true,
+  );
+  score = 0.55;
+  assert.equal(
+    await calendarTextFastPath({ kind: 'calendar.events.create' }, [{ role: 'user', text: 'Create "Q3 Sync"' }]),
+    false,
+  );
+});
+
+test('classifyTurnComplexity routes simple turns only at high confidence', async t => {
+  process.env.TYPESAFE_API_KEY = 'test-key';
+  t.after(() => delete process.env.TYPESAFE_API_KEY);
+  let answer = { choice: 'simple', confidence: 0.91 };
+  t.mock.method(globalThis, 'fetch', async () => jevResponse({ complexity: answer }));
+  assert.equal(await classifyTurnComplexity(workspaceId, 'What is 12 * 12?'), 'simple');
+  answer = { choice: 'simple', confidence: 0.7 };
+  assert.equal(await classifyTurnComplexity(workspaceId, 'Summarize our Q3 pipeline'), 'standard');
+  answer = { choice: 'complex', confidence: 0.82 };
+  assert.equal(await classifyTurnComplexity(workspaceId, 'Audit all integrations and design a migration'), 'complex');
+});
+
+test('taskCompletionStatus distinguishes done, continue, and uncertain replies', async t => {
+  process.env.TYPESAFE_API_KEY = 'test-key';
+  t.after(() => delete process.env.TYPESAFE_API_KEY);
+  let answer = { choice: 'continue', confidence: 0.88 };
+  t.mock.method(globalThis, 'fetch', async () => jevResponse({ status: answer }));
+  assert.equal(await taskCompletionStatus(workspaceId, 'I will now check the table and report back.'), 'continue');
+  answer = { choice: 'done', confidence: 0.9 };
+  assert.equal(await taskCompletionStatus(workspaceId, 'All 3 invoices are verified.'), 'done');
+  answer = { choice: 'done', confidence: 0.5 };
+  assert.equal(await taskCompletionStatus(workspaceId, 'Checking...'), undefined);
+});
+
+test('calendarTextFastPath falls back on long histories and new helpers fail safe on HTTP errors', async t => {
+  process.env.TYPESAFE_API_KEY = 'test-key';
+  t.after(() => delete process.env.TYPESAFE_API_KEY);
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    calls += 1;
+    return new Response('server error', { status: 500 });
+  });
+  // More than 6 user messages must skip Jev and fall back to full check (false) without calling fetch.
+  const manyMessages = Array.from({ length: 7 }, (_, i) => ({ role: 'user', text: `msg ${i}` }));
+  assert.equal(await calendarTextFastPath({ kind: 'calendar.events.create' }, manyMessages), false);
+  assert.equal(calls, 0);
+  // HTTP 500 fails safe across all helpers.
+  assert.deepEqual(await preloadSkills({ request: 'triage', skills: [{ id: 's1', name: 'Triage' }] }), []);
+  assert.equal(await rowReviewIntent('update rows'), undefined);
+  assert.equal(await classifyTurnComplexity(workspaceId, 'Hi'), undefined);
+  assert.equal(await taskCompletionStatus(workspaceId, 'Done'), undefined);
 });
