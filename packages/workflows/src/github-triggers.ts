@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { observeGitHubHandles } from '@tulipfarm/github/events';
 import { qualified, type createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import { workflowCompatibility } from './authorization.ts';
 import {
@@ -168,15 +169,18 @@ export function createGitHubWorkflowFanOut(pool: Pool, runtime: Runtime) {
     );
     if (!subscriptions.length) return;
     const payload = JSON.stringify(payloadSchema.parse(githubWorkflowPayload(event, body.data)));
+    const observedWorkspaces = new Set<string>();
     const failures: unknown[] = [];
     for (const subscription of subscriptions) {
       try {
+        const shouldObserve = !observedWorkspaces.has(subscription.workspace_id);
         const stopped = await runtime.transaction(subscription.workspace_id, workflowCompatibility, async tx => {
           const workflows = qualified(tx.schema, 'tf_workflows');
           const revisions = qualified(tx.schema, 'tf_workflow_revisions');
           const triggers = qualified(tx.schema, 'tf_workflow_triggers');
           const events = qualified(tx.schema, 'tf_provider_events');
           const repositories = qualified(tx.schema, 'tf_knowledge_github_repositories');
+          if (shouldObserve) await observeGitHubHandles(tx, body.data);
           // A verified delivery names the repository's owner, so connected repositories stored without one learn it.
           if (ownerId)
             await tx.client.query(
@@ -228,6 +232,7 @@ export function createGitHubWorkflowFanOut(pool: Pool, runtime: Runtime) {
             );
           return !workflow || (!workflow.live && workflow.generation >= subscription.generation);
         });
+        if (shouldObserve) observedWorkspaces.add(subscription.workspace_id);
         if (stopped)
           await pool.query(
             'DELETE FROM app.github_workflow_subscriptions WHERE workspace_id=$1 AND workflow_id=$2 AND generation=$3',
