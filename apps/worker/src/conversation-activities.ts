@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { slackReplyProgress } from '@tulipfarm/agents/slack-default';
+import { chatDecisions } from '@tulipfarm/agents/decisions';
 import {
   createConversationExecutor,
   replyWorkSchema,
@@ -451,6 +452,7 @@ export function meteredReply(
     });
     const mcpDerived = (sources: SourceDependency[]) =>
       runtime.transaction(fence.workspaceId, commonCompatibility, tx => hasMcpDerivedSources(tx, sources));
+    const decisions = await chatDecisions(fence.workspaceId);
     try {
       const reply = respondToConversation(
         { ...validatedRoute, maxOutputTokens: chat.price.maxOutputTokens },
@@ -576,6 +578,7 @@ export function meteredReply(
               progress,
               ...replyContext,
               completionCheck: completionCheck?.route,
+              decisions,
               ...nextPlanCredential,
               ...(fallback
                 ? {
@@ -616,6 +619,7 @@ export function meteredReply(
               progress,
               ...replyContext,
               completionCheck: completionCheck?.route,
+              decisions,
               ...nextPlanCredential,
               ...(fallback
                 ? {

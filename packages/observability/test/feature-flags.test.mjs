@@ -275,11 +275,17 @@ test('a snapshot uses evaluateMany once per scope; false decides, missing and fa
     'anthropic-models': true,
     'openai-image-models': true,
     'code-sessions': false,
+    'decisions-tool-preload': false,
+    'decisions-completion-check': false,
+    'decisions-creation-review': false,
   });
   assert.deepEqual(failed, {
     'openai-models': false,
     'anthropic-models': false,
     'openai-image-models': true,
     'code-sessions': false,
+    'decisions-tool-preload': false,
+    'decisions-completion-check': false,
+    'decisions-creation-review': false,
   });
 });

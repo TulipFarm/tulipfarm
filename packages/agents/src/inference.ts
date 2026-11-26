@@ -89,6 +89,7 @@ import {
 } from './prompts.ts';
 import {
   nativeChatTools,
+  chatToolSizes,
   agentDraftContextSchema,
   nativeToolName,
   toolSearchName,
@@ -152,6 +153,7 @@ import type { ReplyStatus } from '@tulipfarm/conversations/events';
 import type { AppKind } from '@tulipfarm/apps';
 import { toolDisplayName } from '@tulipfarm/conversations/tool-activity';
 import { modelCallTimeoutMs } from '@tulipfarm/config/timeouts';
+import type { ChatDecisions } from './decisions.ts';
 import { modelFallbackReason, type ModelFallbackReason } from '@tulipfarm/config/model-fallback';
 export { serverSentEvents } from './inference-stream.ts';
 
@@ -1576,6 +1578,8 @@ export type ToolInferenceContext = {
    * fit. Defaults to `context.window`; without either, the evidence is sent whole.
    */
   completionCheckWindow?: number | undefined;
+  /** Fast decision-model shortcuts turned on for this workspace. Each one falls back to the default behavior. */
+  decisions?: ChatDecisions | undefined;
   /**
    * The chat model's input window and the compaction thresholds. With it, each tool result is cut to a tenth of the
    * window, full outputs stay readable through `tool_result_read`, and before every model round whose estimated input
@@ -5060,6 +5064,24 @@ export async function inferWithTools(
   const loaded = new Set(
     [...(tools?.preloadedTools ?? []), ...[...activeBuiltinSkills].flatMap(builtinSkillTools)].map(nativeToolName),
   );
+  // Deferred tools the decision model expects this request to need, asked in parallel with the first round's reads.
+  let toolPreload: Promise<string[]> | undefined =
+    tools?.decisions?.preloadTools && request
+      ? tools.decisions
+          .preloadTools({
+            request,
+            earlier: sourceMessages.slice(0, -1).map(textTurn),
+            ...chatToolSizes(
+              tools.earlierMessages ?? false,
+              tools.chatFiles ?? false,
+              tools.codingRuns ?? false,
+              tools.apps,
+              tools.browser ?? false,
+            ),
+            signal,
+          })
+          .catch(() => [])
+      : undefined;
   const mcpJson = new WeakMap<object, string>();
   const catalogKey = (mcp: McpModelCatalog | undefined) => {
     let json = mcp ? mcpJson.get(mcp) : 'null';
@@ -5496,6 +5518,17 @@ export async function inferWithTools(
         const mcp = await observeChatDetail('catalog', async () => tools?.catalog?.());
         webWithheld = (await tools?.webWithheld?.()) ?? false;
         mcpOffered = Boolean(mcp?.tools.length || mcp?.discovery);
+        if (toolPreload) {
+          const preloaded = await observeChatDetail('tool-preload', () => toolPreload!);
+          toolPreload = undefined;
+          for (const name of preloaded) loaded.add(name);
+          if (preloaded.length)
+            log('info', 'inference', 'call_completed', {
+              operation: 'chat.tool-preload',
+              outcome: 'preloaded',
+              loaded: preloaded.length,
+            });
+        }
         const currentCatalogKey = observeChatDetailSync('serialize', () => catalogKey(mcp));
         const personalMemory =
           tools?.projectInstructions === undefined
@@ -6175,6 +6208,37 @@ export async function inferWithTools(
         fileCheckNeeded || inventoryCheckNeeded() || rowReviewCheckNeeded ? undefined : localCorrection;
       const wordingCheck: ReturnType<typeof leakedWording> =
         directoryLeak && localCorrection === wording ? wording : undefined;
+      const acceptedCompletion = tools?.decisions?.acceptedCompletion;
+      if (
+        acceptedCompletion &&
+        !checked &&
+        !wordingCheck &&
+        !fileCheckNeeded &&
+        !rowReviewCheckNeeded &&
+        !tableCheckNeeded &&
+        !directoryCheckNeeded &&
+        !inventoryCheckNeeded() &&
+        !planCreationAttempted
+      ) {
+        // The decision model may only accept a reply it is sure of; anything else gets the full model check below.
+        const status = await observeChatDetail('completion-decision', () =>
+          acceptedCompletion(
+            completionCheckEvidence(
+              items,
+              candidate,
+              finalizing ? 0 : Math.max(0, chatToolCallLimit - calls),
+              65_536,
+              waiting,
+            ),
+            signal,
+          ),
+        );
+        log('info', 'inference', 'call_completed', {
+          operation: 'chat.completion-decision',
+          outcome: status ? 'accepted' : 'deferred',
+        });
+        if (status) checked = { status, reason: 'The decision model accepted this reply.' };
+      }
       if (!checked || wordingCheck) {
         report('finishing');
         try {

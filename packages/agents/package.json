@@ -283,6 +283,10 @@
       "types": "./dist/model.d.ts",
       "default": "./dist/model.js"
     },
+    "./decisions": {
+      "types": "./dist/decisions.d.ts",
+      "default": "./dist/decisions.js"
+    },
     "./inference": {
       "types": "./dist/inference.d.ts",
       "default": "./dist/inference.js"
