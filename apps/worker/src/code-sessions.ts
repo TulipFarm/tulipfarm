@@ -23,6 +23,7 @@ import {
 import { codingAgentProviders, planRequiredMessage, runCodingJob } from '@tulipfarm/agents/coding-runs';
 import { codingAgentLabels } from '@tulipfarm/agents/coding-run-contracts';
 import { codingRunServices } from './coding-runs.ts';
+import { agentDefinitionSchema } from '@tulipfarm/agents/contracts';
 import { githubChatReads } from './github-composition.ts';
 import { codeSessionSignal, type CodeSessionActivities } from './code-session-workflows.ts';
 
@@ -130,13 +131,61 @@ export function createCodeSessionActivities(
   const services = codingRunServices(runtime);
   let reads: ReturnType<typeof githubChatReads> | undefined;
 
+  const resolveTeamGitHubToken = async (
+    workspaceId: string,
+    session: Awaited<ReturnType<typeof readCodeSessionSystem>>,
+  ): Promise<{ token: string; login: string } | null> => {
+    const teamIntegrationId = await runtime.transaction(workspaceId, commonCompatibility, async tx => {
+      const activations = qualified(tx.schema, 'tf_agent_activations');
+      const definitions = qualified(tx.schema, 'tf_agent_definitions');
+      const assignments = qualified(tx.schema, 'tf_row_assignments');
+      const row = (
+        await tx.client.query(
+          `SELECT d.definition
+           FROM ${assignments} ra
+           JOIN ${activations} a ON a.agent_id = ra.agent_id
+             AND a.revoked_at IS NULL
+             AND a.superseded_by_activation_id IS NULL
+           JOIN ${definitions} d ON d.agent_id = a.agent_id AND d.revision = a.definition_revision
+           WHERE ra.table_id = $1 AND ra.row_id = $2
+           ORDER BY a.activated_at DESC NULLS LAST
+           LIMIT 1`,
+          [session.tableId, session.rowId],
+        )
+      ).rows[0] as { definition?: unknown } | undefined;
+      if (!row) return null;
+      const parsed = agentDefinitionSchema.safeParse(row.definition);
+      const conn = parsed.success ? parsed.data.defaults?.githubConnection : undefined;
+      return conn?.kind === 'team' && conn.allowWrites ? conn.id : null;
+    });
+    if (!teamIntegrationId || !session.repository) return null;
+    try {
+      const team = await (reads ??= githubChatReads(runtime))
+        .teamReads()
+        .teamAgentToken(workspaceId, teamIntegrationId, session.repository);
+      return {
+        token: team.accessToken,
+        login: team.name.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase() || 'tulipfarm-bot',
+      };
+    } catch {
+      return null;
+    }
+  };
+
   const resolveGitHubToken = async (
     workspaceId: string,
     session: Awaited<ReturnType<typeof readCodeSessionSystem>>,
   ): Promise<{ token: string; login: string } | null> => {
     const actor = await resolveOwnerActor(runtime, workspaceId, session.ownerMembershipId);
     if (!actor) return null;
-    return (reads ??= githubChatReads(runtime)).codeSessionToken(workspaceId, actor, session.id, session.githubAccount);
+    const personal = await (reads ??= githubChatReads(runtime)).codeSessionToken(
+      workspaceId,
+      actor,
+      session.id,
+      session.githubAccount,
+    );
+    if (personal) return personal;
+    return resolveTeamGitHubToken(workspaceId, session);
   };
 
   const remoteBranchExists = async (token: string, repository: string, branch: string): Promise<boolean> => {

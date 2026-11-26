@@ -171,6 +171,14 @@
       "types": "./dist/task-approval-contracts.d.ts",
       "default": "./dist/task-approval-contracts.js"
     },
+    "./task-clarification-contracts": {
+      "types": "./dist/task-clarification-contracts.d.ts",
+      "default": "./dist/task-clarification-contracts.js"
+    },
+    "./task-clarifications": {
+      "types": "./dist/task-clarifications.d.ts",
+      "default": "./dist/task-clarifications.js"
+    },
     "./drafts": {
       "types": "./dist/drafts.d.ts",
       "default": "./dist/drafts.js"

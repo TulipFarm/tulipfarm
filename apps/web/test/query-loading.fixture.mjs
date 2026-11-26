@@ -207,6 +207,7 @@ export async function startFixture() {
           updatedAt: null,
           budgetFamilies: [],
         };
+      else if (path === `${base}/code-mode/repositories`) json = { items: [] };
       else if (path === `${base}/github/accounts`) json = { configured: true, accounts: [] };
       else if (path === `${base}/github/chats/${id}/selection`)
         json = { accountId: null, generation: null, version: 0 };

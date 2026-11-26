@@ -22,6 +22,9 @@ export function shellRead(method, path, workspace) {
   if (path.endsWith('/slack/status'))
     return { json: { state: 'disconnected', teamId: null, canManage: false, linked: false, scopes: [] } };
   if (path.endsWith('/github/accounts')) return { json: { configured: false, accounts: [] } };
+  if (/^\/v1\/workspaces\/[^/]+\/code-mode\/repositories$/.test(path)) return { json: { items: [] } };
+  if (/^\/v1\/workspaces\/[^/]+\/tables\/[^/]+\/rows\/[^/]+\/clarifications$/.test(path))
+    return { json: { items: [] } };
   if (/^\/v1\/workspaces\/[^/]+\/integrations$/.test(path)) return { json: { integrations: [] } };
   if (path.endsWith('/atlassian/accounts')) return { json: { accounts: [], providers: [] } };
   if (path.endsWith('/workspace-mcp/capabilities')) return { status: 404, json: { error: 'not-found' } };

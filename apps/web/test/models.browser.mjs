@@ -268,6 +268,8 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
         if (path === '/v1/google-workspace/availability') return send({ configured: false });
         if (path === `${base}/google-workspace`) return send({ status: 'disconnected' });
         if (path === `${base}/github/accounts`) return send({ configured: false, accounts: [] });
+        if (path === `${base}/integrations`) return send({ integrations: [] });
+        if (path === `${base}/code-mode/repositories`) return send({ items: [] });
         if (path === `${base}/atlassian/accounts`) return send({ accounts: [], providers: [] });
         if (path === `${base}/slack/status`)
           return send({ state: 'disconnected', teamId: null, canManage: false, linked: false, scopes: [] });
