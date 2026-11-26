@@ -10,6 +10,7 @@ import {
   withKnowledgeSourceAuthorization,
 } from '@tulipfarm/knowledge';
 import { withGitHubSourceAuthorization } from '@tulipfarm/github/source-runtime';
+import { worthLearning } from '@tulipfarm/agents/decisions';
 import { conversationCompactor } from './conversation-compactor.ts';
 import { conversationModel } from './conversation-model.ts';
 
@@ -26,8 +27,13 @@ export function createConversationMaintenanceActivities(
   const publish: ConversationRecapPublisher =
     options.publish ?? (input => createConversationKnowledge({ runtime }).publish(input));
   const learned = learnedKnowledge(runtime);
+  const learningGate = {
+    memory: (workspaceId: string, transcript: string) => worthLearning(workspaceId, 'memory', transcript),
+    knowledge: (workspaceId: string, content: string) => worthLearning(workspaceId, 'knowledge', content),
+  };
   return {
-    processConversationMaintenance: (work: unknown) => maintenance.process(work, compactor, publish, learned),
+    processConversationMaintenance: (work: unknown) =>
+      maintenance.process(work, compactor, publish, learned, learningGate),
   };
 }
 
