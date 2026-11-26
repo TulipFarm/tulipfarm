@@ -123,6 +123,27 @@ export const featureFlags = {
     scope: 'workspace',
     env: 'FEATURE_FLAG_DECISIONS_TASK_COMPLETION',
   },
+  'decisions-tool-gate': {
+    description:
+      'With TYPESAFE_API_KEY set, the Jev decision model gates side-effecting tool calls before execution and checks external read tool outputs for indirect prompt injection.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_DECISIONS_TOOL_GATE',
+  },
+  'decisions-security-guardrails': {
+    description:
+      'With TYPESAFE_API_KEY set, the Jev decision model classifies incoming prompts, external intake, and candidate replies into pass, review, or block after local secret scrubbing.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_DECISIONS_SECURITY_GUARDRAILS',
+  },
+  'decisions-goal-loops': {
+    description:
+      'With TYPESAFE_API_KEY set, the Jev decision model evaluates explicit acceptance criteria rubrics in one batched call and feeds failing criteria back for bounded retries.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_DECISIONS_GOAL_LOOPS',
+  },
 } as const satisfies Record<string, FeatureFlagDefinition>;
 
 export type FeatureFlag = keyof typeof featureFlags;
