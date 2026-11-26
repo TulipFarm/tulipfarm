@@ -111,11 +111,11 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         { prefix: '/v1' },
       );
       await app.listen({ host: '127.0.0.1', port: 3395 });
-      vite = spawn(
-        'pnpm',
-        ['--filter', '@tulipfarm/web', 'dev', '--host', '127.0.0.1', '--port', '5395', '--strictPort'],
-        { env: { ...process.env, VITE_API_URL: apiOrigin }, stdio: 'ignore' },
-      );
+      vite = spawn(process.execPath, ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', '5395'], {
+        cwd: new URL('..', import.meta.url),
+        env: { ...process.env, VITE_API_URL: apiOrigin },
+        stdio: 'ignore',
+      });
       for (let attempt = 0; ; attempt++) {
         try {
           if ((await fetch(origin)).ok) break;
@@ -224,7 +224,12 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await setup.getByRole('button', { name: 'Replace webhook key' }).click();
       await keyStatus.getByText('Bearer key.').waitFor();
       await previousStatus.getByText('Still accepted', { exact: true }).waitFor();
-      const key = await setup.getByLabel('New webhook key').inputValue();
+      const keyInput = setup.getByLabel('New webhook key');
+      let key = await keyInput.inputValue();
+      for (let i = 0; key === signingKey && i < 50; i++) {
+        await setTimeout(100);
+        key = await keyInput.inputValue();
+      }
       assert.notEqual(key, signingKey);
       assert.match(
         await setup.getByRole('region', { name: 'curl example' }).textContent(),
@@ -422,11 +427,11 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         { prefix: '/v1' },
       );
       await app.listen({ host: '127.0.0.1', port: 3396 });
-      vite = spawn(
-        'pnpm',
-        ['--filter', '@tulipfarm/web', 'dev', '--host', '127.0.0.1', '--port', '5396', '--strictPort'],
-        { env: { ...process.env, VITE_API_URL: apiOrigin }, stdio: 'ignore' },
-      );
+      vite = spawn(process.execPath, ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', '5396'], {
+        cwd: new URL('..', import.meta.url),
+        env: { ...process.env, VITE_API_URL: apiOrigin },
+        stdio: 'ignore',
+      });
       for (let attempt = 0; ; attempt++) {
         try {
           if ((await fetch(origin)).ok) break;

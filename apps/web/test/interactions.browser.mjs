@@ -9,10 +9,14 @@ import { openChatList } from './browser-controls.mjs';
 
 const port = Number(process.env.INTERACTION_BROWSER_PORT ?? 5297);
 const origin = `http://127.0.0.1:${port}`;
-const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-  cwd: new URL('..', import.meta.url),
-  stdio: 'ignore',
-});
+const server = spawn(
+  process.execPath,
+  ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+  {
+    cwd: new URL('..', import.meta.url),
+    stdio: 'ignore',
+  },
+);
 let browser;
 try {
   for (let attempt = 0; ; attempt++) {

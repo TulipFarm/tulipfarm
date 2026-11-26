@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -101,10 +101,9 @@ test('the public guide answers with the public-guide role, priced from the effec
   assert.deepEqual(publicGuideWarnings(env), []);
 });
 
-test('api startup warns about models left out for missing keys and a moved default', () => {
-  const result = spawnSync(process.execPath, [fileURLToPath(new URL('../src/server.ts', import.meta.url))], {
-    encoding: 'utf8',
-    timeout: 60_000,
+test('api startup warns about models left out for missing keys and a moved default', async () => {
+  const child = spawn(process.execPath, [fileURLToPath(new URL('../src/server.ts', import.meta.url))], {
+    stdio: ['ignore', 'pipe', 'pipe'],
     env: {
       PATH: process.env.PATH,
       AZURE_FOUNDRY_ENDPOINT: env.AZURE_FOUNDRY_ENDPOINT,
@@ -112,11 +111,35 @@ test('api startup warns about models left out for missing keys and a moved defau
       PORT: '0',
     },
   });
-  const warnings = result.stderr
-    .split('\n')
-    .filter(line => line.startsWith('{'))
-    .map(line => JSON.parse(line))
-    .filter(entry => entry.level === 'warn');
+  let stderr = '';
+  const warnings = [];
+  const done = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error(`Timed out waiting for startup warnings. stderr:\n${stderr}`));
+    }, 30_000);
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', chunk => {
+      stderr += chunk;
+      const lines = stderr.split('\n');
+      stderr = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line.startsWith('{')) continue;
+        const entry = JSON.parse(line);
+        if (entry.level === 'warn') warnings.push(entry);
+      }
+      if (warnings.length >= 2) {
+        clearTimeout(timer);
+        child.kill('SIGTERM');
+        resolve();
+      }
+    });
+    child.on('exit', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+  await done;
   assert.deepEqual(warnings, [
     {
       level: 'warn',

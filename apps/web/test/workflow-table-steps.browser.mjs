@@ -156,11 +156,11 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         { prefix: '/v1' },
       );
       await app.listen({ host: '127.0.0.1', port: 3380 });
-      vite = spawn(
-        'pnpm',
-        ['--filter', '@tulipfarm/web', 'dev', '--host', '127.0.0.1', '--port', '5380', '--strictPort'],
-        { env: { ...process.env, VITE_API_URL: apiOrigin }, stdio: 'ignore' },
-      );
+      vite = spawn(process.execPath, ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', '5380'], {
+        cwd: new URL('..', import.meta.url),
+        env: { ...process.env, VITE_API_URL: apiOrigin },
+        stdio: 'ignore',
+      });
       for (let attempt = 0; ; attempt++) {
         try {
           if ((await fetch(origin)).ok) break;

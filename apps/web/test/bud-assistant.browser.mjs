@@ -19,10 +19,14 @@ test(
       origin = `http://127.0.0.1:${port}`;
     const screenshots = process.env.BUD_SCREENSHOTS,
       cdp = process.env.BUD_CDP_PORT;
-    const vite = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-      cwd: new URL('..', import.meta.url),
-      stdio: 'ignore',
-    });
+    const vite = spawn(
+      process.execPath,
+      ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+      {
+        cwd: new URL('..', import.meta.url),
+        stdio: 'ignore',
+      },
+    );
     let browser, page;
     try {
       for (let attempt = 0; ; attempt++) {

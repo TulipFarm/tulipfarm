@@ -10,11 +10,15 @@ const port = Number(process.env.RECOMMENDATIONS_PORT ?? 5319);
 const origin = `http://127.0.0.1:${port}`;
 const capture = process.env.RECOMMENDATIONS_SCREENSHOTS;
 const cdpPort = process.env.RECOMMENDATIONS_CDP_PORT;
-const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-  cwd: new URL('..', import.meta.url),
-  stdio: 'ignore',
-  env: process.env,
-});
+const server = spawn(
+  process.execPath,
+  ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+  {
+    cwd: new URL('..', import.meta.url),
+    stdio: 'ignore',
+    env: process.env,
+  },
+);
 const workspace = {
   id: '11111111-1111-4111-8111-111111111111',
   slug: 'acme',

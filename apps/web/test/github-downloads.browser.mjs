@@ -40,11 +40,15 @@ await app.register(
 );
 await app.listen({ host: '127.0.0.1', port: 0 });
 const apiOrigin = `http://127.0.0.1:${app.server.address().port}`;
-const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-  cwd: new URL('..', import.meta.url),
-  env: { ...process.env, VITE_API_URL: apiOrigin },
-  stdio: 'ignore',
-});
+const server = spawn(
+  process.execPath,
+  ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+  {
+    cwd: new URL('..', import.meta.url),
+    env: { ...process.env, VITE_API_URL: apiOrigin },
+    stdio: 'ignore',
+  },
+);
 let browser;
 const workspace = {
   id: f.one.id,

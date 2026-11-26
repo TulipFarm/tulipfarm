@@ -7,7 +7,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/main.js",
-    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test": "node --test test/*.test.mjs",
     "test:chromium": "node --test --test-concurrency=1 test/*.chromium.mjs"
   },
   "dependencies": {

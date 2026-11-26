@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import { createServer } from 'vite';
+import { createBuiltAppServer as createServer } from './built-app.fixture.mjs';
 import { createWorkspaceFixture, serveWorkspaceShellEvent } from './workspace.fixture.mjs';
 
 const at = '2026-10-16T09:00:00.000Z';

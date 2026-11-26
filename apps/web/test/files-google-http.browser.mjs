@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import { createServer } from 'vite';
+import { createBuiltAppServer as createServer } from './built-app.fixture.mjs';
 import { googleFixture } from '../../../packages/google-workspace/test/fixture.mjs';
 import { createGoogleOperations } from '@tulipfarm/google-workspace/operations';
 import { createGoogleApproval } from '@tulipfarm/google-workspace/operation-approval';

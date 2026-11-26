@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import { fileURLToPath } from 'node:url';
-import { createServer } from 'vite';
+import { startBuiltApp } from './built-app.fixture.mjs';
 import { chromium } from 'playwright';
 import { createWorkspaceFixture } from './workspace.fixture.mjs';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
@@ -14,23 +13,19 @@ const projectId = '44444444-4444-4444-8444-444444444444';
 const base = `/v1/workspaces/${workspace.id}`;
 const detailPath = `${workspace.slug}/projects/${projectId}`;
 const settingsPath = `${detailPath}/settings`;
-let vite;
+let app;
 let browser;
 let origin;
 
 before(async () => {
-  vite = await createServer({
-    root: fileURLToPath(new URL('..', import.meta.url)),
-    server: { host: '127.0.0.1', port: 0 },
-  });
-  await vite.listen();
-  origin = vite.resolvedUrls.local[0];
+  app = await startBuiltApp();
+  origin = `${app.origin}/`;
   browser = await chromium.launch();
 });
 
 after(async () => {
   await browser?.close();
-  await vite?.close();
+  await app?.close();
 });
 
 function projectServer() {

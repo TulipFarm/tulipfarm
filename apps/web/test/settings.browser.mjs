@@ -385,11 +385,15 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 36
   try {
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
-    vite = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-      cwd: new URL('..', import.meta.url),
-      env: { ...process.env, VITE_API_URL: `http://127.0.0.1:${server.address().port}` },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    vite = spawn(
+      process.execPath,
+      ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+      {
+        cwd: new URL('..', import.meta.url),
+        env: { ...process.env, VITE_API_URL: `http://127.0.0.1:${server.address().port}` },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
     vite.stdout.on('data', data => {
       output = (output + data).slice(-16000);
     });

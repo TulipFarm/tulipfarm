@@ -13,12 +13,16 @@ const output = new URL('../../../docs/evidence/ui-ux-remaining/', import.meta.ur
 await mkdir(output, { recursive: true });
 const port = 5459,
   origin = `http://127.0.0.1:${port}`;
-const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-  cwd: process.env.UI_APP_ROOT ?? new URL('..', import.meta.url),
-  // The Help page shows its contact section only when a support address is configured.
-  env: { ...process.env, VITE_SUPPORT_EMAIL: 'hello@tulipfarm.ai' },
-  stdio: 'ignore',
-});
+const server = spawn(
+  process.execPath,
+  ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+  {
+    cwd: process.env.UI_APP_ROOT ?? new URL('..', import.meta.url),
+    // The Help page shows its contact section only when a support address is configured.
+    env: { ...process.env, VITE_SUPPORT_EMAIL: 'hello@tulipfarm.ai' },
+    stdio: 'ignore',
+  },
+);
 const ids = Array.from(
   { length: 9 },
   (_, i) =>

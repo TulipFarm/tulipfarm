@@ -1,17 +1,15 @@
 import assert from 'node:assert/strict';
-import { spawn, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright';
+import { startBuiltApp } from './built-app.fixture.mjs';
 import { governanceSnapshot } from './governance-snapshot.mjs';
 
 const port = Number(process.env.VISUAL_PORT ?? 5337);
-const origin = `http://127.0.0.1:${port}`;
 const before = process.env.VISUAL_BEFORE === '1';
 const capture = process.env.VISUAL_SCREENSHOTS;
-const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-  cwd: new URL('..', import.meta.url),
-  stdio: 'inherit',
-});
+const server = await startBuiltApp({ port });
+const { origin } = server;
 const workspace = {
   id: '11111111-1111-4111-8111-111111111111',
   slug: 'acme',
@@ -44,7 +42,7 @@ try {
     await delay(100);
   }
   browser = await chromium.launch({ headless: true, args: [`--remote-debugging-port=${port + 4000}`] });
-  for (const mode of modes) {
+  const runMode = async mode => {
     const context = await browser.newContext({
       viewport: { width: mode.width, height: mode.height },
       isMobile: !!mode.mobile,
@@ -271,8 +269,18 @@ try {
     assert.deepEqual(errors, [], `${mode.name} has no JavaScript errors`);
     console.log(`PASS ${mode.name} navigation${before ? ' baseline' : ', layout, and workflow recovery'}`);
     await context.close();
+  };
+  if (capture) {
+    for (const mode of modes) await runMode(mode);
+  } else {
+    const queue = [...modes];
+    await Promise.all(
+      Array.from({ length: 2 }, async () => {
+        while (queue.length) await runMode(queue.shift());
+      }),
+    );
   }
 } finally {
   await browser?.close();
-  server.kill('SIGTERM');
+  await server.close();
 }

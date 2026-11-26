@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "send": "node dist/send.js",
-    "test": "node --test --test-concurrency=1 test/*.test.mjs"
+    "test": "node --test test/*.test.mjs"
   },
   "devDependencies": {
     "@tulipfarm/typescript-config": "workspace:*",

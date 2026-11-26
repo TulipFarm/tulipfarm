@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test --test-concurrency=1 test/*.test.mjs"
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "@temporalio/client": "1.24.0",

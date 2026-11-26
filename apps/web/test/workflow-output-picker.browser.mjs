@@ -109,10 +109,14 @@ test(
       waitDefinition: null,
     };
     try {
-      vite = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', '5487', '--strictPort'], {
-        cwd: new URL('..', import.meta.url),
-        stdio: 'ignore',
-      });
+      vite = spawn(
+        process.execPath,
+        ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', '5487', '--strictPort'],
+        {
+          cwd: new URL('..', import.meta.url),
+          stdio: 'ignore',
+        },
+      );
       for (
         let i = 0;
         !(await fetch(origin).then(

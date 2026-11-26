@@ -11,7 +11,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/build-schema.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test --test-concurrency=1 test/*.test.mjs"
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "@slack/types": "3.1.0",

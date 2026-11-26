@@ -3,5 +3,6 @@
 // call the API on the page's own origin (self-host serves both behind one proxy), so
 // vite.config.ts passes no `sameOrigin` and gets `undefined`: no preconnect is needed.
 export function resolveApiOrigin(configured: string | undefined, development: boolean, sameOrigin?: string) {
-  return configured || (development ? 'http://localhost:3001' : sameOrigin);
+  const override = development ? (globalThis as { __TF_API_ORIGIN__?: string }).__TF_API_ORIGIN__ : undefined;
+  return override || configured || (development ? 'http://localhost:3001' : sameOrigin);
 }
