@@ -357,10 +357,6 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
     tool: z.literal('drafts.decide'),
     draftId: z.uuid(),
     decision: z.enum(['save', 'activate', 'dismiss']),
-    replaceChannels: z
-      .array(z.string().regex(/^[CG][A-Z0-9]{1,63}$/))
-      .max(20)
-      .optional(),
   }),
   z.strictObject({
     tool: z.literal('skills.draft'),
@@ -1248,6 +1244,7 @@ export type ChatToolsOptions = {
   appPages?: AppPages | undefined;
   telemetryRuntime?: ToolRuntime | undefined;
   wakePlan?: ((workspaceId: string, planId: string) => Promise<unknown>) | undefined;
+  modelFamilyEligibility?: ModelFamilyEligibility | undefined;
   workflowWake?: ((work: Work) => Promise<void>) | undefined;
   githubSubscriptions?: GitHubSubscriptions | undefined;
   fileBytes?: FileBytes | undefined;
@@ -1346,6 +1343,7 @@ export function createChatTools(
     appPages,
     telemetryRuntime = 'chat',
     wakePlan,
+    modelFamilyEligibility,
     workflowWake,
     githubSubscriptions,
     fileBytes,
@@ -2156,7 +2154,7 @@ export function createChatTools(
         }
         const authoringDrafts = createAuthoringDrafts(
           runtime,
-          privateBud?.eligible,
+          modelFamilyEligibility ?? privateBud?.eligible,
           workflowWake,
           agentSetup,
           undefined,
@@ -2165,10 +2163,9 @@ export function createChatTools(
         );
         try {
           const outcome = await authoringDrafts.decide(workspaceId, actor.userId, origin.conversationId, call.draftId, {
-            commandId: callId,
+            commandId: call.decision === 'dismiss' || verified.bulkConfirmed ? callId : origin.turnId,
             digest: verified.digest,
             decision: call.decision,
-            ...(call.replaceChannels?.length ? { consent: { replaceChannels: call.replaceChannels } } : {}),
           });
           const url =
             outcome.kind === 'agent'

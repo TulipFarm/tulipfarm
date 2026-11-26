@@ -420,6 +420,7 @@ export function meteredReply(
       appPages: pageTools,
       telemetryRuntime: externalContext ? 'slack' : 'chat',
       wakePlan,
+      modelFamilyEligibility: request => catalogEligibility(modelEnvironment())(request),
       githubSubscriptions,
       fileBytes,
       agentSetup: { ...slackAgentSetupFromEnvironment(toolRuntime), githubSubscriptions },

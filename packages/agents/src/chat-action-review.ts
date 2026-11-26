@@ -58,11 +58,19 @@ export type ChatDraftDecisionChoice = 'save' | 'activate' | 'dismiss';
 const draftDeclinePhrase =
   /\b(?:don't|don’t|do\s+not|never|no|nope|nah|cancel|dismiss|reject|stop|abort|scrap|skip|hold\s+off|not\s+yet|wait)\b/i;
 
-const draftConfirmPhrase =
-  /\b(?:yes|yep|yeah|yup|sure|ok|okay|alright|go\s+ahead|proceed|confirm(?:ed)?|approve[d]?|looks\s+good|lgtm|sounds\s+good|perfect|ship\s+it|do\s+it|make\s+it|build\s+it|create\s+it|save\s+it|activate\s+it|enable\s+it|turn\s+it\s+on|run\s+it|apply\s+it|add\s+it|update\s+it|delete\s+it|move\s+it|rename\s+it|share\s+it|archive\s+it|restore\s+it|remember\s+it|create\s+and\s+activate|save\s+(?:(?:it|this|that)\s+)?(?:as\s+)?(?:a\s+)?draft|save\s+(?:this|that|the)\b|create\s+(?:this|that|the)\b|activate\s+(?:this|that|the)\b|apply\s+(?:this|that|the)\b|approve\s+(?:this|that|the)\b|confirm\s+(?:this|that|the)\b|publish\s+(?:this|that|the|it)\b)\b/i;
+const standaloneConfirmPhrase =
+  /^(?:yes|yep|yeah|yup|sure|ok|okay|alright|lgtm|looks\s+good|sounds\s+good|perfect|confirmed|approved|go\s+ahead|proceed)(?:\s*[,!.]?\s*(?:please|thanks|thank\s+you|go\s+ahead|proceed|do\s+it|create\s+it|save\s+it|activate\s+it|enable\s+it|turn\s+it\s+on))?[!.\s]*$/i;
+
+const explicitActionConfirmPhrase =
+  /\b(?:go\s+ahead(?:\s+and\s+(?:create|save|activate|enable|apply|make|build|add|update|delete|move|rename|share|archive|restore|publish|run|do))?|ship\s+it|do\s+it|make\s+it|build\s+it|create\s+it|save\s+it|activate\s+it|enable\s+it|turn\s+it\s+on|apply\s+it|add\s+it|update\s+it|delete\s+it|move\s+it|rename\s+it|share\s+it|archive\s+it|restore\s+it|remember\s+it|create\s+and\s+activate|save\s+(?:(?:it|this|that)\s+)?(?:as\s+)?(?:a\s+)?draft|(?:create|save|activate|enable|apply|approve|confirm|publish)\s+(?:this|that|the)\s+(?:draft|card|agent|workflow|skill|project|table|row|rows|plan|change|changes|update|deletion|edit|one)\b|(?:create|save|activate|enable|apply|approve|confirm|publish)\s+(?:this|that|both|all|them)\b)\b/i;
 
 const saveDraftOnlyPhrase =
   /\b(?:save\s+(?:(?:it|this|that)\s+)?(?:as\s+)?(?:a\s+)?draft|draft\s+only|without\s+activat(?:ing|ion)|keep\s+(?:it\s+)?(?:inactive|off|disabled)|do\s+not\s+activate|don't\s+activate|don’t\s+activate)\b/i;
+
+const explicitSaveVerb = /\bsave\b/i;
+const explicitActivateVerb = /\b(?:activate|enable|turn\s+(?:it\s+)?on|publish)\b/i;
+const bulkConfirmPhrase =
+  /\b(?:both|all(?:\s+of\s+them)?|every\s+one|them\s+all|create\s+them|save\s+them|activate\s+them|apply\s+them|approve\s+them|confirm\s+them)\b/i;
 
 const draftDismissPhrase =
   /\b(?:cancel|dismiss|reject|scrap|abort|drop\s+it|never\s*mind|nevermind|no\b|nope|nah|(?:don't|don’t|do\s+not)\s+(?:create|save|activate|apply|do|make|build|add|update|delete|move|rename|share|archive|restore)|change\b|modify\b|instead\b)\b/i;
@@ -75,16 +83,19 @@ export function chatDraftConfirmation(text: string, decision: ChatDraftDecisionC
   const normalized = text.trim();
   if (!normalized || normalized.includes('?')) return false;
   if (decision === 'dismiss') return draftDismissPhrase.test(normalized);
-  if (decision === 'activate' && saveDraftOnlyPhrase.test(normalized)) return false;
+  if (decision === 'activate') {
+    if (saveDraftOnlyPhrase.test(normalized)) return false;
+    if (explicitSaveVerb.test(normalized) && !explicitActivateVerb.test(normalized)) return false;
+  }
   if (previewOnlyPhrase.test(normalized)) return false;
   // Allow "save without activating" for save, otherwise block decline/negation phrases.
   if (!(decision === 'save' && saveDraftOnlyPhrase.test(normalized)) && draftDeclinePhrase.test(normalized))
     return false;
-  return draftConfirmPhrase.test(normalized);
+  return standaloneConfirmPhrase.test(normalized) || explicitActionConfirmPhrase.test(normalized);
 }
 
 export type ChatDraftVerification =
-  | { ok: true; digest: string; proposalKind: string }
+  | { ok: true; digest: string; proposalKind: string; bulkConfirmed: boolean }
   | { ok: false; reason: 'not-found' | 'already-decided' | 'same-turn' | 'not-confirmed' };
 
 /**
@@ -142,7 +153,18 @@ export async function verifyChatDraftDecision(
     if (draft.turnId === origin.turnId || draft.draftSequence >= turn.acceptedSequence)
       return { ok: false, reason: 'same-turn' };
     if (!chatDraftConfirmation(turn.text, decision)) return { ok: false, reason: 'not-confirmed' };
-    return { ok: true, digest: draft.digest, proposalKind: draft.proposalKind };
+    const bulkConfirmed = bulkConfirmPhrase.test(turn.text);
+    if (decision !== 'dismiss' && !bulkConfirmed) {
+      const otherInTurn = (
+        await tx.client.query(
+          `SELECT 1 FROM ${name('tf_chat_authoring_decisions')} dec
+        WHERE dec.membership_id = $1 AND dec.command_id = $2 AND dec.draft_id <> $3 LIMIT 1`,
+          [actor.membershipId, origin.turnId, draftId],
+        )
+      ).rowCount;
+      if (otherInTurn) return { ok: false, reason: 'not-confirmed' };
+    }
+    return { ok: true, digest: draft.digest, proposalKind: draft.proposalKind, bulkConfirmed };
   });
 }
 

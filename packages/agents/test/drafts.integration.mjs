@@ -498,4 +498,64 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     )
   ).rows[0]?.decision;
   assert.equal(dismissedDecision, 'dismiss');
+
+  // Turn 6 & 7: A single singular reply ("Create it.") can confirm at most one pending card in a turn.
+  const { pairFirst, pairSecond } = await sendAndRun('Draft two helper agents.', async runTool => {
+    const a = await runTool({
+      tool: 'agents.draft',
+      agent: 'new',
+      input: {
+        owningTeamId: null,
+        expectedSoulRevision: head,
+        definition: { name: 'Helper A', instructions: 'Help A.', tools: ['rows.list'] },
+      },
+    });
+    const b = await runTool({
+      tool: 'agents.draft',
+      agent: 'new',
+      input: {
+        owningTeamId: null,
+        expectedSoulRevision: head,
+        definition: { name: 'Helper B', instructions: 'Help B.', tools: ['rows.list'] },
+      },
+    });
+    return { pairFirst: a.draftId, pairSecond: b.draftId };
+  });
+  const { firstConfirm, secondConfirm } = await sendAndRun('Create it.', async runTool => {
+    const first = await runTool({ tool: 'drafts.decide', draftId: pairFirst, decision: 'save' });
+    const second = await runTool({ tool: 'drafts.decide', draftId: pairSecond, decision: 'save' });
+    return { firstConfirm: first, secondConfirm: second };
+  });
+  assert.equal(firstConfirm.status, 'applied');
+  assert.equal(secondConfirm.error, 'not-confirmed');
+
+  // Cross-conversation draft cannot be confirmed from another chat.
+  const otherChatId = randomUUID();
+  await chats.create(w.id, user, { chatId: otherChatId, commandId: randomUUID() });
+  const otherTurn = await chats.send(w.id, user, otherChatId, {
+    messageId: randomUUID(),
+    commandId: randomUUID(),
+    parts: [{ kind: 'text', text: 'Create it.' }],
+  });
+  let crossChatResult;
+  const otherExecutor = createConversationExecutor(runtime, async ({ executeTool }) => {
+    crossChatResult = await executeTool('drafts.decide', false, context =>
+      createChatTools(context.runtime).invoke(context, {
+        tool: 'drafts.decide',
+        draftId: pairSecond,
+        decision: 'save',
+      }),
+    );
+    return { text: 'Done.', sources: [] };
+  });
+  assert.equal(
+    await otherExecutor.process({
+      workspaceId: w.id,
+      conversationId: otherChatId,
+      turnId: otherTurn.turnId,
+      generation: 0,
+    }),
+    'completed',
+  );
+  assert.equal(crossChatResult.error, 'not-found');
 });
