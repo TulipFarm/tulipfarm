@@ -42,6 +42,7 @@ export function registerAgentTasks(
     decide?: ReturnType<typeof createTaskApprovalDecision>;
     claimMcpSelection?: Parameters<typeof createAgentTasks>[1];
     wake?: (workspaceId: string, taskId: string) => Promise<void>;
+    closeBrowser?: (workspaceId: string, taskId: string) => Promise<void>;
   },
 ) {
   const service = createAgentTasks(dependencies.runtime, dependencies.claimMcpSelection, { ownerTyped: true });
@@ -114,9 +115,11 @@ export function registerAgentTasks(
           z.strictObject({ expectedGeneration: z.number().int().nonnegative() }),
         ),
       },
-      request => {
+      async request => {
         const p = task.parse(request.params);
-        return service.pause(p.workspaceId, user(request), p.taskId, request.body);
+        const result = await service.pause(p.workspaceId, user(request), p.taskId, request.body);
+        await dependencies.closeBrowser?.(p.workspaceId, p.taskId);
+        return result;
       },
     );
     const proposalParams = task.extend({ proposalId: uuidSchema });

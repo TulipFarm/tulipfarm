@@ -183,13 +183,12 @@ export const memberMessages: Readonly<Record<string, string>> = {
   'member-inactive':
     'An inactive member cannot receive a new link. Choose an active member, or keep the existing links unchanged.',
   'member-selection-required':
-    'Select an existing workspace member before inviting them. Create a member first if they are not listed.',
+    'Select an existing workspace member before inviting them. Add them on Members first if they are not listed.',
   'member-link-conflict':
     'This member is already linked to an account or another invitation. Review workspace access before trying again.',
-  'member-unavailable': 'Member details are not available right now. Open Workspace members and check profile status.',
-  'member-profile-pending': 'Your member profile is still being prepared. Open Workspace members to check its status.',
-  'member-profile-failed':
-    'Your member profile needs another sync attempt. Open Workspace members to retry or ask an admin.',
+  'member-unavailable': 'Member details are not available right now. Open Members and check profile sync status.',
+  'member-profile-pending': 'Your member profile is still being prepared. Open Members to check its status.',
+  'member-profile-failed': 'Your member profile needs another sync attempt. Open Members to retry or ask an admin.',
   'member-not-found':
     'This workspace member is unavailable or your access changed. Ask a workspace admin to review it.',
 };
@@ -366,12 +365,12 @@ export function tableApi(workspaceId: string) {
     search?: string,
     archived = false,
     sort?: TableListSort,
-    /** Leaves out the built-in Tasks table, which people see as Tasks, never as a table. */
-    hideTasks = false,
+    /** Leaves out the built-in Tasks and Workspace members tables, which people see on the Tasks and Members pages. */
+    hideSystem = false,
   ) {
     return tableListSchema.parse(
       await request(
-        `?limit=50${after ? `&after=${encodeURIComponent(after)}` : ''}${search ? `&search=${encodeURIComponent(search)}` : ''}${archived ? '&archived=true' : ''}${sort ? `&sort=${sort.by}&direction=${sort.direction}` : ''}${hideTasks ? '&excludeSystem=tasks' : ''}`,
+        `?limit=50${after ? `&after=${encodeURIComponent(after)}` : ''}${search ? `&search=${encodeURIComponent(search)}` : ''}${archived ? '&archived=true' : ''}${sort ? `&sort=${sort.by}&direction=${sort.direction}` : ''}${hideSystem ? '&excludeSystem=tasks,workspace-members' : ''}`,
         signal,
       ),
     );

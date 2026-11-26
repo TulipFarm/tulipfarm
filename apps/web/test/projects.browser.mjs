@@ -538,6 +538,8 @@ for (const width of [320, 375, 414, 768, 1440])
       async ({ page, editor, api }) => {
         api.state.sendStatus = 400;
         await editor.fill('Retained on a small screen.');
+        // Enter sends only what the composer has taken in, which can lag the fill by a moment.
+        await page.getByRole('button', { name: 'Send message', exact: true, disabled: false }).waitFor();
         await editor.press('Enter');
         await reviewProjectDraft(page);
         assert.equal(await editor.textContent(), 'Retained on a small screen.');

@@ -26,6 +26,8 @@ export const directoryMemberSchema = z.object({
   email: z.email(),
   image: z.string().nullable(),
   role: memberRoleSchema.default('member'),
+  /** The person's row in the built-in Workspace members table, once their account is linked to it. */
+  workspaceMemberId: z.uuid().nullable().default(null),
 });
 export const collaborationDirectorySchema = z.object({ members: z.array(directoryMemberSchema) });
 export const tableGrantPermissionSchema = z.enum([

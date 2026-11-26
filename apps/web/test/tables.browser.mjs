@@ -42,7 +42,8 @@ const memberId = randomUUID(),
   chatId = randomUUID(),
   proposalId = randomUUID(),
   turnId = randomUUID(),
-  tableId = randomUUID();
+  tableId = randomUUID(),
+  membersTableId = randomUUID();
 const fieldId = randomUUID(),
   selectId = randomUUID(),
   optionId = randomUUID(),
@@ -680,6 +681,15 @@ try {
         activityAt: workspace.createdAt,
         createdAt: workspace.createdAt,
       };
+    // Links to people open Members; this workspace's Members table holds none of the rows these tests link to.
+    else if (path === `/v1/workspaces/${workspace.id}/workspace-members`)
+      json = {
+        tableId: membersTableId,
+        revision: 'a'.repeat(40),
+        sync: { pending: 0, failed: 0, repairRequired: 0 },
+        members: [],
+        nextCursor: null,
+      };
     else return route.fulfill({ status: 404, json: { error: 'unavailable' } });
     return route.fulfill({ json });
   });
@@ -755,12 +765,11 @@ try {
   assert.deepEqual(effectRequests.slice(0, 2), [-1, 19]);
   await card.getByRole('button', { name: 'Previous effects' }).click();
   await card.getByText('First subject', { exact: true }).last().waitFor();
-  // The latest pending schema proposal opens its schema in Canvas by itself on a wide screen.
-  await page.getByRole('figure', { name: 'Schema diagram for Change Support tickets table' }).waitFor();
+  // Pending schema proposals stay in chat until the user clicks Open schema.
   assert.equal(
     await page.getByRole('button', { name: 'Close canvas' }).count(),
-    1,
-    'A pending proposal opens the canvas once it loads',
+    0,
+    'A pending proposal keeps the canvas closed until clicked',
   );
   await page.setViewportSize({ width: 1440, height: 1000 });
   await card.getByRole('button', { name: 'Open schema' }).click();
@@ -776,11 +785,10 @@ try {
   liveTurn = true;
   await page.reload();
   await card.getByRole('button', { name: 'Open schema' }).waitFor();
-  await page.getByRole('figure', { name: 'Schema diagram for Change Support tickets table' }).waitFor();
   assert.equal(
     await page.getByRole('button', { name: 'Close canvas' }).count(),
-    1,
-    'A pending proposal reopens its schema after a reload',
+    0,
+    'A pending proposal stays closed after a reload until clicked',
   );
   await card.getByRole('button', { name: 'Open schema' }).click();
   await page.getByRole('figure', { name: 'Schema diagram for Change Support tickets table' }).waitFor();
@@ -794,8 +802,7 @@ try {
   liveTurn = false;
   await page.reload();
   await card.getByRole('button', { name: /^Approve/ }).waitFor();
-  // The pending schema reopens in Canvas by itself; close it so the phone view shows the chat.
-  await page.getByRole('button', { name: 'Close canvas' }).click();
+  assert.equal(await page.getByRole('button', { name: 'Close canvas' }).count(), 0);
   for (const theme of ['light', 'dark']) {
     await page.emulateMedia({ colorScheme: theme });
     await page.setViewportSize({ width: 390, height: 844 });

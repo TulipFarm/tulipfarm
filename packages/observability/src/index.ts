@@ -315,6 +315,10 @@ const logOnlyAttributes = new Set([
   'table',
   'workspace.version',
   'source.kinds',
+  'decision.groups',
+  'decision.tools',
+  'decision.source',
+  'decision.kind',
   'table.generation_xmin',
   'table.catalog_xmin',
   'table.current_xid',
@@ -383,6 +387,12 @@ function safeAttribute(key: string, value: unknown, logLine = false): boolean {
     // Distinct source kinds, comma-joined: a fixed vocabulary of kebab-case names.
     if (key === 'source.kinds')
       return typeof value === 'string' && /^[a-z][a-z-]{0,40}(,[a-z][a-z-]{0,40}){0,63}$/.test(value);
+    // A decision model's choices: fixed kebab-case group ids, comma-joined, and the object kind it judged.
+    if (key === 'decision.groups')
+      return typeof value === 'string' && /^[a-z][a-z-]{0,40}(,[a-z][a-z-]{0,40}){0,31}$/.test(value);
+    if (key === 'decision.kind') return typeof value === 'string' && /^[a-z][a-z-]{0,40}$/.test(value);
+    if (key === 'decision.source') return value === 'decision-model' || value === 'fallback';
+    if (key === 'decision.tools') return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
     return typeof value === 'string' && value.length > 0 && value.length <= providerMessageLimit;
   }
   if (!spanAttributes.has(key)) return false;

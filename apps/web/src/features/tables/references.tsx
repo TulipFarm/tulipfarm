@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
 import { AvatarGroup, AvatarGroupCount, EntityAvatar } from '@tulipfarm/sprout/avatar';
 import { Badge } from '@tulipfarm/sprout/badge';
@@ -11,6 +11,7 @@ import { optionTone } from './table-view';
 import { MessageResponse } from '@tulipfarm/sprout/message-response';
 import { MemberPhoto } from './member-profile';
 import { ActorName } from './actors';
+import { useMemberDirectory } from './hooks';
 import {
   workspaceMemberAccess,
   workspaceMemberFields,
@@ -122,6 +123,55 @@ function FileName({ fileId, files, workspace }: { fileId: string; files: FileNam
   );
 }
 
+/** A link to a linked row, for a Button to render: people in Members open their page, other rows their table. */
+function rowLink(memberTableId: string | null, workspace: TableWorkspace, tableId: string, recordId: string) {
+  return memberTableId === tableId ? (
+    <Link
+      to="/$workspaceSlug/members/people/$memberId"
+      params={{ workspaceSlug: workspace.slug, memberId: recordId }}
+    />
+  ) : (
+    <Link
+      to="/$workspaceSlug/tables/$tableId"
+      params={{ workspaceSlug: workspace.slug, tableId }}
+      search={{ row: recordId }}
+    />
+  );
+}
+
+function RowNameLink({
+  memberTableId,
+  workspace,
+  tableId,
+  recordId,
+  children,
+}: {
+  memberTableId: string | null;
+  workspace: TableWorkspace;
+  tableId: string;
+  recordId: string;
+  children: ReactNode;
+}) {
+  return memberTableId === tableId ? (
+    <Link to="/$workspaceSlug/members/people/$memberId" params={{ workspaceSlug: workspace.slug, memberId: recordId }}>
+      {children}
+    </Link>
+  ) : (
+    <Link
+      to="/$workspaceSlug/tables/$tableId"
+      params={{ workspaceSlug: workspace.slug, tableId }}
+      search={{ row: recordId }}
+    >
+      {children}
+    </Link>
+  );
+}
+
+function useMemberTableId(workspaceId: string) {
+  const directory = useMemberDirectory(workspaceId);
+  return directory.state.kind === 'ready' ? directory.state.data.tableId : null;
+}
+
 function LinkedRowName({
   tableId,
   recordId,
@@ -135,20 +185,11 @@ function LinkedRowName({
   linked: LinkedLabels;
   workspace: TableWorkspace;
 }) {
+  const memberTableId = useMemberTableId(workspace.id);
   const label = linked.kind === 'ready' ? linked.data[recordId] : undefined;
   if (label === undefined) return <span className="text-muted-foreground">{linkedLabel(linked, recordId)}</span>;
   return (
-    <Button
-      variant="link"
-      nativeButton={false}
-      render={
-        <Link
-          to="/$workspaceSlug/tables/$tableId"
-          params={{ workspaceSlug: workspace.slug, tableId }}
-          search={{ row: recordId }}
-        />
-      }
-    >
+    <Button variant="link" nativeButton={false} render={rowLink(memberTableId, workspace, tableId, recordId)}>
       {compact ? (
         <span title={label} className="max-w-40 truncate">
           {label}
@@ -172,6 +213,7 @@ function LinkedPeople({
   linked: LinkedLabels;
   workspace: TableWorkspace;
 }) {
+  const memberTableId = useMemberTableId(workspace.id);
   const names = ids.map(id => (linked.kind === 'ready' ? linked.data[id] : undefined) ?? linkedLabel(linked, id));
   const rest = ids.length - 2;
   const avatars = (
@@ -210,13 +252,9 @@ function LinkedPeople({
           <span key={id}>
             {index > 0 && ', '}
             {linked.kind === 'ready' && linked.data[id] !== undefined ? (
-              <Link
-                to="/$workspaceSlug/tables/$tableId"
-                params={{ workspaceSlug: workspace.slug, tableId }}
-                search={{ row: id }}
-              >
+              <RowNameLink memberTableId={memberTableId} workspace={workspace} tableId={tableId} recordId={id}>
                 {names[index]}
-              </Link>
+              </RowNameLink>
             ) : (
               <span className="text-muted-foreground">{names[index]}</span>
             )}

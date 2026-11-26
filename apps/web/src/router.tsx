@@ -105,6 +105,7 @@ const InviteMembersPage = lazyRouteComponent(routePage('governance'), 'InviteMem
 const EditInvitePage = lazyRouteComponent(routePage('governance'), 'EditInvitePage');
 const MembersSettingsPage = lazyRouteComponent(routePage('governance'), 'MembersSettingsPage');
 const MemberDetailPage = lazyRouteComponent(routePage('governance'), 'MemberDetailPage');
+const PersonDetailPage = lazyRouteComponent(routePage('governance'), 'PersonDetailPage');
 const TeamDetailPage = lazyRouteComponent(routePage('governance'), 'TeamDetailPage');
 const TablesPage = lazyRouteComponent(routePage('tableList'), 'TablesPage');
 const TableDetailPage = lazyRouteComponent(routePage('tables'), 'TableDetailPage');
@@ -1033,6 +1034,15 @@ const workspaceMembersRoute = createRoute({
 const workspaceInviteMembersRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'members/invite',
+  // Inviting someone already in Members links the invite to their profile.
+  validateSearch: search =>
+    z
+      .object({
+        member: z.uuid().optional().catch(undefined),
+        email: z.string().max(320).optional().catch(undefined),
+        name: z.string().max(200).optional().catch(undefined),
+      })
+      .parse(search),
   component: InviteMembersPage,
 });
 const workspaceEditInviteRoute = createRoute({
@@ -1044,6 +1054,11 @@ const workspaceMembersSettingsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'members/settings',
   component: MembersSettingsPage,
+});
+const workspacePersonRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'members/people/$memberId',
+  component: PersonDetailPage,
 });
 const workspaceMemberRoute = createRoute({
   getParentRoute: () => workspaceRoute,
@@ -1172,6 +1187,7 @@ export const router = createRouter({
       workspaceInviteMembersRoute,
       workspaceEditInviteRoute,
       workspaceMembersSettingsRoute,
+      workspacePersonRoute,
       workspaceMemberRoute,
       workspaceTeamsRoute,
       workspaceTeamRoute,

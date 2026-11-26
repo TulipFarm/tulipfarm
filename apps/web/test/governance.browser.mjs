@@ -448,11 +448,14 @@ try {
   await page.getByRole('menuitem', { name: 'Revoke invite for ivy@example.com', exact: true }).click();
   await confirm.getByRole('button', { name: 'Revoke invite', exact: true }).click();
   await confirm.waitFor({ state: 'hidden' });
-  await table.getByText('ivy@example.com', { exact: true }).waitFor({ state: 'hidden' });
+  // Ivy stays in Members without an account once the invite is revoked.
+  const ivy = table.getByRole('row').filter({ has: page.getByText('ivy@example.com', { exact: true }) });
+  await ivy.getByText('No account', { exact: true }).waitFor();
   stale.release.resolve();
   await stale.finished.promise;
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  assert.equal(await table.getByText('ivy@example.com', { exact: true }).count(), 0);
+  assert.equal(await ivy.count(), 1);
+  assert.equal(await ivy.getByText('Pending', { exact: true }).count(), 0);
   // More than one page of open invites.
   invitations = Array.from({ length: 101 }, (_, index) => ({
     id: randomUUID(),

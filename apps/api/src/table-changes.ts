@@ -357,7 +357,11 @@ export function registerTableChanges(
         archived: z.coerce.boolean().default(false),
         sort: z.enum(['name', 'records', 'changed']).optional(),
         direction: z.enum(['asc', 'desc']).optional(),
-        excludeSystem: z.enum(['tasks']).optional(),
+        /** Built-in tables to leave out, comma separated, such as `tasks,workspace-members`. */
+        excludeSystem: z
+          .string()
+          .regex(/^(tasks|workspace-members)(,(tasks|workspace-members))?$/)
+          .optional(),
       });
     const recordQueryPage = page.extend({
       revision: z.string().regex(/^[a-f0-9]{40}$/),
@@ -514,7 +518,8 @@ export function registerTableChanges(
             ...(query.search ? { search: query.search } : {}),
             ...(query.sort ? { sort: query.sort } : {}),
             ...(query.direction ? { direction: query.direction } : {}),
-            ...(query.excludeSystem === 'tasks' ? { excludeTasks: true } : {}),
+            ...(query.excludeSystem?.split(',').includes('tasks') ? { excludeTasks: true } : {}),
+            ...(query.excludeSystem?.split(',').includes('workspace-members') ? { excludeMembers: true } : {}),
           })
           .then(result => ({
             ...result,

@@ -4,10 +4,10 @@ import { useFeatureContext } from '@/lib/query/provider';
 import { linkedRefs, tableKeys, tableQueries, type ProposalIdentity } from './queries';
 import { useTableChanges, useTableTransition } from './changes';
 import type { ProposalApi } from './proposal-api';
-import type { RowPage, RowQuery, TableDataRow, TableDefinition, TableApi, TableListSort } from './api';
+import type { RowPage, RowPermissions, RowQuery, TableDataRow, TableDefinition, TableApi, TableListSort } from './api';
 import { workspaceMembersApi, type MemberStateQuery } from './api';
 import type { TableQueryRequest } from '@tulipfarm/tables/query';
-import { workspaceMemberFields } from '@tulipfarm/tables/workspace-members';
+import { workspaceMemberAccess, workspaceMemberFields } from '@tulipfarm/tables/workspace-members';
 import { runStateOf, taskFields } from '@tulipfarm/tables/tasks-table';
 import type { ReadState } from './request-state';
 import { TableRequestError } from './request-state';
@@ -26,9 +26,9 @@ export function useTableList(
   search?: string,
   sort?: TableListSort,
   archived = false,
-  hideTasks = false,
+  hideSystem = false,
 ) {
-  return useTableQuery(tableQueries.list(api, after, search, sort, archived, hideTasks));
+  return useTableQuery(tableQueries.list(api, after, search, sort, archived, hideSystem));
 }
 /**
  * Tables a person may newly choose. Tasks is never offered as a table, but a choice that already points at it stays,
@@ -98,6 +98,71 @@ export function useMemberDirectory(workspaceId: string) {
   return useTableQuery({
     key: [...tableKeys.picker, 'workspace-members'],
     load: (signal: AbortSignal) => api.state({}, signal),
+  });
+}
+export type MembersTable = { table: TableDefinition; permissions: RowPermissions };
+/** The built-in Members table, its current fields and what the viewer may do with its rows. */
+export function useMembersTable(api: TableApi, workspaceId: string) {
+  const directory = useMemberDirectory(workspaceId);
+  const tableId = directory.state.kind === 'ready' ? directory.state.data.tableId : '';
+  const detail = useTableDetail(api, tableId, !!tableId);
+  const state: ReadState<MembersTable> =
+    directory.state.kind !== 'ready'
+      ? directory.state
+      : detail.state.kind !== 'ready'
+        ? tableId
+          ? detail.state
+          : { kind: 'loading' }
+        : detail.state.data.applied
+          ? {
+              ...detail.state,
+              data: {
+                table: {
+                  id: detail.state.data.id,
+                  revision: detail.state.data.applied.revision,
+                  definition: detail.state.data.applied.definition,
+                  systemKind: 'workspace-members',
+                },
+                permissions: detail.state.data.archived
+                  ? { create: false, update: false, delete: false }
+                  : detail.state.data.rowPermissions,
+              },
+            }
+          : { kind: 'error', message: 'Members are still being set up. Try again in a moment.' };
+  return {
+    state,
+    refresh: async () => {
+      await Promise.all([directory.refresh(), detail.refresh()]);
+    },
+  };
+}
+/** Members-table rows for people with no account and no pending invite. */
+export function useManualMembers(api: TableApi, table: TableDefinition | null) {
+  return useTableQuery({
+    key: [...tableKeys.records(table?.id ?? ''), 'manual-members', table?.revision ?? ''],
+    enabled: !!table,
+    load: async (signal: AbortSignal) => {
+      const rows: TableDataRow[] = [];
+      let after: string | undefined;
+      // Hand-added people are few; ten pages keeps one slow workspace from loading forever.
+      for (let page = 0; page < 10 && table; page++) {
+        const result = await api.recordPage(
+          table,
+          { filter: { fieldId: workspaceMemberFields.access, op: 'eq', value: workspaceMemberAccess.none } },
+          after,
+          signal,
+        );
+        rows.push(
+          ...result.records.filter(row => {
+            const value = row.values[workspaceMemberFields.access];
+            return value?.kind === 'single-select' && value.optionId === workspaceMemberAccess.none;
+          }),
+        );
+        if (!result.nextCursor) break;
+        after = result.nextCursor;
+      }
+      return rows;
+    },
   });
 }
 export function useTableRowsById(

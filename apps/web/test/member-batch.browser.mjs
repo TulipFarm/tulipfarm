@@ -373,12 +373,35 @@ try {
   await confirm.getByRole('button', { name: 'Revoke invite', exact: true }).click();
   await confirm.waitFor({ state: 'hidden' });
   await status.getByText('Revoked the invite for first@example.com. Their link no longer works.').waitFor();
-  await table.getByText('first@example.com', { exact: true }).waitFor({ state: 'hidden' });
+  // A revoked invite leaves the person in Members without an account.
+  const first = table.getByRole('row').filter({ has: page.getByText('first@example.com', { exact: true }) });
+  await first.getByText('No account', { exact: true }).waitFor();
+  assert.equal(await first.getByText('Pending', { exact: true }).count(), 0);
   const pendingInvitation = items.find(item => item.email === 'pending@example.com');
   pendingInvitation.status = 'consumed';
   pendingInvitation.canCopy = false;
-  await invitationsChanged();
-  await table.getByText('pending@example.com', { exact: true }).waitFor({ state: 'hidden' });
+  // Accepting links their Members row to the new account, so they show once, as active.
+  const joinedId = randomUUID();
+  snapshot.members.push({
+    id: joinedId,
+    userId: 'pending',
+    name: 'pending',
+    email: 'pending@example.com',
+    role: 'member',
+  });
+  snapshot.directory.push({ id: joinedId, name: 'pending', email: 'pending@example.com', image: null, role: 'member' });
+  await page.evaluate(
+    async ({ workspaceId, membershipId }) => {
+      const { queryNotifications } = await import('/src/lib/query/notifications.ts');
+      const channel = queryNotifications(() => {}, 'other-tab');
+      channel.send({ kind: 'workspace', userId: 'ada', workspaceId, membershipId }, 'change', [['governance']]);
+      channel.close();
+    },
+    { workspaceId, membershipId: actorId },
+  );
+  const joined = table.getByRole('row').filter({ has: page.getByText('pending@example.com', { exact: true }) });
+  await joined.getByText('Active', { exact: true }).waitFor();
+  assert.equal(await joined.count(), 1);
 
   await page.getByRole('link', { name: 'Invite members', exact: true }).click();
   await input.fill('denied@example.com, stopped@example.com, never@example.com,');

@@ -211,6 +211,7 @@ export function registerConversations(
     eventTiming?: Partial<EventTiming>;
     replies?: Pick<ReplyDispatch, 'sent'>;
     codeSessions?: { start(workspaceId: string, sessionId: string): Promise<void> };
+    closeBrowser?: (workspaceId: string, chatId: string) => Promise<void>;
   },
 ) {
   const { service } = dependencies;
@@ -928,9 +929,11 @@ export function registerConversations(
           deleteChatSchema,
         ),
       },
-      request => {
+      async request => {
         const { workspaceId, chatId } = chatParams.parse(request.params);
-        return service.remove(workspaceId, user(request), chatId, deleteChatSchema.parse(request.body));
+        const result = await service.remove(workspaceId, user(request), chatId, deleteChatSchema.parse(request.body));
+        await dependencies.closeBrowser?.(workspaceId, chatId);
+        return result;
       },
     );
     for (const operation of ['retry', 'cancel'] as const) {

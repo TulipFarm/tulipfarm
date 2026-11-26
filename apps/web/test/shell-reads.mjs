@@ -25,6 +25,8 @@ export function shellRead(method, path, workspace) {
   if (/^\/v1\/workspaces\/[^/]+\/integrations$/.test(path)) return { json: { integrations: [] } };
   if (path.endsWith('/atlassian/accounts')) return { json: { accounts: [], providers: [] } };
   if (path.endsWith('/workspace-mcp/capabilities')) return { status: 404, json: { error: 'not-found' } };
+  // Members reads the built-in Members table for people added by hand; these mocks have none.
+  if (/^\/v1\/workspaces\/[^/]+\/workspace-members$/.test(path)) return { status: 404, json: { error: 'not-found' } };
   if (path.endsWith('/bud'))
     return {
       json: {
