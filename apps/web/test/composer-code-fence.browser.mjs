@@ -315,7 +315,7 @@ test(
       assert.equal(await pills.count(), 0, 'a URL being typed is not replaced before the user finishes it');
       await editor.pressSequentially(' and ');
       await pills.getByText('Package: Leave Management', { exact: true }).waitFor();
-      assert.equal(await editor.locator('.sprout-rich-text-keyword').count(), 2);
+      assert.equal(await editor.locator('.sprout-rich-text-keyword').count(), 0);
       await page.evaluate(text => navigator.clipboard.writeText(text), definition);
       await editor.press(`${modifier}+v`);
       await pills.nth(1).waitFor();

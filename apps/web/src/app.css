@@ -1356,9 +1356,27 @@
   .sprout-input-group[data-mode='code'] button[type='submit']:not(:disabled):hover {
     background: #caa9fa;
   }
-  form[data-dragging] > .sprout-input-group {
+  form[data-dragging] .sprout-input-group {
     border-color: var(--sprout-focus);
     background: var(--sprout-hover);
+  }
+  .composer-shell {
+    border: 1px solid var(--sprout-input);
+    border-radius: var(--sprout-radius-panel);
+    background: color-mix(in oklab, var(--muted) 45%, var(--card));
+  }
+  .composer-shell-bar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+  }
+  .composer-shell > .sprout-input-group {
+    margin: 0 -1px -1px;
+    width: calc(100% + 2px);
+  }
+  .sprout-dropdown-menu-content[data-model-picker-menu] {
+    max-height: min(24rem, var(--available-height));
   }
   .sprout-input-group[data-mode] [data-mode-chip] {
     background: color-mix(in oklab, var(--chat-mode) 14%, transparent);

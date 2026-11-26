@@ -158,13 +158,6 @@ export function ModelPicker({ model, models, disabled, onModelChange, account }:
   const medianCost = pricedCosts.length > 0 ? pricedCosts[Math.floor(pricedCosts.length / 2)]! : null;
   const off = disabled || models.length === 0;
   const source = model ? sourceOf(model) : null;
-  // The trigger names the source when it matters: always for a plan, and for credits when a plan also offers the model.
-  const shownSource =
-    source &&
-    (source !== 'credits' ||
-      groups.some(group => group.offers.length > 1 && group.offers.some(offer => offer.id === model!.id)))
-      ? sources[source].name
-      : null;
   const accounts = model?.plan && account && account.options.length > 1 ? account : null;
   const accountName = accounts?.options.find(option => option.id === accounts.value)?.label;
   const choose = (id: unknown) => onModelChange(String(id));
@@ -175,7 +168,13 @@ export function ModelPicker({ model, models, disabled, onModelChange, account }:
     if (group.offers.length === 1 || group.offers.every(offer => offer.disabled)) {
       const only = group.offers.length === 1 ? group.offers[0]! : group.model;
       const usage = only.disabled ? null : usageOf(only);
-      const hint = only.disabled ? null : modelHint(only, medianCost);
+      const selectedPlan =
+        !only.disabled && only.id === model?.id && only.plan
+          ? accountName
+            ? `${sources[only.plan].name} · ${accountName}`
+            : sources[only.plan].name
+          : null;
+      const hint = only.disabled ? null : (selectedPlan ?? modelHint(only, medianCost));
       return (
         <DropdownMenuRadioItem
           key={group.key}
@@ -208,7 +207,11 @@ export function ModelPicker({ model, models, disabled, onModelChange, account }:
     const current = group.offers.find(offer => offer.id === model?.id);
     const warning = Boolean(usageOf(current ?? group.model)?.warning);
     const hint = modelHint(current ?? group.model, medianCost);
-    const subline = current ? sources[sourceOf(current)].name : hint;
+    const subline = current
+      ? current.plan && accountName
+        ? `${sources[sourceOf(current)].name} · ${accountName}`
+        : sources[sourceOf(current)].name
+      : hint;
     return (
       <DropdownMenuSub key={group.key}>
         <DropdownMenuSubTrigger
@@ -309,14 +312,11 @@ export function ModelPicker({ model, models, disabled, onModelChange, account }:
             </span>
           )}
           <span className="max-w-36 truncate sm:max-w-44">{model?.label ?? 'Model'}</span>
-          {(accountName ?? shownSource) && (
-            <span className="hidden max-w-40 truncate text-xs text-muted-foreground sm:inline">{`· ${accountName ?? shownSource}`}</span>
-          )}
           <ChevronDownIcon size="sm" aria-hidden="true" />
         </TooltipTrigger>
         <TooltipContent>AI model that writes replies, and where it runs</TooltipContent>
       </Tooltip>
-      <DropdownMenuContent size="menu" side="top" align="end">
+      <DropdownMenuContent size="menu" side="top" align="end" data-model-picker-menu="">
         {section('Your plans', 'Billed to your connected account', planGroups)}
         {planGroups.length > 0 && creditGroups.length > 0 && <DropdownMenuSeparator />}
         {section(

@@ -266,8 +266,17 @@ try {
     await route.fulfill({ json });
   });
   await page.goto(`${origin}/acme`);
-  await modelPicker(page, 'GPT-6 Astra').click();
+  const planTrigger = modelPicker(page, 'GPT-6 Astra');
+  await planTrigger.waitFor();
+  assert.equal((await planTrigger.innerText()).includes('ChatGPT plan'), false);
+  await planTrigger.click();
   await modelOption(page, 'GPT-6 Astra').first().waitFor();
+  await page.getByRole('menu').getByText('ChatGPT plan', { exact: true }).waitFor();
+  assert.equal(
+    await page.getByRole('menu').evaluate(el => el.getBoundingClientRect().height <= 420),
+    true,
+    'model selector menu height is capped',
+  );
   assert.equal(await page.getByText('ChatGPT account', { exact: true }).count(), 0);
   await page.keyboard.press('Escape');
   subscriptions = [account(first, 'ada@example.com'), account(second, 'ada@work.example')];

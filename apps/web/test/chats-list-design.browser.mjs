@@ -128,7 +128,7 @@ test('chat list keeps clear columns, responsive actions, filters, and recovery',
     await first.waitFor({ state: 'detached' });
     await open('chats-error');
     await page.getByRole('heading', { name: 'Could not load chats', exact: true }).waitFor();
-    // The demo fails the first five list reads (chats-mock-api.ts); the page makes four as it opens, so the first retry fails too.
+    // The demo fails the first four list reads (chats-mock-api.ts); the page makes three as it opens, so the first retry fails too.
     const retry = page.getByRole('button', { name: 'Retry loading chats', exact: true });
     await retry.click();
     await page.getByRole('heading', { name: 'Could not load chats', exact: true }).waitFor();
