@@ -71,7 +71,7 @@ try {
     false,
     `Port ${port} must be unused`,
   );
-  server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
+  server = spawn(process.execPath, ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port)], {
     cwd: appRoot,
     env: { ...process.env, VITE_API_URL: fixture.origin },
     stdio: ['ignore', 'pipe', 'pipe'],

@@ -81,7 +81,14 @@ test(
       assert.equal(writes.at(-1), '/v1/workspaces/river/last-used');
       assert.equal(await page.evaluate(() => localStorage.getItem('tulipfarm:last-workspace:viewer')), second.id);
       saveStatus = 503;
+      const saveError = page.waitForEvent(
+        'console',
+        message =>
+          message.type() === 'error' &&
+          message.text().includes('Could not save your last workspace. Reload to try again.'),
+      );
       await open('northstar', 503);
+      await saveError;
       assert.ok(errors.some(message => message.includes('Could not save your last workspace. Reload to try again.')));
       saveStatus = 204;
       await open('northstar');

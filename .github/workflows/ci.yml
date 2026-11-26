@@ -116,7 +116,7 @@ jobs:
   # Every apps/web/test/*.browser.mjs, split by recorded duration. Tests share fixed ports, so each shard runs four
   # at a time, each in its own network namespace; see apps/web/test/run-browser-tests.mjs.
   web-browser:
-    name: web-browser (${{ matrix.shard }}/10)
+    name: web-browser (${{ matrix.shard }}/12)
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
@@ -124,7 +124,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     services:
       postgres:
         image: pgvector/pgvector:0.8.2-pg18
@@ -178,14 +178,17 @@ jobs:
       - name: Build the web app and the API and worker code the tests run
         run: |
           pnpm exec turbo run build --filter='@tulipfarm/web^...' --filter=@tulipfarm/api --filter=@tulipfarm/worker --concurrency=4
-          VITE_API_URL= pnpm --filter @tulipfarm/web build
-          TULIPFARM_BROWSER_TEST_BUILD=1 VITE_API_URL= pnpm --filter @tulipfarm/web build
+          (VITE_API_URL= pnpm --filter @tulipfarm/web build) &
+          p1=$!
+          (TULIPFARM_BROWSER_TEST_BUILD=1 VITE_API_URL= pnpm --filter @tulipfarm/web build) &
+          p2=$!
+          wait "$p1" "$p2"
       # Ubuntu's AppArmor blocks the unprivileged user namespaces the runner isolates each test in.
       - name: Allow unprivileged network namespaces
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Run browser tests
         env:
-          SHARD: ${{ matrix.shard }}/10
+          SHARD: ${{ matrix.shard }}/12
         run: pnpm --filter @tulipfarm/web test:browser --shard="$SHARD" --jobs=4
       - name: Upload failure screenshots
         if: failure()
