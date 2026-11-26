@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { SourceAuthorizationUnavailable } from '../src/index.ts';
+import { AccessDenied, SourceAuthorizationUnavailable } from '../src/index.ts';
 import {
   deferRemoteSourceChecks,
   remoteSourceCheck,
@@ -11,6 +11,7 @@ import {
   RemoteSourceChecksDeferred,
   withRemoteSourceCheckBudget,
   withRemoteSourceCheckMemo,
+  withSharedRemoteSourceCheckMemo,
 } from '../src/remote-checks.ts';
 
 /** A transaction that, like the GitHub source wrapper, ends with `RemoteSourceChecksDeferred` after deferring a check. */
@@ -265,4 +266,57 @@ test('a memo keeps no failed checks, and nothing is remembered outside one', asy
     remoteSourceCheck('outside', async () => {}),
     'inline',
   );
+});
+
+test('the shared memo reuses a pass across separate read calls until it expires or a check denies it', async t => {
+  t.mock.method(Date, 'now', () => now);
+  let now = 0;
+  let checks = 0;
+  const load = () =>
+    withSharedRemoteSourceCheckMemo(() =>
+      deferRemoteSourceChecks(
+        transaction(
+          [],
+          [
+            [
+              'shared',
+              async () => {
+                checks++;
+              },
+            ],
+          ],
+        ),
+      ),
+    );
+  await load();
+  assert.deepEqual(await load(), ['shared:verified']);
+  assert.equal(checks, 1);
+  assert.equal(
+    remoteSourceCheck('shared', async () => {}),
+    'inline',
+    'calls outside the shared memo, such as writes, always check',
+  );
+  now = remoteSourceCheckLimits.reuseMilliseconds;
+  await load();
+  assert.equal(checks, 2);
+
+  // A check denied anywhere in the process, such as by a reply, ends the shared pass at once.
+  await assert.rejects(
+    deferRemoteSourceChecks(
+      transaction(
+        [],
+        [
+          [
+            'shared',
+            async () => {
+              throw new AccessDenied();
+            },
+          ],
+        ],
+      ),
+    ),
+    AccessDenied,
+  );
+  await load();
+  assert.equal(checks, 3);
 });

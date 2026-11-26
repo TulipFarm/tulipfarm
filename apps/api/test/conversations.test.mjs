@@ -7,7 +7,9 @@ import Fastify from 'fastify';
 import { registerConversations } from '../src/conversations.ts';
 import { registerExecutionFiles } from '../src/execution-files.ts';
 import { registerAbuseHooks } from '../src/abuse.ts';
-import { AccessDenied } from '@tulipfarm/access';
+import { AccessDenied, SourceAuthorizationUnavailable } from '@tulipfarm/access';
+import { ConversationRequestDenied } from '@tulipfarm/conversations/requests';
+import { registerObservability } from '../src/observability.ts';
 import { useModelCatalog } from '../../worker/test/model-catalog-fixture.mjs';
 
 // Messages without a model use the shipped catalog's default, served with this key.
@@ -456,4 +458,39 @@ test('a send records the time before its handler and passes its arrival to the s
   assert.ok(request, 'send-request phase recorded');
   assert.equal(request['chat.purpose'], 'send');
   assert.ok(request.duration_ms >= 1000, `send-request ${request.duration_ms}ms covers authentication`);
+});
+
+test('a review request read logs why it was denied, and an unavailable source check is retryable', async t => {
+  const lines = [];
+  const write = process.stdout.write.bind(process.stdout);
+  t.mock.method(process.stdout, 'write', (line, ...rest) => {
+    if (typeof line !== 'string' || !line.includes('"request_completed"')) return write(line, ...rest);
+    lines.push(JSON.parse(line));
+    return true;
+  });
+  let failure;
+  const app = Fastify();
+  registerObservability(app);
+  registerConversations(app, {
+    auth: { api: { getSession: async () => ({ user: { id: 'reader' } }) } },
+    service: {},
+    requests: {
+      read: async () => {
+        throw failure;
+      },
+    },
+  });
+  t.after(() => app.close());
+  const read = () =>
+    app.inject({ url: `/workspaces/${randomUUID()}/conversations/${randomUUID()}/requests/${randomUUID()}` });
+  failure = new ConversationRequestDenied('source-access-revoked');
+  const denied = await read();
+  assert.equal(denied.statusCode, 404);
+  assert.deepEqual(denied.json(), { error: 'conversation-not-found' });
+  failure = new SourceAuthorizationUnavailable();
+  const unavailable = await read();
+  assert.equal(unavailable.statusCode, 503);
+  assert.ok(unavailable.headers['retry-after']);
+  t.mock.restoreAll();
+  assert.equal(lines[0]['error.code'], 'source-access-revoked');
 });

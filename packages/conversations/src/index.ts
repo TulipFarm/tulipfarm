@@ -35,6 +35,7 @@ import {
   type AuthorizationTransaction,
   currentMember,
   deferRemoteSourceChecks,
+  withSharedRemoteSourceCheckMemo,
   type HumanActor,
   lockAndResolveHuman,
   prefetchConversationSources,
@@ -362,17 +363,20 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
   /**
    * Runs a chat read. It changes nothing, so it can run again: its GitHub rereads happen between transactions rather
    * than inside one, and its source checks take no row locks, so page loads and a running reply never queue behind it.
+   * Recently passed checks are reused (see `withSharedRemoteSourceCheckMemo`), so polls don't reread every source.
    */
   async function reader<T>(
     workspaceId: string,
     userId: string,
     operation: (tx: AuthorizationTransaction & { commonVersion: number }, actor: HumanActor) => Promise<T>,
   ) {
-    return deferRemoteSourceChecks(() =>
-      human(workspaceId, userId, (tx, actor) => {
-        tx.readOnly = true;
-        return operation(tx, actor);
-      }),
+    return withSharedRemoteSourceCheckMemo(() =>
+      deferRemoteSourceChecks(() =>
+        human(workspaceId, userId, (tx, actor) => {
+          tx.readOnly = true;
+          return operation(tx, actor);
+        }),
+      ),
     );
   }
 
