@@ -10,6 +10,11 @@ export const modelProviderSchema = z.enum([
   'chatgpt',
   'claude',
   'copilot',
+  'byok-anthropic',
+  'byok-openai',
+  'byok-google',
+  'byok-xai',
+  'byok-openai-compatible',
 ]);
 export type ModelProvider = z.infer<typeof modelProviderSchema>;
 
@@ -79,6 +84,11 @@ export const providerModelCapabilities: Readonly<Record<ModelProvider, ModelCapa
   // cannot force a tool; the adapter streams each round's words as the model writes them.
   claude: Object.freeze({ ...base, api: 'anthropic-messages', toolChoice: 'auto', streaming: true }),
   copilot: Object.freeze({ ...base, api: 'chat-completions', toolChoice: 'auto', streaming: true }),
+  'byok-anthropic': Object.freeze({ ...base, api: 'anthropic-messages', streaming: true }),
+  'byok-openai': Object.freeze({ ...base, api: 'chat-completions', streaming: true }),
+  'byok-google': Object.freeze({ ...base, api: 'gemini', streaming: true }),
+  'byok-xai': Object.freeze({ ...base, api: 'chat-completions', streaming: true }),
+  'byok-openai-compatible': Object.freeze({ ...base, api: 'chat-completions', streaming: true }),
 });
 const providerApis: Readonly<Record<ModelProvider, readonly ModelCapabilities['api'][]>> = {
   anthropic: ['anthropic-messages'],
@@ -90,6 +100,11 @@ const providerApis: Readonly<Record<ModelProvider, readonly ModelCapabilities['a
   chatgpt: ['responses'],
   claude: ['anthropic-messages'],
   copilot: ['chat-completions'],
+  'byok-anthropic': ['anthropic-messages'],
+  'byok-openai': ['chat-completions', 'responses'],
+  'byok-google': ['gemini'],
+  'byok-xai': ['chat-completions', 'responses'],
+  'byok-openai-compatible': ['chat-completions', 'responses'],
 };
 
 export function modelApiSupported(provider: ModelProvider, api: ModelCapabilities['api'] | undefined) {

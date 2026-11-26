@@ -1,50 +1,158 @@
 import {
+  isByokProvider,
   isPlanProvider,
   planProviderNames,
+  type ByokProvider,
   type ModelCatalogFile,
   type ModelCatalogFileModel,
   type PlanProvider,
 } from './model-catalog-file.ts';
 
-// Every model a member's plan lists is offered as its own model family, whether or not the catalog names it. Its id is
-// derived from the plan and the provider's model id, so chats and preferences keep it across restarts and deployments.
+// Every model a member's plan or BYOK API key lists is offered as its own model family, without needing a static
+// entry in models.json. Its id is derived from the provider and model id, so chats and preferences keep it across
+// restarts and deployments.
 
 const familyPrefixes: Readonly<Record<PlanProvider, string>> = Object.freeze({
   chatgpt: 'chatgpt-',
   claude: 'claude-plan-',
   copilot: 'copilot-',
+  'byok-anthropic': 'byok-anthropic-',
+  'byok-openai': 'byok-openai-',
+  'byok-google': 'byok-google-',
+  'byok-xai': 'byok-xai-',
+  'byok-openai-compatible': 'byok-compat-',
 });
 
-/** Limits for a plan model the catalog does not know; a known model keeps its own when they are lower. */
+/**
+ * Historical short family IDs from before plan models moved off models.json. Kept so existing chats and saved agents
+ * stored with these IDs continue to resolve to their plan and model.
+ */
+const legacyPlanFamilies: Readonly<Record<string, { readonly provider: PlanProvider; readonly model: string }>> =
+  Object.freeze({
+    'chatgpt-sol': { provider: 'chatgpt', model: 'gpt-6.1-sol' },
+    'chatgpt-astra': { provider: 'chatgpt', model: 'gpt-6-astra' },
+    'chatgpt-luna': { provider: 'chatgpt', model: 'gpt-6-luna' },
+    'claude-plan-sonnet': { provider: 'claude', model: 'claude-sonnet-5' },
+    'claude-plan-opus': { provider: 'claude', model: 'claude-opus-5-5' },
+    'claude-plan-haiku': { provider: 'claude', model: 'claude-haiku-4-5' },
+    'copilot-claude-sonnet': { provider: 'copilot', model: 'claude-sonnet-5.5' },
+    'copilot-claude-opus': { provider: 'copilot', model: 'claude-opus-5.5' },
+    'copilot-gpt-sol': { provider: 'copilot', model: 'gpt-6.1-sol' },
+    'copilot-gpt-luna': { provider: 'copilot', model: 'gpt-6-luna' },
+  });
+
+/** Limits for a plan or BYOK model when neither the provider nor the catalog reports limits. */
 export const planModelDefaultLimits: Readonly<
   Record<PlanProvider, { readonly maxInputTokens: number; readonly maxOutputTokens: number }>
 > = Object.freeze({
   chatgpt: Object.freeze({ maxInputTokens: 272_000, maxOutputTokens: 64_000 }),
   claude: Object.freeze({ maxInputTokens: 200_000, maxOutputTokens: 64_000 }),
   copilot: Object.freeze({ maxInputTokens: 128_000, maxOutputTokens: 32_000 }),
+  'byok-anthropic': Object.freeze({ maxInputTokens: 200_000, maxOutputTokens: 64_000 }),
+  'byok-openai': Object.freeze({ maxInputTokens: 128_000, maxOutputTokens: 32_000 }),
+  'byok-google': Object.freeze({ maxInputTokens: 1_000_000, maxOutputTokens: 65_536 }),
+  'byok-xai': Object.freeze({ maxInputTokens: 131_072, maxOutputTokens: 32_000 }),
+  'byok-openai-compatible': Object.freeze({ maxInputTokens: 128_000, maxOutputTokens: 16_384 }),
 });
 
-// Provider model ids a family id can carry: lowercase words joined by single dots or hyphens. A dot becomes "--", which
-// such an id never contains, so the family id decodes back to exactly one model id.
+// Provider model ids a subscription family id can carry: lowercase words joined by single dots or hyphens. A dot
+// becomes "--", which such an id never contains, so the family id decodes back to exactly one model id.
 const encodableModel = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
+// BYOK model slugs can also contain "/", "_", ":" (e.g. OpenRouter "anthropic/claude-sonnet-4:beta").
+const encodableByokModel = /^[a-z0-9][a-z0-9./_:-]*$/;
 const maxFamilyId = 100;
 
-/** The family id of `model` on `provider`'s plan, or null when the id can't carry it, such as Copilot's `auto`. */
-export function planModelFamilyId(provider: PlanProvider, model: string): string | null {
-  if (model === 'auto' || !encodableModel.test(model)) return null;
+function encodeByokSlug(slug: string): string {
+  return slug
+    .replaceAll('--', '--h')
+    .replaceAll('.', '--d')
+    .replaceAll('/', '--s')
+    .replaceAll('_', '--u')
+    .replaceAll(':', '--c');
+}
+
+function decodeByokSlug(encoded: string): string {
+  return encoded.replace(/--([dsuhc])/g, (_, code: string) =>
+    code === 'd' ? '.' : code === 's' ? '/' : code === 'u' ? '_' : code === 'c' ? ':' : '--',
+  );
+}
+
+const customConnectionPrefix = /^([0-9a-f]{8})-(.+)$/;
+
+function connectionTag(connectionId: string | null | undefined): string | null {
+  if (!connectionId) return null;
+  const hex = connectionId.replaceAll('-', '').slice(0, 8).toLowerCase();
+  return /^[0-9a-f]{8}$/.test(hex) ? hex : null;
+}
+
+/**
+ * The family id of `model` on `provider`, or null when the id can't carry it, such as Copilot's `auto`.
+ * For `byok-openai-compatible`, pass `connectionId` so models from different custom endpoints stay distinct families.
+ */
+export function planModelFamilyId(provider: PlanProvider, model: string, connectionId?: string | null): string | null {
+  if (model === 'auto') return null;
+  if (isByokProvider(provider)) {
+    const lower = model.toLowerCase();
+    if (!encodableByokModel.test(lower)) return null;
+    const tag = provider === 'byok-openai-compatible' ? connectionTag(connectionId) : null;
+    const prefix = tag ? `${familyPrefixes[provider]}${tag}-` : familyPrefixes[provider];
+    const id = prefix + encodeByokSlug(lower);
+    return id.length <= maxFamilyId && /^[a-z][a-z0-9-]{0,99}$/.test(id) ? id : null;
+  }
+  if (!encodableModel.test(model)) return null;
   const id = familyPrefixes[provider] + model.replaceAll('.', '--');
   return id.length <= maxFamilyId ? id : null;
 }
 
-/** The plan and provider model a family id from `planModelFamilyId` names, or null for any other id. */
-export function planModelOfFamily(familyId: string): { provider: PlanProvider; model: string } | null {
+/**
+ * The provider, model, and optional 8-hex custom connection prefix a family id from `planModelFamilyId` (or a legacy
+ * plan id) names, or null for any other id.
+ */
+export function planModelOfFamily(
+  familyId: string,
+): { provider: PlanProvider; model: string; connectionPrefix?: string } | null {
+  const legacy = legacyPlanFamilies[familyId];
+  if (legacy) return { provider: legacy.provider, model: legacy.model };
   for (const provider of planProviderNames) {
     const prefix = familyPrefixes[provider];
     if (!familyId.startsWith(prefix)) continue;
-    const model = familyId.slice(prefix.length).replaceAll('--', '.');
+    const rest = familyId.slice(prefix.length);
+    if (provider === 'byok-openai-compatible') {
+      const scoped = customConnectionPrefix.exec(rest);
+      if (scoped) {
+        const [, tag, encoded] = scoped;
+        const model = decodeByokSlug(encoded!);
+        if (planModelFamilyId(provider, model, tag) === familyId) {
+          return { provider, model, connectionPrefix: tag! };
+        }
+      }
+    }
+    const model = isByokProvider(provider) ? decodeByokSlug(rest) : rest.replaceAll('--', '.');
     if (planModelFamilyId(provider, model) === familyId) return { provider, model };
   }
   return null;
+}
+
+/**
+ * Returns all equivalent family IDs for `familyId` (itself plus any legacy short alias or derived canonical ID),
+ * so workspace availability / disable policies apply consistently across legacy and derived plan family IDs.
+ */
+export function equivalentPlanFamilyIds(familyId: string): readonly string[] {
+  const ids = new Set<string>([familyId]);
+  const legacy = legacyPlanFamilies[familyId];
+  if (legacy) {
+    const derived = planModelFamilyId(legacy.provider, legacy.model);
+    if (derived) ids.add(derived);
+  }
+  const parsed = planModelOfFamily(familyId);
+  if (parsed && !parsed.connectionPrefix) {
+    for (const [legacyId, entry] of Object.entries(legacyPlanFamilies)) {
+      if (entry.provider === parsed.provider && entry.model === parsed.model) {
+        ids.add(legacyId);
+      }
+    }
+  }
+  return [...ids];
 }
 
 /**
@@ -105,11 +213,16 @@ const planVendors: Readonly<Record<PlanProvider, string>> = Object.freeze({
   chatgpt: 'openai',
   claude: 'anthropic',
   copilot: 'github',
+  'byok-anthropic': 'anthropic',
+  'byok-openai': 'openai',
+  'byok-google': 'google',
+  'byok-xai': 'xai',
+  'byok-openai-compatible': 'openai-compatible',
 });
 
-/** Whether the catalog lists `provider`'s plan; a catalog without its routes offers none of its models. */
-export function catalogOffersPlan(catalog: ModelCatalogFile, provider: PlanProvider) {
-  return catalog.models.some(model => model.routes.some(route => route.provider === provider));
+/** Member plans and BYOK API key providers are always offered dynamically without needing static entries in models.json. */
+export function catalogOffersPlan(_catalog: ModelCatalogFile, provider: PlanProvider) {
+  return isPlanProvider(provider);
 }
 
 /** The catalog family that runs `model` on `provider`'s plan, if the catalog names one. */
@@ -120,19 +233,26 @@ export function catalogPlanFamily(catalog: ModelCatalogFile, provider: PlanProvi
   );
 }
 
+export type DiscoveredModelMetadata = {
+  maxInputTokens?: number | null;
+  maxOutputTokens?: number | null;
+  imageInput?: boolean | null;
+  connectionId?: string | null;
+};
+
 /**
- * The catalog entry for `model` on `provider`'s plan. A model the catalog runs on that plan keeps its entry under the
- * derived id; one it runs elsewhere keeps its vendor, ratings and image input within the plan's default limits; any
- * other gets the plan's defaults. Plan models are always unmetered, selectable and fall back to the fallback model.
- * Null when the id can't carry the model or the catalog lists no route for the plan.
+ * The catalog entry for `model` on `provider` (a member's subscription plan or BYOK API key). Uses provider-reported
+ * metadata when present, borrows ratings/vision from any matching deployment entry, and falls back to per-provider
+ * safe defaults. Always unmetered and selectable.
  */
 export function planCatalogModel(
   catalog: ModelCatalogFile,
   provider: PlanProvider,
   model: string,
   label?: string | null,
+  metadata?: DiscoveredModelMetadata | null,
 ): ModelCatalogFileModel | null {
-  const id = planModelFamilyId(provider, model);
+  const id = planModelFamilyId(provider, model, metadata?.connectionId);
   if (!id || !catalogOffersPlan(catalog, provider)) return null;
   const name = planModelName(model, label);
   const listed = catalogPlanFamily(catalog, provider, model);
@@ -143,11 +263,29 @@ export function planCatalogModel(
       !family.routes.some(route => isPlanProvider(route.provider)) &&
       family.routes.some(route => sameModel(route.model, model)),
   );
-  const imageInput = known?.capabilities?.imageInput === true && provider === 'chatgpt';
+  const byok = isByokProvider(provider);
+  const imageInput =
+    metadata?.imageInput ?? (known?.capabilities?.imageInput === true && (provider === 'chatgpt' || byok));
+  const maxInputTokens =
+    metadata?.maxInputTokens && metadata.maxInputTokens > 0
+      ? metadata.maxInputTokens
+      : byok
+        ? (known?.limits.maxInputTokens ?? defaults.maxInputTokens)
+        : Math.min(known?.limits.maxInputTokens ?? Infinity, defaults.maxInputTokens);
+  const maxOutputTokens =
+    metadata?.maxOutputTokens && metadata.maxOutputTokens > 0
+      ? metadata.maxOutputTokens
+      : byok
+        ? (known?.limits.maxOutputTokens ?? defaults.maxOutputTokens)
+        : Math.min(known?.limits.maxOutputTokens ?? Infinity, defaults.maxOutputTokens);
+  const slugForVendor = model.includes('/') ? model.split('/').pop()! : model;
   return {
     id,
     name,
-    vendor: known?.vendor ?? vendorPatterns.find(([pattern]) => pattern.test(model))?.[1] ?? planVendors[provider],
+    vendor:
+      known?.vendor ??
+      vendorPatterns.find(([pattern]) => pattern.test(slugForVendor.toLowerCase()))?.[1] ??
+      planVendors[provider],
     routes: [{ provider, model }],
     default: false,
     paused: false,
@@ -158,13 +296,19 @@ export function planCatalogModel(
     roles: [],
     fallback: null,
     limits: {
-      maxInputTokens: Math.min(known?.limits.maxInputTokens ?? Infinity, defaults.maxInputTokens),
-      maxOutputTokens: Math.min(known?.limits.maxOutputTokens ?? Infinity, defaults.maxOutputTokens),
-      ...(imageInput && known.limits.imageInputTokens ? { imageInputTokens: known.limits.imageInputTokens } : {}),
+      maxInputTokens,
+      maxOutputTokens,
+      ...(imageInput && known?.limits.imageInputTokens ? { imageInputTokens: known.limits.imageInputTokens } : {}),
     },
     ...(imageInput ? { capabilities: { imageInput: true } } : {}),
     imageModel: null,
     pricing: 'unmetered',
-    notes: [`Listed by the member's own ${provider} plan; limits are defaults.`],
+    notes: [
+      byok
+        ? `Discovered from a connected ${planVendors[provider]} API key.`
+        : `Listed by the member's own ${provider} plan.`,
+    ],
   };
 }
+
+export type { ByokProvider };

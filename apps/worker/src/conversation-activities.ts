@@ -277,11 +277,25 @@ export function meteredReply(
           workspaceId: fence.workspaceId,
           caller,
           model: chat.route.model,
+          familyId: chat.price.familyId,
           preferredConnectionId: caller ? await turnPreferredPlan(runtime, fence) : null,
         })
       : null;
+    const planCapabilities =
+      plans?.imageInput !== undefined
+        ? { ...chat.route.capabilities, imageInput: plans.imageInput }
+        : chat.route.capabilities;
     const validatedRoute = inferenceRouteSchema.parse(
-      plans?.token ? { ...chat.route, accessToken: plans.token } : chat.route,
+      plans?.token
+        ? {
+            ...chat.route,
+            endpoint: plans.endpoint ?? chat.route.endpoint,
+            model: plans.model ?? chat.route.model,
+            ...(plans.maxOutputTokens ? { maxOutputTokens: plans.maxOutputTokens } : {}),
+            ...(planCapabilities ? { capabilities: planCapabilities } : {}),
+            accessToken: plans.token,
+          }
+        : chat.route,
     );
     const fallback = chatFallbackModel(chat.price.familyId);
     // A plan also runs the completion check, so a plan chat sends nothing extra to a model the workspace pays for.
@@ -292,7 +306,7 @@ export function meteredReply(
       builtinSkills,
       ...(slug ? { agentBuilderUrl: `/${encodeURIComponent(slug)}/agents/new` } : {}),
       context: {
-        window: chat.price.maxInputTokens,
+        window: plans?.maxInputTokens ?? chat.price.maxInputTokens,
         triggerPercent: compactionPolicy?.triggerPercent ?? compactionDefaults.triggerPercent,
         targetPercent: compactionPolicy?.targetPercent ?? compactionDefaults.targetPercent,
       },

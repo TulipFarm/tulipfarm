@@ -3,6 +3,7 @@ import {
   loadModelCatalog,
   modelImageLimits,
   ModelResolutionError,
+  planProviderNames,
   resolveModelBundle,
   servedModelBundle,
   serverRouteLocation,
@@ -88,7 +89,9 @@ function buildModelEnvironment(catalog: ServedModelCatalog, credentials: readonl
   };
   const planItems = () => [...planBundles.values()].map(built => built.item);
   const restrictions = Object.freeze({
-    allowedProviders: Object.freeze([...new Set(configured.map(item => item.route.provider))]),
+    allowedProviders: Object.freeze([
+      ...new Set([...configured.map(item => item.route.provider), ...planProviderNames]),
+    ]),
     allowedLocations: Object.freeze([serverRouteLocation]),
   });
   const defaultFamily = catalog.defaultModel.id;
@@ -152,6 +155,7 @@ function buildModelEnvironment(catalog: ServedModelCatalog, credentials: readonl
       const registered = new Set<string>();
       /** Runs a plan model's decision on the member's plans in turn, stopping when none can answer. */
       const planDecision = async (
+        familyId: string,
         route: Extract<InferenceRoute, { provider: PlanRouteProvider }>,
         input: Parameters<ModelContinuity['infer']>[1],
         timeoutMs: number,
@@ -166,19 +170,37 @@ function buildModelEnvironment(catalog: ServedModelCatalog, credentials: readonl
           workspaceId: member.workspaceId,
           membershipId: member.membershipId,
           model: route.model,
+          familyId,
         });
         let token = access.token;
+        let endpoint = access.endpoint;
+        let model = access.model;
         let result: InferenceResult | undefined;
         while (token) {
+          const capabilities =
+            access.imageInput !== undefined
+              ? { ...route.capabilities, imageInput: access.imageInput }
+              : route.capabilities;
           result = await inferDecision(
-            { ...route, accessToken: token, timeoutMs: Math.max(1, deadline - Date.now()) },
+            {
+              ...route,
+              endpoint: endpoint ?? route.endpoint,
+              model: model ?? route.model,
+              ...(access.maxOutputTokens ? { maxOutputTokens: access.maxOutputTokens } : {}),
+              ...(capabilities ? { capabilities } : {}),
+              accessToken: token,
+              timeoutMs: Math.max(1, deadline - Date.now()),
+            },
             input,
             signal,
           );
           if (result.kind !== 'failure' || signal.aborted || deadline - Date.now() < 2000) break;
           const failure = planRouteFailure(result.reason);
           if (!failure) break;
-          token = await access.next(failure, result.retryAfterMs ?? undefined);
+          const nextCred = await access.next(failure, result.retryAfterMs ?? undefined);
+          token = nextCred?.token ?? null;
+          endpoint = nextCred?.endpoint ?? null;
+          model = nextCred?.model ?? route.model;
         }
         if (!result) return inferDecision({ ...route, timeoutMs }, input, signal);
         if (result.kind === 'success') await access.answered();
@@ -229,7 +251,7 @@ function buildModelEnvironment(catalog: ServedModelCatalog, credentials: readonl
         infer: (resolution, input, timeoutMs, signal, member) => {
           const route = inference(resolution);
           if (!route) throw new Error('Model route unavailable');
-          if (isPlanRoute(route)) return planDecision(route, input, timeoutMs, signal, member);
+          if (isPlanRoute(route)) return planDecision(resolution.familyId, route, input, timeoutMs, signal, member);
           return inferDecision({ ...route, timeoutMs }, input, signal);
         },
       };

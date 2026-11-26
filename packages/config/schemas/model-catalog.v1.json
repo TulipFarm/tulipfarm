@@ -42,7 +42,12 @@
               "openai-compatible",
               "chatgpt",
               "claude",
-              "copilot"
+              "copilot",
+              "byok-anthropic",
+              "byok-openai",
+              "byok-google",
+              "byok-xai",
+              "byok-openai-compatible"
             ],
             "description": "API this provider speaks"
           },

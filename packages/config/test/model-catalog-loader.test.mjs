@@ -72,27 +72,12 @@ test('the shipped catalog is the default source and serves the models whose keys
   assert.equal(served.model('gpt-luna'), undefined);
 });
 
-test('plan models are always served, need no key, and none becomes the default', () => {
+test('shipped catalog contains no static plan entries; plan models are discovered dynamically', () => {
   const planIds = served =>
     served.models.filter(item => ['chatgpt', 'claude', 'copilot'].includes(item.route.type)).map(item => item.id);
   const served = loadModelCatalog({ ANTHROPIC_API_KEY: 'test-key' });
-  assert.deepEqual(planIds(served), [
-    'chatgpt-sol',
-    'chatgpt-astra',
-    'chatgpt-luna',
-    'claude-plan-sonnet',
-    'claude-plan-opus',
-    'claude-plan-haiku',
-    'copilot-claude-sonnet',
-    'copilot-claude-opus',
-    'copilot-gpt-sol',
-    'copilot-gpt-luna',
-  ]);
+  assert.deepEqual(planIds(served), []);
   assert.equal(served.defaultModel.id, 'claude-sonnet');
-  assert.deepEqual(
-    served.models.filter(item => item.route.type === 'claude').map(item => item.route.model),
-    ['claude-sonnet-5', 'claude-opus-5-5', 'claude-haiku-4-5'],
-  );
   assert.throws(() => loadModelCatalog({}), /no model has a route with its key set/);
 });
 

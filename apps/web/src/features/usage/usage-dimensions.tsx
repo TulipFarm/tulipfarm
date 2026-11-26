@@ -26,9 +26,23 @@ const providers: Record<string, { name: string; brand?: Brand }> = {
   chatgpt: { name: 'ChatGPT plan', brand: 'openai' },
   claude: { name: 'Claude plan', brand: 'claude' },
   copilot: { name: 'GitHub Copilot plan', brand: 'github' },
+  'byok-anthropic': { name: 'Anthropic API key', brand: 'claude' },
+  'byok-openai': { name: 'OpenAI API key', brand: 'openai' },
+  'byok-google': { name: 'Google AI Studio API key', brand: 'gemini' },
+  'byok-xai': { name: 'xAI API key', brand: 'grok' },
+  'byok-openai-compatible': { name: 'Custom API key' },
   unknown: { name: 'Unknown' },
 };
-const planBrands: Record<keyof typeof planLabels, Brand> = { chatgpt: 'openai', claude: 'claude', copilot: 'github' };
+const planBrands: Record<keyof typeof planLabels, Brand | null> = {
+  chatgpt: 'openai',
+  claude: 'claude',
+  copilot: 'github',
+  'byok-anthropic': 'claude',
+  'byok-openai': 'openai',
+  'byok-google': 'gemini',
+  'byok-xai': 'grok',
+  'byok-openai-compatible': null,
+};
 
 export const paidByLabels: Record<string, string> = {
   credits: 'TulipFarm credits',
@@ -107,7 +121,10 @@ export function usageDimensions(report: UsageReport, members: ReadonlyMap<string
   };
   const connectionIcon = (id: string) => {
     const connection = report.labels.connections[id];
-    if (connection) return <BrandIcon brand={planBrands[connection.provider]} size="inline" />;
+    if (connection) {
+      const brand = planBrands[connection.provider];
+      return brand ? <BrandIcon brand={brand} size="inline" /> : glyph(KeyIcon);
+    }
     if (id === 'key') return glyph(KeyIcon);
     if (id === 'credits') return glyph(WalletIcon);
     return glyph(UserIcon);
