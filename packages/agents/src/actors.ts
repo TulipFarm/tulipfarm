@@ -1,11 +1,19 @@
 import { z } from 'zod';
 import { definitionGrantPredicate, type HumanActor, lockAndResolveHuman } from '@tulipfarm/access';
-import { activeMembers } from './members.ts';
+import { activeMemberProfiles } from './members.ts';
 import { relation, type AgentTransaction } from './store.ts';
 
 export const actorDirectorySchema = z.object({
   members: z.array(
-    z.object({ membershipId: z.uuid(), name: z.string(), email: z.string().nullable(), current: z.boolean() }),
+    z.object({
+      membershipId: z.uuid(),
+      name: z.string(),
+      email: z.string().nullable(),
+      /** The member's Members table photo, an API path such as `/v1/workspaces/…/photos/…`. */
+      photo: z.string().nullable(),
+      /** Still a member; former members are left out, so this is always true. */
+      current: z.boolean(),
+    }),
   ),
   agents: z.array(z.object({ id: z.uuid(), name: z.string(), available: z.boolean() })),
 });
@@ -16,7 +24,7 @@ export type ActorDirectory = z.infer<typeof actorDirectorySchema>;
  * the reader may invoke it, since assigning starts a run on the assigner's behalf.
  */
 export async function actorDirectory(tx: AgentTransaction, actor: HumanActor): Promise<ActorDirectory> {
-  const members = await activeMembers(tx);
+  const members = await activeMemberProfiles(tx);
   const agents = z.array(z.object({ id: z.uuid(), name: z.string(), available: z.boolean() })).parse(
     (
       await tx.client.query(
@@ -33,7 +41,8 @@ export async function actorDirectory(tx: AgentTransaction, actor: HumanActor): P
       membershipId: member.membershipId,
       name: member.name,
       email: member.email,
-      current: member.membershipId === actor.membershipId,
+      photo: member.photo,
+      current: true,
     })),
     agents,
   };

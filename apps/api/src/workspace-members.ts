@@ -144,7 +144,9 @@ export function registerWorkspaceMembers(
         reply
           .header('Cache-Control', 'private, no-store')
           .header('Referrer-Policy', 'no-referrer')
-          .header('X-Content-Type-Options', 'nosniff');
+          .header('X-Content-Type-Options', 'nosniff')
+          // The web app is on a sibling origin, such as app. beside api., and shows this in an <img>.
+          .header('Cross-Origin-Resource-Policy', 'same-site');
         if (image.startsWith('https://')) return reply.redirect(image);
         const [, mime, body] = /^data:(image\/(?:png|jpeg|webp));base64,(.+)$/.exec(image) ?? [];
         if (!mime || !body) throw new WorkspaceMemberError('member-profile-failed');

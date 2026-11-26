@@ -6,7 +6,14 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Popover, PopoverContent, PopoverTrigger } from '@tulipfarm/sprout/popover';
 import { Status, type StatusState } from '@tulipfarm/sprout/status';
 import { Chip, PropertyChip } from '@/components/ui/chip';
-import { actorKey, actorLabel, parseActorKey, useActorDirectory, type Actor } from '@/features/tables/actors';
+import {
+  actorImage,
+  actorKey,
+  actorLabel,
+  parseActorKey,
+  useActorDirectory,
+  type Actor,
+} from '@/features/tables/actors';
 import { optionLabel, type TaskOption } from './task-data';
 
 /** `chip` is a composer pill; `property` is a flat value in the task page's side panel. */
@@ -107,11 +114,11 @@ export function ChipMenu({
 
 export const statusIcon = (state: StatusState) => <Status state={state} size="sm" aria-hidden="true" tooltip={false} />;
 
-export function ActorAvatar({ actor, name }: { actor: Actor; name: string }) {
+export function ActorAvatar({ actor, name, image = null }: { actor: Actor; name: string; image?: string | null }) {
   return actor.type === 'agent' ? (
     <AgentAvatar agentId={actor.id} name={name} size="sm" />
   ) : (
-    <EntityAvatar seed={actor.id} name={name} size="sm" />
+    <EntityAvatar seed={actor.id} name={name} image={image} size="sm" />
   );
 }
 
@@ -147,7 +154,7 @@ export function ActorMenu({
           value: actorKey(actor),
           label: member.name,
           keywords: member.email ? [member.email] : [],
-          icon: <ActorAvatar actor={actor} name={member.name} />,
+          icon: <ActorAvatar actor={actor} name={member.name} image={actorImage(workspaceId, data, actor)} />,
           group: peopleOnly ? undefined : 'People',
         };
       }),
@@ -167,7 +174,13 @@ export function ActorMenu({
     <ChipMenu
       look={look}
       name={name}
-      icon={value ? <ActorAvatar actor={value} name={label} /> : <UserCircleIcon size="sm" aria-hidden="true" />}
+      icon={
+        value ? (
+          <ActorAvatar actor={value} name={label} image={actorImage(workspaceId, data, value)} />
+        ) : (
+          <UserCircleIcon size="sm" aria-hidden="true" />
+        )
+      }
       text={data || !value ? label : 'Loading…'}
       placeholder={!value}
       disabled={disabled || !data}
