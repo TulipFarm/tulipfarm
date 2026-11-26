@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { z } from 'zod';
-import { Link } from '@tanstack/react-router';
+import { Link, Navigate } from '@tanstack/react-router';
 import { AddIcon, DatabaseIcon, EditIcon, MoreIcon } from '@tulipfarm/icons';
 import { Button } from '@tulipfarm/sprout/button';
 import { Checkbox } from '@tulipfarm/sprout/checkbox';
@@ -119,91 +119,104 @@ function TableDetailView({
       refresh={read.refresh}
       notFound={<TableNotFound workspaceSlug={workspaceSlug} refresh={read.refresh} />}
     >
-      {state => (
-        <div className="space-y-6">
-          <PageHeader
-            title={state.applied?.definition.label ?? state.saved?.definition?.label ?? 'Table'}
-            parent={{
-              label: 'Tables',
-              link: (
-                <Link
-                  to="/$workspaceSlug/tables"
-                  params={{ workspaceSlug }}
-                  search={state.archived ? { archived: true } : {}}
-                />
-              ),
-            }}
-            actions={
-              <>
-                {!state.archived && wideHeader && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    nativeButton={false}
-                    render={
-                      <Link
-                        to="/$workspaceSlug"
-                        params={{ workspaceSlug }}
-                        search={{ intent: 'edit-table', tableId: state.id }}
-                      />
-                    }
-                  >
-                    Change fields in chat
-                  </Button>
-                )}
-                <TableMore
-                  state={state}
-                  api={api}
-                  workspace={workspace}
-                  disabled={busy}
-                  changeFields={!state.archived && !wideHeader}
-                />
-              </>
-            }
-          />
-          {state.archived && (
-            <Alert>
-              <AlertTitle>This table is archived</AlertTitle>
-              <AlertDescription>
-                {state.canRestore
-                  ? "Its rows are kept but can't be changed. Unarchive it to use it again."
-                  : "Its rows are kept but can't be changed. Ask someone who can change its fields to unarchive it."}
-              </AlertDescription>
-              <UnarchiveTable state={state} api={api} workspaceSlug={workspaceSlug} disabled={busy} />
-            </Alert>
-          )}
-          {state.saved && state.applied && state.saved.revision !== state.applied.revision && (
-            <Alert>
-              <AlertDescription>
-                A field change is still applying. Rows use the current fields until it finishes. Open Schema history
-                from the ⋯ menu to follow it.
-              </AlertDescription>
-            </Alert>
-          )}
-          {state.applied ? (
-            <Records
-              key={`${workspace.id}/${state.id}`}
-              workspace={workspace}
-              tableId={state.id}
-              systemKind={state.systemKind}
-              applied={state.applied}
-              permissions={state.archived ? readOnly : state.rowPermissions}
-              archived={state.archived}
-              api={api}
-              disabled={busy}
-              refreshTable={read.refresh}
-              search={search}
-              changeSearch={changeSearch}
+      {state =>
+        // Members never show as a table; its rows open as people.
+        state.systemKind === 'workspace-members' ? (
+          search.row ? (
+            <Navigate
+              to="/$workspaceSlug/members/people/$memberId"
+              params={{ workspaceSlug, memberId: search.row }}
+              replace
             />
           ) : (
-            <StatePanel
-              kind="empty"
-              title="No active definition yet"
-              description="Rows become available after the first schema migration completes. Open Schema history from the ⋯ menu to follow progress."
+            <Navigate to="/$workspaceSlug/members" params={{ workspaceSlug }} replace />
+          )
+        ) : (
+          <div className="space-y-6">
+            <PageHeader
+              title={state.applied?.definition.label ?? state.saved?.definition?.label ?? 'Table'}
+              parent={{
+                label: 'Tables',
+                link: (
+                  <Link
+                    to="/$workspaceSlug/tables"
+                    params={{ workspaceSlug }}
+                    search={state.archived ? { archived: true } : {}}
+                  />
+                ),
+              }}
+              actions={
+                <>
+                  {!state.archived && wideHeader && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      nativeButton={false}
+                      render={
+                        <Link
+                          to="/$workspaceSlug"
+                          params={{ workspaceSlug }}
+                          search={{ intent: 'edit-table', tableId: state.id }}
+                        />
+                      }
+                    >
+                      Change fields in chat
+                    </Button>
+                  )}
+                  <TableMore
+                    state={state}
+                    api={api}
+                    workspace={workspace}
+                    disabled={busy}
+                    changeFields={!state.archived && !wideHeader}
+                  />
+                </>
+              }
             />
-          )}
-        </div>
-      )}
+            {state.archived && (
+              <Alert>
+                <AlertTitle>This table is archived</AlertTitle>
+                <AlertDescription>
+                  {state.canRestore
+                    ? "Its rows are kept but can't be changed. Unarchive it to use it again."
+                    : "Its rows are kept but can't be changed. Ask someone who can change its fields to unarchive it."}
+                </AlertDescription>
+                <UnarchiveTable state={state} api={api} workspaceSlug={workspaceSlug} disabled={busy} />
+              </Alert>
+            )}
+            {state.saved && state.applied && state.saved.revision !== state.applied.revision && (
+              <Alert>
+                <AlertDescription>
+                  A field change is still applying. Rows use the current fields until it finishes. Open Schema history
+                  from the ⋯ menu to follow it.
+                </AlertDescription>
+              </Alert>
+            )}
+            {state.applied ? (
+              <Records
+                key={`${workspace.id}/${state.id}`}
+                workspace={workspace}
+                tableId={state.id}
+                systemKind={state.systemKind}
+                applied={state.applied}
+                permissions={state.archived ? readOnly : state.rowPermissions}
+                archived={state.archived}
+                api={api}
+                disabled={busy}
+                refreshTable={read.refresh}
+                search={search}
+                changeSearch={changeSearch}
+              />
+            ) : (
+              <StatePanel
+                kind="empty"
+                title="No active definition yet"
+                description="Rows become available after the first schema migration completes. Open Schema history from the ⋯ menu to follow progress."
+              />
+            )}
+          </div>
+        )
+      }
     </TableRead>
   );
 }

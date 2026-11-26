@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { CheckIcon, MoreIcon, UserIcon } from '@tulipfarm/icons';
 import { createdInvitationSchema, invitationLinkSchema } from '@tulipfarm/workspaces/governance-contracts';
@@ -20,6 +20,12 @@ import { useInvitations, type Invitation } from '@/features/governance/invitatio
 import { WorkspaceMemberPicker } from '@/features/tables/member-picker';
 import { useConfirmation } from '@/features/access/confirm';
 import { joinList } from '@/features/access/policies';
+import { AddPersonDialog, memberInactive, memberName, memberText, useRemovePerson } from '@/features/access/people';
+import { tableApi, type TableDataRow } from '@/features/tables/api';
+import { useManualMembers, useMembersTable } from '@/features/tables/hooks';
+import { memberPhotoSource } from '@/features/tables/member-profile';
+import { MemberDirectoryStatus } from '@/features/tables/member-status';
+import { workspaceMemberFields } from '@tulipfarm/tables/workspace-members';
 import type { AccessPage } from './governance';
 
 const date = (value: string) =>
@@ -35,16 +41,18 @@ export const failed = (result: Awaited<ReturnType<AccessPage['change']>>) =>
 
 type Row = {
   id: string;
-  kind: 'member' | 'invite';
+  // A person is someone added to Members by hand, without an account here.
+  kind: 'member' | 'invite' | 'person';
   name: string;
   email: string;
   image: string | null;
   sortName: string;
   admin: string;
   teams: string[];
-  status: 'Active' | 'Pending' | 'Expired';
+  status: 'Active' | 'Pending' | 'Expired' | 'No account' | 'Inactive';
   self: boolean;
   invitation?: Invitation;
+  record?: TableDataRow;
 };
 
 // Keeps one request id per invitation until a resend is confirmed, so retrying never sends twice.
@@ -60,6 +68,12 @@ export function MembersList({ page }: { page: AccessPage }) {
   const confirmation = useConfirmation();
   const invitations = useInvitations(workspaceId, admin, page.accessLost, '', true);
   const resendMember = useRef('');
+  const tables = useMemo(() => tableApi(workspaceId), [workspaceId]);
+  const membersTable = useMembersTable(tables, workspaceId);
+  const people = membersTable.state.kind === 'ready' ? membersTable.state.data : null;
+  const manual = useManualMembers(tables, people?.table ?? null);
+  const removePerson = useRemovePerson(tables, people);
+  const [adding, setAdding] = useState(false);
   const admins = adminCount(page);
   const teamsOf = (membershipId: string) =>
     data.teams.filter(team => team.membershipIds.includes(membershipId)).map(team => team.name);
@@ -92,8 +106,36 @@ export function MembersList({ page }: { page: AccessPage }) {
           invitation: item,
         }))
     : [];
+  // Someone joining or invited can still read as having no account until their profile syncs; list them once.
+  const listed = new Set([
+    ...data.directory.flatMap(member => member.workspaceMemberId ?? []),
+    ...invites.flatMap(row => row.invitation?.workspaceMemberId ?? []),
+  ]);
+  const listedEmails = new Set([...members, ...invites].map(row => row.email.toLowerCase()));
+  const added: Row[] = (manual.state.kind === 'ready' ? manual.state.data : [])
+    .filter(
+      record =>
+        !listed.has(record.id) &&
+        !listedEmails.has(memberText(record.values, workspaceMemberFields.contactEmail).toLowerCase()),
+    )
+    .map(record => {
+      const name = memberText(record.values, workspaceMemberFields.name);
+      return {
+        id: record.id,
+        kind: 'person',
+        name,
+        email: memberText(record.values, workspaceMemberFields.contactEmail),
+        image: memberPhotoSource(workspaceId, record.values[workspaceMemberFields.photo]),
+        sortName: memberName(record.values).toLowerCase(),
+        admin: '',
+        teams: [],
+        status: memberInactive(record.values) ? 'Inactive' : 'No account',
+        self: false,
+        record,
+      };
+    });
   const needle = search.trim().toLowerCase();
-  const rows = [...members, ...invites].filter(
+  const rows = [...members, ...invites, ...added].filter(
     row => !needle || row.name.toLowerCase().includes(needle) || row.email.toLowerCase().includes(needle),
   );
 
@@ -154,6 +196,48 @@ export function MembersList({ page }: { page: AccessPage }) {
   function menu(row: Row) {
     const who = row.kind === 'invite' ? row.email : personName(row);
     const items: React.ReactNode[] = [];
+    if (row.kind === 'person') {
+      if (admin && row.status === 'No account')
+        items.push(
+          <DropdownMenuItem
+            key="invite"
+            disabled={busy}
+            onClick={() =>
+              void navigate({
+                to: '/$workspaceSlug/members/invite',
+                params: { workspaceSlug },
+                search: { member: row.id, email: row.email || undefined, name: who },
+              })
+            }
+          >
+            <span className="min-w-0 wrap-anywhere">Invite {who}</span>
+          </DropdownMenuItem>,
+        );
+      if (people?.permissions.delete)
+        items.push(
+          ...(items.length ? [<DropdownMenuSeparator key="separator" />] : []),
+          <DropdownMenuItem
+            key="remove"
+            variant="destructive"
+            disabled={busy}
+            onClick={() =>
+              confirmation.open({
+                title: `Remove ${who}?`,
+                description: `${who} and their profile details are removed from Members.`,
+                action: 'Remove',
+                run: async () => {
+                  const reason = await removePerson(row.record!);
+                  if (!reason) page.notify(`Removed ${who} from Members.`);
+                  return reason;
+                },
+              })
+            }
+          >
+            <span className="min-w-0 wrap-anywhere">Remove {who}</span>
+          </DropdownMenuItem>,
+        );
+      return items;
+    }
     if (row.kind === 'invite') {
       const item = row.invitation!;
       if (item.status === 'active')
@@ -311,6 +395,11 @@ export function MembersList({ page }: { page: AccessPage }) {
       Invite members
     </Button>
   ) : null;
+  const addPerson = people?.permissions.create ? (
+    <Button variant="outline" disabled={busy} onClick={() => setAdding(true)}>
+      Add person
+    </Button>
+  ) : null;
   return (
     <section aria-labelledby="members-heading" className="flex flex-col gap-4">
       <h2 id="members-heading" className="sr-only">
@@ -324,8 +413,31 @@ export function MembersList({ page }: { page: AccessPage }) {
           onChange={setSearch}
           placeholder="Search by name or email"
         />
-        {invite}
+        {(people || invite) && (
+          <div className="flex flex-wrap gap-2">
+            {people && (
+              <MemberDirectoryStatus
+                table={people.table}
+                api={tables}
+                workspace={{ id: workspaceId, slug: workspaceSlug, sessionId: page.sessionId }}
+                refresh={async () => {
+                  await Promise.all([membersTable.refresh(), manual.refresh()]);
+                }}
+              />
+            )}
+            {addPerson}
+            {invite}
+          </div>
+        )}
       </div>
+      {manual.state.kind === 'error' && (
+        <p className="text-sm text-muted-foreground">
+          People added by hand couldn’t load.{' '}
+          <Button variant="link" size="sm" onClick={() => void manual.refresh()}>
+            Try again
+          </Button>
+        </p>
+      )}
       {admin && invitations.error && (
         <p className="text-sm text-muted-foreground">
           Pending invites couldn’t load.{' '}
@@ -358,14 +470,20 @@ export function MembersList({ page }: { page: AccessPage }) {
               <span className="flex min-w-0 items-center gap-3">
                 <span aria-hidden="true" className="flex shrink-0">
                   <EntityAvatar
-                    seed={row.kind === 'member' ? row.id : row.email}
-                    name={row.kind === 'member' ? personName(row) : row.email}
+                    seed={row.kind === 'invite' ? row.email : row.id}
+                    name={row.kind === 'invite' ? row.email : personName(row)}
                     image={row.image}
                     size="sm"
                   />
                 </span>
                 <span className="flex min-w-0 flex-col">
-                  {row.kind === 'member' && (row.self || admin) ? (
+                  {row.kind === 'person' ? (
+                    <span className="font-medium wrap-anywhere underline-offset-4 hover:underline">
+                      <Link to="/$workspaceSlug/members/people/$memberId" params={{ workspaceSlug, memberId: row.id }}>
+                        {personName(row)}
+                      </Link>
+                    </span>
+                  ) : row.kind === 'member' && (row.self || admin) ? (
                     <span className="font-medium wrap-anywhere underline-offset-4 hover:underline">
                       <Link to="/$workspaceSlug/members/$membershipId" params={{ workspaceSlug, membershipId: row.id }}>
                         {personName(row)}
@@ -377,7 +495,7 @@ export function MembersList({ page }: { page: AccessPage }) {
                       {row.kind === 'invite' ? row.email : personName(row)}
                     </span>
                   )}
-                  {row.kind === 'member' && row.name && (
+                  {row.kind !== 'invite' && row.name && row.email && (
                     <span className="text-xs text-muted-foreground wrap-anywhere">{row.email}</span>
                   )}
                   {row.kind === 'invite' && <Delivery invitation={row.invitation!} />}
@@ -427,7 +545,15 @@ export function MembersList({ page }: { page: AccessPage }) {
             cell: row => (
               <span className="flex flex-col items-start gap-0.5">
                 <Badge
-                  variant={row.status === 'Active' ? 'success' : row.status === 'Pending' ? 'warning' : 'secondary'}
+                  variant={
+                    row.status === 'Active'
+                      ? 'success'
+                      : row.status === 'Pending'
+                        ? 'warning'
+                        : row.status === 'No account'
+                          ? 'outline'
+                          : 'secondary'
+                  }
                 >
                   {row.status}
                 </Badge>
@@ -475,6 +601,20 @@ export function MembersList({ page }: { page: AccessPage }) {
         </div>
       )}
       {confirmation.element}
+      {adding && people && (
+        <AddPersonDialog
+          workspace={{ id: workspaceId, slug: workspaceSlug, sessionId: page.sessionId }}
+          api={tables}
+          members={people}
+          close={() => setAdding(false)}
+          added={(name, photoSaved) => {
+            setAdding(false);
+            page.notify(
+              photoSaved ? `Added ${name} to Members.` : `Added ${name} to Members, but their photo wasn’t saved.`,
+            );
+          }}
+        />
+      )}
     </section>
   );
 }

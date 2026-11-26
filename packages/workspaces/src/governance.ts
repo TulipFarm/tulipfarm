@@ -587,15 +587,15 @@ export function createGovernanceService(dependencies: {
   }
 
   async function directory(transaction: Transaction) {
-    const members = z
-      .array(memberRowSchema)
-      .parse(
-        (
-          await transaction.client.query(
-            `SELECT id, user_id, role FROM ${table(transaction, 'tf_memberships')} WHERE removed_at IS NULL ORDER BY id`,
-          )
-        ).rows,
-      );
+    const members = z.array(memberRowSchema.extend({ workspace_member_id: z.uuid().nullable() })).parse(
+      (
+        await transaction.client.query(
+          `SELECT m.id, m.user_id, m.role, a.member_id AS workspace_member_id FROM ${table(transaction, 'tf_memberships')} m
+              LEFT JOIN ${table(transaction, 'tf_workspace_member_accounts')} a ON a.membership_id = m.id
+              WHERE m.removed_at IS NULL ORDER BY m.id`,
+        )
+      ).rows,
+    );
     const profiles = z
       .array(z.object({ id: z.string(), name: z.string(), email: z.email(), image: z.string().nullable() }))
       .parse(
@@ -610,7 +610,14 @@ export function createGovernanceService(dependencies: {
       members: members.map(member => {
         const profile = byId.get(member.user_id);
         if (!profile) throw new Error('Member identity unavailable');
-        return { id: member.id, name: profile.name, email: profile.email, image: profile.image, role: member.role };
+        return {
+          id: member.id,
+          name: profile.name,
+          email: profile.email,
+          image: profile.image,
+          role: member.role,
+          workspaceMemberId: member.workspace_member_id,
+        };
       }),
     });
   }
@@ -1196,7 +1203,24 @@ export function createGovernanceService(dependencies: {
             )
           : true;
       return memberAccessSchema.parse({
-        member: { id: member.id, name: profile.name, email: profile.email, image: profile.image, role: member.role },
+        member: {
+          id: member.id,
+          name: profile.name,
+          email: profile.email,
+          image: profile.image,
+          role: member.role,
+          workspaceMemberId: z
+            .uuid()
+            .nullable()
+            .parse(
+              (
+                await transaction.client.query(
+                  `SELECT member_id FROM ${table(transaction, 'tf_workspace_member_accounts')} WHERE membership_id = $1`,
+                  [membershipId],
+                )
+              ).rows[0]?.member_id ?? null,
+            ),
+        },
         self,
         canManage: admin,
         finalAdmin: !otherAdmin,

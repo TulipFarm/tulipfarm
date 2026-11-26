@@ -42,7 +42,8 @@ const memberId = randomUUID(),
   chatId = randomUUID(),
   proposalId = randomUUID(),
   turnId = randomUUID(),
-  tableId = randomUUID();
+  tableId = randomUUID(),
+  membersTableId = randomUUID();
 const fieldId = randomUUID(),
   selectId = randomUUID(),
   optionId = randomUUID(),
@@ -679,6 +680,15 @@ try {
         archived: false,
         activityAt: workspace.createdAt,
         createdAt: workspace.createdAt,
+      };
+    // Links to people open Members; this workspace's Members table holds none of the rows these tests link to.
+    else if (path === `/v1/workspaces/${workspace.id}/workspace-members`)
+      json = {
+        tableId: membersTableId,
+        revision: 'a'.repeat(40),
+        sync: { pending: 0, failed: 0, repairRequired: 0 },
+        members: [],
+        nextCursor: null,
       };
     else return route.fulfill({ status: 404, json: { error: 'unavailable' } });
     return route.fulfill({ json });

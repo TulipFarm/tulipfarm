@@ -30,6 +30,7 @@ function installInviteMembersMock() {
     email: `${name.toLowerCase().replace(' ', '.')}@example.test`,
     image: null,
     role: 'member' as const,
+    workspaceMemberId: null,
   }));
   const data: GovernanceSnapshot = {
     actorMembershipId: id,

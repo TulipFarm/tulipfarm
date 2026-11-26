@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import {
   policyChangeSchema,
   type GovernanceSnapshot,
@@ -27,7 +27,8 @@ import { workspaceRoute } from '@/router';
 import { describeChange, permissionSummary, scopeObject, sortPermissions } from '@/features/access/policies';
 import type { SaveResult, ScopeChoice } from '@/features/access/policy-table';
 import { MembersList, MembersSettings } from './access-members';
-import { InviteMembers } from './access-invite';
+import { InviteMembers, type InvitePreset } from './access-invite';
+import { PersonDetail, PersonTitle } from './access-person';
 import { MemberDetail } from './access-member';
 import { TeamDetail, TeamsList } from './access-teams';
 import { TableAccess } from './access-tables';
@@ -51,7 +52,7 @@ export type GovernanceChange = (
   | 'team-owns-integrations'
 >;
 
-type Section = 'members' | 'teams' | 'settings' | 'grants' | 'invite' | 'edit-invite' | 'member' | 'team';
+type Section = 'members' | 'teams' | 'settings' | 'grants' | 'invite' | 'edit-invite' | 'member' | 'person' | 'team';
 type LoadState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
@@ -62,6 +63,7 @@ type LoadState =
 export type AccessPage = {
   workspaceId: string;
   workspaceSlug: string;
+  sessionId: string;
   admin: boolean;
   access: OwnMembership;
   data: GovernanceSnapshot;
@@ -120,17 +122,26 @@ const reachable = (delay: number) =>
 let flashed: { workspaceId: string; message: string } | null = null;
 
 function AccessShell({ section }: { section: Section }) {
-  const { workspace } = workspaceRoute.useRouteContext();
-  const params = useParams({ strict: false }) as { membershipId?: string; teamId?: string; invitationId?: string };
+  const { workspace, sessionId } = workspaceRoute.useRouteContext();
+  const params = useParams({ strict: false }) as {
+    membershipId?: string;
+    memberId?: string;
+    teamId?: string;
+    invitationId?: string;
+  };
+  const search = useSearch({ strict: false }) as InvitePreset;
   return (
     <AccessContent
-      key={`${workspace.id}:${section}:${params.membershipId ?? ''}:${params.teamId ?? ''}:${params.invitationId ?? ''}`}
+      key={`${workspace.id}:${section}:${params.membershipId ?? ''}:${params.memberId ?? ''}:${params.teamId ?? ''}:${params.invitationId ?? ''}`}
       section={section}
       workspaceId={workspace.id}
       workspaceSlug={workspace.slug}
+      sessionId={sessionId}
       membershipId={params.membershipId}
+      memberId={params.memberId}
       teamId={params.teamId}
       invitationId={params.invitationId}
+      preset={search.member ? search : undefined}
     />
   );
 }
@@ -139,16 +150,22 @@ function AccessContent({
   section,
   workspaceId,
   workspaceSlug,
+  sessionId,
   membershipId,
+  memberId,
   teamId,
   invitationId,
+  preset,
 }: {
   section: Section;
   workspaceId: string;
   workspaceSlug: string;
+  sessionId: string;
   membershipId: string | undefined;
+  memberId: string | undefined;
   teamId: string | undefined;
   invitationId: string | undefined;
+  preset: InvitePreset | undefined;
 }) {
   const navigate = useNavigate();
   const { membership, administration, refresh } = useGovernance(workspaceId);
@@ -357,6 +374,7 @@ function AccessContent({
     ? {
         workspaceId,
         workspaceSlug,
+        sessionId,
         admin: state.kind === 'admin',
         access: state.access,
         data: state.data,
@@ -402,6 +420,13 @@ function AccessContent({
               state.data.directory.find(member => member.id === membershipId)?.email)) ||
           'Member'
         }
+      />
+    ) : section === 'person' ? (
+      <PageHeader
+        titleId="governance-heading"
+        focusable
+        parent={members}
+        title={ready && memberId ? <PersonTitle workspaceId={workspaceId} memberId={memberId} /> : 'Person'}
       />
     ) : (
       <PageHeader
@@ -483,11 +508,12 @@ function AccessContent({
           {section === 'members' && <MembersList page={page} />}
           {section === 'teams' && <TeamsList page={page} />}
           {section === 'settings' && <MembersSettings page={page} />}
-          {section === 'invite' && <InviteMembers page={page} />}
+          {section === 'invite' && <InviteMembers page={page} preset={preset} />}
           {section === 'edit-invite' && invitationId && (
             <InviteMembers key={invitationId} page={page} invitationId={invitationId} />
           )}
           {section === 'member' && membershipId && <MemberDetail page={page} membershipId={membershipId} />}
+          {section === 'person' && memberId && <PersonDetail page={page} memberId={memberId} />}
           {section === 'team' && teamId && <TeamDetail page={page} teamId={teamId} />}
           {section === 'grants' && <TableAccess page={page} />}
         </>
@@ -501,6 +527,7 @@ export const MembersSettingsPage = () => <AccessShell section="settings" />;
 export const InviteMembersPage = () => <AccessShell section="invite" />;
 export const EditInvitePage = () => <AccessShell section="edit-invite" />;
 export const MemberDetailPage = () => <AccessShell section="member" />;
+export const PersonDetailPage = () => <AccessShell section="person" />;
 export const TeamsPage = () => <AccessShell section="teams" />;
 export const TeamDetailPage = () => <AccessShell section="team" />;
 export const GrantsPage = () => <AccessShell section="grants" />;

@@ -537,17 +537,24 @@ export function createMemberTablesMock(
     }
     if (suffix === '/rows/page') {
       const search = url.searchParams.get('search')?.toLowerCase();
-      const activeOnly = url.searchParams.has('filters');
-      const records = table.records.filter(row => {
+      const filters = z
+        .array(z.object({ fieldId: z.string(), value: z.unknown() }))
+        .parse(JSON.parse(url.searchParams.get('filters') ?? '[]'));
+      const matches = (row: Row, filter: (typeof filters)[number]) => {
+        const value = row.values[filter.fieldId];
+        if (value?.kind === 'single-select') return value.optionId === filter.value;
+        // Reference pickers ask for active members only.
         const active = row.values[fields.active];
-        return (
+        return active?.kind === 'boolean' && active.value;
+      };
+      const records = table.records.filter(
+        row =>
           (!search ||
             Object.values(row.values).some(
               value => value?.kind === 'text' && value.value.toLowerCase().includes(search),
             )) &&
-          (!activeOnly || (active?.kind === 'boolean' && active.value))
-        );
-      });
+          filters.every(filter => matches(row, filter)),
+      );
       return Response.json({ records, total: String(records.length), nextCursor: null });
     }
     if (suffix === '/schema-history') return Response.json({ entries: [], nextCursor: null });
@@ -633,6 +640,15 @@ export function createWorkspaceMembersMock(scenario?: string) {
           preferences: [],
         });
       if (path === `${root}/workspace-mcp/capabilities`) return Response.json({ enabled: false });
+      if (path === `${root}/secrets/capabilities`) return Response.json({ enabled: false });
+      if (path === `${root}/settings`)
+        return Response.json({
+          workspaceId,
+          name: workspace.name,
+          slug: workspace.slug,
+          revision: 0,
+          canManage: scenario !== 'reader',
+        });
       if (path === `${root}/agents/recent`) return Response.json([]);
       if (path === `${root}/conversations/pinned`) return Response.json({ chats: [] });
       if (path === `${root}/inbox`) return Response.json({ items: [], open: 0 });
@@ -661,11 +677,23 @@ export function createWorkspaceMembersMock(scenario?: string) {
         capabilities: { manageGovernance: scenario !== 'reader', canLeave: false },
       });
     if (path === '/v1/account/sign-in-methods') return Response.json({ methods: ['email-link', 'google'] });
+    const self = { ...user, id: id(4), role: 'admin' as const, workspaceMemberId: id(20) };
+    if (path === `${root}/governance/members/${id(4)}/access`)
+      return Response.json({
+        member: self,
+        self: true,
+        canManage: scenario !== 'reader',
+        canLeave: false,
+        finalAdmin: true,
+        teams: [],
+        policies: [],
+        skipped: null,
+      });
     if (path.endsWith('/governance'))
       return Response.json({
         actorMembershipId: id(4),
         members: [{ ...user, id: id(4), userId: user.id, role: 'admin' }],
-        directory: [{ ...user, id: id(4) }],
+        directory: [self],
         teams: [],
         tables: [],
         grants: [],

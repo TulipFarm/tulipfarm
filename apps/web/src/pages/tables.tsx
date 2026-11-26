@@ -10,6 +10,7 @@ import { TaskBoard, TaskBoardSkeleton } from '@/features/task-board/task-board';
 import { canonicalTaskKey } from '@/features/task-board/task-api';
 import { TaskView } from '@/features/task-board/task-page';
 import { useTasksTableRead as useTasksRead } from '@/features/task-board/task-data';
+import { useMemberDirectory } from '@/features/tables/hooks';
 
 export function TableDetailPage() {
   const { tableId } = tableDetailRoute.useParams();
@@ -128,9 +129,13 @@ export function EditTablePage() {
   const { tableId } = tableEditRoute.useParams();
   const { workspace } = workspaceRoute.useRouteContext();
   const tasks = useTasksTableId(workspace.id);
-  if (tasks.kind === 'loading') return null;
+  const members = useMemberDirectory(workspace.id).state;
+  if (tasks.kind === 'loading' || members.kind === 'loading') return null;
   if (tasks.kind === 'ready' && tasks.data === tableId)
     return <Navigate to="/$workspaceSlug/tasks" params={{ workspaceSlug: workspace.slug }} replace />;
+  // Members fields are changed from the Members page, not as a table.
+  if (members.kind === 'ready' && members.data.tableId === tableId)
+    return <Navigate to="/$workspaceSlug/members" params={{ workspaceSlug: workspace.slug }} replace />;
   return <SchemaInChat tableId={tableId} />;
 }
 

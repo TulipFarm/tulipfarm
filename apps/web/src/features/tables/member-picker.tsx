@@ -158,9 +158,9 @@ function MemberChoices({
           variant="link"
           size="sm"
           nativeButton={false}
-          render={<Link to="/$workspaceSlug/tables/$tableId" params={{ workspaceSlug, tableId: table.id }} />}
+          render={<Link to="/$workspaceSlug/members" params={{ workspaceSlug }} />}
         >
-          Create a member first
+          Add them on Members first
         </Button>
       </p>
     </div>

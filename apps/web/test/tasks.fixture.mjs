@@ -13,6 +13,7 @@ export const workspace = {
 };
 export const base = `/v1/workspaces/${workspace.id}`;
 export const tableId = '55555555-5555-4555-8555-555555555555';
+export const membersTableId = '55555555-5555-4555-8555-555555555556';
 export const agentId = '66666666-6666-4666-8666-666666666666';
 export const teammate = governance.members[1];
 export const teammatePhoto = `${base}/workspace-members/77777777-7777-4777-8777-777777777777/photos/${'b'.repeat(64)}`;
@@ -183,9 +184,15 @@ export function tasksApi() {
         });
       }
       if (path === `${base}/tables`) {
-        const hidden = url.searchParams.get('excludeSystem') === 'tasks';
+        const excluded = (url.searchParams.get('excludeSystem') ?? '').split(',');
         return json({
-          tables: hidden ? [otherTable] : [otherTable, { ...otherTable, id: tableId, label: 'Tasks' }],
+          tables: [
+            otherTable,
+            ...(excluded.includes('tasks') ? [] : [{ ...otherTable, id: tableId, label: 'Tasks' }]),
+            ...(excluded.includes('workspace-members')
+              ? []
+              : [{ ...otherTable, id: membersTableId, label: 'Workspace members' }]),
+          ],
           nextCursor: null,
         });
       }

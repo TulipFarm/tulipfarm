@@ -148,10 +148,10 @@ export const tableQueries = {
     search?: string,
     sort?: TableListSort,
     archived = false,
-    hideTasks = false,
+    hideSystem = false,
   ) => ({
-    key: [...tableKeys.list(after, search, sort, archived), ...(hideTasks ? ['hide-tasks'] : [])],
-    load: (signal: AbortSignal) => api.list(after, signal, search, archived, sort, hideTasks),
+    key: [...tableKeys.list(after, search, sort, archived), ...(hideSystem ? ['hide-system'] : [])],
+    load: (signal: AbortSignal) => api.list(after, signal, search, archived, sort, hideSystem),
   }),
   detail: (api: TableApi, id: string) => ({
     key: tableKeys.definition(id),
