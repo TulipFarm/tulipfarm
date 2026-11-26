@@ -450,7 +450,10 @@ for (const width of [375, 390, 414, 768, 1440])
           'reopening resumes the setup saved in the builder',
         );
         assert.equal(decisions.length, 1, 'reopening does not decide the chat draft again');
-        await form.getByRole('button', { name: 'Continue editing', exact: true }).click();
+        const continueEditing = form.getByRole('button', { name: 'Continue editing', exact: true });
+        await continueEditing.click();
+        // It reloads the saved setup, then opens Review; a step chosen before that is replaced.
+        await continueEditing.waitFor({ state: 'hidden' });
         await canvas.getByRole('tab', { name: /Triggers/ }).click();
         for (const recheck of await form.getByRole('button', { name: 'Recheck', exact: true }).all())
           await recheck.click();
