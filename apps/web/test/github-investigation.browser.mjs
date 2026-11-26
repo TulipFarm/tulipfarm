@@ -16,10 +16,14 @@ let browser;
 before(async () => {
   server = process.env.INVESTIGATION_ORIGIN
     ? null
-    : spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-        cwd: new URL('..', import.meta.url),
-        stdio: 'ignore',
-      });
+    : spawn(
+        process.execPath,
+        ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+        {
+          cwd: new URL('..', import.meta.url),
+          stdio: 'ignore',
+        },
+      );
   for (let attempt = 0; ; attempt++) {
     if (
       await fetch(base).then(

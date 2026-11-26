@@ -7,10 +7,14 @@ const { chromium } = await import(
   process.env.PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : 'playwright'
 );
 const origin = 'http://127.0.0.1:5197';
-const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', '5197', '--strictPort'], {
-  cwd: new URL('..', import.meta.url),
-  stdio: 'ignore',
-});
+const server = spawn(
+  process.execPath,
+  ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', '5197', '--strictPort'],
+  {
+    cwd: new URL('..', import.meta.url),
+    stdio: 'ignore',
+  },
+);
 let browser;
 try {
   for (let attempt = 0; ; attempt++) {

@@ -6,10 +6,14 @@ import { createWorkspaceFixture } from './workspace.fixture.mjs';
 import { membership, credits } from './chat-query.fixture.mjs';
 
 const origin = 'http://127.0.0.1:5493';
-const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', '5493', '--strictPort'], {
-  cwd: new URL('..', import.meta.url),
-  stdio: 'ignore',
-});
+const server = spawn(
+  process.execPath,
+  ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', '5493', '--strictPort'],
+  {
+    cwd: new URL('..', import.meta.url),
+    stdio: 'ignore',
+  },
+);
 const { workspace, session } = createWorkspaceFixture();
 const id = '11111111-1111-4111-8111-111111111111';
 let browser;

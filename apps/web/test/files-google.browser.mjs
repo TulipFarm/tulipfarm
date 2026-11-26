@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import { createServer } from 'vite';
+import { createBuiltAppServer as createServer } from './built-app.fixture.mjs';
 import { createWorkspaceFixture, workspaceShellReads, serveWorkspaceShellEvent } from './workspace.fixture.mjs';
 import { viewerPdf, assertRenderedPdf } from './pdf-viewer.fixture.mjs';
 import { captureEvidence, evidenceBrowserArgs } from './browser-controls.mjs';

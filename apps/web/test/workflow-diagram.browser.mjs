@@ -10,14 +10,7 @@ test('workflow page and chat show inspectable, immutable diagrams', async t => {
   // Agent artwork is opt-in; configure the origin this test routes.
   const server = spawn(
     process.execPath,
-    [
-      new URL('../node_modules/vite/bin/vite.js', import.meta.url).pathname,
-      '--host',
-      '127.0.0.1',
-      '--port',
-      port,
-      '--strictPort',
-    ],
+    [new URL('./serve-built-app.mjs', import.meta.url).pathname, '--host', '127.0.0.1', '--port', port, '--strictPort'],
     {
       cwd: new URL('..', import.meta.url),
       stdio: 'ignore',

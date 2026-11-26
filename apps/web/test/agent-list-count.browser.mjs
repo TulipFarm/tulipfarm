@@ -19,10 +19,14 @@ const agent = {
   savedRevision: 'a'.repeat(40),
   definitionRevision: 'b'.repeat(64),
 };
-const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', '5239', '--strictPort'], {
-  cwd: new URL('..', import.meta.url),
-  stdio: 'ignore',
-});
+const server = spawn(
+  process.execPath,
+  ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', '5239', '--strictPort'],
+  {
+    cwd: new URL('..', import.meta.url),
+    stdio: 'ignore',
+  },
+);
 let browser;
 try {
   for (let attempt = 0; ; attempt++) {

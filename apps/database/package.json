@@ -5,7 +5,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test": "node --test test/*.test.mjs",
     "test:integration": "node --test test/integration/*.test.mjs"
   },
   "dependencies": {

@@ -11,7 +11,9 @@ assert.ok(
   ['baseline', 'acceptance'].includes(mode),
   'Usage: node test/query-loading.browser.mjs [baseline|acceptance]',
 );
-const port = Number(process.env.QUERY_LOADING_PORT ?? 5493);
+const deviceMode = process.env.QUERY_LOADING_DEVICE ?? (process.env.NODE_TEST_CONTEXT ? 'desktop' : 'all');
+const devices = deviceMode === 'mobile' ? [true] : deviceMode === 'desktop' ? [false] : [false, true];
+const port = Number(process.env.QUERY_LOADING_PORT ?? (deviceMode === 'mobile' ? 5494 : 5493));
 const origin = `http://127.0.0.1:${port}`;
 const appRoot = new URL('..', import.meta.url);
 const fixture = await startFixture();
@@ -71,7 +73,7 @@ try {
     false,
     `Port ${port} must be unused`,
   );
-  server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
+  server = spawn(process.execPath, ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port)], {
     cwd: appRoot,
     env: { ...process.env, VITE_API_URL: fixture.origin },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -95,7 +97,7 @@ try {
   }
   browser = await chromium.launch({ headless: true });
   report.environment.browser = browser.version();
-  for (const mobile of [false, true]) {
+  for (const mobile of devices) {
     const result = {
       device: mobile ? 'mobile' : 'desktop',
       viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 },
@@ -395,7 +397,7 @@ try {
       await context.close();
     }
   }
-  assert.equal(report.devices.length, 2);
+  assert.equal(report.devices.length, devices.length);
   assert.ok(
     report.devices.every(
       device => device.phases.length >= 10 && device.phases[0].requests > 0 && device.phases[0].payloadBytes > 0,

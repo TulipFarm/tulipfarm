@@ -46,10 +46,14 @@ test('a waiting change shows what will be sent and records Send and Don’t send
     }),
     view('DELETE', 'https://api.linear.app/v1/issues/ENG-301', { digest: 'b'.repeat(64) }),
   ];
-  const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-    cwd: new URL('..', import.meta.url),
-    stdio: 'ignore',
-  });
+  const server = spawn(
+    process.execPath,
+    ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+    {
+      cwd: new URL('..', import.meta.url),
+      stdio: 'ignore',
+    },
+  );
   let browser;
   try {
     for (
@@ -213,10 +217,14 @@ test(
     ];
     let status = 'waiting-approval';
     const answers = [];
-    const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-      cwd: new URL('..', import.meta.url),
-      stdio: 'ignore',
-    });
+    const server = spawn(
+      process.execPath,
+      ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+      {
+        cwd: new URL('..', import.meta.url),
+        stdio: 'ignore',
+      },
+    );
     let browser;
     try {
       for (

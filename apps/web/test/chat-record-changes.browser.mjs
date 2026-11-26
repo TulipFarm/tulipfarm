@@ -59,10 +59,14 @@ const update = receipt({
 test('rows written in chat open in the Canvas with added and updated markers', { timeout: 120000 }, async () => {
   const port = Number(process.env.CHAT_RECORD_CHANGES_PORT ?? 5752);
   const origin = `http://127.0.0.1:${port}`;
-  const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-    cwd: new URL('..', import.meta.url),
-    stdio: 'ignore',
-  });
+  const server = spawn(
+    process.execPath,
+    ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+    {
+      cwd: new URL('..', import.meta.url),
+      stdio: 'ignore',
+    },
+  );
   let browser;
   try {
     for (

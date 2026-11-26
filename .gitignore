@@ -34,3 +34,4 @@ apps/*/version.json
 
 # Local planning notes
 docs/plans/
+dist-test
