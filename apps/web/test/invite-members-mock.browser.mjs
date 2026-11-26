@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { createServer } from 'vite';
+import { createBuiltAppServer as createServer } from './built-app.fixture.mjs';
 import { chromium } from 'playwright';
 
 test('the invite page links member rows and never reaches a real API', { timeout: 120000 }, async () => {

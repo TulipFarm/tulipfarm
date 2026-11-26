@@ -43,7 +43,7 @@ const authorizationUrl = 'https://oauth.posthog.com/oauth/authorize?client_id=tu
 async function withCard(authentication, steps, { paste = false } = {}) {
   const server = spawn(
     process.execPath,
-    ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+    ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
     { cwd: new URL('..', import.meta.url), stdio: 'ignore' },
   );
   let browser;

@@ -6,10 +6,14 @@ import { chromium } from 'playwright';
 
 test('sidebar mock has four independent three-item sections and keeps normal links', { timeout: 120000 }, async () => {
   const origin = 'http://127.0.0.1:5775';
-  const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', '5775', '--strictPort'], {
-    cwd: new URL('..', import.meta.url),
-    stdio: 'ignore',
-  });
+  const server = spawn(
+    process.execPath,
+    ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', '5775', '--strictPort'],
+    {
+      cwd: new URL('..', import.meta.url),
+      stdio: 'ignore',
+    },
+  );
   let browser;
   try {
     for (

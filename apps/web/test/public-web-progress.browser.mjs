@@ -49,10 +49,14 @@ await new Promise(resolve => provider.listen(0, '127.0.0.1', resolve));
 const previousEndpoint = process.env.HUNTSMAN_ENDPOINT;
 process.env.HUNTSMAN_ENDPOINT = `http://127.0.0.1:${provider.address().port}/`;
 const f = await conversationFixture();
-const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-  cwd: new URL('..', import.meta.url),
-  stdio: 'ignore',
-});
+const server = spawn(
+  process.execPath,
+  ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+  {
+    cwd: new URL('..', import.meta.url),
+    stdio: 'ignore',
+  },
+);
 let browser;
 let pending;
 try {

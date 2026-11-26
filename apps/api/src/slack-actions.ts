@@ -25,6 +25,8 @@ import {
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { createFollowUps } from '@tulipfarm/agents/follow-ups';
 import { slackFollowUpCancelAction, slackFollowUpCancelValueSchema } from '@tulipfarm/agents/follow-up-contracts';
+import { createTaskClarifications } from '@tulipfarm/agents/task-clarifications';
+import type { TaskClarificationView } from '@tulipfarm/agents/task-clarification-contracts';
 import { authConfig, type registerAuth } from './auth.ts';
 import { SlackSignatureError, verifySlackRequest } from './slack-request.ts';
 import { requestSession } from './request-session.ts';
@@ -74,6 +76,125 @@ export function registerSlackActions(
   const config = slackConfigurationSchema.parse(JSON.parse(process.env.SLACK_CONFIGURATION ?? ''));
   const channels = createSlackChannelAgents({ ...settings, runtime: options.runtime, model: null });
   const followUps = createFollowUps(options.runtime);
+  const taskClarifications = createTaskClarifications({ runtime: options.runtime });
+  const slackTaskClarificationCallbackId = 'tf_task_clarification_submit';
+  const resolveSlackActorAndToken = async (workspaceId: string, slackUserId: string) =>
+    options.runtime.transaction(workspaceId, commonCompatibility, async tx => {
+      const installation = (
+        await tx.client.query(
+          `SELECT id, generation, bot_credential FROM ${qualified(tx.schema, 'tf_slack_installations')}
+           WHERE app_id = $1 AND state = 'active' AND bot_credential IS NOT NULL LIMIT 1`,
+          [config.appId],
+        )
+      ).rows[0] as { id: string; generation: number; bot_credential: unknown } | undefined;
+      if (!installation) return null;
+      const member = (
+        await tx.client.query(
+          `SELECT m.id AS membership_id, m.user_id
+           FROM ${qualified(tx.schema, 'tf_slack_identities')} s
+           JOIN ${qualified(tx.schema, 'tf_memberships')} m ON m.id = s.membership_id AND m.removed_at IS NULL
+           WHERE s.installation_id = $1 AND s.generation = $2 AND s.slack_user_id = $3 AND s.state <> 'revoked'
+           LIMIT 1`,
+          [installation.id, installation.generation, slackUserId],
+        )
+      ).rows[0] as { membership_id: string; user_id: string } | undefined;
+      if (!member) return null;
+      const token = settings.cipher.decrypt(
+        { workspaceId, installationId: installation.id, generation: installation.generation, kind: 'bot' },
+        installation.bot_credential,
+      );
+      return {
+        token,
+        actor: { kind: 'human' as const, membershipId: member.membership_id, userId: member.user_id },
+      };
+    });
+  const buildTaskClarificationModal = (clarification: TaskClarificationView, metadata: string) => {
+    const githubOptions = clarification.githubAccounts ?? [];
+    const blockedByMissingGitHub = clarification.fields.some(
+      field => field.kind === 'github_account' && field.required && githubOptions.length === 0,
+    );
+    return {
+      type: 'modal' as const,
+      callback_id: slackTaskClarificationCallbackId,
+      private_metadata: metadata,
+      title: { type: 'plain_text' as const, text: clarification.title.slice(0, 24) || 'Task details' },
+      ...(blockedByMissingGitHub ? {} : { submit: { type: 'plain_text' as const, text: 'Submit' } }),
+      close: { type: 'plain_text' as const, text: 'Cancel' },
+      blocks: [
+        ...(clarification.summary
+          ? [
+              {
+                type: 'section' as const,
+                text: { type: 'mrkdwn' as const, text: clarification.summary.slice(0, 2900) },
+              },
+            ]
+          : []),
+        ...clarification.fields.map(field => {
+          if (field.kind === 'github_account') {
+            if (githubOptions.length === 0) {
+              return {
+                type: 'section' as const,
+                text: {
+                  type: 'mrkdwn' as const,
+                  text: `*${field.label}*\nNo GitHub accounts are available to you yet. Connect a personal GitHub account or ask an admin to share a team GitHub connection in TulipFarm Settings -> Integrations, then reopen this form.`,
+                },
+              };
+            }
+            return {
+              type: 'input' as const,
+              block_id: `field_${field.id}`,
+              optional: !field.required,
+              label: { type: 'plain_text' as const, text: field.label.slice(0, 2000) },
+              element: {
+                type: 'static_select' as const,
+                action_id: field.id,
+                placeholder: { type: 'plain_text' as const, text: 'Choose a GitHub account' },
+                options: githubOptions.slice(0, 100).map(opt => ({
+                  text: { type: 'plain_text' as const, text: opt.label.slice(0, 75) },
+                  value: opt.value,
+                })),
+              },
+            };
+          }
+          if (field.kind === 'select' && field.options?.length) {
+            return {
+              type: 'input' as const,
+              block_id: `field_${field.id}`,
+              optional: !field.required,
+              label: { type: 'plain_text' as const, text: field.label.slice(0, 2000) },
+              element: {
+                type: 'static_select' as const,
+                action_id: field.id,
+                placeholder: {
+                  type: 'plain_text' as const,
+                  text: 'Select an option',
+                },
+                options: field.options.slice(0, 100).map((opt, index) => ({
+                  text: { type: 'plain_text' as const, text: opt.label.slice(0, 75) },
+                  value: String(index),
+                })),
+              },
+            };
+          }
+          const placeholder =
+            'placeholder' in field && typeof field.placeholder === 'string'
+              ? field.placeholder.slice(0, 150)
+              : undefined;
+          return {
+            type: 'input' as const,
+            block_id: `field_${field.id}`,
+            optional: !field.required,
+            label: { type: 'plain_text' as const, text: field.label.slice(0, 2000) },
+            element: {
+              type: 'plain_text_input' as const,
+              action_id: field.id,
+              ...(placeholder ? { placeholder: { type: 'plain_text' as const, text: placeholder } } : {}),
+            },
+          };
+        }),
+      ],
+    };
+  };
   const defaults = createSlackDefault({
     ...settings,
     runtime: options.runtime,
@@ -257,7 +378,7 @@ export function registerSlackActions(
         team: z.object({ id: z.string() }),
         user: z.object({ id: z.string() }),
         view: z.object({
-          callback_id: z.literal(slackFormCallbackId),
+          callback_id: z.union([z.literal(slackFormCallbackId), z.literal(slackTaskClarificationCallbackId)]),
           private_metadata: z.string().max(3000),
           title: z.object({ text: z.string() }),
           blocks: blocksSchema,
@@ -274,12 +395,83 @@ export function registerSlackActions(
         })
         .safeParse(value);
       if (!probe.success) return false;
-      if (probe.data.type === 'view_submission') return probe.data.view?.callback_id === slackFormCallbackId;
+      if (probe.data.type === 'view_submission')
+        return (
+          probe.data.view?.callback_id === slackFormCallbackId ||
+          probe.data.view?.callback_id === slackTaskClarificationCallbackId
+        );
       return probe.data.type === 'block_actions' && Boolean(probe.data.actions?.[0]?.action_id.startsWith('tf_'));
     };
     const replyInteraction = async (value: unknown): Promise<Record<string, unknown> | undefined> => {
       const payload = interactionSchema.parse(value);
       if (payload.type === 'view_submission') {
+        if (payload.view.callback_id === slackTaskClarificationCallbackId) {
+          const meta = z
+            .strictObject({
+              workspaceId: z.uuid(),
+              clarificationId: z.uuid(),
+              tableId: z.uuid(),
+              rowId: z.uuid(),
+            })
+            .parse(JSON.parse(payload.view.private_metadata));
+          const resolved = await resolveSlackActorAndToken(meta.workspaceId, payload.user.id);
+          if (!resolved) {
+            const firstBlock = payload.view.blocks.find(b => b.type === 'input' && b.block_id)?.block_id;
+            return firstBlock
+              ? {
+                  response_action: 'errors',
+                  errors: { [firstBlock]: 'Your Slack account is not linked to TulipFarm.' },
+                }
+              : undefined;
+          }
+          const currentClarification = await taskClarifications
+            .readById(meta.workspaceId, resolved.actor, meta.clarificationId)
+            .catch(() => null);
+          const selectFieldById = new Map<string, Array<{ value: string; label: string }>>();
+          for (const field of currentClarification?.fields ?? []) {
+            if (field.kind === 'select' && field.options?.length) {
+              selectFieldById.set(field.id, field.options);
+            }
+          }
+          const answers: Record<string, string> = {};
+          for (const inputs of Object.values(payload.view.state.values)) {
+            for (const [actionId, entry] of Object.entries(inputs)) {
+              const raw =
+                typeof entry.value === 'string'
+                  ? entry.value
+                  : entry.selected_option &&
+                      typeof entry.selected_option === 'object' &&
+                      'value' in entry.selected_option &&
+                      typeof entry.selected_option.value === 'string'
+                    ? entry.selected_option.value
+                    : '';
+              const trimmed = raw.trim();
+              if (!trimmed) continue;
+              const selectOptions = selectFieldById.get(actionId);
+              if (selectOptions && /^\d+$/.test(trimmed)) {
+                const mapped = selectOptions[Number(trimmed)]?.value;
+                if (mapped) answers[actionId] = mapped;
+                continue;
+              }
+              answers[actionId] = trimmed;
+            }
+          }
+          try {
+            await taskClarifications.answer(
+              meta.workspaceId,
+              resolved.actor,
+              meta.clarificationId,
+              { answers },
+              'slack',
+              { tableId: meta.tableId, rowId: meta.rowId },
+            );
+            return undefined;
+          } catch (error) {
+            const firstBlock = payload.view.blocks.find(b => b.type === 'input' && b.block_id)?.block_id;
+            const message = error instanceof Error ? error.message : 'Could not submit answers.';
+            return firstBlock ? { response_action: 'errors', errors: { [firstBlock]: message } } : undefined;
+          }
+        }
         const origin = z
           .strictObject({ channel: z.string(), messageTs: z.string() })
           .parse(JSON.parse(payload.view.private_metadata));
@@ -313,6 +505,33 @@ export function registerSlackActions(
         text = answers
           ? await followUp(payload.team.id, payload.user.id, reply, `Form answers:\n${answers}`)
           : 'Fill in the form first.';
+      } else if (kind === 'tf_task_clarify' && modalId && payload.trigger_id) {
+        const workspaceId = await workspaceFor(payload.team.id);
+        const resolved = workspaceId ? await resolveSlackActorAndToken(workspaceId, payload.user.id) : null;
+        if (workspaceId && resolved) {
+          const clarification = await taskClarifications
+            .readById(workspaceId, resolved.actor, modalId)
+            .catch(() => null);
+          if (clarification && clarification.status === 'open') {
+            await openSlackModal({
+              token: resolved.token,
+              triggerId: payload.trigger_id,
+              view: buildTaskClarificationModal(
+                clarification,
+                JSON.stringify({
+                  workspaceId,
+                  clarificationId: clarification.id,
+                  tableId: clarification.tableId,
+                  rowId: clarification.rowId,
+                }),
+              ) as never,
+            });
+          } else {
+            text = 'This clarification form has already been answered or is no longer open.';
+          }
+        } else {
+          text = 'Link your Slack account in TulipFarm first to answer task questions in Slack.';
+        }
       } else if (kind === 'tf_modal' && modalId && payload.trigger_id) {
         const workspaceId = await workspaceFor(payload.team.id);
         const found = workspaceId

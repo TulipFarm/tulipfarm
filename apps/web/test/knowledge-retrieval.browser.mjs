@@ -17,7 +17,7 @@ test(
       new URL('../../../reports/check/knowledge-retrieval/', import.meta.url).pathname;
     const server = process.env.KNOWLEDGE_BROWSER_ORIGIN
       ? null
-      : spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', port, '--strictPort'], {
+      : spawn(process.execPath, ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', port, '--strictPort'], {
           cwd: new URL('..', import.meta.url),
           stdio: 'ignore',
         });

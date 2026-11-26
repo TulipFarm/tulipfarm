@@ -109,11 +109,15 @@ try {
   await app.listen({ host: '127.0.0.1', port: 0 });
   const api = `http://127.0.0.1:${app.server.address().port}`;
   assert.notEqual(api, origin);
-  server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-    cwd: new URL('..', import.meta.url),
-    env: { ...process.env, VITE_API_URL: api },
-    stdio: 'ignore',
-  });
+  server = spawn(
+    process.execPath,
+    ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+    {
+      cwd: new URL('..', import.meta.url),
+      env: { ...process.env, VITE_API_URL: api },
+      stdio: 'ignore',
+    },
+  );
   const shell = createWorkspaceFixture({ id: f.one.id, slug: 'task-download', name: 'Task download' });
   for (let n = 0; ; n++) {
     try {

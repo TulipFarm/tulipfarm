@@ -12,7 +12,7 @@ test(
     const origin = process.env.WEB_ACTIVITY_ORIGIN ?? 'http://127.0.0.1:5869';
     const server = process.env.WEB_ACTIVITY_ORIGIN
       ? null
-      : spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', '5869', '--strictPort'], {
+      : spawn(process.execPath, ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', '5869', '--strictPort'], {
           cwd: new URL('..', import.meta.url),
           stdio: 'ignore',
         });

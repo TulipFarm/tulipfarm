@@ -137,7 +137,7 @@
     "qualify:soul-read:production": "node src/soul-read-production-qualification.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test --test-concurrency=1 test/*.test.mjs"
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1141.0",

@@ -51,11 +51,15 @@ test(
   'Slack destinations show their own loading, unavailable, error, empty, and refresh states',
   { timeout: 180000 },
   async () => {
-    const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-      cwd: new URL('..', import.meta.url),
-      stdio: 'ignore',
-      detached: true,
-    });
+    const server = spawn(
+      process.execPath,
+      ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+      {
+        cwd: new URL('..', import.meta.url),
+        stdio: 'ignore',
+        detached: true,
+      },
+    );
     let browser;
     try {
       for (let attempt = 0; ; attempt++) {

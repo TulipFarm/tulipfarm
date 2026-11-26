@@ -171,6 +171,14 @@
       "types": "./dist/task-approval-contracts.d.ts",
       "default": "./dist/task-approval-contracts.js"
     },
+    "./task-clarification-contracts": {
+      "types": "./dist/task-clarification-contracts.d.ts",
+      "default": "./dist/task-clarification-contracts.js"
+    },
+    "./task-clarifications": {
+      "types": "./dist/task-clarifications.d.ts",
+      "default": "./dist/task-clarifications.js"
+    },
     "./drafts": {
       "types": "./dist/drafts.d.ts",
       "default": "./dist/drafts.js"
@@ -397,7 +405,7 @@
     "generate:system-package-examples": "node scripts/generate-system-package-examples.mjs",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test": "node --test test/*.test.mjs",
     "test:integration": "node --test test/*.integration.mjs",
     "test:integrations": "node --test test/integrations.integration.mjs"
   },

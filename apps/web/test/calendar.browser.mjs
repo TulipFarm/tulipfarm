@@ -57,10 +57,14 @@ const historyEvents = parseCalendarRead(
 
 test('calendar home and shared chat rows', { timeout: 180000 }, async t => {
   await mkdir(new URL('../../../reports/calendar/', import.meta.url), { recursive: true });
-  const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-    cwd: new URL('..', import.meta.url),
-    stdio: 'ignore',
-  });
+  const server = spawn(
+    process.execPath,
+    ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+    {
+      cwd: new URL('..', import.meta.url),
+      stdio: 'ignore',
+    },
+  );
   let browser;
   try {
     for (let attempt = 0; ; attempt++) {

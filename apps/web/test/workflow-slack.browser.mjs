@@ -102,11 +102,11 @@ test(
         return result;
       });
       await app.listen({ host: '127.0.0.1', port: 3478 });
-      vite = spawn(
-        'pnpm',
-        ['--filter', '@tulipfarm/web', 'dev', '--host', '127.0.0.1', '--port', '5478', '--strictPort'],
-        { env: { ...process.env, VITE_API_URL: apiOrigin }, stdio: 'ignore' },
-      );
+      vite = spawn(process.execPath, ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', '5478'], {
+        cwd: new URL('..', import.meta.url),
+        env: { ...process.env, VITE_API_URL: apiOrigin },
+        stdio: 'ignore',
+      });
       for (
         let i = 0;
         !(await fetch(origin).then(

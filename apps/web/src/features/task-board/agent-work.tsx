@@ -7,6 +7,7 @@ import type { TableWorkspace } from '@/features/tables/references';
 import { useRowThread } from '@/features/tables/row-thread';
 import { TableRequestError } from '@/features/tables/request-state';
 import { toolVisual } from '@/features/chat/tool-labels';
+import { GitHubTaskSourceCard } from '@/features/chat/github-investigation-card';
 import { taskCredits } from '@/features/tasks/api';
 import type { TaskCard } from './api';
 import { currentStep, duration, sentence, useAssignmentRun } from './live';
@@ -101,6 +102,16 @@ export function AgentWork({
         >
           {sentence(activity.reason)} Reply below to continue.
         </p>
+      )}
+      {run && latest && card.state === 'waiting' && (
+        <GitHubTaskSourceCard
+          workspaceId={workspace.id}
+          chatId={latest.taskId}
+          slug={workspace.slug}
+          disabled={busy}
+          picked={() => void refresh()}
+          working={false}
+        />
       )}
       {activity?.wakeAt && (
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">

@@ -4,7 +4,7 @@ import { createServer as createHttpServer } from 'node:http';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import { createServer } from 'vite';
+import { createBuiltAppServer as createServer } from './built-app.fixture.mjs';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
 
 const workspace = {

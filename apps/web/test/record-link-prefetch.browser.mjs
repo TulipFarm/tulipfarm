@@ -19,10 +19,14 @@ const first = project('20000000-0000-4000-8000-000000000091', 'First launch');
 const second = project('20000000-0000-4000-8000-000000000092', 'Second launch');
 
 test('pointing at or focusing a record link starts the read its page opens with', { timeout: 120000 }, async () => {
-  const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', '5782', '--strictPort'], {
-    cwd: new URL('..', import.meta.url),
-    stdio: 'ignore',
-  });
+  const server = spawn(
+    process.execPath,
+    ['test/serve-built-app.mjs', '--host', '127.0.0.1', '--port', '5782', '--strictPort'],
+    {
+      cwd: new URL('..', import.meta.url),
+      stdio: 'ignore',
+    },
+  );
   let browser;
   try {
     for (

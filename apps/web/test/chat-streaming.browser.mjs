@@ -59,7 +59,7 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 240000 
   const vite = spawn(
     process.execPath,
     [
-      new URL('../node_modules/vite/bin/vite.js', import.meta.url).pathname,
+      new URL('./serve-built-app.mjs', import.meta.url).pathname,
       '--host',
       '127.0.0.1',
       '--port',
