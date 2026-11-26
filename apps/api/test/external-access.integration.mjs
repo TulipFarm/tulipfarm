@@ -28,7 +28,7 @@ test(
     const db = await fixture();
     await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
   ${await migration('0001_baseline.sql')}`);
-    await db.platform.query(`SET search_path TO app; ${await migration('0019_access_tokens.sql')}`);
+    await db.platform.query(`SET search_path TO app; ${await migration('0020_access_tokens.sql')}`);
     const pool = new pg.Pool({ connectionString: db.connectionString, options: '-c search_path=app' });
     let link;
     const auth = createAuth(
