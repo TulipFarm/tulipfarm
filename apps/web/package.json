@@ -90,7 +90,7 @@
     "axe-core": "4.14.0",
     "emoji-datasource": "16.0.0",
     "fake-indexeddb": "6.2.5",
-    "playwright": "1.62.1",
+    "playwright": "npm:flashwright@1.64.1-flashwright.12",
     "pptxgenjs": "4.0.1",
     "shadcn": "4.21.0",
     "tailwindcss": "4.3.3",
