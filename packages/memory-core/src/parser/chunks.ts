@@ -14,6 +14,9 @@ function loadEncoding() {
 }
 const pieceTokens = new Map<string, number>();
 const pieceCacheLimit = 100_000;
+// js-tiktoken's byte-pair merge is quadratic in piece length, and an unbroken run such as CJK prose or a long
+// symbol line is a single piece. Counting long pieces in fixed runs keeps each encode cheap and cacheable.
+const longPieceChars = 256;
 /** Names the text normalization and chunking below; part of every parser profile. */
 export const normalization = 'nfc-lf-v1-cl100k_base-800-100';
 
@@ -23,23 +26,33 @@ export function countTokens(text: string): number {
 
 /**
  * Counts tokens the way `encode` does: the text splits into pieces and each piece encodes on its own.
+ * Pieces longer than `longPieceChars` count as consecutive runs of that length.
  * Stops once the count passes `limit`, so callers that only test a limit skip the rest of the text.
  */
 function countTokensUpTo(text: string, limit: number): number {
   if (!loaded) throw new Error('The tokenizer is not loaded');
-  const { tokenizer, pieces } = loaded;
   let total = 0;
-  for (const [piece] of text.matchAll(pieces)) {
-    let tokens = pieceTokens.get(piece);
-    if (tokens === undefined) {
-      tokens = tokenizer.encode(piece, [], []).length;
-      if (pieceTokens.size >= pieceCacheLimit) pieceTokens.clear();
-      pieceTokens.set(piece, tokens);
+  for (const [piece] of text.matchAll(loaded.pieces)) {
+    let start = 0;
+    while (start < piece.length) {
+      let end = Math.min(piece.length, start + longPieceChars);
+      if (end < piece.length && /[\uD800-\uDBFF]/.test(piece[end - 1] ?? '')) end -= 1;
+      total += pieceTokenCount(start === 0 && end === piece.length ? piece : piece.slice(start, end));
+      if (total > limit) return total;
+      start = end;
     }
-    total += tokens;
-    if (total > limit) return total;
   }
   return total;
+}
+
+function pieceTokenCount(piece: string): number {
+  let tokens = pieceTokens.get(piece);
+  if (tokens === undefined) {
+    tokens = loaded!.tokenizer.encode(piece, [], []).length;
+    if (pieceTokens.size >= pieceCacheLimit) pieceTokens.clear();
+    pieceTokens.set(piece, tokens);
+  }
+  return tokens;
 }
 
 function fitsTokens(text: string, limit: number): boolean {
