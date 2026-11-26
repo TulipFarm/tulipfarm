@@ -100,7 +100,8 @@ function UserMessage({ children }: { children: string }) {
 
 /** Quick answers to TulipFarm's question, in the app's question card, right under the message. */
 function QuestionCard({ options, onAnswer }: { options: string[]; onAnswer: (answer: string) => void }) {
-  const [choice, setChoice] = useState<string[]>([]);
+  // A single answer comes ready-selected, so Continue sends it without picking it first.
+  const [choice, setChoice] = useState<string[]>(options.length === 1 ? [options[0]!] : []);
   const [attempted, setAttempted] = useState(false);
   const error = attempted && !choice.length ? 'Choose an answer, or type your own below.' : undefined;
   return (
@@ -389,7 +390,9 @@ function AgentPicker({
   onDone: (selected: StarterAgentId[]) => void;
 }) {
   const suggestions = agents.flatMap(id => starterAgents.filter(agent => agent.id === id));
-  const [selected, setSelected] = useState<string[]>(initial.filter(id => agents.includes(id)));
+  const [selected, setSelected] = useState<string[]>(
+    suggestions.length === 1 ? [suggestions[0]!.id] : initial.filter(id => agents.includes(id)),
+  );
   return (
     <section
       aria-label="Suggested agents"

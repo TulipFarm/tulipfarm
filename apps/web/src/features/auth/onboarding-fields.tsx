@@ -102,14 +102,24 @@ export function useOnboardingFields(disabled: boolean) {
   }, [name, customSlug, chatProfile, website, personName]);
   // As soon as there's a workspace name, look up its website, unless the visitor typed one.
   const trimmedName = name.trim();
+  const typedWebsite = websiteSource === 'typed';
+  const lookedUp = useRef(new Map<string, string | null>());
   useEffect(() => {
-    if (websiteSource === 'typed' || trimmedName.length < 2) return;
+    if (typedWebsite || trimmedName.length < 2) return;
+    // Each name is searched once; going back to an earlier name reuses its answer.
+    if (lookedUp.current.has(trimmedName)) {
+      const found = lookedUp.current.get(trimmedName) ?? null;
+      setWebsite(found ?? '');
+      setWebsiteSource(found ? 'found' : null);
+      return;
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => {
       setLookingUp(true);
       void guideVisitor(challenge)
         .then(visitor => findWebsite(visitor, trimmedName, controller.signal))
         .then(found => {
+          lookedUp.current.set(trimmedName, found);
           if (controller.signal.aborted) return;
           setWebsite(found ?? '');
           setWebsiteSource(found ? 'found' : null);
@@ -124,7 +134,7 @@ export function useOnboardingFields(disabled: boolean) {
       controller.abort();
       setLookingUp(false);
     };
-  }, [trimmedName, websiteSource, challenge]);
+  }, [trimmedName, typedWebsite, challenge]);
   const onChallenge = useCallback((token: string | null) => setChallenge(token), []);
   const checkAvailability = useCallback((value: string) => {
     clearTimeout(debounce.current);

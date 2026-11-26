@@ -12,6 +12,8 @@ export const sessionIndependentOperations: ReadonlySet<string> = new Set([
   'publicGuideSessionV1',
   'publicGuideMessageV1',
   'publicGuideSignupV1',
+  'publicGuideOnboardingV1',
+  'publicGuideWebsiteV1',
   'publicGuideGoogleV1',
   'checkOnboardingUrlV1',
   'saveOnboardingV1',

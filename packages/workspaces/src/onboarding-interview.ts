@@ -66,11 +66,50 @@ export function openingTurn(
   };
 }
 
+/**
+ * Goal choices in the words of the visitor's kind of business, read from what they and their homepage said. Each label
+ * maps back to a goal through `goalFromText`. The model writes its own; these are for when it's unavailable.
+ */
+const goalsByBusiness: [RegExp, string[]][] = [
+  [
+    /\b(software|saas|app|platform|api|developers?|cloud|startup|tech)\b/i,
+    ['Answer support emails', 'Follow up with trial sign-ups', 'Prepare for sales calls', 'Chase unpaid invoices'],
+  ],
+  [
+    /\b(restaurants?|caf[eé]s?|bakery|bakes|food|sweets|snacks|catering|kitchen|menu|mithai|namkeen)\b/i,
+    ['Reply to orders and enquiries', 'Get more customer reviews', 'Track supplier bills', 'Answer common questions'],
+  ],
+  [
+    /\b(clinic|dental|dentist|doctors?|patients?|therapy|health|salon|spa|physio|gym|fitness)\b/i,
+    ['Reply to patient messages', 'Remind people about appointments', 'Ask happy clients for reviews', 'Log expenses'],
+  ],
+  [
+    /\b(agency|studio|consult\w*|freelanc\w*|design|marketing|creative)\b/i,
+    ['Follow up with new leads', 'Reply to client emails', 'Prepare for client meetings', 'Chase unpaid invoices'],
+  ],
+  [
+    /\b(shop|store|e-?commerce|retail|boutique|products?|brand)\b/i,
+    ['Answer customer questions', 'Win back past customers', 'Get more reviews', 'Log receipts and expenses'],
+  ],
+  [
+    /\b(family|kids|household|home)\b/i,
+    ['Run the family calendar', 'Plan meals and shopping', 'Track bills and renewals', 'Sort the inbox each morning'],
+  ],
+];
+
+export function goalSuggestionsFor(profile: OnboardingProfile) {
+  const text = [profile.about, profile.site].filter(Boolean).join(' ');
+  return goalsByBusiness.find(([pattern]) => pattern.test(text))?.[1] ?? goalSuggestions;
+}
+
 const goalKeywords: [OnboardingGoalId, RegExp][] = [
   ['household', /\b(family|home|house|household|kids?|children|meals?|groceries|chores|school)\b/i],
   ['customer-messages', /\b(messages?|support|repl(y|ies)|inbox|enquir(y|ies)|inquir(y|ies)|tickets?|questions?)\b/i],
-  ['admin', /\b(admin|paperwork|invoices?|receipts?|bills?|expenses?|accounting|bookkeeping|taxes|scheduling)\b/i],
-  ['customers', /\b(customers?|clients?|leads?|sales|sell|marketing|grow|reviews?|prospects?)\b/i],
+  [
+    'admin',
+    /\b(admin|paperwork|invoices?|receipts?|bills?|expenses?|accounting|bookkeeping|taxes|scheduling|appointments?)\b/i,
+  ],
+  ['customers', /\b(customers?|clients?|leads?|sales|sell|marketing|grow|reviews?|prospects?|trials?|sign-?ups)\b/i],
 ];
 
 export function goalFromText(text: string): OnboardingProfile['goal'] {
@@ -124,7 +163,7 @@ export function ruleTurn(request: InterviewRequest): Omit<InterviewTurn, 'conver
         reply: `${skipped ? 'No problem.' : 'Thanks, that helps.'} ${goalQuestion}`,
         stage: 'goal',
         profile: next,
-        suggestions: goalSuggestions,
+        suggestions: goalSuggestionsFor(next),
         agents: [],
       };
     }
