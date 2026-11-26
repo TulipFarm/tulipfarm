@@ -8,7 +8,6 @@ import {
   onboardingPersonas,
   starterAgentIds,
   starterAgents,
-  suggestStarterAgents,
 } from '@tulipfarm/workspaces/onboarding-catalog';
 import {
   interviewStages,
@@ -16,7 +15,7 @@ import {
   type InterviewTurn,
   type OnboardingProfile,
 } from '@tulipfarm/workspaces/onboarding-contracts';
-import { ruleTurn } from '@tulipfarm/workspaces/onboarding-interview';
+import { agentsFor, ruleTurn } from '@tulipfarm/workspaces/onboarding-interview';
 import { z } from 'zod';
 import { guideFacts, guideClient } from './public-guide-model.ts';
 import type { OnboardingSite } from './onboarding-site.ts';
@@ -143,10 +142,7 @@ export function applyModelTurn(
     persona: turn.persona ?? request.profile.persona,
     answers: turn.answer ? [...request.profile.answers, turn.answer].slice(-4) : request.profile.answers,
   };
-  const agents =
-    stage === 'agents'
-      ? [...new Set(turn.agents.length ? turn.agents : suggestStarterAgents(profile.goal?.id ?? null).map(a => a.id))]
-      : [];
+  const agents = stage === 'agents' ? [...new Set(turn.agents.length ? turn.agents : agentsFor(profile))] : [];
   return { reply: turn.reply, stage, profile, suggestions: stage === 'agents' ? [] : turn.suggestions, agents };
 }
 

@@ -6,6 +6,7 @@ import {
   suggestStarterAgents,
   type OnboardingGoalId,
   type OnboardingPersona,
+  type StarterAgentId,
 } from './onboarding-catalog.ts';
 import type { InterviewRequest, InterviewTurn, OnboardingProfile } from './onboarding-contracts.ts';
 
@@ -70,36 +71,79 @@ export function openingTurn(
  * Goal choices in the words of the visitor's kind of business, read from what they and their homepage said. Each label
  * maps back to a goal through `goalFromText`. The model writes its own; these are for when it's unavailable.
  */
-const goalsByBusiness: [RegExp, string[]][] = [
+type BusinessGoal = { label: string; agents: StarterAgentId[] };
+const goal = (label: string, ...agents: StarterAgentId[]): BusinessGoal => ({ label, agents });
+const goalsByBusiness: [RegExp, BusinessGoal[]][] = [
   [
     /\b(software|saas|app|platform|api|developers?|cloud|startup|tech)\b/i,
-    ['Answer support emails', 'Follow up with trial sign-ups', 'Prepare for sales calls', 'Chase unpaid invoices'],
+    [
+      goal('Answer support emails', 'email-replies', 'common-questions', 'customer-list', 'daily-summary'),
+      goal('Follow up with trial sign-ups', 'lead-follow-up', 'customer-list', 'email-replies', 'meeting-prep'),
+      goal('Prepare for sales calls', 'meeting-prep', 'lead-follow-up', 'customer-list', 'daily-summary'),
+      goal('Chase unpaid invoices', 'invoice-tracker', 'expense-log', 'bills-and-renewals', 'daily-summary'),
+    ],
   ],
   [
     /\b(restaurants?|caf[eé]s?|bakery|bakes|food|sweets|snacks|catering|kitchen|menu|mithai|namkeen)\b/i,
-    ['Reply to orders and enquiries', 'Get more customer reviews', 'Track supplier bills', 'Answer common questions'],
+    [
+      goal('Reply to orders and enquiries', 'email-replies', 'common-questions', 'customer-list', 'daily-summary'),
+      goal('Get more customer reviews', 'review-requests', 'customer-list', 'email-replies'),
+      goal('Track supplier bills', 'bills-and-renewals', 'expense-log', 'invoice-tracker'),
+      goal('Answer common questions', 'common-questions', 'email-replies', 'daily-summary'),
+    ],
   ],
   [
     /\b(clinic|dental|dentist|doctors?|patients?|therapy|health|salon|spa|physio|gym|fitness)\b/i,
-    ['Reply to patient messages', 'Remind people about appointments', 'Ask happy clients for reviews', 'Log expenses'],
+    [
+      goal('Reply to patient messages', 'email-replies', 'common-questions', 'daily-summary', 'customer-list'),
+      goal('Remind people about appointments', 'daily-summary', 'meeting-prep', 'email-replies'),
+      goal('Ask happy clients for reviews', 'review-requests', 'customer-list', 'email-replies'),
+      goal('Log expenses', 'expense-log', 'bills-and-renewals', 'invoice-tracker'),
+    ],
   ],
   [
     /\b(agency|studio|consult\w*|freelanc\w*|design|marketing|creative)\b/i,
-    ['Follow up with new leads', 'Reply to client emails', 'Prepare for client meetings', 'Chase unpaid invoices'],
+    [
+      goal('Follow up with new leads', 'lead-follow-up', 'customer-list', 'meeting-prep', 'review-requests'),
+      goal('Reply to client emails', 'email-replies', 'daily-summary', 'customer-list'),
+      goal('Prepare for client meetings', 'meeting-prep', 'customer-list', 'daily-summary'),
+      goal('Chase unpaid invoices', 'invoice-tracker', 'expense-log', 'bills-and-renewals'),
+    ],
   ],
   [
     /\b(shop|store|e-?commerce|retail|boutique|products?|brand)\b/i,
-    ['Answer customer questions', 'Win back past customers', 'Get more reviews', 'Log receipts and expenses'],
+    [
+      goal('Answer customer questions', 'email-replies', 'common-questions', 'customer-list'),
+      goal('Win back past customers', 'customer-list', 'lead-follow-up', 'review-requests'),
+      goal('Get more reviews', 'review-requests', 'customer-list'),
+      goal('Log receipts and expenses', 'expense-log', 'bills-and-renewals', 'invoice-tracker'),
+    ],
   ],
   [
     /\b(family|kids|household|home)\b/i,
-    ['Run the family calendar', 'Plan meals and shopping', 'Track bills and renewals', 'Sort the inbox each morning'],
+    [
+      goal('Run the family calendar', 'family-calendar', 'daily-summary', 'meal-planner'),
+      goal('Plan meals and shopping', 'meal-planner', 'family-calendar'),
+      goal('Track bills and renewals', 'bills-and-renewals', 'expense-log', 'daily-summary'),
+      goal('Sort the inbox each morning', 'daily-summary', 'family-calendar', 'bills-and-renewals'),
+    ],
   ],
 ];
 
+const businessText = (profile: OnboardingProfile) => [profile.about, profile.site].filter(Boolean).join(' ');
+
 export function goalSuggestionsFor(profile: OnboardingProfile) {
-  const text = [profile.about, profile.site].filter(Boolean).join(' ');
-  return goalsByBusiness.find(([pattern]) => pattern.test(text))?.[1] ?? goalSuggestions;
+  const goals = goalsByBusiness.find(([pattern]) => pattern.test(businessText(profile)))?.[1];
+  return goals?.map(goal => goal.label) ?? goalSuggestions;
+}
+
+/** Agents for the goal they chose, best first: the goal's own list when they tapped one of their business's choices. */
+export function agentsFor(profile: OnboardingProfile): StarterAgentId[] {
+  const chosen = profile.goal?.text?.toLowerCase();
+  const tailored = goalsByBusiness
+    .flatMap(([, goals]) => goals)
+    .find(goal => goal.label.toLowerCase() === chosen)?.agents;
+  return tailored ?? suggestStarterAgents(profile.goal?.id ?? null).map(agent => agent.id);
 }
 
 const goalKeywords: [OnboardingGoalId, RegExp][] = [
@@ -128,12 +172,18 @@ export function personaFromText(text: string, goal: OnboardingGoalId | null): On
 }
 
 function agentsTurn(name: string, profile: OnboardingProfile, lead: string): Omit<InterviewTurn, 'conversation'> {
+  // "answer support emails", when they tapped one of their business's goals.
+  const text = profile.goal?.text;
+  const aim =
+    text && goalsByBusiness.some(([, goals]) => goals.some(goal => goal.label === text))
+      ? text[0]!.toLowerCase() + text.slice(1)
+      : null;
   return {
-    reply: `${lead} Here are agents that could help ${name}. Tick the ones you want, or tell me what else you need. Bud will build them with you once you’re in.`,
+    reply: `${lead} Here are agents that could help ${name}${aim ? ` ${aim}` : ''}. Tick the ones you want, or tell me what else you need. Bud will build them with you once you’re in.`,
     stage: 'agents',
     profile,
     suggestions: [],
-    agents: suggestStarterAgents(profile.goal?.id ?? null).map(agent => agent.id),
+    agents: agentsFor(profile),
   };
 }
 

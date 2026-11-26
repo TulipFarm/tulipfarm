@@ -15,6 +15,7 @@ import { newOnboardingToken, saveOnboarding, workspaceUrlAvailable } from '@/lib
 import { onboardingChatMessages } from '@/features/auth/onboarding-interview';
 import { findWebsite, guideVisitor } from '@/features/auth/guide-visitor';
 import { AuthVerification } from '@/features/auth/verification';
+import { useAuthOptions } from '@/features/auth/public-query';
 import { suggestWorkspaceSlug, workspaceSlugError } from '@/lib/workspace-slug';
 
 // New workspaces are always business workspaces; the signup flow does not ask.
@@ -58,6 +59,8 @@ function clearWorkspaceDraft() {
 }
 
 export function useOnboardingFields(disabled: boolean) {
+  // The chat-onboarding flag also brings its step 1: business name first, your name, and a website found on the web.
+  const chatOn = useAuthOptions().data?.chatOnboarding === true;
   const [draft] = useState(readWorkspaceDraft);
   const [name, setName] = useState(draft?.name ?? '');
   const [customSlug, setCustomSlug] = useState<string | null>(draft?.customSlug ?? null);
@@ -105,7 +108,7 @@ export function useOnboardingFields(disabled: boolean) {
   const typedWebsite = websiteSource === 'typed';
   const lookedUp = useRef(new Map<string, string | null>());
   useEffect(() => {
-    if (typedWebsite || trimmedName.length < 2) return;
+    if (!chatOn || typedWebsite || trimmedName.length < 2) return;
     // Each name is searched once; going back to an earlier name reuses its answer.
     if (lookedUp.current.has(trimmedName)) {
       const found = lookedUp.current.get(trimmedName) ?? null;
@@ -134,7 +137,7 @@ export function useOnboardingFields(disabled: boolean) {
       controller.abort();
       setLookingUp(false);
     };
-  }, [trimmedName, typedWebsite, challenge]);
+  }, [chatOn, trimmedName, typedWebsite, challenge]);
   const onChallenge = useCallback((token: string | null) => setChallenge(token), []);
   const checkAvailability = useCallback((value: string) => {
     clearTimeout(debounce.current);
@@ -166,7 +169,7 @@ export function useOnboardingFields(disabled: boolean) {
   }, [slug, checkAvailability]);
   function validate() {
     setSubmitted(true);
-    if (websiteInvalid || !personName.trim()) return false;
+    if (chatOn && (websiteInvalid || !personName.trim())) return false;
     return onboardingDetailsSchema.safeParse({ name, slug, accountType, messages: [], profile }).success;
   }
   async function prepare() {
@@ -200,7 +203,7 @@ export function useOnboardingFields(disabled: boolean) {
     <div className="grid gap-5">
       <Field
         id="onboarding-workspace-name"
-        label="Business or workspace name"
+        label={chatOn ? 'Business or workspace name' : 'Workspace name'}
         required
         disabled={disabled}
         error={submitted && !name.trim() ? 'Enter a workspace name.' : undefined}
@@ -215,7 +218,7 @@ export function useOnboardingFields(disabled: boolean) {
           onChange={event => setName(event.target.value)}
         />
       </Field>
-      {editingSlug || slugError ? (
+      {!chatOn || editingSlug || slugError ? (
         <Field
           id="onboarding-workspace-slug"
           label="Workspace URL"
@@ -259,57 +262,61 @@ export function useOnboardingFields(disabled: boolean) {
           </div>
         )
       )}
-      <Field
-        id="onboarding-person-name"
-        label="Your name"
-        required
-        disabled={disabled}
-        error={submitted && !personName.trim() ? 'Enter your name.' : undefined}
-      >
-        <Input
-          name="name"
-          scale="lg"
-          autoComplete="name"
-          placeholder="Ada Lovelace"
-          maxLength={80}
-          value={personName}
-          onChange={event => setPersonName(event.target.value)}
-        />
-      </Field>
-      <Field
-        id="onboarding-workspace-website"
-        label="Website"
-        optional
-        disabled={disabled}
-        helper={
-          lookingUp
-            ? 'Looking for your website…'
-            : websiteSource === 'found'
-              ? 'We found this on the web. Change it if it’s not yours.'
-              : 'Helps us suggest the right agents.'
-        }
-        error={submitted && websiteInvalid ? 'Enter a website address, like acme-studio.com.' : undefined}
-      >
-        <Input
-          name="workspace-website"
-          type="url"
-          inputMode="url"
-          scale="lg"
-          autoComplete="url"
-          autoCapitalize="none"
-          spellCheck={false}
-          placeholder="acme-studio.com"
-          maxLength={200}
-          value={website}
-          onChange={event => {
-            setWebsite(event.target.value);
-            setWebsiteSource(event.target.value.trim() ? 'typed' : null);
-          }}
-        />
-      </Field>
-      <div className="sr-only">
-        <AuthVerification action="public_guide" onToken={onChallenge} />
-      </div>
+      {chatOn && (
+        <>
+          <Field
+            id="onboarding-person-name"
+            label="Your name"
+            required
+            disabled={disabled}
+            error={submitted && !personName.trim() ? 'Enter your name.' : undefined}
+          >
+            <Input
+              name="name"
+              scale="lg"
+              autoComplete="name"
+              placeholder="Ada Lovelace"
+              maxLength={80}
+              value={personName}
+              onChange={event => setPersonName(event.target.value)}
+            />
+          </Field>
+          <Field
+            id="onboarding-workspace-website"
+            label="Website"
+            optional
+            disabled={disabled}
+            helper={
+              lookingUp
+                ? 'Looking for your website…'
+                : websiteSource === 'found'
+                  ? 'We found this on the web. Change it if it’s not yours.'
+                  : 'Helps us suggest the right agents.'
+            }
+            error={submitted && websiteInvalid ? 'Enter a website address, like acme-studio.com.' : undefined}
+          >
+            <Input
+              name="workspace-website"
+              type="url"
+              inputMode="url"
+              scale="lg"
+              autoComplete="url"
+              autoCapitalize="none"
+              spellCheck={false}
+              placeholder="acme-studio.com"
+              maxLength={200}
+              value={website}
+              onChange={event => {
+                setWebsite(event.target.value);
+                setWebsiteSource(event.target.value.trim() ? 'typed' : null);
+              }}
+            />
+          </Field>
+          <div className="sr-only">
+            <AuthVerification action="public_guide" onToken={onChallenge} />
+          </div>
+        </>
+      )}
     </div>
   );
   return {

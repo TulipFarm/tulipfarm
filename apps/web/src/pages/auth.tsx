@@ -50,6 +50,15 @@ export function RegisterPage() {
 }
 
 export function WorkspaceSignupPage() {
+  // Step 1 reads the sign-up options too (the chat-onboarding flag shapes its fields), so the whole page shares them.
+  return (
+    <PublicAuthQueryProvider>
+      <WorkspaceSignup />
+    </PublicAuthQueryProvider>
+  );
+}
+
+function WorkspaceSignup() {
   const [pending, setPending] = useState(false);
   const [step, setStep] = useState<'workspace' | 'account'>('workspace');
   const workspace = useOnboardingFields(pending);

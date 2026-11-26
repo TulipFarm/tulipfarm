@@ -87,3 +87,75 @@ test('URL checks use a separate per-IP budget and can be retried after throttlin
   hits.clear();
   assert.equal((await check('192.0.2.1')).statusCode, 200);
 });
+
+test('website lookup accepts only a homepage whose domain matches the business name', async () => {
+  const { matchesName } = await import('../src/onboarding-website.ts');
+  assert.equal(matchesName('www.haldiram.com', 'Haldiram'), true);
+  assert.equal(matchesName('basecamp.com', 'Basecamp'), true);
+  assert.equal(matchesName('shop.acme.co.uk', 'Acme Ltd'), true);
+  assert.equal(matchesName('www.chaipoint.com', 'Chai Point'), true);
+  assert.equal(matchesName('www.linkedin.com', 'LinkedIn'), false, 'Directories are never a business website');
+  assert.equal(matchesName('example.com', 'Basecamp'), false);
+  assert.equal(matchesName('ab.com', 'AB'), false, 'Too short to match safely');
+});
+
+test('model turns move one stage at a time, except that follow-ups are optional', async () => {
+  const { applyModelTurn } = await import('../src/onboarding-interviewer.ts');
+  const { emptyOnboardingProfile } = await import('@tulipfarm/workspaces/onboarding-interview');
+  const turn = next_stage => ({
+    reply: 'Okay.',
+    site_summary: null,
+    goal_id: null,
+    goal_text: null,
+    about: null,
+    persona: null,
+    answer: null,
+    next_stage,
+    suggestions: [],
+    agents: [],
+  });
+  const request = (stage, kind = 'message') => ({
+    message: 'Hello',
+    kind,
+    stage,
+    profile: emptyOnboardingProfile,
+    workspaceName: 'Basecamp',
+    visitorName: null,
+  });
+  assert.equal(applyModelTurn(request('about', 'open'), turn('agents')).stage, 'about');
+  assert.equal(applyModelTurn(request('about'), turn('agents')).stage, 'goal');
+  assert.equal(applyModelTurn(request('goal'), turn('agents')).stage, 'agents');
+  assert.equal(applyModelTurn(request('goal'), turn('signup')).stage, 'agents');
+  assert.ok(applyModelTurn(request('goal'), turn('agents')).agents.length > 0, 'Agents fall back to the goal');
+});
+
+test('Bud continues the chat with the picked agents and remembers the business', async () => {
+  const { onboardingSeed } = await import('../src/onboarding-continuation.ts');
+  const { emptyOnboardingProfile } = await import('@tulipfarm/workspaces/onboarding-interview');
+  const seed = onboardingSeed({
+    workspaceName: 'Basecamp',
+    messages: [
+      { role: 'assistant', content: 'Hi Asha.' },
+      { role: 'user', content: 'We make project software.' },
+    ],
+    profile: {
+      ...emptyOnboardingProfile,
+      about: 'We make project software.',
+      website: 'https://basecamp.com/',
+      goal: { id: 'customer-messages', text: 'Answer support emails' },
+      selectedAgents: ['email-replies', 'customer-list'],
+    },
+  });
+  assert.equal(seed.messages.length, 2);
+  assert.match(seed.welcome, /Let’s build Email replies and Customer list, starting with Email replies\./);
+  assert.match(
+    seed.request,
+    /^Build the Email replies agent for Basecamp\. .* After that, I also want Customer list\.$/,
+  );
+  assert.match(seed.memory, /About Basecamp: We make project software\./);
+  assert.match(seed.memory, /What I want agents to help with first: Answer support emails/);
+
+  const none = onboardingSeed({ workspaceName: 'Basecamp', messages: [], profile: emptyOnboardingProfile });
+  assert.equal(none.request, null, 'Nothing is built for them without a pick');
+  assert.equal(none.memory, '');
+});
