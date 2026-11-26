@@ -15,7 +15,7 @@ import {
   type FanoutMarks,
 } from './subagent-fanout-state';
 
-const avatar: FanoutMarks['avatar'] = () => <AgentMark size={24} />;
+const avatar: FanoutMarks['avatar'] = agentId => <AgentMark agentId={agentId} size={24} />;
 
 /**
  * The sub-agents of one `agents.delegate` call, live while they run. AgentFanout draws the agents; the list under it
