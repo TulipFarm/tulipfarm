@@ -223,18 +223,21 @@ test(
   async t => {
     const { form, step } = await environment(t);
     await step('Access');
-    for (const app of ['Tables', 'Knowledge and web', 'GitHub']) {
+    for (const app of ['Tables', 'Knowledge and web']) {
       const group = form.getByRole('region', { name: `${app} actions`, exact: true });
       await group.getByRole('button').first().click();
       await group.getByRole('button', { name: `${app}: read only`, exact: true }).click();
     }
-    const chosen = form.getByRole('list', { name: 'Chosen actions' });
-    const before = await chosen.innerText();
     const slack = form.getByRole('region', { name: 'Slack actions', exact: true });
     await slack.getByRole('button').first().click();
     await slack
       .getByRole('button', { name: 'Slack: all actions, including actions that change data', exact: true })
       .click();
+    const chosen = form.getByRole('list', { name: 'Chosen actions' });
+    const before = await chosen.innerText();
+    const github = form.getByRole('region', { name: 'GitHub actions', exact: true });
+    await github.getByRole('button').first().click();
+    await github.getByRole('button', { name: 'GitHub: read only', exact: true }).click();
     await form.getByRole('alert').getByText('Choose no more than 20 actions.', { exact: true }).waitFor();
     assert.equal(await chosen.innerText(), before);
     assert.ok((await chosen.getByRole('listitem').count()) <= 20);
