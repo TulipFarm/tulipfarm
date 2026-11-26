@@ -12,7 +12,7 @@ CREATE TABLE {{schema}}.tf_member_external_handles (
   created_by_membership_id uuid NOT NULL REFERENCES {{schema}}.tf_memberships(id),
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-  FOREIGN KEY (table_id, member_id) REFERENCES {{schema}}.tf_table_identities(table_id, row_id),
+  FOREIGN KEY (table_id, member_id) REFERENCES {{schema}}.tf_table_identities(table_id, row_id) ON DELETE CASCADE,
   CHECK (external_id IS NOT NULL OR handle IS NOT NULL)
 );
 CREATE INDEX tf_member_external_handles_member ON {{schema}}.tf_member_external_handles (member_id, provider);
@@ -92,3 +92,19 @@ GRANT SELECT, INSERT, UPDATE ON {{schema}}.tf_member_external_handle_observation
 GRANT SELECT ON {{schema}}.tf_member_verified_links TO {{runtime}};
 GRANT SELECT ON {{schema}}.tf_member_external_handles, {{schema}}.tf_member_external_handle_observations,
   {{schema}}.tf_member_verified_links TO {{migration}};
+
+-- Soft-deleting a Members row flips live to false without removing the identity row, so clear its manual handles.
+CREATE FUNCTION {{schema}}.tf_clear_deleted_member_handles() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $$
+BEGIN
+  DELETE FROM {{schema}}.tf_member_external_handles
+  WHERE table_id = NEW.table_id AND member_id = NEW.row_id;
+  RETURN NULL;
+END;
+$$;
+REVOKE ALL ON FUNCTION {{schema}}.tf_clear_deleted_member_handles()
+  FROM PUBLIC, {{runtime}}, {{migration}}, {{customOwner}}, {{confirmation}};
+CREATE TRIGGER tf_table_identities_clear_member_handles
+  AFTER UPDATE OF live ON {{schema}}.tf_table_identities
+  FOR EACH ROW WHEN (OLD.live AND NOT NEW.live)
+  EXECUTE FUNCTION {{schema}}.tf_clear_deleted_member_handles();

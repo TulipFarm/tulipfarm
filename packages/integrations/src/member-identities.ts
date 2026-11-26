@@ -602,10 +602,13 @@ async function assertUnclaimed(
   const r = relations(tx);
   const { rows } = await tx.client.query<{ claimed: boolean }>(
     `SELECT EXISTS (SELECT 1 FROM ${r.links} WHERE provider = $1 AND scope = $2 AND external_id = $3::text)
-      OR EXISTS (SELECT 1 FROM ${r.handles} WHERE provider = $1 AND scope = $2 AND external_id = $3::text
-        AND id IS DISTINCT FROM $6::uuid)
-      OR EXISTS (SELECT 1 FROM ${r.handles} WHERE member_id = $4 AND provider = $1 AND scope = $2
-        AND handle_key = lower($5::text) AND id IS DISTINCT FROM $6::uuid) AS claimed`,
+      OR EXISTS (SELECT 1 FROM ${r.handles} h
+        JOIN ${r.identities} ti ON ti.table_id = h.table_id AND ti.row_id = h.member_id AND ti.live
+        WHERE h.provider = $1 AND h.scope = $2 AND h.external_id = $3::text AND h.id IS DISTINCT FROM $6::uuid)
+      OR EXISTS (SELECT 1 FROM ${r.handles} h
+        JOIN ${r.identities} ti ON ti.table_id = h.table_id AND ti.row_id = h.member_id AND ti.live
+        WHERE h.member_id = $4 AND h.provider = $1 AND h.scope = $2
+        AND h.handle_key = lower($5::text) AND h.id IS DISTINCT FROM $6::uuid) AS claimed`,
     [identity.provider, identity.scope, values.externalId, identity.memberId, values.handle, identity.id],
   );
   if (rows[0]?.claimed) throw new MemberIdentityError('identity-claimed');

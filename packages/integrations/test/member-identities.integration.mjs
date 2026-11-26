@@ -486,6 +486,17 @@ test('an external ID belongs to one person, and a verified account outranks hand
     status: 409,
   });
 
+  const contractor = await handAdded();
+  await add(contractor, { provider: 'discord', externalId: '2222', handle: 'contractor' });
+  await assert.rejects(add(other, { provider: 'discord', externalId: '2222' }), {
+    code: 'identity-claimed',
+    status: 409,
+  });
+  await deleteMemberRow(contractor);
+  const reclaimed = await add(other, { provider: 'discord', externalId: '2222', handle: 'contractor' });
+  assert.equal(reclaimed.externalId, '2222');
+  assert.equal(reclaimed.memberId, other.memberId);
+
   await connectGitHub(owner, { id: '7007', login: 'owner7' });
   await assert.rejects(add(other, { provider: 'github', externalId: '7007' }), {
     code: 'identity-claimed',
