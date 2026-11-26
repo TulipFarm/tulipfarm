@@ -113,8 +113,14 @@ export function CodeSessionCard({
           <div className="flex flex-wrap items-center gap-2">
             <TerminalIcon size="sm" aria-hidden="true" />
             <span className="font-medium text-sm">{session.title}</span>
-            <Badge variant="secondary">{codeSessionStageLabels[session.stage]}</Badge>
-            <Badge variant={runStateVariants[session.runState]}>{session.runState}</Badge>
+            {active ? (
+              <>
+                <Badge variant="secondary">{codeSessionStageLabels[session.stage]}</Badge>
+                <Badge variant={runStateVariants[session.runState]}>{session.runState}</Badge>
+              </>
+            ) : (
+              <Badge variant={runStateVariants[session.runState]}>{codeSessionStageLabels[session.stage]}</Badge>
+            )}
           </div>
           <p className="font-mono text-xs text-muted-foreground">
             {codingAgentLabels[session.agent]} · {session.repository} ({session.baseBranch} → {session.sessionBranch})

@@ -177,6 +177,24 @@ export async function codeSession(input: { workspaceId: string; sessionId: strin
   const qaHistory: string[] = [];
   let guidance: string | undefined;
 
+  function extractErrorMessage(error: unknown): string {
+    const messages: string[] = [];
+    let current: unknown = error;
+    let depth = 0;
+    while (current && depth < 6) {
+      if (typeof current === 'object' && 'message' in current && typeof current.message === 'string') {
+        const cleaned = current.message.replace(/\s+/g, ' ').trim();
+        if (cleaned) messages.push(cleaned);
+      }
+      current = typeof current === 'object' && 'cause' in current ? current.cause : undefined;
+      depth += 1;
+    }
+    const meaningful = [...messages]
+      .reverse()
+      .find(msg => msg !== 'Activity task failed' && msg !== 'Workflow task failed');
+    return (meaningful ?? messages[0] ?? 'Code session failed unexpectedly.').slice(0, 400);
+  }
+
   async function recordFailure(error: unknown): Promise<void> {
     if (stopped) {
       await CancellationScope.nonCancellable(() =>
@@ -184,8 +202,7 @@ export async function codeSession(input: { workspaceId: string; sessionId: strin
       );
       return;
     }
-    const raw = error instanceof Error ? error.message : 'Code session failed unexpectedly.';
-    const sanitized = raw.replace(/\s+/g, ' ').trim().slice(0, 400);
+    const sanitized = extractErrorMessage(error);
     await CancellationScope.nonCancellable(async () => {
       try {
         const current = await acts.loadCodeSession(workspaceId, sessionId);
