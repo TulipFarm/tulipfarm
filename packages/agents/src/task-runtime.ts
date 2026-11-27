@@ -230,7 +230,7 @@ export function taskGoogleFilesReader(google: GoogleFileReader): TaskGoogleFiles
     return { filename: file.name, text: file.text, read: file.read };
   };
 }
-type FileSource = Extract<TaskSource, { kind: 'attachment' | 'file' | 'google-drive-file' }>;
+type FileSource = Extract<TaskSource, { kind: 'attachment' | 'row-attachment' | 'file' | 'google-drive-file' }>;
 /** Why a step stops before the model, and what the owner reads. Each names that the content was not read. */
 const fileStops = {
   unsupported: 'An attached file exceeds the supported text format or size, or file storage is not configured.',
@@ -259,9 +259,11 @@ const fileKey = (source: FileSource) =>
     ? `file:${source.fileId}`
     : source.kind === 'google-drive-file'
       ? `google:${source.fileId}`
-      : `attachment:${source.attachmentId}`;
+      : `${source.kind}:${source.attachmentId}`;
 const withoutRead = (source: FileSource): FileSource =>
-  source.kind === 'attachment' ? source : (({ read: _read, ...requested }) => requested)(source);
+  source.kind === 'attachment' || source.kind === 'row-attachment'
+    ? source
+    : (({ read: _read, ...requested }) => requested)(source);
 
 /**
  * What a step's files are read for: images only when every route the step may use reads them, since a fallback that
@@ -842,7 +844,10 @@ export function createTaskRuntime(
             .flatMap(message => message.sources)
             .filter(
               (source): source is FileSource =>
-                source.kind === 'attachment' || source.kind === 'file' || source.kind === 'google-drive-file',
+                source.kind === 'attachment' ||
+                source.kind === 'row-attachment' ||
+                source.kind === 'file' ||
+                source.kind === 'google-drive-file',
             )
             .map(source => [fileKey(source), withoutRead(source)]),
         ).values(),
@@ -1102,6 +1107,8 @@ export function createTaskRuntime(
             }
             const text = z.strictObject({ filename: z.string().max(255), text: z.string().max(16000) });
             for (const source of preparation.sources) {
+              // Without image reading, the brief still names a task's files; the agent reads them with files.read.
+              if (source.kind === 'row-attachment') continue;
               if (!(source.kind === 'attachment' ? attachments : source.kind === 'file' ? files : google)) {
                 materializing.stop = 'unsupported';
                 break;
@@ -1309,8 +1316,7 @@ export function createTaskRuntime(
       try {
         const parsed = parseModelDecision(result.decision, claim.input);
         if (parsed.kind === 'answer') {
-          const securityVerdict = await checkOutputSecurity({ workspaceId, text: parsed.text });
-          if (securityVerdict === 'block' || securityVerdict === 'review') {
+          if ((await checkOutputSecurity({ workspaceId, text: parsed.text })) === 'block') {
             outputBlocked = true;
           } else {
             if (parsed.incomplete === undefined) {

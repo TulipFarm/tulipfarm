@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { AccessDenied } from '@tulipfarm/access';
 import { createWorkspaceRuntime, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
@@ -9,8 +9,10 @@ import { activeGeneration } from '@tulipfarm/tables/store';
 import { runStateOf, taskFields } from '@tulipfarm/tables/tasks-table';
 import { fixture, loadPlatformBaseline } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createInboxSlackNotifier } from '../src/inbox-slack.ts';
-import { createRowAssignments, deliverComment } from '../src/row-assignments.ts';
+import { createRowAssignments, deliverComment, deliverRowFiles } from '../src/row-assignments.ts';
 import { createRowWork } from '../src/row-work.ts';
+import { changeRowAttachments } from '../src/row-attachments.ts';
+import { readTaskRowFile } from '../src/task-files.ts';
 
 async function harness(t) {
   const db = await fixture();
@@ -483,3 +485,84 @@ test(
     assert.equal(items.find(item => item.rowId === row.id)?.taskId, taskId, 'the item opens the run and its browser');
   },
 );
+
+test("an assigned agent is handed the row's description and comment files", { timeout: 60000 }, async t => {
+  const { workspace: ws, s, query, tableId, create, assignment, started, engine, transaction } = await harness(t);
+  const row = await create('Fix the login error');
+  const comment = randomUUID();
+  await query(
+    `INSERT INTO ${s}.tf_row_thread_items(id,table_id,row_id,kind,author_membership_id,body) VALUES($1,$2,$3,'comment',$4,'Still broken')`,
+    [comment, tableId, row.id, ws.membershipId],
+  );
+  const file = async (name, itemId) => {
+    const id = randomUUID();
+    await query(
+      `INSERT INTO ${s}.tf_row_attachments(id,table_id,row_id,thread_item_id,object_key,filename,media_type,size,sha256,creator_membership_id)
+        VALUES($1,$2,$3,$4,gen_random_uuid(),$5,'image/png',10,$6,$7)`,
+      [id, tableId, row.id, itemId, name, 'a'.repeat(64), ws.membershipId],
+    );
+    return id;
+  };
+  const shot = await file('login-error.png', null);
+  const after = await file('after.png', comment);
+
+  await engine.step(ws.id);
+  assert.deepEqual(started[0].sources, [
+    { kind: 'row-attachment', tableId, attachmentId: shot },
+    { kind: 'row-attachment', tableId, attachmentId: after },
+  ]);
+  assert.match(
+    started[0].text,
+    new RegExp(`Files on the description: \\[files: login-error\\.png \\(image/png, ${shot}\\)\\]`),
+  );
+  assert.match(started[0].text, new RegExp(`Still broken \\[files: after\\.png \\(image/png, ${after}\\)\\]`));
+
+  const { current_task_id: taskId } = await assignment(row.id);
+  await query(
+    `INSERT INTO ${s}.tf_agent_task_messages(task_id,sequence,generation,role,text,sources) VALUES($1,0,0,'owner','brief','[]')`,
+    [taskId],
+  );
+  await transaction(tx => deliverComment(tx, tableId, row.id, ws.membershipId, 'See this', [after]));
+  const [message] = await query(`SELECT sources FROM ${s}.tf_agent_task_messages WHERE task_id=$1 AND sequence=1`, [
+    taskId,
+  ]);
+  assert.deepEqual(message.sources, [{ kind: 'row-attachment', tableId, attachmentId: after }]);
+
+  const notes = Buffer.from('steps to reproduce');
+  const upload = randomUUID();
+  await query(
+    `INSERT INTO ${s}.tf_row_attachments(id,table_id,object_key,filename,media_type,size,sha256,creator_membership_id)
+      VALUES($1,$2,gen_random_uuid(),'notes.txt','text/plain',$3,$4,$5)`,
+    [upload, tableId, notes.length, createHash('sha256').update(notes).digest('hex'), ws.membershipId],
+  );
+  const change = await transaction(tx =>
+    changeRowAttachments(
+      tx,
+      ws.membershipId,
+      { tableId, rowId: row.id, itemId: null },
+      { add: [upload], remove: [shot] },
+    ),
+  );
+  assert.deepEqual(change.added, [upload]);
+  const description = await query(
+    `SELECT id FROM ${s}.tf_row_attachments WHERE row_id=$1 AND thread_item_id IS NULL ORDER BY id`,
+    [row.id],
+  );
+  assert.deepEqual(
+    description.map(file => file.id),
+    [upload],
+  );
+
+  await transaction(tx => deliverRowFiles(tx, tableId, row.id, ws.membershipId, change.added));
+  const [added] = await query(`SELECT sources FROM ${s}.tf_agent_task_messages WHERE task_id=$1 AND sequence=2`, [
+    taskId,
+  ]);
+  assert.deepEqual(added.sources, [{ kind: 'row-attachment', tableId, attachmentId: upload }]);
+
+  const owner = { kind: 'human', userId: ws.userId, membershipId: ws.membershipId };
+  const objects = { read: async () => notes };
+  const read = await transaction(tx => readTaskRowFile(tx, owner, objects, ws.id, { source: upload }, 20000));
+  assert.match(read.file, /steps to reproduce/);
+  const outsider = { kind: 'human', userId: randomUUID(), membershipId: randomUUID() };
+  assert.equal(await transaction(tx => readTaskRowFile(tx, outsider, objects, ws.id, { source: upload }, 20000)), null);
+});

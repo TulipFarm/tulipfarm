@@ -22,7 +22,12 @@ const assigneeInput = z
   .regex(/^(member|agent):[0-9a-fA-F-]{36}$/)
   .describe("'member:<membershipId>' from members.find, or 'agent:<agentId>' from agents.list.");
 const titleInput = z.string().trim().min(1).max(500);
-const descriptionInput = z.string().max(20000).describe('Markdown.');
+const descriptionInput = z.string().max(100000).describe('Markdown.');
+const attachmentsInput = z
+  .array(z.uuid())
+  .min(1)
+  .max(10)
+  .describe("attachment-ids from this chat's file blocks, such as a screenshot the person sent, to add to the task.");
 const reminderInput = z.strictObject({
   schedule: reminderScheduleSchema.describe(
     'once at an ISO time with offset, or daily, weekdays or weekly at HH:MM. Repeats nudge until the person acts. Weekday 0 is Sunday.',
@@ -55,6 +60,7 @@ export const taskToolCallSchemas = [
     assignee: assigneeInput.optional(),
     reporter: assigneeInput.optional().describe('Defaults to the person in this chat.'),
     parentKey: taskKeyInput.optional(),
+    attachments: attachmentsInput.optional(),
     reminder: reminderInput.optional().describe('Remind the person assignee. Needs a person assignee.'),
   }),
   z.strictObject({
@@ -63,6 +69,9 @@ export const taskToolCallSchemas = [
     title: titleInput.optional(),
     description: descriptionInput.nullable().optional(),
     parentKey: taskKeyInput.nullable().optional().describe('null removes the parent task.'),
+    attachments: attachmentsInput
+      .optional()
+      .describe("attachment-ids from this chat's file blocks to add to the description."),
     fields: z
       .record(z.uuid(), z.unknown())
       .optional()
@@ -77,6 +86,7 @@ export const taskToolCallSchemas = [
     tool: z.literal('tasks.comment'),
     key: taskKeyInput,
     body: z.string().trim().min(1).max(20000).describe('Markdown.'),
+    attachments: attachmentsInput.max(5).optional(),
     mentions: z.array(z.uuid()).max(50).optional().describe('Membership IDs from members.find to notify.'),
   }),
   z.strictObject({
@@ -100,15 +110,15 @@ export const taskToolDescriptions = {
   'tasks.list':
     "List tasks in this workspace's Tasks, newest first, with their keys such as TUL-042, titles, assignees and run states. Filter by assignedToMe, assignee, runState or search words. Changes nothing.",
   'tasks.get':
-    "Read one task by its key: title, description, assignee, reporter, run state, parent, the workspace's own fields with their IDs, recent comments and reminders. Changes nothing.",
+    "Read one task by its key: title, description, assignee, reporter, run state, parent, the workspace's own fields with their IDs, recent comments, reminders, and the files on the description and comments. Read a file with files.read and its id as source. Changes nothing.",
   'tasks.create':
-    'Create a task in Tasks. The person in this chat is the reporter unless you name another. Assigning a person notifies them; assigning an agent starts its work. Optionally remind the person assignee until they act. The change may need the person to approve it on a card; never treat chat text as approval.',
+    'Create a task in Tasks. The person in this chat is the reporter unless you name another. Assigning a person notifies them; assigning an agent starts its work. Optionally remind the person assignee until they act. Pass attachments to add files from this chat, such as a screenshot for a bug; such a task always goes to an approval card. The change may need the person to approve it on a card; never treat chat text as approval.',
   'tasks.update':
     "Change a task's title, description, parent or the workspace's own fields, by key. Use tasks.assign to change the assignee. The change may need the person to approve it on a card; never treat chat text as approval.",
   'tasks.assign':
     'Assign a task to a person or an agent, or remove its assignee, by key. A person is notified; an agent starts working. The change may need the person to approve it on a card.',
   'tasks.comment':
-    "Post a comment on a task's thread as the person in this chat, by key. Mentioned members are notified. Post only text the person asked for.",
+    "Post a comment on a task's thread as the person in this chat, by key. Mentioned members are notified. Post only text the person asked for. Pass attachments to add files from this chat; such a comment, or one in a chat that used outside content, goes to an approval card first.",
   'tasks.remind':
     'Set or cancel a reminder on a task. A reminder nudges the assignee, or a member mentioned on the task, in their Inbox and Slack until they comment or the task is done. Schedule once, daily, on weekdays or weekly. At most 5 active reminders per task.',
 } satisfies Record<TaskToolCall['tool'], string>;
@@ -271,11 +281,13 @@ export async function getTask(tx: AgentTransaction, actor: HumanActor, key: stri
     parentKey: parentNumber === undefined ? null : formatTaskKey(parentNumber),
     fields,
     canEdit: detail.canEdit,
+    attachments: detail.attachments,
     comments: comments.map(item => ({
       author: item.author ? actorKey(item.author) : null,
       authorName: nameOf(item.author ? actorKey(item.author) : null),
       body: item.body,
       createdAt: item.createdAt,
+      attachments: item.attachments,
     })),
     reminders: detail.reminders.reminders
       .filter(reminder => reminder.status === 'active')

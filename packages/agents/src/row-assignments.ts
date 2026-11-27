@@ -9,6 +9,7 @@ import { lockTask } from './task-approval-gate.ts';
 import { relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
 import { agentDefinitionSchema } from './contracts.ts';
 import { loadAgentEscalationPolicy, resolveEscalationRecipients } from './escalation-recipients.ts';
+import { listRowAttachments, type RowAttachment } from './row-attachments.ts';
 import { createRowClarification, parseClarificationBlock } from './task-clarifications.ts';
 
 /** Run limits for one wake: the agent's usual defaults. */
@@ -38,7 +39,13 @@ const pauseReasons: Record<string, string> = {
 type Starter = (
   workspaceId: string,
   userId: string,
-  input: { requestId: string; agentId: string; text: string; limits: typeof runLimits },
+  input: {
+    requestId: string;
+    agentId: string;
+    text: string;
+    limits: typeof runLimits;
+    sources: RowFileSource[];
+  },
 ) => Promise<{ id: string }>;
 type Pauser = (workspaceId: string, userId: string, taskId: string) => Promise<unknown>;
 
@@ -149,6 +156,14 @@ async function loadAgentDefaults(tx: AgentTransaction, agentId: string) {
   return parsed.success ? (parsed.data.defaults ?? null) : null;
 }
 
+type RowFileSource = { kind: 'row-attachment'; tableId: string; attachmentId: string };
+/** The most files a run is handed to read; the brief names the rest, which the agent reads with files.read by id. */
+const briefFiles = 8;
+const fileNames = (files: readonly RowAttachment[] | undefined) =>
+  files?.length ? ` [files: ${files.map(file => `${file.filename} (${file.mediaType}, ${file.id})`).join('; ')}]` : '';
+const rowFileSources = (tableId: string, files: readonly RowAttachment[]): RowFileSource[] =>
+  files.map(file => ({ kind: 'row-attachment', tableId, attachmentId: file.id }));
+
 async function runBrief(tx: AgentTransaction, tableId: string, rowId: string, agentName: string, agentId?: string) {
   const generation = await activeGeneration(tx, tableId);
   const row = await readRecord(tx, generation, rowId);
@@ -163,9 +178,12 @@ async function runBrief(tx: AgentTransaction, tableId: string, rowId: string, ag
         : `- ${field.label}: ${value.slice(0, field.id === taskFields.description ? 3000 : 400)}`;
     })
     .filter(Boolean);
-  const thread = z
+  const files = await listRowAttachments(tx, tableId, rowId);
+  if (files.description.length) fields.push(`- Files on the description:${fileNames(files.description)}`);
+  const items = z
     .array(
       z.object({
+        id: z.string(),
         kind: z.string(),
         body: z.string().nullable(),
         event: z.record(z.string(), z.unknown()).nullable(),
@@ -185,14 +203,17 @@ async function runBrief(tx: AgentTransaction, tableId: string, rowId: string, ag
         )
       ).rows,
     )
-    .map(item =>
-      item.deleted_at
-        ? null
-        : item.kind === 'event'
-          ? `- event: ${JSON.stringify(item.event)}`
-          : `- ${item.kind} by ${item.author ?? 'a member'}: ${(item.body ?? '').slice(0, 600)}`,
-    )
-    .filter(Boolean);
+    .filter(item => !item.deleted_at);
+  const thread = items.map(item =>
+    item.kind === 'event'
+      ? `- event: ${JSON.stringify(item.event)}`
+      : `- ${item.kind} by ${item.author ?? 'a member'}: ${(item.body ?? '').slice(0, 600)}${fileNames(files.comments.get(item.id))}`,
+  );
+  // The description's files first, then the newest comments' files.
+  const sources = rowFileSources(tableId, [
+    ...files.description,
+    ...[...items].reverse().flatMap(item => files.comments.get(item.id) ?? []),
+  ]).slice(0, briefFiles);
   const defaults = agentId ? await loadAgentDefaults(tx, agentId) : null;
   const defaultLines: string[] = [];
   if (defaults?.context) defaultLines.push(`- Default context: ${defaults.context.slice(0, 1200)}`);
@@ -213,13 +234,18 @@ async function runBrief(tx: AgentTransaction, tableId: string, rowId: string, ag
     ...thread,
     '',
     'The row and its thread are your only memory between runs. Use your table tools to read or edit the row when you have access.',
+    ...(sources.length
+      ? [
+          'Files on the row are attached to this message, so you can see screenshots and read documents directly. Read any other listed file with files.read and its id as the source.',
+        ]
+      : []),
     'Before asking a person for missing details, first check your Agent defaults, the row thread, workspace Knowledge, and memory to infer anything unambiguous on your own (such as which repository, project, or channel applies).',
     'If inputs are still genuinely missing or ambiguous, gather ALL missing items into ONE structured clarification form instead of asking piecemeal. Include a fenced JSON block right after a "CLARIFICATION:" line with shape {"title":"...","summary":"...","fields":[{"id":"...","kind":"github_account|github_repository|select|text","label":"Plain label","description":"optional","required":true}]} (for select include "options":[{"value":"...","label":"..."}]). Use plain-language labels like "GitHub account" or "Repository", never vague terms like "GitHub source".',
     'Your reply is posted to the row thread as a progress note: say what you did, what you are waiting for and what comes next.',
     'End your reply with exactly one line: "STATUS: done" when the work is finished, "STATUS: waiting <short reason>" when you need a person, or "STATUS: continue" to keep working later.',
     `With "STATUS: continue" you may add a line "WAKE: <ISO 8601 time>" up to ${maxWakeDays} days ahead to be woken then.`,
   ].join('\n');
-  return text.length > 8000 ? `${text.slice(0, 7000)}\n…\n${text.slice(-900)}` : text;
+  return { text: text.length > 8000 ? `${text.slice(0, 7000)}\n…\n${text.slice(-900)}` : text, sources };
 }
 
 const visibleState = (state: string): RunState | null => (state === 'stopped' ? null : (state as RunState));
@@ -616,6 +642,7 @@ export function createRowAssignments(options: {
         requestId: string;
         text: string;
         credits: number;
+        sources: RowFileSource[];
       }[] = [];
       const startedToday = new Map<string, number>();
       const hold = async (row: (typeof queued)[number], state: 'queued' | 'waiting', reason: string) => {
@@ -658,8 +685,8 @@ export function createRowAssignments(options: {
           await hold(row, 'queued', 'Waiting: the workspace limit on working rows is reached');
           continue;
         }
-        const text = await runBrief(tx, row.table_id, row.row_id, row.agent_name, row.agent_id);
-        if (!text) {
+        const brief = await runBrief(tx, row.table_id, row.row_id, row.agent_name, row.agent_id);
+        if (!brief) {
           await hold(row, 'waiting', 'Row unavailable');
           continue;
         }
@@ -682,7 +709,7 @@ export function createRowAssignments(options: {
           generation: row.generation,
           userId: row.sponsor_user,
           requestId: requestId(`${row.table_id}:${row.row_id}:${row.generation}:${row.run_count}`),
-          text,
+          ...brief,
           credits,
         });
       }
@@ -741,6 +768,7 @@ export function createRowAssignments(options: {
           requestId: claimed.requestId,
           agentId: claimed.agentId,
           text: claimed.text,
+          sources: claimed.sources,
           limits: { ...runLimits, credits: claimed.credits },
         });
       } catch (error) {
@@ -790,6 +818,37 @@ export async function deliverComment(
   rowId: string,
   authorMembershipId: string,
   body: string,
+  attachmentIds: readonly string[] = [],
+) {
+  const text = `New comment on the row from member ${authorMembershipId}:\n${body.slice(0, 20000)}${attachmentIds.length ? `\n[files: ${attachmentIds.join(', ')}, attached to this message]` : ''}`;
+  if (await sendToWorkingTask(tx, tableId, rowId, text, attachmentIds)) return true;
+  return wakeRow(tx, tableId, rowId);
+}
+
+/** Hands files newly added to a row's description or a comment to the run working on it, if any. */
+export async function deliverRowFiles(
+  tx: AgentTransaction,
+  tableId: string,
+  rowId: string,
+  membershipId: string,
+  attachmentIds: readonly string[],
+) {
+  if (!attachmentIds.length) return false;
+  return sendToWorkingTask(
+    tx,
+    tableId,
+    rowId,
+    `Member ${membershipId} added files to the row.\n[files: ${attachmentIds.join(', ')}, attached to this message]`,
+    attachmentIds,
+  );
+}
+
+async function sendToWorkingTask(
+  tx: AgentTransaction,
+  tableId: string,
+  rowId: string,
+  text: string,
+  attachmentIds: readonly string[],
 ) {
   const working = z
     .object({ current_task_id: z.uuid() })
@@ -802,31 +861,29 @@ export async function deliverComment(
         )
       ).rows[0],
     );
-  if (working) {
-    await lockTask(tx, working.current_task_id);
-    const task = z
-      .object({ generation: z.number() })
-      .optional()
-      .parse(
-        (
-          await tx.client.query(
-            `SELECT generation FROM ${relation(tx, 'tf_agent_tasks')} WHERE id=$1 AND status='pending'`,
-            [working.current_task_id],
-          )
-        ).rows[0],
-      );
-    if (task) {
-      await tx.client.query(
-        `INSERT INTO ${relation(tx, 'tf_agent_task_messages')}(task_id,sequence,generation,role,text,sources)
-        SELECT $1,COALESCE(max(sequence)+1,0),$2,'owner',$3,'[]' FROM ${relation(tx, 'tf_agent_task_messages')} WHERE task_id=$1`,
-        [
-          working.current_task_id,
-          task.generation,
-          `New comment on the row from member ${authorMembershipId}:\n${body.slice(0, 20000)}`,
-        ],
-      );
-      return true;
-    }
-  }
-  return wakeRow(tx, tableId, rowId);
+  if (!working) return false;
+  await lockTask(tx, working.current_task_id);
+  const task = z
+    .object({ generation: z.number() })
+    .optional()
+    .parse(
+      (
+        await tx.client.query(
+          `SELECT generation FROM ${relation(tx, 'tf_agent_tasks')} WHERE id=$1 AND status='pending'`,
+          [working.current_task_id],
+        )
+      ).rows[0],
+    );
+  if (!task) return false;
+  await tx.client.query(
+    `INSERT INTO ${relation(tx, 'tf_agent_task_messages')}(task_id,sequence,generation,role,text,sources)
+    SELECT $1,COALESCE(max(sequence)+1,0),$2,'owner',$3,$4 FROM ${relation(tx, 'tf_agent_task_messages')} WHERE task_id=$1`,
+    [
+      working.current_task_id,
+      task.generation,
+      text,
+      JSON.stringify(attachmentIds.map(attachmentId => ({ kind: 'row-attachment', tableId, attachmentId }))),
+    ],
+  );
+  return true;
 }

@@ -207,6 +207,8 @@ export function createAgentTasks(
         if (!(await canAccessAsset(tx, actor, source.tableId, 'table.row.read'))) throw new AccessDenied();
         if (runId && !(await canAccessAsset(tx, { kind: 'agent', runId }, source.tableId, 'table.row.read')))
           throw new AccessDenied();
+      } else if (source.kind === 'row-attachment') {
+        if (!(await canAccessAsset(tx, actor, source.tableId, 'table.row.read'))) throw new AccessDenied();
       } else if (source.kind === 'attachment') {
         const allowed = await tx.client.query(
           `SELECT 1 FROM ${relation(tx, 'tf_conversation_attachments')} a JOIN ${relation(tx, 'tf_conversations')} c ON c.id=a.conversation_id JOIN ${relation(tx, 'tf_conversation_parts')} p ON p.conversation_id=c.id AND p.message_id=a.message_id AND p.attachment_id=a.id WHERE a.id=$1 AND c.id=$2 AND c.kind='private' AND c.owner_user_id=$3 AND c.owner_membership_id=$4 AND a.state='bound'`,

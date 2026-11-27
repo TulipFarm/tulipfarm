@@ -31,6 +31,7 @@ import { RecordMutationFeedback, useRecordMutation } from '@/features/tables/rec
 import { changedValues, rejectionMessage, validateRowDraft } from '@/features/tables/record-validation';
 import type { TableWorkspace } from '@/features/tables/references';
 import type { TableValues } from '@/features/tables/review-contracts';
+import { DescriptionFiles } from '@/features/tables/row-attachments';
 import { RowThreadPanel } from '@/features/tables/row-thread';
 import { CodeSessionTaskSection } from '@/features/code-sessions/CodeSessionTaskSection';
 import { taskCards, type TaskCard } from './api';
@@ -242,6 +243,14 @@ function TaskLoaded({
               value={card.description}
               disabled={!editable}
               save={value => save({ [taskFields.description]: value ? { kind: 'text', value } : null })}
+            />
+            <DescriptionFiles
+              workspaceId={workspace.id}
+              tableId={task.tableId}
+              rowId={task.rowId}
+              saved={task.attachments}
+              editable={editable}
+              changed={refreshAll}
             />
             <RecordMutationFeedback mutation={update} />
           </div>
@@ -503,6 +512,7 @@ function Description({ value, disabled, save }: { value: string; disabled: boole
         <BareText
           autoFocus
           aria-label="Description"
+          data-description-paste
           placeholder="Add description…"
           value={draft}
           onChange={event => setDraft(event.target.value)}

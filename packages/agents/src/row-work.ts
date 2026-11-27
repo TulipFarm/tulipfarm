@@ -20,7 +20,7 @@ import {
   taskNumberOf,
 } from '@tulipfarm/tables/task-keys';
 import { runStateOf, TaskTableError, taskFields } from '@tulipfarm/tables/tasks-table';
-import { deliverComment, rowExists, wakeRow } from './row-assignments.ts';
+import { deliverComment, deliverRowFiles, rowExists, wakeRow } from './row-assignments.ts';
 import {
   cancelReminder,
   createReminder,
@@ -32,6 +32,14 @@ import {
   TaskReminderError,
 } from './task-reminders.ts';
 import { relation, type AgentTransaction } from './store.ts';
+import {
+  commentAttachmentLimit,
+  listRowAttachments,
+  rowAttachmentIdsSchema,
+  rowAttachmentSchema,
+  changeRowAttachments,
+  setRowAttachments,
+} from './row-attachments.ts';
 
 const runStateSchema = z.enum(['queued', 'working', 'waiting', 'done', 'failed', 'stopped']);
 
@@ -53,6 +61,7 @@ export const rowThreadSchema = z.object({
       editedAt: z.string().nullable(),
       deleted: z.boolean(),
       mine: z.boolean(),
+      attachments: z.array(rowAttachmentSchema),
     }),
   ),
   assignment: z
@@ -120,6 +129,7 @@ export const taskDetailSchema = z.object({
   canEdit: z.boolean(),
   thread: rowThreadSchema,
   reminders: remindersSchema,
+  attachments: z.array(rowAttachmentSchema),
 });
 export type TaskDetail = z.infer<typeof taskDetailSchema>;
 
@@ -136,7 +146,15 @@ export { reminderInputSchema } from './task-reminders.ts';
 export const commentInputSchema = z.strictObject({
   body: z.string().trim().min(1).max(20000),
   mentions: z.array(z.uuid()).max(50).default([]),
+  attachmentIds: z.array(z.uuid()).max(commentAttachmentLimit).default([]),
 });
+export const commentEditSchema = commentInputSchema.extend({
+  attachmentIds: z.array(z.uuid()).max(commentAttachmentLimit).optional(),
+});
+export const rowAttachmentsInputSchema = z
+  .strictObject({ add: rowAttachmentIdsSchema.default([]), remove: rowAttachmentIdsSchema.default([]) })
+  .refine(change => change.add.length + change.remove.length > 0);
+export const rowAttachmentsSchema = z.object({ attachments: z.array(rowAttachmentSchema) });
 
 export const inboxSchema = z.object({
   items: z.array(
@@ -245,6 +263,7 @@ async function canEditRow(tx: AgentTransaction, actor: HumanActor, tableId: stri
 }
 
 async function readThread(tx: AgentTransaction, actor: HumanActor, tableId: string, rowId: string): Promise<RowThread> {
+  const { comments } = await listRowAttachments(tx, tableId, rowId);
   const items = (
     await tx.client.query(
       `SELECT * FROM ${relation(tx, 'tf_row_thread_items')} WHERE table_id=$1 AND row_id=$2 ORDER BY created_at,id LIMIT 500`,
@@ -265,6 +284,7 @@ async function readThread(tx: AgentTransaction, actor: HumanActor, tableId: stri
     editedAt: row.edited_at ? iso(row.edited_at) : null,
     deleted: Boolean(row.deleted_at),
     mine: row.author_membership_id === actor.membershipId,
+    attachments: row.deleted_at ? [] : (comments.get(row.id) ?? []),
   }));
   const assignment = (
     await tx.client.query(`SELECT * FROM ${relation(tx, 'tf_row_assignments')} WHERE table_id=$1 AND row_id=$2`, [
@@ -339,7 +359,11 @@ type Runtime = {
 };
 
 /** Row threads, Run now, the Inbox and assignment limits: what people do around assigned rows. */
-export function createRowWork(runtime: Runtime, compatibility: unknown) {
+export function createRowWork(
+  runtime: Runtime,
+  compatibility: unknown,
+  options: { removeObjects?: (workspaceId: string, objectKeys: readonly string[]) => Promise<void> } = {},
+) {
   const as = <T>(
     workspaceId: string,
     userId: string,
@@ -348,6 +372,17 @@ export function createRowWork(runtime: Runtime, compatibility: unknown) {
     runtime.transaction(z.uuid().parse(workspaceId), compatibility, async tx => {
       return operation(tx, await lockAndResolveHuman(tx, userId));
     });
+  /** Runs a change that may take attachments off, then removes their objects once it has committed. */
+  async function detaching<T>(
+    workspaceId: string,
+    userId: string,
+    operation: (tx: AgentTransaction, actor: HumanActor, removed: string[]) => Promise<T>,
+  ) {
+    const removed: string[] = [];
+    const result = await as(workspaceId, userId, (tx, actor) => operation(tx, actor, removed));
+    if (removed.length) await options.removeObjects?.(workspaceId, removed);
+    return result;
+  }
 
   async function ownComment(tx: AgentTransaction, actor: HumanActor, tableId: string, rowId: string, itemId: string) {
     await requireRow(tx, actor, tableId, rowId);
@@ -484,16 +519,7 @@ export function createRowWork(runtime: Runtime, compatibility: unknown) {
 
     comment: (workspaceId: string, userId: string, tableId: string, rowId: string, value: unknown) =>
       as(workspaceId, userId, async (tx, actor) => {
-        const input = commentInputSchema.parse(value);
-        await requireRow(tx, actor, tableId, rowId);
-        const id = randomUUID();
-        await tx.client.query(
-          `INSERT INTO ${relation(tx, 'tf_row_thread_items')}(id,table_id,row_id,kind,author_membership_id,body,mentions) VALUES($1,$2,$3,'comment',$4,$5,$6)`,
-          [id, tableId, rowId, actor.membershipId, input.body, input.mentions],
-        );
-        await notifyMentions(tx, actor, tableId, rowId, id, input.mentions);
-        await deliverComment(tx, tableId, rowId, actor.membershipId, input.body);
-        await stopReminders(tx, tableId, rowId, 'commented', actor.membershipId);
+        await postComment(tx, actor, tableId, rowId, commentInputSchema.parse(value));
         return readThread(tx, actor, tableId, rowId);
       }),
 
@@ -505,9 +531,19 @@ export function createRowWork(runtime: Runtime, compatibility: unknown) {
       itemId: string,
       value: unknown,
     ) =>
-      as(workspaceId, userId, async (tx, actor) => {
-        const input = commentInputSchema.parse(value);
+      detaching(workspaceId, userId, async (tx, actor, removed) => {
+        const input = commentEditSchema.parse(value);
         await ownComment(tx, actor, tableId, rowId, itemId);
+        if (input.attachmentIds) {
+          const target = { tableId, rowId, itemId };
+          const current = (await listRowAttachments(tx, tableId, rowId)).comments.get(itemId) ?? [];
+          const change = await changeRowAttachments(tx, actor.membershipId, target, {
+            add: input.attachmentIds,
+            remove: current.map(file => file.id).filter(id => !input.attachmentIds!.includes(id)),
+          });
+          removed.push(...change.removed);
+          await deliverRowFiles(tx, tableId, rowId, actor.membershipId, change.added);
+        }
         await tx.client.query(
           `UPDATE ${relation(tx, 'tf_row_thread_items')} SET body=$2,mentions=$3,edited_at=clock_timestamp() WHERE id=$1`,
           [itemId, input.body, input.mentions],
@@ -517,8 +553,9 @@ export function createRowWork(runtime: Runtime, compatibility: unknown) {
       }),
 
     deleteComment: (workspaceId: string, userId: string, tableId: string, rowId: string, itemId: string) =>
-      as(workspaceId, userId, async (tx, actor) => {
+      detaching(workspaceId, userId, async (tx, actor, removed) => {
         await ownComment(tx, actor, tableId, rowId, itemId);
+        removed.push(...(await setRowAttachments(tx, actor.membershipId, { tableId, rowId, itemId }, [])));
         await tx.client.query(
           `UPDATE ${relation(tx, 'tf_row_thread_items')} SET body=NULL,mentions='{}',deleted_at=clock_timestamp() WHERE id=$1`,
           [itemId],
@@ -528,6 +565,18 @@ export function createRowWork(runtime: Runtime, compatibility: unknown) {
           [itemId],
         );
         return readThread(tx, actor, tableId, rowId);
+      }),
+
+    /** Adds uploads to, or removes files from, the row's description; anyone who can edit the row may change them. */
+    setAttachments: (workspaceId: string, userId: string, tableId: string, rowId: string, value: unknown) =>
+      detaching(workspaceId, userId, async (tx, actor, removed) => {
+        const input = rowAttachmentsInputSchema.parse(value);
+        await requireRow(tx, actor, tableId, rowId);
+        await requireTablePermission(tx, actor, tableId, 'table.row.update');
+        const change = await changeRowAttachments(tx, actor.membershipId, { tableId, rowId, itemId: null }, input);
+        removed.push(...change.removed);
+        await deliverRowFiles(tx, tableId, rowId, actor.membershipId, change.added);
+        return rowAttachmentsSchema.parse({ attachments: (await listRowAttachments(tx, tableId, rowId)).description });
       }),
 
     runNow: (workspaceId: string, userId: string, tableId: string, rowId: string) =>
@@ -738,7 +787,29 @@ export async function readTaskDetail(
     canEdit: await canEditRow(tx, actor, tableId),
     thread: await readThread(tx, actor, tableId, rowId),
     reminders: await listReminders(tx, actor, tableId, rowId),
+    attachments: (await listRowAttachments(tx, tableId, rowId)).description,
   });
+}
+
+/** Posts a comment as the actor. `id` lets an approved chat card post its comment exactly once. */
+export async function postComment(
+  tx: AgentTransaction,
+  actor: HumanActor,
+  tableId: string,
+  rowId: string,
+  input: z.infer<typeof commentInputSchema>,
+  id: string = randomUUID(),
+) {
+  await requireRow(tx, actor, tableId, rowId);
+  await tx.client.query(
+    `INSERT INTO ${relation(tx, 'tf_row_thread_items')}(id,table_id,row_id,kind,author_membership_id,body,mentions) VALUES($1,$2,$3,'comment',$4,$5,$6)`,
+    [id, tableId, rowId, actor.membershipId, input.body, input.mentions],
+  );
+  await setRowAttachments(tx, actor.membershipId, { tableId, rowId, itemId: id }, input.attachmentIds);
+  await notifyMentions(tx, actor, tableId, rowId, id, input.mentions);
+  await deliverComment(tx, tableId, rowId, actor.membershipId, input.body, input.attachmentIds);
+  await stopReminders(tx, tableId, rowId, 'commented', actor.membershipId);
+  return id;
 }
 
 async function readLimits(tx: AgentTransaction): Promise<AssignmentLimits> {

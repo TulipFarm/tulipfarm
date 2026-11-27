@@ -96,6 +96,7 @@ export function registerConversationDispatch(
     runtime: ConversationRuntime;
     temporal: ReturnType<typeof createTemporalClient>;
     attachments?: ReturnType<typeof createAttachments> | undefined;
+    rowAttachments?: { cleanup: (workspaceId: string) => Promise<unknown> } | undefined;
     expireApprovals?: (workspaceId: string) => Promise<void>;
     /** Starts the workspace's due follow-ups; the reply dispatch below then starts their chat turns. */
     fireFollowUps?: (workspaceId: string) => Promise<unknown>;
@@ -159,6 +160,7 @@ export function registerConversationDispatch(
       }
       try {
         await dependencies.attachments?.cleanup(row.workspace_id);
+        await dependencies.rowAttachments?.cleanup(row.workspace_id);
       } catch {
         app.log.error({ workspaceId: row.workspace_id }, 'Attachment cleanup will retry');
       }

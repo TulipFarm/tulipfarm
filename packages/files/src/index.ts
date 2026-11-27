@@ -123,18 +123,20 @@ export type FileArrival =
 const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, name);
 const installed = (tx: AuthorizationTransaction, name: string) => relationInstalled(tx.client, table(tx, name));
 /**
- * Bytes charged to the workspace quota: every Files row, every earlier version of a file, and every live chat attachment.
+ * Bytes charged to the workspace quota: every Files row, every earlier version of a file, every live chat attachment
+ * and every live row attachment.
  * A sent attachment published into Files shares its id with that file and is charged once, through the file.
  * Since 0110 the file borrows the attachment's object, so the charge matches storage. Files published earlier keep a
  * second copy that is still charged once. Deleting the file forever charges the attachment again, because its object remains.
  * Callers hold the advisory lock salted 209871 so concurrent checks see each other's writes.
  */
 export async function chargedBytes(tx: AuthorizationTransaction) {
-  const [files, attachments, packages, fileVersions] = await pipelinedAll(tx.client, [
+  const [files, attachments, packages, fileVersions, rowAttachments] = await pipelinedAll(tx.client, [
     () => installed(tx, 'tf_files'),
     () => installed(tx, 'tf_conversation_attachments'),
     () => installed(tx, 'tf_skill_package_objects'),
     () => installed(tx, 'tf_file_versions'),
+    () => installed(tx, 'tf_row_attachments'),
   ]);
   const versions = files && fileVersions;
   const total = async (sql: string) =>
@@ -163,6 +165,12 @@ export async function chargedBytes(tx: AuthorizationTransaction) {
         : 0,
     async () =>
       packages ? total(`SELECT COALESCE(sum(size),0) AS total FROM ${table(tx, 'tf_skill_package_objects')}`) : 0,
+    async () =>
+      rowAttachments
+        ? total(
+            `SELECT COALESCE(sum(size),0) AS total FROM ${table(tx, 'tf_row_attachments')} WHERE chat_attachment_id IS NULL`,
+          )
+        : 0,
   ]);
   return totals.reduce((sum, value) => sum + value, 0);
 }

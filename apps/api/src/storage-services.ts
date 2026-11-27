@@ -7,6 +7,8 @@ import { integrationCredentialKeyring } from '@tulipfarm/integrations';
 import { createCodeSessionInTx } from '@tulipfarm/agents/code-session-store';
 import { createConversations } from '@tulipfarm/conversations';
 import { createAttachments } from '@tulipfarm/conversations/attachments';
+import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
+import { createRowAttachments } from '@tulipfarm/agents/row-attachments';
 import { pinTurnImageModels, recognitionAvailability } from '@tulipfarm/agents/image-settings';
 import type { ModelContinuity } from '@tulipfarm/agents/chat';
 import type { ModelFamilyEligibility } from '@tulipfarm/agents/model-policy';
@@ -104,6 +106,7 @@ export function createStorageServices(app: FastifyInstance, dependencies: Storag
     ...(defaultKnowledge ? { defaultKnowledge } : {}),
   });
   const attachments = chatObjects ? createAttachments(runtime, chatObjects, files ? { files } : {}) : undefined;
+  const rowAttachments = chatObjects ? createRowAttachments(runtime, commonCompatibility, chatObjects) : undefined;
   const confirmation = createWorkspaceTableConfirmation(runtime);
   app.addHook('onClose', async () => {
     await confirmation.close();
@@ -147,6 +150,7 @@ export function createStorageServices(app: FastifyInstance, dependencies: Storag
     googleService,
     knowledge,
     attachments,
+    rowAttachments,
     confirmation,
     systemPackages,
     agents: createAgentWork({
@@ -186,6 +190,7 @@ export function registerStorageSweeps(
     runtime,
     temporal,
     attachments: services.attachments,
+    rowAttachments: services.rowAttachments,
     replies: services.replies,
     fireFollowUps: workspaceId => services.followUps.due(workspaceId, services.conversations.send),
     expireApprovals: async workspaceId => {

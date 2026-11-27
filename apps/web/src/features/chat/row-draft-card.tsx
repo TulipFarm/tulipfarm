@@ -47,6 +47,7 @@ export function RowDraftCard({
   checkStatus: ReactNode;
 }) {
   const kind = operation(proposal);
+  const files = proposal.attachments?.length ?? 0;
   const table = draft.rowTable;
   const tableName = table?.name ?? 'a table you cannot see';
   const { input, written } = proposal;
@@ -265,10 +266,18 @@ export function RowDraftCard({
           {kind === 'delete' ? 'Current row values are unavailable. See technical details.' : 'No field values set.'}
         </p>
       )}
+      {files > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Adds {files === 1 ? 'the file' : `${files} files`} from this chat to the row. Anyone who can see the row can
+          open {files === 1 ? 'it' : 'them'}.
+        </p>
+      )}
       <p className="text-xs text-muted-foreground">
         {proposal.reason
           ? reasons[proposal.reason]
-          : 'This chat used content from outside your tables, such as web pages, knowledge, files or connected apps, so the change waits for your approval.'}{' '}
+          : files > 0
+            ? 'The change adds files from this chat, so it waits for your approval.'
+            : 'This chat used content from outside your tables, such as web pages, knowledge, files or connected apps, so the change waits for your approval.'}{' '}
         Approving makes this exact change with your table access.
       </p>
       <Disclosure title="Technical details">

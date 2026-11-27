@@ -15,6 +15,12 @@ const attachmentSource = z.strictObject({
   conversationId: uuidSchema,
   attachmentId: uuidSchema,
 });
+/** A file on a task's description or comment, read under the owner's read access to that row. */
+const rowAttachmentSource = z.strictObject({
+  kind: z.literal('row-attachment'),
+  tableId: uuidSchema,
+  attachmentId: uuidSchema,
+});
 const taskHistorySource = z.strictObject({
   kind: z.literal('task'),
   taskId: uuidSchema,
@@ -33,6 +39,7 @@ const ownerGoogleFileSource = z.strictObject({
 export const taskSourceSchema = z.discriminatedUnion('kind', [
   ...sourceDependencySchema.options,
   attachmentSource,
+  rowAttachmentSource,
   taskHistorySource,
   /** Only the runtime writes `read`, the receipt of the content an agent step was given. */
   ownerFileSource.extend({ read: fileReadReceiptSchema.optional() }),
@@ -56,6 +63,7 @@ const ownerDependencies = sourceDependencySchema.options.filter(option => !bears
 const ownerTaskSourceSchema = z.discriminatedUnion('kind', [
   ...ownerDependencies,
   attachmentSource,
+  rowAttachmentSource,
   taskHistorySource,
   ownerFileSource,
   ownerGoogleFileSource,

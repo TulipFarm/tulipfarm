@@ -1,7 +1,15 @@
-import { useState, type KeyboardEvent } from 'react';
+import { useRef, useState, type KeyboardEvent } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { taskFields } from '@tulipfarm/tables/tasks-table';
-import { AlarmClockIcon, ChevronRightIcon, CloseIcon, MaximizeIcon, MinimizeIcon, MoreIcon } from '@tulipfarm/icons';
+import {
+  AlarmClockIcon,
+  ChevronRightIcon,
+  CloseIcon,
+  MaximizeIcon,
+  MinimizeIcon,
+  MoreIcon,
+  PaperclipIcon,
+} from '@tulipfarm/icons';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,6 +20,7 @@ import {
   AlertDialogTitle,
 } from '@tulipfarm/sprout/alert-dialog';
 import { Button } from '@tulipfarm/sprout/button';
+import { Input } from '@tulipfarm/sprout/input';
 import { Dialog, DialogTitle } from '@tulipfarm/sprout/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@tulipfarm/sprout/popover';
 import { toast } from '@tulipfarm/sprout/toast';
@@ -26,6 +35,13 @@ import { RecordMutationFeedback, useRecordMutation } from '@/features/tables/rec
 import { rejectionMessage, validateRowDraft } from '@/features/tables/record-validation';
 import type { TableWorkspace } from '@/features/tables/references';
 import type { TableField, TableValue, TableValues } from '@/features/tables/review-contracts';
+import {
+  descriptionFileLimit,
+  pastedFiles,
+  RowFiles,
+  rowAttachmentsApi,
+  useRowUploads,
+} from '@/features/tables/row-attachments';
 import { rowThreadApi } from '@/features/tables/row-thread';
 import {
   draftSchedule,
@@ -72,6 +88,8 @@ export function TaskComposer({
   const { change: changed } = useFeatureChanges();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const uploads = useRowUploads(workspace.id, table.id, descriptionFileLimit);
+  const picker = useRef<HTMLInputElement>(null);
   const [done, setDone] = useState(false);
   const [assignee, setAssignee] = useState<Actor | null>(null);
   const [reporter, setReporter] = useState<Actor | null>(me ? { type: 'member', id: me } : null);
@@ -101,7 +119,7 @@ export function TaskComposer({
     rejection => rejectionMessage(table.definition, rejection, values),
   );
   const busy = create.locked || finishing;
-  const dirty = title.trim() !== '' || description.trim() !== '';
+  const dirty = title.trim() !== '' || description.trim() !== '' || uploads.files.length > 0;
   const errors = validated ? validateRowDraft(table.definition, values, undefined, 'tasks') : {};
   const reminderFor = assignee?.type === 'member' ? assignee.id : null;
   const reminderSchedule = reminding && reminderFor ? draftSchedule(reminder) : null;
@@ -118,6 +136,11 @@ export function TaskComposer({
   /** Everything the task needs after its row exists: its key, its reminder and, when chosen, Done. */
   const finish = async (id: string) => {
     const problems: string[] = [];
+    const files = uploads.ids();
+    if (files.length)
+      await rowAttachmentsApi(workspace.id, table.id)
+        .changeDescription(id, { add: files })
+        .catch(() => problems.push('The files weren’t attached. Add them again from the task.'));
     if (reminderFor && reminderSchedule)
       await reminderApi(workspace.id, table.id, id)
         .create({ membershipId: reminderFor, schedule: reminderSchedule, timeZone: browserTimeZone() })
@@ -139,7 +162,7 @@ export function TaskComposer({
   };
 
   const submit = async () => {
-    if (busy) return;
+    if (busy || !uploads.ready) return;
     setValidated(true);
     if (Object.keys(validateRowDraft(table.definition, values, undefined, 'tasks')).length) return;
     const id = recordId;
@@ -164,6 +187,7 @@ export function TaskComposer({
     }
     setTitle('');
     setDescription('');
+    uploads.clear();
     setValidated(false);
     setRecordId(crypto.randomUUID());
   };
@@ -241,9 +265,34 @@ export function TaskComposer({
               value={description}
               disabled={busy}
               onChange={event => setDescription(event.target.value)}
+              onPaste={event => {
+                const files = pastedFiles(event);
+                if (files.length) void uploads.add(files);
+              }}
+            />
+            <RowFiles
+              workspaceId={workspace.id}
+              tableId={table.id}
+              rowId={null}
+              saved={[]}
+              uploads={uploads}
+              look="chip"
             />
           </div>
           <div className="flex flex-wrap items-center gap-1.5 px-4 pb-3">
+            <Input
+              ref={picker}
+              type="file"
+              multiple
+              hidden
+              onChange={event => {
+                void uploads.add([...(event.target.files ?? [])]);
+                event.target.value = '';
+              }}
+            />
+            <Chip icon={<PaperclipIcon aria-hidden />} disabled={busy} onClick={() => picker.current?.click()}>
+              Attach
+            </Chip>
             <ChipMenu
               look="chip"
               name="Status"
@@ -374,7 +423,7 @@ export function TaskComposer({
           <div className="flex items-center justify-end gap-3 border-t px-4 py-2.5">
             <InlineSwitch label="Create more" checked={createMore} change={setCreateMore} disabled={busy} />
             <CompactButton
-              disabled={busy}
+              disabled={busy || !uploads.ready}
               title={`Create task (${isMac ? '⌘' : 'Ctrl'}+Enter)`}
               onClick={() => void submit()}
             >

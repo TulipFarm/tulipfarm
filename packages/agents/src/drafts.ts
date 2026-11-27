@@ -68,6 +68,9 @@ import { agentLinkedWorkflow } from './agent-trigger-workflows.ts';
 import { agentWorkflowCommonVersion } from '@tulipfarm/workflows';
 import { closeUnavailableDraft } from '@tulipfarm/conversations/activity';
 import { chatAccess } from '@tulipfarm/conversations/chat-access';
+import { attachChatFiles, borrowChatAttachments } from './row-attachments.ts';
+import { rowExists } from './row-assignments.ts';
+import { postComment } from './row-work.ts';
 
 const sourcesSchema = sourceDependenciesSchema;
 const rowSchema = z.object({
@@ -102,8 +105,28 @@ const staleRowError = (error: unknown) =>
   (error instanceof TableError &&
     ['applied-revision-conflict', 'table-maintenance', 'table-not-found'].includes(error.code));
 
-/** Runs the exact chat row call through the same table mutation as a direct chat write. */
+/** Runs the exact chat row call, then adds the task's chat files to its description. */
 async function applyRow(
+  bound: AgentStorage,
+  tx: AgentTransaction,
+  workspaceId: string,
+  actor: HumanActor,
+  chatId: string,
+  id: string,
+  proposal: RowProposal,
+) {
+  await writeRow(bound, workspaceId, actor, id, proposal);
+  if (proposal.attachments)
+    await attachChatFiles(
+      tx,
+      actor,
+      chatId,
+      { tableId: proposal.input.tableId, rowId: rowRecordIds(id, proposal)[0]! },
+      proposal.attachments,
+    );
+}
+/** Runs the exact chat row call through the same table mutation as a direct chat write. */
+async function writeRow(
   bound: AgentStorage,
   workspaceId: string,
   actor: HumanActor,
@@ -223,6 +246,8 @@ export function createAuthoringDrafts(
     if (proposal.kind === 'knowledge') return createKnowledgeDrafts(bound, workspaceId).writable(actor, proposal);
     // Only the requester's own document is ever read or replaced.
     if (proposal.kind === 'memory') return;
+    if (proposal.kind === 'task-comment')
+      return requireTablePermission(tx, actor, proposal.input.tableId, 'table.row.read');
     if (proposal.kind === 'row') {
       await requireTablePermission(tx, actor, proposal.input.tableId, 'table.row.read');
       return requireTablePermission(tx, actor, proposal.input.tableId, `table.row.${rowOperation(proposal)}`);
@@ -305,6 +330,7 @@ export function createAuthoringDrafts(
     if (proposal.kind === 'file-share') return createFileShareDrafts(bound, workspaceId).stale(tx, actor, proposal);
     if (proposal.kind === 'knowledge') return createKnowledgeDrafts(bound, workspaceId).stale(actor, proposal);
     if (proposal.kind === 'memory') return memoryStale(tx, actor, proposal);
+    if (proposal.kind === 'task-comment') return !(await rowExists(tx, proposal.input.tableId, proposal.input.rowId));
     if (proposal.kind === 'row') {
       const { tableId, expectedAppliedRevision } = proposal.input;
       if (
@@ -600,7 +626,15 @@ export function createAuthoringDrafts(
         proposal.before = view.rowCurrents ?? {};
       }
       if (proposal.kind === 'agent') await resolveProcedures(tx, proposal.input.definition.skills, actor);
-      if (proposal.kind === 'row') await savepoint(tx, () => applyRow(bound, workspaceId, actor, id, proposal), false);
+      if (proposal.kind === 'task-comment')
+        await savepoint(
+          tx,
+          () =>
+            borrowChatAttachments(tx, actor, origin.conversationId, proposal.input.tableId, proposal.input.attachments),
+          false,
+        );
+      if (proposal.kind === 'row')
+        await savepoint(tx, () => applyRow(bound, tx, workspaceId, actor, origin.conversationId, id, proposal), false);
       else if (await stale(tx, proposal, actor, bound, workspaceId, id)) throw new AgentError('draft-stale');
       const digest = createHash('sha256').update(canonicalJson(proposal)).digest('hex');
       await tx.client.query(
@@ -703,6 +737,14 @@ export function createAuthoringDrafts(
           instruction: `Nothing has been shared yet. The human can review who can open “${file.name}” on the card and approve, or confirm in a later chat message (call drafts.decide only on a later turn).`,
         };
       }
+      if (proposal.kind === 'task-comment')
+        return {
+          draftId: id,
+          digest,
+          status: 'review-required',
+          key: proposal.input.key,
+          instruction: `Nothing has been posted on ${proposal.input.key} yet. The human can approve the comment on the card or confirm in a later chat message (call drafts.decide only on a later turn).`,
+        };
       if (proposal.kind === 'memory')
         return {
           draftId: id,
@@ -884,6 +926,7 @@ export function createAuthoringDrafts(
                     outcome.kind === 'file-share' ||
                     outcome.kind === 'knowledge' ||
                     outcome.kind === 'memory' ||
+                    outcome.kind === 'task-comment' ||
                     outcome.kind === 'row'
                   ? 'saved'
                   : outcome.receipt.status === 'accepted'
@@ -998,7 +1041,7 @@ export function createAuthoringDrafts(
         if (proposal.kind === 'agent') await resolveProcedures(tx, proposal.input.definition.skills, actor);
         if (proposal.kind === 'row') {
           try {
-            await applyRow(bound, workspaceId, actor, id, proposal);
+            await applyRow(bound, tx, workspaceId, actor, chatId, id, proposal);
           } catch (error) {
             throw staleRowError(error) ? new AgentError('draft-stale') : error;
           }
@@ -1056,7 +1099,12 @@ export function createAuthoringDrafts(
           outcome = await createFileShareDrafts(bound, workspaceId).apply(actor, proposal);
         else if (proposal.kind === 'knowledge')
           outcome = await createKnowledgeDrafts(bound, workspaceId, fileBytes).apply(actor, id, proposal);
-        else if (proposal.kind === 'memory') {
+        else if (proposal.kind === 'task-comment') {
+          const { tableId, rowId, body, mentions, attachments } = proposal.input;
+          const attachmentIds = await borrowChatAttachments(tx, actor, chatId, tableId, attachments);
+          await postComment(tx, actor, tableId, rowId, { body, mentions, attachmentIds }, id);
+          outcome = { kind: 'task-comment', itemId: id };
+        } else if (proposal.kind === 'memory') {
           // The chat may have moved into a project since the card was drafted.
           await requireMemoryChat(tx, actor, chatId);
           outcome = await applyMemory(tx, actor, proposal);

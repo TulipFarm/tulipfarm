@@ -1,5 +1,7 @@
 import { routeCapabilities, inferenceRouteSchema } from '@tulipfarm/agents/inference';
 import { pinTurnImageModels } from '@tulipfarm/agents/image-settings';
+import { createRowAttachments } from '@tulipfarm/agents/row-attachments';
+import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { fetchPublicFile } from '@tulipfarm/agents/web-fetch';
 import { defaultImageInputLimits, modelImageLimits } from '@tulipfarm/config';
 import { createAttachments, type AttachmentBytes } from '@tulipfarm/conversations/attachments';
@@ -50,7 +52,9 @@ function turnLimited(turn: string, recognizer: MediaRecognizer): MediaRecognizer
  */
 export function chatTurnFiles(runtime: ConversationRuntime, objects: { attachments: AttachmentBytes }): TurnFiles {
   const attachments = createAttachments(runtime, objects.attachments);
+  const rowFiles = createRowAttachments(runtime, commonCompatibility, objects.attachments);
   return {
+    rowFiles,
     family(familyId) {
       const model = chatReplyModel(familyId);
       if (!model) throw new Error('conversation-model-unavailable');

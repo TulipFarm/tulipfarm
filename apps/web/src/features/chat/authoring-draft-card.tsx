@@ -20,6 +20,7 @@ import { FileDraftCard } from './file-draft-card';
 import { FileShareDraftCard } from './file-share-draft-card';
 import { KnowledgeDraftCard, KnowledgeReceiptCard } from './knowledge-draft-card';
 import { MemoryDraftCard } from './memory-draft-card';
+import { TaskCommentDraftCard } from './task-comment-draft-card';
 import { formatRun, handStartedDraft, workflowChange, workflowSaveLabel } from './workflow-draft-details';
 import { WorkflowSavedActions } from './workflow-saved-actions';
 import { WorkflowDraftPreview } from './workflow-draft-preview';
@@ -243,6 +244,20 @@ export function AuthoringDraftCard({
     return (
       <KnowledgeDraftCard
         id={id}
+        draft={draft}
+        proposal={proposal}
+        locked={locked}
+        sending={write.state.kind === 'sending'}
+        dirty={write.state.kind === 'sending' || write.state.kind === 'uncertain'}
+        decide={decide}
+        result={result}
+        feedback={feedback}
+        checkStatus={checkStatus}
+      />
+    );
+  if (proposal.kind === 'task-comment')
+    return (
+      <TaskCommentDraftCard
         draft={draft}
         proposal={proposal}
         locked={locked}

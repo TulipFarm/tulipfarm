@@ -203,6 +203,10 @@
       "types": "./dist/row-work.d.ts",
       "default": "./dist/row-work.js"
     },
+    "./row-attachments": {
+      "types": "./dist/row-attachments.d.ts",
+      "default": "./dist/row-attachments.js"
+    },
     "./inbox-slack": {
       "types": "./dist/inbox-slack.d.ts",
       "default": "./dist/inbox-slack.js"
