@@ -70,6 +70,7 @@ export {
   type SlackResolve,
 } from './directory-contracts.ts';
 export { slackActionCard } from './action-card.ts';
+export { discardSlackFiles, stageSlackFiles, unreadSlackFileLine, type SlackFileShare } from './shared-files.ts';
 export { createSlackRecovery, slackCredentialsReady } from './recovery.ts';
 export { canAccessSlackInstallation, requireSlackInstallationUse } from './installation-access.ts';
 export { startSlackProgress, type SlackProgress, type SlackProgressStep } from './progress-stream.ts';

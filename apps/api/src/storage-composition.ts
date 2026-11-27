@@ -123,7 +123,17 @@ export function registerStorageComposition(
   };
   const services = createStorageServices(app, sweepDependencies);
   registerStorageSweeps(app, sweepDependencies, services);
-  const { wake, githubSubscriptions, agentSetup, chatObjects, workflows, files, googleService, attachments } = services;
+  const {
+    wake,
+    githubSubscriptions,
+    agentSetup,
+    chatObjects,
+    workflows,
+    files,
+    googleService,
+    attachments,
+    rowAttachments,
+  } = services;
   const { confirmation, approvalRequests, replies, conversations, followUps, gmail } = services;
   registerCredits(app, { runtime, auth: dependencies.auth });
   registerRecommendations(app, { runtime, auth: dependencies.auth });
@@ -371,7 +381,7 @@ export function registerStorageComposition(
   });
   registerWorkspaceMembers(app, { auth: dependencies.auth, runtime });
   registerActors(app, { auth: dependencies.auth, runtime });
-  registerRowWork(app, { auth: dependencies.auth, runtime });
+  registerRowWork(app, { auth: dependencies.auth, runtime, rowAttachments });
   registerIntegrations(app, {
     auth: dependencies.auth,
     service: createIntegrationService({ runtime, keyring: integrationCredentialKeyring() }),

@@ -44,3 +44,42 @@ test('An attached file a run cannot read is kept for browser uploads, and stops 
   assert.deepEqual(await read([]), stop);
   assert.deepEqual(await read(['7a6b5c4d-3e2f-4a1b-9c8d-7e6f5a4b3c2d']), stop, 'only the listed files are exempt');
 });
+
+test("A task's own screenshot reaches the agent as an image, and a file it cannot read is skipped", async () => {
+  const shotId = '5e4d3c2b-1a09-4f8e-9d7c-6b5a49382716';
+  const goneId = '1f2e3d4c-5b6a-4798-8a7b-6c5d4e3f2a1b';
+  const clipRowId = '2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d';
+  const tableId = '7c6b5a49-3827-4615-9a4b-3c2d1e0f9a8b';
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  const rowFiles = {
+    [shotId]: { filename: 'bug.png', mediaType: 'image/png', size: png.byteLength, bytes: new Uint8Array(png) },
+    [clipRowId]: {
+      filename: 'clip.mp4',
+      mediaType: 'video/mp4',
+      size: 8,
+      bytes: new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]),
+    },
+  };
+  const result = await readTaskFiles({
+    reading: {
+      rowFiles: { read: async (_workspace, _user, id) => rowFiles[id] ?? null },
+      recognition: async () => ({ recognition: undefined, maxImageBytes: 5_000_000 }),
+    },
+    scope,
+    family: { imageInput: true, maxInputTokens: 100_000, imageInputTokens: 1500, maxImageBytes: 5_000_000 },
+    sources: [shotId, goneId, clipRowId].map(attachmentId => ({ kind: 'row-attachment', tableId, attachmentId })),
+    instructions: [],
+    withinAllowance: () => true,
+  });
+  assert.ok(!('stop' in result), 'a missing or unreadable task file does not pause the run');
+  assert.ok(
+    result.content.some(part => part.type === 'image'),
+    'the screenshot is an image part',
+  );
+  const text = result.content.map(part => part.text ?? '').join('');
+  assert.match(text, /bug\.png/);
+  assert.doesNotMatch(text, /clip\.mp4/);
+});

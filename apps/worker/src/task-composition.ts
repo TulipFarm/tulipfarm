@@ -14,6 +14,7 @@ import { createMemoryRouteHealth } from '@tulipfarm/agents/chat';
 import { modelEnvironment } from '@tulipfarm/agents/model-environment';
 import type { ModelBundleStore } from '@tulipfarm/agents/model-bundles';
 import { createAttachments } from '@tulipfarm/conversations/attachments';
+import { createRowAttachments } from '@tulipfarm/agents/row-attachments';
 import { createFiles } from '@tulipfarm/files';
 import type { GoogleFileReader } from '@tulipfarm/conversations/file-references';
 import { chatObjectStore } from '@tulipfarm/workspaces/chat-objects';
@@ -102,6 +103,7 @@ export function createTaskComposition(
       attachments: attachments ?? undefined,
       files: files ?? undefined,
       google: drive,
+      rowFiles: objects ? createRowAttachments(runtime, commonCompatibility, objects) : undefined,
       recognition: taskFileRecognition(runtime),
       links: objects && attachments ? { fetch: fetchPublicFile, objects, hasRoom: attachments.hasRoom } : undefined,
     },

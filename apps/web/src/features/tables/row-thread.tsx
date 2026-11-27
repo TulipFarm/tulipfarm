@@ -1,14 +1,18 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { z } from 'zod';
 import { Badge, type BadgeVariant } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
+import { Input } from '@tulipfarm/sprout/input';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@tulipfarm/sprout/collapsible';
 import { MessageResponse } from '@tulipfarm/sprout/message-response';
+import { ArrowUpIcon, PaperclipIcon } from '@tulipfarm/icons';
+import { BareText } from '@/components/ui/bare-text';
 import { Textarea } from '@tulipfarm/sprout/textarea';
 import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson, responseError } from '@/lib/http';
 import { useFeatureRead } from '@/lib/query';
 import { ActorName } from './actors';
+import { commentFileLimit, pastedFiles, RowFiles, rowAttachmentSchema, useRowUploads } from './row-attachments';
 import { TableRequestError } from './request-state';
 
 const runStateSchema = z.enum(['queued', 'working', 'waiting', 'done', 'failed', 'stopped']);
@@ -25,6 +29,7 @@ export const rowThreadSchema = z.object({
       editedAt: z.string().nullable(),
       deleted: z.boolean(),
       mine: z.boolean(),
+      attachments: z.array(rowAttachmentSchema),
     }),
   ),
   assignment: z
@@ -64,9 +69,10 @@ export function rowThreadApi(workspaceId: string, tableId: string, rowId: string
   };
   return {
     read: (signal: AbortSignal) => send('/thread', 'GET', undefined, signal),
-    comment: (body: string) => send('/thread/comments', 'POST', { body, mentions: [] }),
-    edit: (itemId: string, body: string) =>
-      send(`/thread/comments/${encodeURIComponent(itemId)}`, 'PATCH', { body, mentions: [] }),
+    comment: (body: string, attachmentIds: string[] = []) =>
+      send('/thread/comments', 'POST', { body, mentions: [], attachmentIds }),
+    edit: (itemId: string, body: string, attachmentIds: string[]) =>
+      send(`/thread/comments/${encodeURIComponent(itemId)}`, 'PATCH', { body, mentions: [], attachmentIds }),
     remove: (itemId: string) => send(`/thread/comments/${encodeURIComponent(itemId)}`, 'DELETE'),
     runNow: () => send('/run-now', 'POST'),
     clearWake: () => send('/wake', 'DELETE'),
@@ -165,6 +171,15 @@ export function RowThreadPanel({
   const [editing, setEditing] = useState<{ id: string; body: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const uploads = useRowUploads(workspaceId, tableId, commentFileLimit);
+  const canSend = !busy && Boolean(draft.trim()) && uploads.ready;
+  const send = () =>
+    void act(() => api.comment(draft, uploads.ids())).then(saved => {
+      if (!saved) return;
+      setDraft('');
+      uploads.clear();
+    });
+  const picker = useRef<HTMLInputElement>(null);
   const loaded = read.state.kind === 'ready' ? read.state.data : undefined;
   const thread = loaded ?? latest;
   const act = async (operation: () => Promise<RowThread>) => {
@@ -255,7 +270,13 @@ export function RowThreadPanel({
                     size="sm"
                     disabled={busy || !editing.body.trim()}
                     onClick={() =>
-                      void act(() => api.edit(item.id, editing.body)).then(saved => saved && setEditing(null))
+                      void act(() =>
+                        api.edit(
+                          item.id,
+                          editing.body,
+                          item.attachments.map(file => file.id),
+                        ),
+                      ).then(saved => saved && setEditing(null))
                     }
                   >
                     Save comment
@@ -267,6 +288,9 @@ export function RowThreadPanel({
               </div>
             ) : (
               item.body && <MessageResponse>{item.body}</MessageResponse>
+            )}
+            {!item.deleted && (
+              <RowFiles workspaceId={workspaceId} tableId={tableId} rowId={rowId} saved={item.attachments} />
             )}
             {item.mine && item.kind === 'comment' && !item.deleted && editing?.id !== item.id && (
               <div className="mt-2 flex gap-2">
@@ -286,31 +310,61 @@ export function RowThreadPanel({
           </li>
         ))}
       </ol>
-      <div className="space-y-2">
-        <Textarea
+      <div
+        className="space-y-2 rounded-lg border bg-card p-3 focus-within:border-ring"
+        onDragOver={event => event.preventDefault()}
+        onDrop={event => {
+          if (!event.dataTransfer.files.length) return;
+          event.preventDefault();
+          void uploads.add([...event.dataTransfer.files]);
+        }}
+      >
+        <BareText
           aria-label="Comment"
-          placeholder={
-            thread?.assignment
-              ? 'Comment, or give the agent more direction. Markdown works.'
-              : 'Add a comment. Markdown works.'
-          }
+          placeholder={thread?.assignment ? 'Leave a comment, or give the agent more direction…' : 'Leave a comment…'}
           value={draft}
           maxLength={20000}
           disabled={busy}
           onChange={event => setDraft(event.target.value)}
+          onPaste={event => {
+            const files = pastedFiles(event);
+            if (files.length) void uploads.add(files);
+          }}
+          onKeyDown={event => {
+            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && canSend) send();
+          }}
         />
+        <RowFiles workspaceId={workspaceId} tableId={tableId} rowId={null} saved={[]} uploads={uploads} />
         {error && (
           <p role="alert" className="text-sm text-destructive">
             {error}
           </p>
         )}
-        <Button
-          size="sm"
-          disabled={busy || !draft.trim()}
-          onClick={() => void act(() => api.comment(draft)).then(saved => saved && setDraft(''))}
-        >
-          Comment
-        </Button>
+        <div className="flex items-center justify-end gap-1">
+          <Input
+            ref={picker}
+            type="file"
+            multiple
+            hidden
+            onChange={event => {
+              void uploads.add([...(event.target.files ?? [])]);
+              event.target.value = '';
+            }}
+          />
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label="Attach files"
+            title="Attach files"
+            disabled={busy}
+            onClick={() => picker.current?.click()}
+          >
+            <PaperclipIcon aria-hidden />
+          </Button>
+          <Button size="icon-sm" aria-label="Comment" title="Comment · ⌘Enter" disabled={!canSend} onClick={send}>
+            <ArrowUpIcon aria-hidden />
+          </Button>
+        </div>
       </div>
       {!conversationOnly && thread && thread.runs.length > 0 && (
         <Collapsible>

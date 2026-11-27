@@ -15,7 +15,13 @@ import {
   type SendApiCallOptions,
 } from '@tulipfarm/api-calls';
 import type { TaskSecretTools } from '@tulipfarm/secrets';
-import { keepTaskApiFile, readTaskApiFile, taskFileResultChars, type TaskFileReading } from './task-files.ts';
+import {
+  keepTaskApiFile,
+  readTaskApiFile,
+  readTaskRowFile,
+  taskFileResultChars,
+  type TaskFileReading,
+} from './task-files.ts';
 import {
   AccessDenied,
   canAccessAsset,
@@ -1177,6 +1183,16 @@ export function createAgentExecutor(options: Options) {
                         row.call,
                         taskFileResultChars,
                       );
+                      if ('error' in result && run.user_id && run.membership_id)
+                        result =
+                          (await readTaskRowFile(
+                            transaction,
+                            { kind: 'human', userId: run.user_id, membershipId: run.membership_id },
+                            taskFileLinks?.objects,
+                            ids.workspaceId,
+                            row.call,
+                            taskFileResultChars,
+                          )) ?? result;
                       break;
                   }
                   await transaction.client.query(

@@ -15,7 +15,7 @@ export function createRowAssignmentComposition(options: {
   const { agentTasks } = options;
   const engine = createRowAssignments({
     runtime: options.runtime,
-    start: (workspaceId, user, value) => agentTasks.startForWorkflow(workspaceId, user, { ...value, sources: [] }),
+    start: (workspaceId, user, value) => agentTasks.startForWorkflow(workspaceId, user, value),
     pause: async (workspaceId, user, id) => {
       const task = await agentTasks.read(workspaceId, user, id);
       return agentTasks.pause(workspaceId, user, id, { expectedGeneration: task.generation });

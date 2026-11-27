@@ -75,7 +75,7 @@ export function useConversationChanges() {
                 ? 'agents'
                 : kind === 'skill' || kind.startsWith('skill-')
                   ? 'skills'
-                  : kind === 'row'
+                  : kind === 'row' || kind === 'task-comment'
                     ? 'tables'
                     : kind === 'project'
                       ? 'projects'

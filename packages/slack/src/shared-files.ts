@@ -20,7 +20,7 @@ export type SlackFileReading = {
 
 type SharedAttachments = Pick<ReturnType<typeof createAttachments>, 'stageShared' | 'discardShared'>;
 
-/** At most five files of one message are read, each at most 10 MiB, within 25 seconds: the chat attachment limits. */
+/** At most five files of one message are read, each at most 100 MiB, within 25 seconds: the chat attachment limits. */
 export const slackFileLimits = { files: 5, maxBytes: attachmentLimit, deadlineMs: 25_000, maxRedirects: 3 };
 
 /** A shared file whose bytes are stored, waiting to become an attachment of the message. */
@@ -31,7 +31,7 @@ export type SlackFileShare = { staged: StagedSlackFile[]; unread: { file: SlackS
 const reasons = {
   scope:
     "TulipFarm's Slack app does not have permission to read files. A Slack manager can update Slack permissions in TulipFarm's integration settings",
-  'too-large': 'it is larger than 10 MiB',
+  'too-large': 'it is larger than 100 MiB',
   unavailable: 'Slack did not return it',
   'timed-out': 'downloading it from Slack timed out',
   extra: 'only five files are read per message',
@@ -76,7 +76,7 @@ const slackFileHost = (url: URL) =>
 
 /**
  * Downloads one shared file with the bot token. The token goes only to `files.slack.com`; a redirect is followed only
- * to another Slack host, without the token. The body is streamed under the 10 MiB cap, and an HTML page in place of a
+ * to another Slack host, without the token. The body is streamed under the 100 MiB cap, and an HTML page in place of a
  * non-HTML file is Slack's sign-in page, not the file.
  */
 async function download(file: SlackSharedFile, token: string, fetcher: typeof fetch, signal: AbortSignal) {
@@ -119,7 +119,7 @@ async function download(file: SlackSharedFile, token: string, fetcher: typeof fe
 
 /**
  * Downloads the files shared in one held direct message and stores their bytes, outside any transaction. Files past
- * the fifth, larger than 10 MiB, or that Slack does not return are named with the reason; without `files:read` none
+ * the fifth, larger than 100 MiB, or that Slack does not return are named with the reason; without `files:read` none
  * are downloaded. The caller adopts the stored bytes as attachments when it admits the message, or discards them.
  */
 export async function stageSlackFiles(input: {

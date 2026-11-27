@@ -71,7 +71,7 @@ export async function slackRowDraftCards(
   const drafts = z.array(z.object({ id: z.uuid(), digest: z.string(), proposal: authoringProposalSchema })).parse(
     (
       await tx.client.query(
-        `SELECT d.id,d.digest,d.proposal FROM ${relation(tx, 'tf_chat_authoring_drafts')} d WHERE d.conversation_id=$1 AND d.turn_id=$2 AND d.membership_id=$3 AND d.user_id=$4 AND d.proposal->>'kind'='row'
+        `SELECT d.id,d.digest,d.proposal FROM ${relation(tx, 'tf_chat_authoring_drafts')} d WHERE d.conversation_id=$1 AND d.turn_id=$2 AND d.membership_id=$3 AND d.user_id=$4 AND d.proposal->>'kind' IN ('row','task-comment')
           AND NOT EXISTS (SELECT 1 FROM ${relation(tx, 'tf_chat_authoring_decisions')} c WHERE c.draft_id=d.id) ORDER BY d.created_at,d.id LIMIT ${shownDrafts + 1}`,
         [conversationId, turnId, actor.membershipId, actor.userId],
       )
@@ -79,6 +79,44 @@ export async function slackRowDraftCards(
   );
   const blocks: SlackBlock[] = [];
   for (const draft of drafts.slice(0, shownDrafts)) {
+    const value = JSON.stringify({ workspaceId, chatId: conversationId, draftId: draft.id, digest: draft.digest });
+    if (draft.proposal.kind === 'task-comment') {
+      const { input } = draft.proposal;
+      const files = input.attachments.length;
+      blocks.push(
+        { type: 'divider' },
+        { type: 'section', text: { type: 'plain_text', text: `Review comment on ${input.key}` } },
+        { type: 'section', text: { type: 'plain_text', text: clip(input.body, 3000) } },
+        {
+          type: 'context',
+          elements: [
+            {
+              type: 'plain_text',
+              text: [
+                files ? `Adds ${files === 1 ? '1 file' : `${files} files`} from this thread to ${input.key}.` : '',
+                'This comment waits for approval by the person who asked. Approving posts it with their access.',
+              ]
+                .filter(Boolean)
+                .join(' '),
+            },
+          ],
+        },
+        {
+          type: 'actions',
+          elements: [
+            {
+              type: 'button',
+              action_id: slackRowDraftApprove,
+              text: { type: 'plain_text', text: 'Post comment' },
+              style: 'primary',
+              value,
+            },
+            { type: 'button', action_id: slackRowDraftDismiss, text: { type: 'plain_text', text: 'Dismiss' }, value },
+          ],
+        },
+      );
+      continue;
+    }
     if (draft.proposal.kind !== 'row') continue;
     const proposal = draft.proposal,
       { input } = proposal,
@@ -150,7 +188,6 @@ export async function slackRowDraftCards(
               return { type: 'plain_text' as const, text: `${clip(shown.label, 100)}\n${clip(shown.value, 500)}` };
             });
     const count = input.tool === 'rows.create.batch' || input.tool === 'rows.update.batch' ? input.rows.length : 1;
-    const value = JSON.stringify({ workspaceId, chatId: conversationId, draftId: draft.id, digest: draft.digest });
     blocks.push(
       { type: 'divider' },
       {
@@ -177,6 +214,9 @@ export async function slackRowDraftCards(
                   : input.tool === 'rows.update.batch'
                     ? `Updates ${count} existing rows together.`
                     : `${verbs[kind]}s row ${input.recordId}.`,
+              proposal.attachments
+                ? `Adds ${proposal.attachments.length === 1 ? '1 file' : `${proposal.attachments.length} files`} from this thread.`
+                : '',
               values.length > shownFields
                 ? `${values.length - shownFields} more ${input.tool === 'rows.create.batch' || input.tool === 'rows.update.batch' ? 'rows are' : 'fields are'} set.`
                 : '',
