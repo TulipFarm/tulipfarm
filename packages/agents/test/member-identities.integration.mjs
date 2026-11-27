@@ -12,7 +12,13 @@ import {
 } from '@tulipfarm/integrations/member-identities';
 import { createConversations } from '@tulipfarm/conversations';
 import { createConversationExecutor } from '@tulipfarm/conversations/runtime';
-import { createSlackInbox, slackCredentialCipher, slackThreadPrompt } from '@tulipfarm/slack';
+import {
+  createChannelProvider,
+  createSlackInbox,
+  resolveSlackPresentationMentions,
+  slackCredentialCipher,
+  slackThreadPrompt,
+} from '@tulipfarm/slack';
 import { conversationFixture } from '../../conversations/test/fixture.mjs';
 import { createChatTools } from '../src/tools.ts';
 import { findMembers, resolveSlackThreadMembers } from '../src/members.ts';
@@ -544,4 +550,211 @@ test('Slack thread mention resolution maps verified and manual Slack IDs into sl
   const parsedResolved = JSON.parse(deliveredPrompt.split(resolvedMarker)[1].split('\nCurrent thread: ')[0]);
   assert.deepEqual(parsedResolved, resolved);
   assert.equal('UUNKNOWN1' in parsedResolved, false);
+});
+
+test('outbound Slack sends resolve cross-platform @handles to live Slack user mention pills across workflows, channel sends, and default replies', async t => {
+  const f = await conversationFixture();
+  t.after(() => f.close());
+
+  const tableId = await membersTableId(f);
+  const installationId = randomUUID();
+  const requesterIdentityId = randomUUID();
+  const cipher = slackCredentialCipher({ activeKeyId: 'fixture', keys: { fixture: 'ab'.repeat(32) } });
+
+  const requester = {
+    userId: f.workspace.userId,
+    membershipId: f.workspace.membershipId,
+    memberId: (
+      await f.db.platform.query(
+        `SELECT member_id FROM ${f.table('tf_workspace_member_accounts')} WHERE membership_id=$1`,
+        [f.workspace.membershipId],
+      )
+    ).rows[0].member_id,
+  };
+  const dhruv = await admitNamedMember(f, { name: 'Dhruv Jain', email: 'dhruv@example.test' });
+  const alex = await createHandAddedPerson(f, { name: 'Alex Contractor', contactEmail: 'alex@example.test' });
+
+  await f.db.platform.query(
+    `INSERT INTO ${f.table('tf_slack_installations')}
+      (id,app_id,team_id,bot_user_id,generation,state,scopes,bot_credential,accepts_events_after)
+    VALUES ($1,'ATEST','TTEAMOUT','UBOT',1,'active',ARRAY['chat:write','im:write'],$2,0)`,
+    [
+      installationId,
+      cipher.encrypt({ workspaceId: f.workspace.id, installationId, generation: 1, kind: 'bot' }, 'xoxb-fixture'),
+    ],
+  );
+  await f.db.platform.query(
+    `INSERT INTO ${f.table('tf_slack_identities')}
+      (id,installation_id,generation,slack_user_id,user_id,membership_id,state,credential,scopes)
+    VALUES ($1,$2,1,'UREQOUT',$3,$4,'authorized',$5,ARRAY['chat:write','channels:history','im:history','users:read'])`,
+    [
+      requesterIdentityId,
+      installationId,
+      requester.userId,
+      requester.membershipId,
+      cipher.encrypt(
+        {
+          workspaceId: f.workspace.id,
+          installationId,
+          generation: 1,
+          kind: 'user',
+          identityId: requesterIdentityId,
+          membershipId: requester.membershipId,
+          slackUserId: 'UREQOUT',
+        },
+        'xoxp-fixture',
+      ),
+    ],
+  );
+  await f.db.platform.query(
+    `INSERT INTO ${f.table('tf_slack_identities')}
+      (id,installation_id,generation,slack_user_id,user_id,membership_id,state,credential)
+    VALUES ($1,$2,1,'U01DHRUV',$3,$4,'authorized','{}')`,
+    [randomUUID(), installationId, dhruv.userId, dhruv.membershipId],
+  );
+  await f.db.platform.query(
+    `INSERT INTO ${f.table('tf_github_accounts')}
+      (id,owner_membership_id,generation,state,config_hash,identity,credential)
+    VALUES ($1,$2,1,'active','cfg',$3::jsonb,'{}')`,
+    [randomUUID(), dhruv.membershipId, JSON.stringify({ id: '18121502', login: 'dhruvjainin' })],
+  );
+  await f.runtime.transaction(f.workspace.id, commonCompatibility, async tx => {
+    await addManualMemberIdentity(tx, {
+      tableId,
+      memberId: alex.memberId,
+      createdByMembershipId: requester.membershipId,
+      provider: 'slack',
+      scope: 'TTEAMOUT',
+      externalId: 'U02ALEX',
+      handle: 'alex_slack',
+    });
+  });
+  await f.db.platform.query(
+    `INSERT INTO ${f.table('tf_slack_installation_grants')} (installation_id,membership_id) VALUES ($1,$2)`,
+    [installationId, requester.membershipId],
+  );
+
+  const posted = [];
+  const messages = [{ user: 'UREQOUT', ts: '1.000001', text: '<@UBOT> Who opened the PR?' }];
+  const fetcher = async (url, init) => {
+    const method = new URL(String(url)).pathname.split('/').at(-1);
+    const params =
+      new Headers(init?.headers).get('content-type') === 'application/json'
+        ? JSON.parse(init.body)
+        : Object.fromEntries(new URLSearchParams(init?.body));
+    if (method === 'conversations.info')
+      return Response.json({
+        ok: true,
+        channel: { id: params.channel ?? 'CTEST', is_archived: false, is_member: true },
+      });
+    if (method === 'conversations.members')
+      return Response.json({ ok: true, members: ['UREQOUT', 'U01DHRUV', 'U02ALEX', 'UBOT'] });
+    if (method === 'conversations.replies') return Response.json({ ok: true, messages, has_more: false });
+    if (method === 'conversations.open')
+      return Response.json({ ok: true, channel: { id: 'DREQOUT', is_im: true, user: 'UREQOUT' } });
+    if (method === 'users.info')
+      return Response.json({ ok: true, user: { id: params.user, profile: { display_name: params.user } } });
+    if (method === 'assistant.threads.setStatus') return Response.json({ ok: true });
+    if (method === 'chat.postMessage') {
+      posted.push(params);
+      return Response.json({ ok: true, channel: params.channel, ts: `${posted.length + 1}.000001` });
+    }
+    assert.fail(`Unexpected Slack method ${method}`);
+  };
+
+  const provider = createChannelProvider({ appId: 'ATEST', cipher, fetcher });
+  await f.runtime.transaction(f.workspace.id, commonCompatibility, async tx => {
+    await provider.dispatch(
+      tx,
+      f.workspace.id,
+      { userId: requester.userId, membershipId: requester.membershipId, role: 'admin', permissions: new Set() },
+      { installationId, generation: 1, channel: 'CTEST', rootTs: '1.000001' },
+      {
+        tool: 'slack.message.send',
+        text: '🔀 New pull request in TulipFarm/deploy by @dhruvjainin\n\nSkip `@dhruvjainin` and <!channel>',
+      },
+      async () => {},
+      'app',
+    );
+  });
+
+  assert.equal(posted.length, 1);
+  assert.equal(
+    posted[0].text,
+    '🔀 New pull request in TulipFarm/deploy by <@U01DHRUV>\n\nSkip `@dhruvjainin` and <!channel>',
+  );
+  const workflowBlocks = JSON.parse(posted[0].blocks);
+  assert.deepEqual(workflowBlocks[0].elements[0].elements, [
+    { type: 'text', text: '🔀 New pull request in TulipFarm/deploy by ' },
+    { type: 'user', user_id: 'U01DHRUV' },
+  ]);
+  assert.deepEqual(workflowBlocks[0].elements[1].elements, [
+    { type: 'text', text: 'Skip ' },
+    { type: 'text', text: '@dhruvjainin', style: { code: true } },
+    { type: 'text', text: ' and <!channel>' },
+  ]);
+
+  const options = { runtime: f.runtime, appId: 'ATEST', cipher, fetcher, model: null, publicDelivery: true };
+  const channels = createSlackChannelAgents(options);
+  const defaults = createSlackDefault({
+    ...options,
+    channels,
+    reply: () => async () => ({ text: 'Opened by @dhruvjainin, cc <@U02ALEX>.', sources: [] }),
+  });
+  const inbox = createSlackInbox(f.runtime, channels.freeze);
+  await inbox.accept(
+    { workspaceId: f.workspace.id, installationId, generation: 1 },
+    {
+      type: 'event_callback',
+      api_app_id: 'ATEST',
+      team_id: 'TTEAMOUT',
+      event_id: 'EVIDOUT1',
+      event_time: 1,
+      event: {
+        type: 'app_mention',
+        channel: 'CTEST',
+        thread_ts: '1.000001',
+        ...messages[0],
+      },
+    },
+  );
+  const [work] = await defaults.due(f.workspace.id);
+  assert.ok(work);
+  assert.equal(await defaults.process(work), 'sent');
+
+  assert.equal(posted.length, 2);
+  assert.equal(posted[1].text, 'Opened by <@U01DHRUV>, cc <@U02ALEX>.');
+  assert.deepEqual(posted[1].blocks[0].elements[0].elements, [
+    { type: 'text', text: 'Opened by ' },
+    { type: 'user', user_id: 'U01DHRUV' },
+    { type: 'text', text: ', cc ' },
+    { type: 'user', user_id: 'U02ALEX' },
+    { type: 'text', text: '.' },
+  ]);
+  const publication = (
+    await f.db.platform.query(`SELECT text FROM ${f.table('tf_slack_publications')} WHERE channel='CTEST'`)
+  ).rows[0];
+  assert.equal(publication.text, 'Opened by <@U01DHRUV>, cc <@U02ALEX>.');
+
+  const layout = await f.runtime.transaction(f.workspace.id, commonCompatibility, tx =>
+    resolveSlackPresentationMentions(tx, 'TTEAMOUT', {
+      kind: 'message',
+      text: 'PR by @dhruvjainin',
+      blocks: [
+        { type: 'markdown', text: 'Author: @dhruvjainin' },
+        { type: 'section', text: { type: 'mrkdwn', text: 'Reviewer: @alex_slack' } },
+        {
+          type: 'rich_text',
+          elements: [{ type: 'rich_text_section', elements: [{ type: 'text', text: 'Ping @dhruvjainin' }] }],
+        },
+      ],
+    }),
+  );
+  assert.equal(layout.text, 'PR by <@U01DHRUV>');
+  assert.equal(layout.blocks[0].text, 'Author: <@U01DHRUV>');
+  assert.equal(layout.blocks[1].text.text, 'Reviewer: <@U02ALEX>');
+  assert.deepEqual(layout.blocks[2].elements[0].elements, [
+    { type: 'text', text: 'Ping ' },
+    { type: 'user', user_id: 'U01DHRUV' },
+  ]);
 });

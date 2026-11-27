@@ -14,6 +14,7 @@ import { requireSlackInstallationUse } from './installation-access.ts';
 import { watchIntegrationRecommendations } from '@tulipfarm/integrations/authorization';
 import { slackRecommendations } from './recommendations.ts';
 import { normalizeSlackContent, slackContentFields } from './message-content.ts';
+import { resolveSlackOutboundMentions } from './outbound-mentions.ts';
 import { renderSlackAnswer } from '@tulipfarm/slack-presentation';
 export const threadMessageSchema = z.strictObject({
   user: slackId,
@@ -296,28 +297,31 @@ export function createChannelProvider(options: {
           })
         : call(tx, workspaceId, actor, source, member, method, params, effect);
     switch (action.tool) {
-      case 'slack.message.send':
+      case 'slack.message.send': {
+        const outbound = await resolveSlackOutboundMentions(tx, member.team_id, action.text);
         return z.object({ ts: z.string().regex(/^\d{1,16}\.\d{6}$/) }).parse(
           await send(
             'chat.postMessage',
             {
               channel: source.channel,
-              text: action.text,
-              ...formatted(action.text),
+              text: outbound.text,
+              ...formatted(outbound.text, outbound.mentionUserIds),
               unfurl_links: false,
               unfurl_media: false,
             },
             {},
           ),
         ).ts;
-      case 'slack.thread.reply':
+      }
+      case 'slack.thread.reply': {
+        const outbound = await resolveSlackOutboundMentions(tx, member.team_id, action.text);
         return z.object({ ts: z.string().regex(/^\d{1,16}\.\d{6}$/) }).parse(
           await send(
             'chat.postMessage',
             {
               channel: source.channel,
-              text: action.text,
-              ...formatted(action.text),
+              text: outbound.text,
+              ...formatted(outbound.text, outbound.mentionUserIds),
               thread_ts: action.threadTs,
               unfurl_links: false,
               unfurl_media: false,
@@ -325,6 +329,7 @@ export function createChannelProvider(options: {
             {},
           ),
         ).ts;
+      }
       case 'slack.reaction.add':
         await send(
           'reactions.add',
@@ -473,10 +478,10 @@ export function createChannelProvider(options: {
   return { observe, identity, dispatch, search, authors };
 }
 
-// Markdown renders as formatted blocks; `text` stays the exact approved message and the notification fallback.
-function formatted(text: string): Record<string, string> {
+// Markdown renders as formatted blocks; `text` carries resolved mentions as the notification fallback.
+function formatted(text: string, mentionUserIds?: ReadonlySet<string>): Record<string, string> {
   try {
-    return { blocks: JSON.stringify(renderSlackAnswer(text).blocks) };
+    return { blocks: JSON.stringify(renderSlackAnswer(text, { mentionUserIds }).blocks) };
   } catch {
     return {};
   }

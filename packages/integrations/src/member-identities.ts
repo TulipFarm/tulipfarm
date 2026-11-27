@@ -483,6 +483,122 @@ export async function resolveMemberIdentities(
   return [...resolve(externalKeys, byExternalId), ...resolve(handleKeys, byHandle)];
 }
 
+export type OutboundMemberTarget = {
+  memberId: string;
+  externalId: string;
+  trust: MemberIdentityTrust;
+};
+
+export async function resolveOutboundMemberIdentities(
+  tx: IdentityTransaction,
+  query: {
+    targetProvider: string;
+    targetScope: string;
+    handles?: readonly string[];
+    targetExternalIds?: readonly string[];
+  },
+): Promise<{
+  byHandle: ReadonlyMap<string, OutboundMemberTarget>;
+  knownExternalIds: ReadonlySet<string>;
+}> {
+  const provider = normalizeExternalProvider(query.targetProvider);
+  const scope = normalizeExternalScope(provider, query.targetScope);
+  const handleKeys = [
+    ...new Set(
+      (query.handles ?? []).flatMap(raw => {
+        const normalized = orNull(() => normalizeExternalHandle(provider, raw).toLowerCase());
+        return normalized ? [normalized] : [];
+      }),
+    ),
+  ];
+  const externalIds = [
+    ...new Set(
+      (query.targetExternalIds ?? []).flatMap(raw => {
+        const normalized = orNull(() => normalizeExternalId(raw));
+        return normalized ? [normalized] : [];
+      }),
+    ),
+  ];
+  const byHandle = new Map<string, OutboundMemberTarget>();
+  const knownExternalIds = new Set<string>();
+  if (!hasMemberIdentities(tx) || (handleKeys.length === 0 && externalIds.length === 0))
+    return { byHandle, knownExternalIds };
+  const r = relations(tx);
+  if (externalIds.length > 0) {
+    const { rows } = await tx.client.query<{ external_id: string }>(
+      `SELECT k.value AS external_id
+      FROM unnest($3::text[]) k(value)
+      WHERE EXISTS (
+        SELECT 1 FROM ${r.links} v WHERE v.provider = $1 AND v.scope = $2 AND v.external_id = k.value
+      ) OR EXISTS (
+        SELECT 1 FROM ${liveManual(tx)} WHERE h.provider = $1 AND h.scope = $2 AND h.external_id = k.value
+      )`,
+      [provider, scope, externalIds],
+    );
+    for (const row of rows) knownExternalIds.add(row.external_id);
+  }
+  if (handleKeys.length === 0) return { byHandle, knownExternalIds };
+  const { rows: handleHits } = await tx.client.query<{ key: string; tier: number; member_id: string }>(
+    `SELECT k.key, CASE WHEN v.provider = $1 AND v.scope = $2 THEN 0 ELSE 2 END AS tier, v.member_id
+    FROM ${r.links} v JOIN unnest($3::text[]) k(key) ON lower(v.handle) = k.key
+    UNION
+    SELECT k.key, CASE WHEN v.provider = $1 AND v.scope = $2 THEN 1 ELSE 3 END, v.member_id
+    FROM ${r.observations} o JOIN unnest($3::text[]) k(key) ON o.handle_key = k.key
+    JOIN ${r.links} v ON v.provider = o.provider AND v.scope = o.scope AND v.external_id = o.external_id
+    UNION
+    SELECT k.key, CASE WHEN v.provider = $1 AND v.scope = $2 THEN 1 ELSE 3 END, v.member_id
+    FROM ${r.links} v JOIN unnest($3::text[]) k(key) ON lower(v.fallback_handle) = k.key
+    UNION
+    SELECT k.key, CASE WHEN h.provider = $1 AND h.scope = $2 THEN 1 ELSE 3 END, h.member_id
+    FROM ${liveManual(tx)} JOIN unnest($3::text[]) k(key) ON h.handle_key = k.key`,
+    [provider, scope, handleKeys],
+  );
+  const memberByHandle = new Map<string, string>();
+  for (const key of handleKeys) {
+    const hits = handleHits.filter(row => row.key === key);
+    if (hits.length === 0) continue;
+    const minTier = Math.min(...hits.map(row => row.tier));
+    const [memberId, ...others] = new Set(hits.filter(row => row.tier === minTier).map(row => row.member_id));
+    if (memberId && others.length === 0) memberByHandle.set(key, memberId);
+  }
+  if (memberByHandle.size === 0) return { byHandle, knownExternalIds };
+  const memberIds = [...new Set(memberByHandle.values())];
+  const { rows: targetHits } = await tx.client.query<{
+    member_id: string;
+    external_id: string;
+    tier: number;
+    trust: MemberIdentityTrust;
+  }>(
+    `SELECT member_id, external_id, 0 AS tier, 'verified'::text AS trust
+    FROM ${r.links}
+    WHERE provider = $1 AND scope = $2 AND member_id = ANY($3::uuid[]) AND external_id IS NOT NULL
+    UNION
+    SELECT h.member_id, h.external_id, 1 AS tier, 'manual'::text AS trust
+    FROM ${liveManual(tx)}
+    WHERE h.provider = $1 AND h.scope = $2 AND h.member_id = ANY($3::uuid[]) AND h.external_id IS NOT NULL`,
+    [provider, scope, memberIds],
+  );
+  const targetByMember = new Map<string, OutboundMemberTarget>();
+  for (const memberId of memberIds) {
+    const hits = targetHits.filter(row => row.member_id === memberId);
+    if (hits.length === 0) continue;
+    const minTier = Math.min(...hits.map(row => row.tier));
+    const best = hits.filter(row => row.tier === minTier);
+    const [externalId, ...others] = new Set(best.map(row => row.external_id));
+    if (externalId && others.length === 0)
+      targetByMember.set(memberId, {
+        memberId,
+        externalId,
+        trust: best.some(row => row.trust === 'verified') ? 'verified' : 'manual',
+      });
+  }
+  for (const [key, memberId] of memberByHandle) {
+    const target = targetByMember.get(memberId);
+    if (target) byHandle.set(key, target);
+  }
+  return { byHandle, knownExternalIds };
+}
+
 export async function searchMemberIdentities(
   tx: IdentityTransaction,
   needle: string,
