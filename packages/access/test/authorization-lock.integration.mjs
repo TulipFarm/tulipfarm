@@ -13,6 +13,7 @@ import { closeTransactionMemos, openTransactionMemos } from '@tulipfarm/workspac
 import {
   forgetMembers,
   lockAndPrefetchHuman,
+  lockAndResolveHuman,
   lockAuthorization,
   resolveHuman,
   WorkspaceMembershipDenied,
@@ -263,6 +264,34 @@ test('a member read with the lock is reused until this transaction changes membe
     });
   } finally {
     await connection.end();
+    await setup.close();
+  }
+});
+
+test('a sibling query still waiting when the read lock and member read settle gets its own reply', async () => {
+  const setup = await fixture();
+  const workspace = await setup.create();
+  const connection = await connect(setup.login(workspace));
+  const failures = [];
+  connection.on('error', error => failures.push(error));
+  try {
+    await inTransaction(connection, async client => {
+      const tx = { client, schema: workspace.names.schema };
+      const who = result => result.rows[0]?.who;
+      // Like integrations.list: one connection lookup takes the lock and resolves the member while sibling lookups on
+      // the same transaction send queries behind them, then the first lookup goes on to its next query before the
+      // siblings' replies are in.
+      const actor = lockAndResolveHuman(tx, workspace.userId);
+      const siblings = [client.query("SELECT 'slow' AS who, pg_sleep(0.05)"), client.query("SELECT 'fast' AS who")];
+      assert.deepEqual(await actor, { kind: 'human', userId: workspace.userId, membershipId: workspace.membershipId });
+      const next = client.query("SELECT 'next' AS who");
+      assert.deepEqual((await Promise.all(siblings)).map(who), ['slow', 'fast']);
+      assert.equal(who(await next), 'next');
+      assert.equal(client.pipeline, false);
+    });
+    assert.deepEqual(failures, []);
+  } finally {
+    await connection.end().catch(() => {});
     await setup.close();
   }
 });
