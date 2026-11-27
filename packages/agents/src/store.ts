@@ -144,6 +144,70 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
       throw new AccessDenied();
   }
 
+  async function verifyGoogleDefaults(
+    transaction: AgentTransaction,
+    actor: HumanActor,
+    agentId: string,
+    revision: string,
+  ) {
+    const definitionRow = (
+      await transaction.client.query(
+        `SELECT definition FROM ${relation(transaction, 'tf_agent_definitions')} WHERE agent_id = $1 AND revision = $2`,
+        [agentId, revision],
+      )
+    ).rows[0] as { definition?: unknown } | undefined;
+    const parsedDefinition = agentDefinitionSchema.safeParse(definitionRow?.definition);
+    const defaultGoogle = parsedDefinition.success ? parsedDefinition.data.defaults?.googleConnection : undefined;
+    if (!defaultGoogle) return;
+    const row = z
+      .object({
+        id: uuidSchema,
+        ownership: z.enum(['personal', 'shared']),
+        membership_id: uuidSchema,
+        status: z.enum(['connected', 'disconnected', 'reconnect-required']),
+      })
+      .optional()
+      .parse(
+        (
+          await transaction.client.query(
+            `SELECT id, ownership, membership_id, status
+             FROM ${relation(transaction, 'tf_google_integrations')}
+             WHERE id = $1`,
+            [defaultGoogle.integrationId],
+          )
+        ).rows[0],
+      );
+    if (!row || row.status === 'disconnected') throw new AccessDenied();
+    if (defaultGoogle.ownership === 'personal') {
+      if (row.ownership !== 'personal' || row.membership_id !== actor.membershipId) throw new AccessDenied();
+      return;
+    }
+    if (row.ownership !== 'shared') throw new AccessDenied();
+    const grantRows = z.array(z.object({ role: z.enum(['use', 'manage']) })).parse(
+      (
+        await transaction.client.query(
+          `SELECT g.role
+           FROM ${relation(transaction, 'tf_google_grants')} g
+           WHERE g.integration_id = $1
+             AND (
+               g.grantee = 'workspace'
+               OR g.membership_id = $2
+               OR EXISTS (
+                 SELECT 1 FROM ${relation(transaction, 'tf_member_teams')} mt
+                 WHERE mt.team_id = g.team_id AND mt.membership_id = $2
+               )
+             )`,
+          [row.id, actor.membershipId],
+        )
+      ).rows,
+    );
+    if (defaultGoogle.autonomousWrites) {
+      if (!grantRows.some(grant => grant.role === 'manage')) throw new AccessDenied();
+    } else if (grantRows.length === 0) {
+      throw new AccessDenied();
+    }
+  }
+
   async function activate(workspaceId: string, actor: HumanActor, input: unknown) {
     const value = z
       .strictObject({
@@ -174,6 +238,7 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
         throw new AccessDenied();
       await resolveDefinitionProcedures(transaction, value.agentId, value.revision);
       await verifyTeamGitHubDefaults(transaction, actor, value.agentId, value.revision);
+      await verifyGoogleDefaults(transaction, actor, value.agentId, value.revision);
       const id = value.requestId ?? randomUUID();
       const previous = (
         await transaction.client.query(
@@ -355,6 +420,7 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
       if (canonicalJson(scope) !== canonicalJson(value.scope)) throw new AgentError('activation-scope-conflict');
       await resolveDefinitionProcedures(transaction, value.agentId, value.revision, actor);
       await verifyTeamGitHubDefaults(transaction, actor, value.agentId, value.revision);
+      await verifyGoogleDefaults(transaction, actor, value.agentId, value.revision);
       const before = await definitionRecommendationAudience(transaction, 'agent', value.agentId);
       // Replacing instructions must not change the default scope or resolve genuinely tied activation times.
       const attributed = supportsActivationActor(transaction);

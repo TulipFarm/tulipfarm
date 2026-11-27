@@ -1967,10 +1967,20 @@ export function createAgentExecutor(options: Options) {
                   return action(tx);
                 }),
             };
+            const googleConnection = await guarded.transaction(ids.workspaceId, agentCompatibility, async tx => {
+              const row = (
+                await tx.client.query(
+                  `SELECT d.definition FROM ${relation(tx, 'tf_agent_runs')} r JOIN ${relation(tx, 'tf_agent_definitions')} d ON d.agent_id=r.agent_id AND d.revision=r.definition_revision WHERE r.id=$1`,
+                  [ids.runId],
+                )
+              ).rows[0] as { definition?: unknown } | undefined;
+              const parsed = agentDefinitionSchema.safeParse(row?.definition);
+              return parsed.success ? parsed.data.defaults?.googleConnection : undefined;
+            });
             const result = await invokeGoogleTool(
               guarded,
               options.google,
-              { workspaceId: ids.workspaceId, actor: owner, callId: ids.callId },
+              { workspaceId: ids.workspaceId, actor: owner, callId: ids.callId, googleConnection },
               outcome.call,
             );
             return await guarded.transaction(ids.workspaceId, agentCompatibility, async tx => {

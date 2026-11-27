@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { googleAppScopes, googleIdentityScopes, type GoogleCallbackResult } from './public-contracts.ts';
 export {
+  googleAutonomousWriteKinds,
+  googleAutonomousWritePolicySchema,
+  checkAutonomousWritePolicy,
   googleStatusSchema,
   googleAppScopes,
   googleIdentityScopes,
@@ -14,6 +17,9 @@ export {
   googleAccountsListSchema,
   googleBeginOptionsSchema,
   googleLabelSchema,
+  type GoogleAutonomousWriteKind,
+  type GoogleAutonomousWritePolicy,
+  type AutonomousWritePolicyCheck,
   type GoogleApp,
   type GoogleStatus,
   type GoogleOwnership,

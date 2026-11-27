@@ -34,8 +34,12 @@ export {
   type GoogleOperation,
 } from './operation-contracts.ts';
 export {
+  googleAutonomousWriteKinds,
+  googleAutonomousWritePolicySchema,
+  checkAutonomousWritePolicy,
   operationRequestSchema,
   proposalRequestSchema,
+  autonomousExecuteRequestSchema,
   approvalDecisionSchema,
   googleResultSchema,
   googleReceiptSchema,
@@ -44,6 +48,9 @@ export {
   googleProposalCursorSchema,
   googleProposalListQuerySchema,
   googleProposalListSchema,
+  type GoogleAutonomousWriteKind,
+  type GoogleAutonomousWritePolicy,
+  type AutonomousWritePolicyCheck,
 } from './lifecycle-contracts.ts';
 
 const scope = (name: string) => `https://www.googleapis.com/auth/${name}`;

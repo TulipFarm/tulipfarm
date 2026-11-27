@@ -29,6 +29,8 @@ import {
 import { dispatchGoogleOperation, readGoogleRevision } from './operation-provider.ts';
 import {
   GoogleLifecycleError,
+  autonomousExecuteRequestSchema,
+  checkAutonomousWritePolicy,
   googleVersionGuardSchema,
   googleProposalListQuerySchema,
   googleProposalListSchema,
@@ -518,6 +520,131 @@ export function createGoogleOperations(options: {
       return access(workspaceId, userId, async (tx, actor) => {
         await loadProposal(tx, actor, claimed.row.id);
         return receipt(tx, claimed.row.id);
+      });
+    },
+    async executeAutonomous(workspaceId: string, userId: string, input: unknown) {
+      denyMcpEgress();
+      const value = autonomousExecuteRequestSchema.parse(input);
+      if (!isGoogleWrite(value.operation)) throw new GoogleLifecycleError('operation-write-required');
+      const policyCheck = checkAutonomousWritePolicy(value.operation, value.policy);
+      if (!policyCheck.allowed) {
+        const detail =
+          policyCheck.reason === 'recipient-not-allowed'
+            ? `Blocked by autonomous write recipient allowlist: ${policyCheck.blockedRecipients.join(', ')}`
+            : `Operation ${value.operation.kind} is not permitted by autonomous write policy`;
+        throw new GoogleLifecycleError('operation-policy-denied', detail);
+      }
+      if (
+        (value.operation.kind === 'calendar.events.create' || value.operation.kind === 'calendar.events.update') &&
+        value.operation.event.conferenceData
+      ) {
+        value.operation.event.conferenceData.createRequest.requestId = value.commandId;
+      }
+      const claimed = await access(workspaceId, userId, async (tx, actor) => {
+        await proposalLock(tx, `${actor.membershipId}:${value.commandId}`);
+        const previous = await previousProposal(tx, actor, value.commandId, value.operation);
+        if (previous) {
+          const existing = await receipt(tx, previous.id);
+          if (existing) return { kind: 'existing' as const, proposalId: previous.id, receipt: existing };
+          const integration = await freshProposal(tx, actor, previous);
+          await tx.client.query(`INSERT INTO ${table(tx, 'receipts')} (proposal_id) VALUES ($1)`, [previous.id]);
+          return {
+            kind: 'claimed' as const,
+            row: previous,
+            fence: { workspaceId: uuidSchema.parse(workspaceId), actor, ...integration },
+          };
+        }
+        const integration = await loadIntegration(tx, actor, requiredScopes(value.operation), value.integrationId);
+        await proposalLock(tx, actor.membershipId);
+        const count = z
+          .number()
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT count(*)::integer AS count FROM ${table(tx, 'proposals')} WHERE membership_id=$1 AND created_at>clock_timestamp()-interval '1 day'`,
+                [actor.membershipId],
+              )
+            ).rows[0]?.count,
+          );
+        if (count >= 1000 || Buffer.byteLength(JSON.stringify(value.operation)) > 2_097_152)
+          throw new GoogleLifecycleError('operation-limit');
+        const id = randomUUID();
+        const actionDigest = digest({
+          workspaceId: uuidSchema.parse(workspaceId),
+          membershipId: actor.membershipId,
+          userId: actor.userId,
+          id,
+          commandId: value.commandId,
+          operation: value.operation,
+          integration,
+        });
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'proposals')} (id,membership_id,user_id,command_id,integration_id,account_id,generation,scopes,required_scopes,operation,digest) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+          [
+            id,
+            actor.membershipId,
+            actor.userId,
+            value.commandId,
+            integration.integrationId,
+            integration.accountId,
+            integration.generation,
+            integration.scopes,
+            integration.requiredScopes,
+            value.operation,
+            actionDigest,
+          ],
+        );
+        await tx.client.query(`INSERT INTO ${table(tx, 'receipts')} (proposal_id) VALUES ($1)`, [id]);
+        return {
+          kind: 'claimed' as const,
+          row: await loadProposal(tx, actor, id),
+          fence: { workspaceId: uuidSchema.parse(workspaceId), actor, ...integration },
+        };
+      });
+      if (claimed.kind === 'existing') return { proposalId: claimed.proposalId, receipt: claimed.receipt };
+      let result: ReturnType<typeof boundedResult> | null = null;
+      let status: 'succeeded' | 'failed' | 'outcome-unknown' = 'outcome-unknown';
+      const settle = async (tx: AuthorizationTransaction) => {
+        await tx.client.query(
+          `UPDATE ${table(tx, 'receipts')} SET status=$2,result=$3,error=$4 WHERE proposal_id=$1 AND status='executing'`,
+          [
+            claimed.row.id,
+            status,
+            result,
+            status === 'succeeded'
+              ? null
+              : status === 'failed'
+                ? 'provider-request-failed'
+                : 'provider-outcome-unknown',
+          ],
+        );
+      };
+      try {
+        await options.integrations.withCredential(claimed.fence, async ({ accessToken, signal }, tx) => {
+          if (claimed.row.expires_at.getTime() <= Date.now()) throw new GoogleLifecycleError('operation-expired');
+          result = boundedResult(
+            await dispatchGoogleOperation({ operation: claimed.row.operation, accessToken, signal, fetcher }),
+            accessToken,
+          );
+          status = 'succeeded';
+          await settle(tx);
+          return result;
+        });
+      } catch (error) {
+        status = 'outcome-unknown';
+        result = null;
+        if (
+          error instanceof GoogleOperationError &&
+          ['target-stale', 'provider-rejected', 'reconnect-required', 'insufficient-scope', 'rate-limited'].includes(
+            error.code,
+          )
+        )
+          status = 'failed';
+      }
+      await options.runtime.transaction(claimed.fence.workspaceId, commonCompatibility, settle);
+      return access(workspaceId, userId, async (tx, actor) => {
+        await loadProposal(tx, actor, claimed.row.id);
+        return { proposalId: claimed.row.id, receipt: await receipt(tx, claimed.row.id) };
       });
     },
   };

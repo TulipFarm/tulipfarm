@@ -1336,6 +1336,56 @@
                         "required": ["kind", "id"],
                         "additionalProperties": false
                       },
+                      "googleConnection": {
+                        "type": "object",
+                        "properties": {
+                          "integrationId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "ownership": {
+                            "default": "shared",
+                            "type": "string",
+                            "enum": ["personal", "shared"]
+                          },
+                          "autonomousWrites": {
+                            "type": "object",
+                            "properties": {
+                              "allowedOperations": {
+                                "minItems": 1,
+                                "maxItems": 20,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "gmail.messages.send",
+                                    "gmail.messages.modify",
+                                    "gmail.drafts.create",
+                                    "gmail.drafts.update",
+                                    "gmail.drafts.send",
+                                    "calendar.events.create",
+                                    "calendar.events.update"
+                                  ]
+                                }
+                              },
+                              "allowedRecipients": {
+                                "maxItems": 100,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 254
+                                }
+                              }
+                            },
+                            "required": ["allowedOperations"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": ["integrationId"],
+                        "additionalProperties": false
+                      },
                       "knowledgeSourceIds": {
                         "maxItems": 20,
                         "type": "array",
@@ -1366,6 +1416,21 @@
                         "type": "number",
                         "minimum": 0,
                         "maximum": 1
+                      },
+                      "targetMembershipIds": {
+                        "minItems": 1,
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        }
+                      },
+                      "targetTeamId": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                       }
                     },
                     "required": ["rules"],

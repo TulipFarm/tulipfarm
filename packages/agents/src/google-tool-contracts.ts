@@ -71,6 +71,7 @@ export const googleToolErrorCodeSchema = z.enum([
   'operation-conflict',
   'operation-expired',
   'operation-limit',
+  'operation-policy-denied',
   'operation-read-required',
   'operation-write-required',
   'operation-approval-required',

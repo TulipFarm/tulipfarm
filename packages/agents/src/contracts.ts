@@ -27,6 +27,7 @@ import {
 } from './record-contracts.ts';
 import { modelFamilyIdSchema } from './model-policy-contracts.ts';
 import { procedureSelectionsSchema } from './workspace-skill-contracts.ts';
+import { googleAutonomousWritePolicySchema } from '@tulipfarm/google-workspace/public-contracts';
 import { googleToolCallSchema, googleToolResultSchema } from './google-tool-contracts.ts';
 import { slackActionSchema, slackActionViewSchema } from '@tulipfarm/slack/action-contracts';
 import { mcpPermissionSlotsSchema } from '@tulipfarm/workspaces/agent-document';
@@ -96,6 +97,14 @@ export const agentDefaultsSchema = z.strictObject({
       allowWrites: z.boolean().default(false),
     })
     .optional(),
+  /** Default Google Workspace connection bound to this agent (personal or shared). */
+  googleConnection: z
+    .strictObject({
+      integrationId: uuidSchema,
+      ownership: z.enum(['personal', 'shared']).default('shared'),
+      autonomousWrites: googleAutonomousWritePolicySchema.optional(),
+    })
+    .optional(),
   /** Default Knowledge source IDs checked first during self-discovery. */
   knowledgeSourceIds: z.array(uuidSchema).max(20).optional(),
 });
@@ -103,6 +112,8 @@ export type AgentDefaults = z.infer<typeof agentDefaultsSchema>;
 export const agentEscalationPolicySchema = z.strictObject({
   rules: z.string().trim().min(1).max(2000),
   minConfidence: z.number().min(0).max(1).default(0.7),
+  targetMembershipIds: z.array(uuidSchema).min(1).max(20).optional(),
+  targetTeamId: uuidSchema.optional(),
 });
 export type AgentEscalationPolicy = z.infer<typeof agentEscalationPolicySchema>;
 export const agentDefinitionSchema = z.strictObject({

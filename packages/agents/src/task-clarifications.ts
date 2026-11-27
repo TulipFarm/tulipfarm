@@ -4,6 +4,7 @@ import { AccessDenied, canAccessAsset, requireTablePermission, type HumanActor }
 import { writeRunState } from '@tulipfarm/tables/store';
 import { relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
 import { agentCompatibility, relation, type AgentStorage, type AgentTransaction } from './store.ts';
+import { isAuthorizedEscalationResponder } from './escalation-recipients.ts';
 import {
   githubAccountChoiceSchema,
   taskClarificationAnswerInputSchema,
@@ -311,7 +312,15 @@ export function createTaskClarifications(options: {
         throw new TaskClarificationError('not-found');
       }
       await requireTablePermission(tx, actor, row.table_id, 'table.row.read');
-      if (row.sponsor_membership_id !== actor.membershipId) {
+      const responder = await isAuthorizedEscalationResponder(tx, actor, {
+        sponsorMembershipId: row.sponsor_membership_id,
+        agentId: row.agent_id,
+        tableId: row.table_id,
+        rowId: row.row_id,
+        ...(row.agent_task_id ? { sourceId: row.agent_task_id } : {}),
+      });
+      if (!responder.authorized) {
+        if (responder.hasExplicitTargets) throw new AccessDenied();
         const canEdit = await requireTablePermission(tx, actor, row.table_id, 'table.row.update').then(
           () => true,
           error => {
@@ -388,6 +397,17 @@ export function createTaskClarifications(options: {
         [randomUUID(), row.table_id, row.row_id, actor.membershipId, body.slice(0, 20000)],
       );
 
+      if (await relationInstalled(tx.client, relation(tx, 'tf_inbox_items'))) {
+        await tx.client.query(
+          `UPDATE ${relation(tx, 'tf_inbox_items')}
+           SET resolved_at = clock_timestamp()
+           WHERE resolved_at IS NULL
+             AND kind = 'waiting'
+             AND ((table_id = $1 AND row_id = $2) OR ($3::uuid IS NOT NULL AND source_id = $3))`,
+          [row.table_id, row.row_id, row.agent_task_id],
+        );
+      }
+
       // Wake only if the same agent is still assigned and waiting on this row; never reopen completed or reassigned work.
       if (await relationInstalled(tx.client, relation(tx, 'tf_row_assignments'))) {
         const assignment = (
@@ -401,14 +421,6 @@ export function createTaskClarifications(options: {
         ).rows[0] as { agent_id: string; run_state: string } | undefined;
 
         if (assignment && assignment.agent_id === row.agent_id && assignment.run_state === 'waiting') {
-          if (await relationInstalled(tx.client, relation(tx, 'tf_inbox_items'))) {
-            await tx.client.query(
-              `UPDATE ${relation(tx, 'tf_inbox_items')}
-               SET resolved_at = clock_timestamp()
-               WHERE table_id = $1 AND row_id = $2 AND kind = 'waiting' AND resolved_at IS NULL`,
-              [row.table_id, row.row_id],
-            );
-          }
           await tx.client.query(
             `UPDATE ${relation(tx, 'tf_row_assignments')}
              SET pending_wakes = pending_wakes + 1,

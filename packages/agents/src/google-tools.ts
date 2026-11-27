@@ -15,12 +15,17 @@ import {
   officeImageIds,
   renderOfficeDocument,
 } from '@tulipfarm/conversations/office-documents';
-import { GoogleLifecycleError, type createGoogleOperations } from '@tulipfarm/google-workspace/operations';
+import {
+  GoogleLifecycleError,
+  checkAutonomousWritePolicy,
+  type createGoogleOperations,
+} from '@tulipfarm/google-workspace/operations';
 import { GoogleWorkspaceError, googleAppScopes, type GoogleApp } from '@tulipfarm/google-workspace/contracts';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import type { createFiles } from '@tulipfarm/files';
 import { readOfficeImages } from '@tulipfarm/conversations/file-outputs';
 
+import { agentDefinitionSchema, type AgentDefaults } from './contracts.ts';
 import type { AgentStorage } from './store.ts';
 import {
   googleToolResultSchema,
@@ -100,7 +105,11 @@ export function googleToolError(error: unknown) {
       ? unguardedUpdateMessage
       : error instanceof GoogleWorkspaceError && error.code === 'insufficient-scope'
         ? missingAccessMessage(error.missingScopes)
-        : undefined;
+        : error instanceof GoogleLifecycleError &&
+            error.code === 'operation-policy-denied' &&
+            error.message !== error.code
+          ? error.message
+          : undefined;
   return googleToolErrorSchema.parse({
     provider: 'google-workspace',
     untrusted: true,
@@ -144,6 +153,54 @@ export async function requireGoogleAgentOwner(
     ).rowCount
   )
     throw new AccessDenied();
+  const definitionRow = (
+    await tx.client.query(
+      `SELECT d.definition FROM ${table(tx, 'tf_agent_runs')} r JOIN ${table(tx, 'tf_agent_definitions')} d ON d.agent_id=r.agent_id AND d.revision=r.definition_revision WHERE r.id=$1`,
+      [runId],
+    )
+  ).rows[0] as { definition?: unknown } | undefined;
+  const parsedDef = agentDefinitionSchema.safeParse(definitionRow?.definition);
+  const boundGoogle = parsedDef.success ? parsedDef.data.defaults?.googleConnection : undefined;
+  if (boundGoogle?.ownership === 'shared') {
+    const shared = z
+      .object({
+        id: z.uuid(),
+        ownership: z.enum(['personal', 'shared']),
+        status: z.enum(['connected', 'disconnected', 'reconnect-required']),
+      })
+      .optional()
+      .parse(
+        (
+          await tx.client.query(`SELECT id,ownership,status FROM ${table(tx, 'tf_google_integrations')} WHERE id=$1`, [
+            boundGoogle.integrationId,
+          ])
+        ).rows[0],
+      );
+    if (shared?.ownership === 'shared') {
+      const granted = (
+        await tx.client.query(
+          `SELECT 1 FROM ${table(tx, 'tf_google_grants')} g
+           WHERE g.integration_id=$1
+             AND (
+               g.grantee='workspace'
+               OR g.membership_id=$2
+               OR EXISTS (
+                 SELECT 1 FROM ${table(tx, 'tf_member_teams')} mt
+                 WHERE mt.team_id=g.team_id AND mt.membership_id=$2
+               )
+             )
+           LIMIT 1`,
+          [shared.id, actor.membershipId],
+        )
+      ).rowCount;
+      if (!granted) throw new AccessDenied();
+      if (availability === 'required') {
+        if (shared.status === 'disconnected') throw new GoogleLifecycleError('integration-required');
+        if (shared.status === 'reconnect-required') throw new GoogleWorkspaceError('reconnect-required');
+      }
+      return actor;
+    }
+  }
   const integration = z
     .object({ id: z.uuid(), status: z.enum(['connected', 'disconnected', 'reconnect-required']) })
     .optional()
@@ -175,7 +232,12 @@ export async function requireGoogleAgentOwner(
 export async function invokeGoogleTool(
   runtime: Runtime,
   factory: GoogleOperationsFactory | undefined,
-  context: { workspaceId: string; actor: HumanActor; callId: string },
+  context: {
+    workspaceId: string;
+    actor: HumanActor;
+    callId: string;
+    googleConnection?: AgentDefaults['googleConnection'];
+  },
   call: GoogleToolCall,
   files?: Pick<ReturnType<typeof createFiles>, 'download'>,
 ) {
@@ -190,14 +252,15 @@ export async function invokeGoogleTool(
       }),
   };
   const service = factory(guarded);
-  const { workspaceId, actor, callId } = context;
+  const { workspaceId, actor, callId, googleConnection } = context;
+  const integrationId = call.integrationId ?? googleConnection?.integrationId;
   let data: unknown;
   try {
     switch (call.tool) {
       case 'google.read':
         data = await service.read(workspaceId, actor.userId, {
           operation: call.operation,
-          ...(call.integrationId ? { integrationId: call.integrationId } : {}),
+          ...(integrationId ? { integrationId } : {}),
         });
         break;
       case 'google.propose': {
@@ -229,10 +292,31 @@ export async function invokeGoogleTool(
             );
           operation = documentUpload(call.document, Buffer.from(bytes).toString('base64'));
         }
+        if (operation && googleConnection?.autonomousWrites && integrationId === googleConnection.integrationId) {
+          const check = checkAutonomousWritePolicy(operation, googleConnection.autonomousWrites);
+          if (check.allowed) {
+            const executed = await service.executeAutonomous(workspaceId, actor.userId, {
+              commandId: callId,
+              integrationId,
+              operation,
+              policy: googleConnection.autonomousWrites,
+            });
+            data = { autonomous: true, proposalId: executed.proposalId, receipt: executed.receipt };
+            break;
+          }
+          if (check.reason === 'recipient-not-allowed') {
+            return googleToolErrorSchema.parse({
+              provider: 'google-workspace',
+              untrusted: true,
+              error: 'operation-policy-denied',
+              message: `Blocked by autonomous write recipient allowlist: ${check.blockedRecipients.join(', ')}`,
+            });
+          }
+        }
         data = await service.propose(workspaceId, actor.userId, {
           commandId: callId,
           operation,
-          ...(call.integrationId ? { integrationId: call.integrationId } : {}),
+          ...(integrationId ? { integrationId } : {}),
         });
         break;
       }
