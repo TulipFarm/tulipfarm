@@ -368,7 +368,8 @@ export async function requireProtectedSource(
       break;
     }
     case 'agent-definition': {
-      await requireAgentGrant(tx, actor, source.agentId, 'read');
+      // Deleting an agent must not lock its readers out of what was made with it, so the read grant still counts.
+      await requireAgentGrant(tx, actor, source.agentId, 'read', { deleted: true });
       if (
         !(
           await tx.client.query(

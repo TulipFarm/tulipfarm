@@ -26,11 +26,11 @@ export async function requireAgentGrant(
   actor: HumanActor,
   agentId: string,
   permission: AgentPermission,
-  options: { archived?: boolean } = {},
+  options: { archived?: boolean; deleted?: boolean } = {},
 ) {
   await currentMember(tx, actor);
   const predicate = definitionGrantPredicate(tx, 'agent', 'a.id', '$2', '$3');
-  const lifecycle = options.archived ? 'a.archived_at IS NOT NULL' : 'a.deleted_at IS NULL';
+  const lifecycle = options.archived ? 'a.archived_at IS NOT NULL' : options.deleted ? 'TRUE' : 'a.deleted_at IS NULL';
   if (
     !(
       await tx.client.query(
