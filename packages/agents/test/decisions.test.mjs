@@ -420,6 +420,24 @@ test('security guardrails block secrets locally without fetch and fail closed on
   assert.equal(await checkInputSecurity({ workspaceId, text: 'Payload', source: 'webhook', enabled: true }), 'review');
 });
 
+test('output security blocks only confident credential leaks and passes personal details', async t => {
+  process.env.TYPESAFE_API_KEY = 'test-key';
+  t.after(() => delete process.env.TYPESAFE_API_KEY);
+  let response = () => jevResponse({ verdict: { choice: 'review', confidence: 0.9 } });
+  t.mock.method(globalThis, 'fetch', async () => response());
+  const text = 'You live at 12 Park Street, Bengaluru.';
+  assert.equal(await checkOutputSecurity({ workspaceId, text, enabled: true }), 'pass');
+  response = () => jevResponse({ verdict: { choice: 'block', confidence: 0.6 } });
+  assert.equal(await checkOutputSecurity({ workspaceId, text, enabled: true }), 'pass');
+  response = () => new Response('down', { status: 500 });
+  assert.equal(await checkOutputSecurity({ workspaceId, text, enabled: true }), 'pass');
+  response = () => jevResponse({ verdict: { choice: 'block', confidence: 0.95 } });
+  assert.equal(
+    await checkOutputSecurity({ workspaceId, text: 'The database password is hunter2', enabled: true }),
+    'block',
+  );
+});
+
 test('evaluateGoalRubric scores criteria in one batched call and formats unmet criteria feedback', async t => {
   process.env.TYPESAFE_API_KEY = 'test-key';
   t.after(() => delete process.env.TYPESAFE_API_KEY);

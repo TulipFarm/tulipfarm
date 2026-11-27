@@ -787,13 +787,8 @@ export function meteredReply(
         throw error;
       });
       if (decisions?.checkOutputSecurity && answer.text) {
-        const outputVerdict = await decisions.checkOutputSecurity(answer.text, session.leaseSignal);
-        if (outputVerdict === 'block' || outputVerdict === 'review') {
-          answer.text =
-            outputVerdict === 'block'
-              ? 'I cannot share that response because it was flagged for potential credential leakage or unauthorized disclosure.'
-              : 'This response was held for review because it may contain sensitive disclosure.';
-        }
+        if ((await decisions.checkOutputSecurity(answer.text, session.leaseSignal)) === 'block')
+          answer.text = 'I cannot share that response because it may contain a password, key or other credential.';
       }
       if (!answer.fallback) await plans?.answered();
       return answer.fallbackReason && plans?.own() ? { ...answer, fallbackOwnPlan: true as const } : answer;
