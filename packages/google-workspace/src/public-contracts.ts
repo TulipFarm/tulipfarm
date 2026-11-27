@@ -116,7 +116,10 @@ export const googleAccountsListSchema = z.strictObject({
   accounts: z.array(googleAccountSummarySchema),
 });
 export const googleStatusSchema = z.discriminatedUnion('status', [
-  z.strictObject({ status: z.literal('disconnected') }),
+  z.strictObject({
+    status: z.literal('disconnected'),
+    accounts: z.array(googleAccountSummarySchema).optional(),
+  }),
   z.strictObject({
     status: z.enum(['connected', 'reconnect-required']),
     integrationId: z.uuid(),
@@ -124,6 +127,7 @@ export const googleStatusSchema = z.discriminatedUnion('status', [
     accountId: z.string(),
     email: z.string(),
     scopes: z.array(z.string()),
+    accounts: z.array(googleAccountSummarySchema).optional(),
   }),
 ]);
 export type GoogleStatus = z.infer<typeof googleStatusSchema>;

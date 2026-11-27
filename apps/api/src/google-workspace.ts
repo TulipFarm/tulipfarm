@@ -168,7 +168,15 @@ export function registerGoogleWorkspace(
           paramsSchema,
         ),
       },
-      request => dependencies.service.status(paramsSchema.parse(request.params).workspaceId, principal(request).userId),
+      async request => {
+        const workspaceId = paramsSchema.parse(request.params).workspaceId;
+        const userId = principal(request).userId;
+        const status = await dependencies.service.status(workspaceId, userId);
+        const accounts = await dependencies.service.list(workspaceId, userId);
+        return accounts.length > 1 || accounts.some(account => account.ownership === 'shared')
+          ? { ...status, accounts }
+          : status;
+      },
     );
     routes.get(
       `${base}/accounts`,

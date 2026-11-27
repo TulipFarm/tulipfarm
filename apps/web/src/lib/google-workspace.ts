@@ -164,12 +164,8 @@ export async function loadGoogleIntegration(workspaceId: string, signal: AbortSi
     value => ({ kind: 'success' as const, value }),
     (error: unknown) => ({ kind: 'error' as const, error }),
   );
-  const accounts = googleApi.accounts(workspaceId, signal).then(
-    value => value.accounts,
-    () => [] as GoogleAccountSummary[],
-  );
   const status = await googleApi.status(workspaceId, signal);
-  const [configuration, accountList] = await Promise.all([availability, accounts]);
+  const configuration = await availability;
   if (configuration.kind === 'error') throw configuration.error;
-  return { ...configuration.value, status, accounts: accountList };
+  return { ...configuration.value, status, accounts: status.accounts ?? [] };
 }
