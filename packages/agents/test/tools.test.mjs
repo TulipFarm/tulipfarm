@@ -494,6 +494,58 @@ test('agent executor records exceptions without leaking stored tool arguments', 
   assert.doesNotMatch(JSON.stringify(records), /PRIVATE|url|arguments/);
 });
 
+test('agent executor records the code of a storage timeout, and keeps other errors hidden', async t => {
+  const lines = [];
+  t.mock.method(process.stdout, 'write', line => {
+    lines.push(line);
+    return true;
+  });
+  const waitTimeout = Object.assign(new Error('Workspace storage unavailable (wait_timeout)'), {
+    name: 'StorageUnavailableError',
+    code: 'wait_timeout',
+  });
+  const lockTimeout = Object.assign(new Error('canceling statement due to lock timeout'), { code: '55P03' });
+  const private_ = new Error('PRIVATE EXECUTOR FAILURE');
+  const thrown = [];
+  for (const failure of [waitTimeout, lockTimeout, private_]) {
+    let transactions = 0;
+    const runtime = {
+      transaction: async (_workspace, _compatibility, action) => {
+        if (transactions++) throw failure;
+        return action({
+          schema: 'synthetic',
+          client: { query: async () => ({ rows: [{ call: { tool: 'web.fetch', url: 'https://example.com/' } }] }) },
+        });
+      },
+    };
+    await assert.rejects(
+      createAgentExecutor({ runtime }).execute({
+        workspaceId: randomUUID(),
+        runId: randomUUID(),
+        callId: randomUUID(),
+      }),
+      error => {
+        thrown.push(error);
+        return /Agent tool execution unavailable/.test(error.message);
+      },
+    );
+  }
+  assert.deepEqual(
+    thrown.map(error => error.cause),
+    [waitTimeout, lockTimeout, undefined],
+  );
+  const records = lines.map(line => JSON.parse(line)).filter(record => record.category === 'tool');
+  assert.deepEqual(
+    records.map(record => [record.outcome, record['error.code']]),
+    [
+      ['error', 'wait_timeout'],
+      ['error', '55P03'],
+      ['error', 'unclassified'],
+    ],
+  );
+  assert.doesNotMatch(JSON.stringify(records), /PRIVATE/);
+});
+
 test('summary and linked-name lookup are granted like other reads and visible in chat', () => {
   const tableId = '11111111-1111-4111-8111-111111111111',
     fieldId = '22222222-2222-4222-8222-222222222222',
