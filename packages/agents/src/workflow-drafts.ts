@@ -132,6 +132,7 @@ export function nextWorkflowRun(trigger: Trigger, now = new Date()): string | nu
     case 'event':
     case 'provider':
     case 'github':
+    case 'gmail':
     case 'record':
     case 'row':
       return null;

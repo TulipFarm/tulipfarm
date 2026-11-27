@@ -34,6 +34,7 @@ import { createConversationActivities } from './conversation-activities.ts';
 import { createConversationMaintenanceActivities } from './conversation-maintenance-activities.ts';
 import { createGoogleHeartbeatActivities } from './google-heartbeat-activities.ts';
 import { createWorkflows } from '@tulipfarm/workflows';
+import { createWorkflowGmailAccess } from './workflow-gmail-access.ts';
 import type { SnippetClient } from '@tulipfarm/workflow-snippets/protocol';
 import { createExecutionSnippetClient } from './workflow-code-steps.ts';
 import { createTaskComposition } from './task-composition.ts';
@@ -460,24 +461,47 @@ async function run() {
           ? resourceBilling.agentTaskStep(workspaceId, taskId, () => activities.processAgentTask(workspaceId, taskId))
           : activities.processAgentTask(workspaceId, taskId),
     });
-    const workflows = coreResources
+    const workflowService = coreResources
+      ? createWorkflows(coreResources.runtime, {
+          decide: evaluateWorkflowDecision,
+          gmailAccess: createWorkflowGmailAccess(coreResources.runtime),
+          ...(workflowSlack ? { slackActions: workflowSlack } : {}),
+          ...(snippets ? { snippets } : {}),
+          ...(workflowCoding ? { codingRuns: workflowCoding.runner } : {}),
+          ...(agentTasks
+            ? {
+                agentTasks: createWorkflowAgentTasks(
+                  agentTasks,
+                  (workspaceId, taskId) => taskDispatch?.wake(workspaceId, taskId) ?? Promise.resolve(),
+                ),
+              }
+            : {}),
+        })
+      : undefined;
+    if (coreResources && workflowService) {
+      appJobs.push(
+        repeatFromStart(async () => {
+          let cursor: string | null = null;
+          while (!appAbort.signal.aborted) {
+            const batch = await coreResources.readyTaskWorkspaces(cursor);
+            if (!batch.length) break;
+            for (const workspaceId of batch) {
+              if (appAbort.signal.aborted) break;
+              await workflowService.pollGmailTriggers(workspaceId).catch(error =>
+                Runtime.instance().logger.error('Workflow Gmail trigger poll failed', {
+                  workspaceId,
+                  ...errorAttributes(error),
+                }),
+              );
+            }
+            cursor = batch.at(-1) ?? null;
+          }
+        }, 60 * 1000),
+      );
+    }
+    const workflows = workflowService
       ? {
-          advanceWorkflow: meteredWorkflowStep(
-            createWorkflows(coreResources.runtime, {
-              decide: evaluateWorkflowDecision,
-              ...(workflowSlack ? { slackActions: workflowSlack } : {}),
-              ...(snippets ? { snippets } : {}),
-              ...(workflowCoding ? { codingRuns: workflowCoding.runner } : {}),
-              ...(agentTasks
-                ? {
-                    agentTasks: createWorkflowAgentTasks(
-                      agentTasks,
-                      (workspaceId, taskId) => taskDispatch?.wake(workspaceId, taskId) ?? Promise.resolve(),
-                    ),
-                  }
-                : {}),
-            }).activity,
-          ),
+          advanceWorkflow: meteredWorkflowStep(workflowService.activity),
         }
       : undefined;
     recommendations = coreResources

@@ -2,6 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   AccessDenied,
+  canAccessTable,
+  requireTaskInvocation,
   requireWorkflowDefinitionSources,
   type AuthorizationTransaction,
   type HumanActor,
@@ -84,11 +86,13 @@ import {
   type CodingStepJob,
   type CodingStepResult,
   type GitHubTrigger,
+  type GmailTrigger,
   type Progress,
   type Trigger,
   type Work,
 } from './contracts.ts';
 import type { GitHubSubscriptions } from './github-triggers.ts';
+import { pollGmailMessages, type GmailPollCursor } from './gmail-trigger.ts';
 import {
   jobSchema,
   resultSchema,
@@ -267,6 +271,28 @@ type SlackClient = {
   }>;
 };
 
+export type GmailTriggerActor = Pick<HumanActor, 'membershipId' | 'userId'>;
+export type GmailTriggerAccess = {
+  verifyAccess(
+    tx: AuthorizationTransaction,
+    actor: GmailTriggerActor,
+    integrationId: string,
+  ): Promise<{ accountEmail: string }>;
+  withCredential<T>(
+    workspaceId: string,
+    actor: GmailTriggerActor,
+    integrationId: string,
+    operation: (credential: { accessToken: string; accountEmail: string; signal: AbortSignal }) => Promise<T>,
+  ): Promise<T>;
+};
+
+// tf_workflow_triggers.kind currently checks the original 9 kinds; Gmail triggers store their exact kind in definition JSONB.
+const storageTriggerKind = (kind: Trigger['kind']) => (kind === 'gmail' ? 'provider' : kind);
+const gmailReplayIdentity = (value: z.infer<typeof payloadSchema>) =>
+  value !== null && typeof value === 'object' && !Array.isArray(value) && 'messageId' in value
+    ? value.messageId
+    : value;
+
 export function createWorkflows(
   runtime: WorkflowRuntime,
   options: ProviderOptions & {
@@ -298,11 +324,19 @@ export function createWorkflows(
     wake?: (work: Work) => Promise<void>;
     webhookToleranceSeconds?: number;
     githubSubscriptions?: GitHubSubscriptions;
+    gmailAccess?: GmailTriggerAccess;
+    gmailFetch?: typeof fetch;
   } = {},
 ) {
   const providers = createWorkflowProviders(runtime, options);
   const cipher = credentialCipher(options.keyring);
   const tolerance = options.webhookToleranceSeconds ?? webhookToleranceSeconds;
+  const gmailFetcher = options.gmailFetch ?? options.providerFetch ?? fetch;
+  const gmailPollState = new Map<string, { cursor: GmailPollCursor; nextPollAt: number }>();
+  const clearGmailPollState = (workspaceId: string, workflowId: string, triggerId?: string) => {
+    const prefix = triggerId ? `${workspaceId}:${workflowId}:${triggerId}:` : `${workspaceId}:${workflowId}:`;
+    for (const key of gmailPollState.keys()) if (key.startsWith(prefix)) gmailPollState.delete(key);
+  };
   // The API composes no runner client, so it learns from configuration whether the worker can execute code steps.
   const codeStepsAvailable = options.codeSteps ?? options.snippets !== undefined;
   const agentStepsAvailable = options.agentSteps ?? options.agentTasks !== undefined;
@@ -333,10 +367,26 @@ export function createWorkflows(
   ) {
     return workflowTransaction(runtime, workspaceId, operation, mode, user);
   }
+  async function gmailActor(tx: AuthorizationTransaction, membershipId: string): Promise<GmailTriggerActor> {
+    const member = (
+      await tx.client.query(
+        `SELECT id, user_id FROM ${table(tx, 'tf_memberships')} WHERE id=$1 AND removed_at IS NULL`,
+        [membershipId],
+      )
+    ).rows[0];
+    if (!member) throw new AccessDenied();
+    return { membershipId: idSchema.parse(member.id), userId: z.string().parse(member.user_id) };
+  }
+  async function requireGmailAccess(tx: AuthorizationTransaction, trigger: GmailTrigger, membershipId: string) {
+    if (!options.gmailAccess) return;
+    const actor = await gmailActor(tx, membershipId);
+    await options.gmailAccess.verifyAccess(tx, actor, trigger.integrationId);
+  }
   // A trigger that reads a source carries that source's data into runs, so each member who sponsors or sees them needs source access.
   async function authorizeSource(tx: AuthorizationTransaction, trigger: Trigger, membershipId: string) {
     if (trigger.kind === 'provider') await providers.authorize(tx, trigger, membershipId);
     if (trigger.kind === 'record' || trigger.kind === 'row') await requireRecordReader(tx, membershipId, trigger);
+    if (trigger.kind === 'gmail') await requireGmailAccess(tx, trigger, membershipId);
   }
   async function authorizeSources(
     tx: AuthorizationTransaction,
@@ -1024,6 +1074,7 @@ export function createWorkflows(
             throw new WorkflowConflict('revision-conflict');
           return read(tx, id, actor.membershipId);
         }
+        const previousTriggerKinds = new Map<string, Trigger['kind']>();
         if (previous) {
           await requireUnarchived(tx, id);
           // Saving the latest definition again keeps its revision, so the sponsor's consent and the generation stand.
@@ -1033,8 +1084,11 @@ export function createWorkflows(
               [id, previous.revision],
             )
           ).rows[0];
-          if (latest && canonical(definitionSchema.parse(latest.definition)) === canonical(input.definition))
-            return read(tx, id, actor.membershipId);
+          if (latest) {
+            const parsedLatest = definitionSchema.parse(latest.definition);
+            if (canonical(parsedLatest) === canonical(input.definition)) return read(tx, id, actor.membershipId);
+            for (const trigger of parsedLatest.triggers) previousTriggerKinds.set(trigger.id, trigger.kind);
+          }
         }
         requireCodeRunner(input.definition);
         requireAgentRunner(input.definition);
@@ -1042,7 +1096,12 @@ export function createWorkflows(
         const kept = await keptOnceTimes(tx, id);
         for (const trigger of input.definition.triggers) {
           const state = states.get(trigger.id);
-          if (state && state.kind !== trigger.kind) throw new WorkflowConflict('trigger-kind-changed');
+          const previousKind = previousTriggerKinds.get(trigger.id);
+          if (
+            (state && state.kind !== storageTriggerKind(trigger.kind)) ||
+            (previousKind !== undefined && previousKind !== trigger.kind)
+          )
+            throw new WorkflowConflict('trigger-kind-changed');
           if (trigger.kind === 'provider') await providers.authorize(tx, trigger, actor.membershipId);
           // An unchanged once trigger may stay after its time has passed; it never fires again.
           if (
@@ -1055,6 +1114,7 @@ export function createWorkflows(
           if (trigger.kind === 'record') await savableRecordSource(tx, trigger, actor.membershipId);
           if (trigger.kind === 'row') await savableRowSource(tx, trigger, actor.membershipId);
           if (trigger.kind === 'github') await requireGitHubRepository(tx, trigger, actor.membershipId);
+          if (trigger.kind === 'gmail') await requireGmailAccess(tx, trigger, actor.membershipId);
         }
         await requireTableStepFields(tx, actor.membershipId, input.definition);
         await requireAgentStepReader(tx, actor.membershipId, input.definition);
@@ -1076,7 +1136,7 @@ export function createWorkflows(
         for (const trigger of input.definition.triggers)
           await tx.client.query(
             `INSERT INTO ${table(tx, 'tf_workflow_triggers')} (workflow_id,trigger_id,kind) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
-            [id, trigger.id, trigger.kind],
+            [id, trigger.id, storageTriggerKind(trigger.kind)],
           );
         if (previous)
           await tx.client.query(
@@ -1237,7 +1297,12 @@ export function createWorkflows(
                   (await requireSponsor(tx, id, revision)).sponsor_membership_id,
                 );
               }
+              if (trigger.kind === 'gmail') {
+                const sponsor = (await requireSponsor(tx, id, revision)).sponsor_membership_id;
+                await requireGmailAccess(tx, trigger, sponsor);
+              }
             }
+            clearGmailPollState(workspaceId, id);
             if (githubTriggers.length)
               await tx.client.query(
                 `DELETE FROM ${table(tx, 'tf_provider_events')} WHERE workflow_id=$1 AND NOT admitted`,
@@ -1785,7 +1850,33 @@ export function createWorkflows(
     workflowId: string,
     revision: string,
   ) {
-    await requireWorkflowDefinitionSources(tx, actor, [{ kind: 'workflow-definition', workflowId, revision }]);
+    const row = (
+      await tx.client.query(
+        `SELECT definition FROM ${table(tx, 'tf_workflow_revisions')} WHERE workflow_id=$1 AND id=$2`,
+        [workflowId, revision],
+      )
+    ).rows[0];
+    if (!row) throw new AccessDenied();
+    const parsed = definitionSchema.parse(row.definition);
+    if (!parsed.triggers.some(trigger => trigger.kind === 'gmail')) {
+      await requireWorkflowDefinitionSources(tx, actor, [{ kind: 'workflow-definition', workflowId, revision }]);
+      return;
+    }
+    await requireGrant(tx, actor.membershipId, workflowId, 'read');
+    for (const trigger of parsed.triggers) {
+      await authorizeSource(tx, trigger, actor.membershipId);
+    }
+    for (const step of parsed.steps) {
+      if (isTableStep(step) && !(await canAccessTable(tx, actor, step.tableId, 'table.row.read')))
+        throw new AccessDenied();
+      if (step.kind === 'agent') await requireTaskInvocation(tx, actor, step.agentId);
+      if (step.kind === 'http' && step.credential)
+        await providers.authorize(
+          tx,
+          { kind: 'provider', integrationId: step.credential.integrationId, event: 'created', minutes: 5 },
+          actor.membershipId,
+        );
+    }
   }
   async function definition(workspaceId: string, user: string, id: string, value: unknown = {}) {
     const query = definitionQuerySchema.parse(value);
@@ -2791,7 +2882,9 @@ export function createWorkflows(
         [workflowId, revision, triggerId, event.event_key],
       );
     const matched = definition.triggers.filter(
-      trigger => (trigger.kind === 'provider' || trigger.kind === 'github') && listed.has(trigger.id),
+      trigger =>
+        (trigger.kind === 'provider' || trigger.kind === 'github' || trigger.kind === 'gmail') &&
+        listed.has(trigger.id),
     );
     const live = matched.filter(trigger => enabled.has(trigger.id)),
       [trigger] = live;
@@ -2816,7 +2909,7 @@ export function createWorkflows(
         await admitted();
         return 'skipped';
       }
-      if (trigger.kind !== 'provider' && trigger.kind !== 'github') return 'ignored';
+      if (trigger.kind !== 'provider' && trigger.kind !== 'github' && trigger.kind !== 'gmail') return 'ignored';
       const key = `${trigger.kind}:${revision}:${triggerId}:${z.string().parse(event.event_key)}`,
         fired = firedBy(live.map(item => item.id));
       // A disconnected repository only pauses delivery: reconnecting it in Knowledge resumes runs without re-enabling.
@@ -3992,6 +4085,187 @@ export function createWorkflows(
       return (updated.rowCount ?? 0) > 0;
     });
   }
+  async function pollGmailTrigger(
+    workspaceId: string,
+    workflowId: string,
+    triggerId: string,
+    pollOptions: { cursor?: GmailPollCursor | null; limit?: number } = {},
+  ): Promise<{
+    polled: boolean;
+    admitted: string[];
+    deduplicated: number;
+    cursor: GmailPollCursor | null;
+  }> {
+    workspaceId = idSchema.parse(workspaceId);
+    workflowId = idSchema.parse(workflowId);
+    triggerId = triggerIdSchema.parse(triggerId);
+    if (!options.gmailAccess) throw new WorkflowConflict('gmail-trigger-unavailable');
+    const gmailAccess = options.gmailAccess;
+
+    const prepared = await transaction(
+      workspaceId,
+      async tx => {
+        const row = (
+          await tx.client.query(
+            `SELECT w.enabled,w.active_revision AS revision,r.definition,t.enabled AS trigger_enabled
+             FROM ${table(tx, 'tf_workflows')} w
+             JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=w.active_revision
+             JOIN ${table(tx, 'tf_workflow_triggers')} t ON t.workflow_id=w.id AND t.trigger_id=$2
+             WHERE w.id=$1`,
+            [workflowId, triggerId],
+          )
+        ).rows[0];
+        if (!row || !row.enabled || !row.trigger_enabled || !row.revision) return null;
+        const revision = idSchema.parse(row.revision);
+        const trigger = definitionSchema.parse(row.definition).triggers.find(item => item.id === triggerId);
+        if (trigger?.kind !== 'gmail') return null;
+        try {
+          const sponsor = await requireSponsor(tx, workflowId, revision);
+          const actor = await gmailActor(tx, sponsor.sponsor_membership_id);
+          const verified = await gmailAccess.verifyAccess(tx, actor, trigger.integrationId);
+          return { revision, trigger, sponsor, actor, accountEmail: verified.accountEmail };
+        } catch (error) {
+          if (error instanceof AccessDenied) {
+            await disableAutomatically(tx, workflowId, 'workflow.disable.sponsor-access-lost');
+            return null;
+          }
+          throw error;
+        }
+      },
+      'write',
+    );
+    if (!prepared) return { polled: false, admitted: [], deduplicated: 0, cursor: null };
+
+    const stateKey = `${workspaceId}:${workflowId}:${triggerId}:${prepared.revision}`;
+    const cursor =
+      pollOptions.cursor !== undefined ? pollOptions.cursor : (gmailPollState.get(stateKey)?.cursor ?? null);
+
+    const polled = await gmailAccess.withCredential(
+      workspaceId,
+      prepared.actor,
+      prepared.trigger.integrationId,
+      ({ accessToken, accountEmail, signal }) =>
+        pollGmailMessages({
+          accessToken,
+          fetcher: gmailFetcher,
+          trigger: prepared.trigger,
+          accountEmail: accountEmail || prepared.accountEmail,
+          cursor,
+          limit: pollOptions.limit,
+          signal,
+        }),
+    );
+
+    const admitted: string[] = [];
+    let deduplicated = 0;
+
+    await wakeAfter(workspaceId, async (tx, woken) => {
+      const live = (
+        await tx.client.query(
+          `SELECT 1 FROM ${table(tx, 'tf_workflows')} w
+           JOIN ${table(tx, 'tf_workflow_triggers')} t ON t.workflow_id=w.id AND t.trigger_id=$3
+           WHERE w.id=$1 AND w.enabled AND w.active_revision=$2 AND t.enabled`,
+          [workflowId, prepared.revision, triggerId],
+        )
+      ).rowCount;
+      if (live !== 1) return;
+      try {
+        const sponsor = await requireSponsor(tx, workflowId, prepared.revision);
+        if (sponsor.sponsorship_id !== prepared.sponsor.sponsorship_id) return;
+        for (const item of polled.events) {
+          const key = `gmail:${prepared.revision}:${triggerId}:${item.externalId}`;
+          const result = await admit(
+            tx,
+            workflowId,
+            key,
+            payloadSchema.parse(item.payload),
+            null,
+            firedBy([triggerId]),
+            gmailReplayIdentity,
+          );
+          if (result.replayed) {
+            deduplicated++;
+          } else {
+            admitted.push(result.runId);
+            woken.add(result.runId);
+          }
+        }
+      } catch (error) {
+        if (error instanceof AccessDenied) {
+          await disableAutomatically(tx, workflowId, 'workflow.disable.sponsor-access-lost');
+          return;
+        }
+        if (error instanceof WorkflowLimitReached) return;
+        throw error;
+      }
+    });
+
+    gmailPollState.set(stateKey, {
+      cursor: polled.nextCursor,
+      nextPollAt: Date.now() + prepared.trigger.minutes * 60_000,
+    });
+
+    return { polled: true, admitted, deduplicated, cursor: polled.nextCursor };
+  }
+
+  async function pollGmailTriggers(workspaceId: string): Promise<{
+    polled: number;
+    admitted: string[];
+    deduplicated: number;
+  }> {
+    workspaceId = idSchema.parse(workspaceId);
+    if (!options.gmailAccess) return { polled: 0, admitted: [], deduplicated: 0 };
+
+    const targets = await transaction(
+      workspaceId,
+      async tx => {
+        const rows = (
+          await tx.client.query(
+            `SELECT w.id AS workflow_id,w.active_revision AS revision,r.definition,
+                    ARRAY(SELECT t.trigger_id FROM ${table(tx, 'tf_workflow_triggers')} t WHERE t.workflow_id=w.id AND t.enabled) AS enabled_ids
+             FROM ${table(tx, 'tf_workflows')} w
+             JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=w.active_revision
+             WHERE w.enabled AND EXISTS (
+               SELECT 1 FROM jsonb_array_elements(r.definition->'triggers') tr WHERE tr->>'kind'='gmail'
+             )
+             ORDER BY w.id LIMIT 100`,
+          )
+        ).rows;
+        const found: Array<{ workflowId: string; revision: string; triggerId: string }> = [];
+        for (const row of rows) {
+          const workflowId = idSchema.parse(row.workflow_id);
+          const revision = idSchema.parse(row.revision);
+          const enabledIds = new Set(z.array(z.string()).parse(row.enabled_ids));
+          const definition = definitionSchema.parse(row.definition);
+          for (const trigger of definition.triggers) {
+            if (trigger.kind === 'gmail' && enabledIds.has(trigger.id)) {
+              found.push({ workflowId, revision, triggerId: trigger.id });
+            }
+          }
+        }
+        return found;
+      },
+      'read',
+    );
+
+    let polled = 0;
+    let deduplicated = 0;
+    const admitted: string[] = [];
+    const now = Date.now();
+    for (const target of targets) {
+      const stateKey = `${workspaceId}:${target.workflowId}:${target.triggerId}:${target.revision}`;
+      const existing = gmailPollState.get(stateKey);
+      if (existing && existing.nextPollAt > now) continue;
+      const result = await pollGmailTrigger(workspaceId, target.workflowId, target.triggerId);
+      if (result.polled) {
+        polled++;
+        admitted.push(...result.admitted);
+        deduplicated += result.deduplicated;
+      }
+    }
+    return { polled, admitted, deduplicated };
+  }
+
   async function activity(value: unknown): Promise<Progress> {
     try {
       return await advance(value);
@@ -4048,6 +4322,8 @@ export function createWorkflows(
     activity,
     codingJob,
     recordCodingResult,
+    pollGmailTrigger,
+    pollGmailTriggers,
     providers,
     candidates,
     grants,
