@@ -1309,8 +1309,7 @@ export function createTaskRuntime(
       try {
         const parsed = parseModelDecision(result.decision, claim.input);
         if (parsed.kind === 'answer') {
-          const securityVerdict = await checkOutputSecurity({ workspaceId, text: parsed.text });
-          if (securityVerdict === 'block' || securityVerdict === 'review') {
+          if ((await checkOutputSecurity({ workspaceId, text: parsed.text })) === 'block') {
             outputBlocked = true;
           } else {
             if (parsed.incomplete === undefined) {
