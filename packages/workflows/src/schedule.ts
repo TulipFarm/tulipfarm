@@ -27,6 +27,7 @@ export function nextOccurrence(trigger: Trigger, now: Date): string | null {
     case 'event':
     case 'provider':
     case 'github':
+    case 'gmail':
       return null;
     default: {
       const exhaustive: never = trigger;

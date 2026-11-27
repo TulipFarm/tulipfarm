@@ -148,11 +148,34 @@ export async function providerSources(
         .object({ id: z.uuid(), account_id: z.string(), generation: z.number().int(), scopes: z.array(z.string()) })
         .optional()
         .parse(
-          (
-            await tx.client.query(
-              `SELECT id,account_id,generation,scopes FROM ${relation(tx, 'tf_google_integrations')} WHERE membership_id=$1 AND user_id=$2 AND status='connected'`,
-              [actor.membershipId, actor.userId],
-            )
+          (call.integrationId
+            ? await tx.client.query(
+                `SELECT i.id,i.account_id,i.generation,i.scopes
+                   FROM ${relation(tx, 'tf_google_integrations')} i
+                   WHERE i.id=$1 AND i.status='connected'
+                     AND (
+                       (i.ownership='personal' AND i.membership_id=$2 AND i.user_id=$3)
+                       OR (i.ownership='shared' AND EXISTS(
+                         SELECT 1 FROM ${relation(tx, 'tf_google_grants')} g
+                         WHERE g.integration_id=i.id
+                           AND (
+                             g.grantee='workspace'
+                             OR g.membership_id=$2
+                             OR EXISTS(
+                               SELECT 1 FROM ${relation(tx, 'tf_member_teams')} mt
+                               WHERE mt.team_id=g.team_id AND mt.membership_id=$2
+                             )
+                           )
+                       ))
+                     )`,
+                [call.integrationId, actor.membershipId, actor.userId],
+              )
+            : await tx.client.query(
+                `SELECT id,account_id,generation,scopes FROM ${relation(tx, 'tf_google_integrations')}
+                   WHERE membership_id=$1 AND user_id=$2 AND ownership='personal' AND status='connected'
+                   ORDER BY id ASC LIMIT 1`,
+                [actor.membershipId, actor.userId],
+              )
           ).rows[0],
         );
       const operation =

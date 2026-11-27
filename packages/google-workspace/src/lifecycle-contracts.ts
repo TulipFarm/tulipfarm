@@ -7,17 +7,94 @@ export class GoogleLifecycleError extends Error {
     | 'operation-conflict'
     | 'operation-expired'
     | 'operation-limit'
+    | 'operation-policy-denied'
     | 'operation-read-required'
     | 'operation-write-required'
     | 'operation-approval-required'
     | 'operation-revision-required'
     | 'operation-target-stale'
     | 'operation-unguarded-update';
-  constructor(code: GoogleLifecycleError['code']) {
-    super(code);
+  constructor(code: GoogleLifecycleError['code'], message?: string) {
+    super(message ?? code);
     this.code = code;
   }
 }
+
+export const googleAutonomousWriteKinds = [
+  'gmail.messages.send',
+  'gmail.messages.modify',
+  'gmail.drafts.create',
+  'gmail.drafts.update',
+  'gmail.drafts.send',
+  'calendar.events.create',
+  'calendar.events.update',
+] as const;
+export type GoogleAutonomousWriteKind = (typeof googleAutonomousWriteKinds)[number];
+
+export const googleAutonomousWritePolicySchema = z.strictObject({
+  allowedOperations: z.array(z.enum(googleAutonomousWriteKinds)).min(1).max(20),
+  allowedRecipients: z.array(z.string().trim().min(1).max(254)).max(100).optional(),
+});
+export type GoogleAutonomousWritePolicy = z.infer<typeof googleAutonomousWritePolicySchema>;
+
+export type AutonomousWritePolicyCheck =
+  | { allowed: true }
+  | { allowed: false; reason: 'operation-not-allowed' }
+  | { allowed: false; reason: 'recipient-not-allowed'; blockedRecipients: string[] };
+
+function normalizeEmailAddress(raw: string): string {
+  const trimmed = raw.trim();
+  const angle = /<([^<>]+)>/.exec(trimmed);
+  return (angle?.[1] ?? trimmed).trim().toLowerCase();
+}
+
+function extractOperationRecipients(operation: GoogleOperation): string[] {
+  switch (operation.kind) {
+    case 'gmail.messages.send':
+    case 'gmail.drafts.create':
+    case 'gmail.drafts.update':
+    case 'gmail.drafts.send':
+      return [...operation.message.to, ...(operation.message.cc ?? []), ...(operation.message.bcc ?? [])];
+    case 'calendar.events.create':
+    case 'calendar.events.update':
+      return (operation.event.attendees ?? []).map(attendee => attendee.email);
+    default:
+      return [];
+  }
+}
+
+export function checkAutonomousWritePolicy(
+  operation: GoogleOperation,
+  policy: GoogleAutonomousWritePolicy,
+): AutonomousWritePolicyCheck {
+  if (!(policy.allowedOperations as readonly string[]).includes(operation.kind)) {
+    return { allowed: false, reason: 'operation-not-allowed' };
+  }
+  if (policy.allowedRecipients !== undefined) {
+    const rules = policy.allowedRecipients.map(rule => rule.trim().toLowerCase());
+    const blockedRecipients: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of extractOperationRecipients(operation)) {
+      const email = normalizeEmailAddress(raw);
+      const matched = rules.some(rule => (rule.startsWith('@') ? email.endsWith(rule) : email === rule));
+      if (!matched && !seen.has(email)) {
+        seen.add(email);
+        blockedRecipients.push(email);
+      }
+    }
+    if (blockedRecipients.length > 0) {
+      return { allowed: false, reason: 'recipient-not-allowed', blockedRecipients };
+    }
+  }
+  return { allowed: true };
+}
+
+export const autonomousExecuteRequestSchema = z.strictObject({
+  commandId: z.uuid(),
+  integrationId: z.uuid(),
+  operation: googleOperationSchema,
+  policy: googleAutonomousWritePolicySchema,
+});
 export const googleReadBindingSchema = z.strictObject({
   integrationId: z.uuid(),
   accountId: z.string(),
@@ -27,8 +104,13 @@ export const googleReadBindingSchema = z.strictObject({
 export const operationRequestSchema = z.strictObject({
   operation: googleOperationSchema,
   expectedIntegration: googleReadBindingSchema.optional(),
+  integrationId: z.uuid().optional(),
 });
-export const proposalRequestSchema = z.strictObject({ operation: googleOperationSchema, commandId: z.uuid() });
+export const proposalRequestSchema = z.strictObject({
+  operation: googleOperationSchema,
+  commandId: z.uuid(),
+  integrationId: z.uuid().optional(),
+});
 export const approvalDecisionSchema = z.strictObject({
   digest: z.string().regex(/^[a-f0-9]{64}$/),
   decision: z.enum(['approve', 'reject']),

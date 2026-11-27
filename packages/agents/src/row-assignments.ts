@@ -8,6 +8,7 @@ import { agentCompatibility, relation, type AgentStorage, type AgentTransaction 
 import { lockTask } from './task-approval-gate.ts';
 import { relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
 import { agentDefinitionSchema } from './contracts.ts';
+import { loadAgentEscalationPolicy, resolveEscalationRecipients } from './escalation-recipients.ts';
 import { listRowAttachments, type RowAttachment } from './row-attachments.ts';
 import { createRowClarification, parseClarificationBlock } from './task-clarifications.ts';
 
@@ -277,23 +278,23 @@ async function postNote(
 
 async function notifySponsor(
   tx: AgentTransaction,
-  assignment: { table_id: string; row_id: string; sponsor_membership_id: string },
+  assignment: { table_id: string; row_id: string; sponsor_membership_id: string; agent_id?: string },
   kind: 'waiting' | 'finished',
   sourceId: string,
   summary: string,
 ) {
-  await tx.client.query(
-    `INSERT INTO ${relation(tx, 'tf_inbox_items')}(id,membership_id,kind,table_id,row_id,source_id,summary) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`,
-    [
-      randomUUID(),
-      assignment.sponsor_membership_id,
-      kind,
-      assignment.table_id,
-      assignment.row_id,
-      sourceId,
-      summary.slice(0, 500),
-    ],
-  );
+  const policy =
+    kind === 'waiting' && assignment.agent_id ? await loadAgentEscalationPolicy(tx, assignment.agent_id) : undefined;
+  const recipients =
+    kind === 'waiting'
+      ? await resolveEscalationRecipients(tx, assignment.sponsor_membership_id, policy)
+      : [assignment.sponsor_membership_id];
+  for (const membershipId of recipients) {
+    await tx.client.query(
+      `INSERT INTO ${relation(tx, 'tf_inbox_items')}(id,membership_id,kind,table_id,row_id,source_id,summary) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`,
+      [randomUUID(), membershipId, kind, assignment.table_id, assignment.row_id, sourceId, summary.slice(0, 500)],
+    );
+  }
 }
 
 /**

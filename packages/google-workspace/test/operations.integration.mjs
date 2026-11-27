@@ -83,7 +83,7 @@ test('Google operations select only the trusted human integration and protect ex
       );
     assert.equal(f.calls.length, reads);
     await assert.rejects(f.operations.read(w, f.admin.userId, { operation: read }), /integration-required/);
-    await assert.rejects(f.operations.read(w, u, { operation: read, integrationId: connected.integrationId }));
+    await assert.rejects(f.operations.read(w, u, { operation: read, unexpectedField: connected.integrationId }));
     await assert.rejects(f.operations.read(w, u, { operation: write }), /operation-read-required/);
     await assert.rejects(f.propose(read), /operation-write-required/);
     const commandId = randomUUID();

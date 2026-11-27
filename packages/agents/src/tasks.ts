@@ -51,6 +51,7 @@ import { recordsTaskFailure } from './task-pause.ts';
 import { visiblePage } from './visible-page.ts';
 import { delegatedRequestId, subagentLimits } from './subagent-contracts.ts';
 import { effectiveAgentScope, unavailableTableMessage } from './data-scope.ts';
+import { isAuthorizedEscalationResponder } from './escalation-recipients.ts';
 import { relationInstalled } from '@tulipfarm/workspace-storage/transaction-reads';
 
 const columns = (tx: AgentTransaction) =>
@@ -763,7 +764,37 @@ export function createAgentTasks(
     const input = continueTaskSchema.parse(value);
     return transaction(workspaceId, user, async (tx, actor) => {
       await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 648291))', [`${tx.schema}:${id}`]);
-      const task = await owned(tx, actor, id);
+      let task: Task;
+      let taskOwner: HumanActor = actor;
+      let escalationResponder = false;
+      try {
+        task = await owned(tx, actor, id);
+      } catch (error) {
+        if (!(error instanceof AccessDenied)) throw error;
+        const candidate = storedSchema
+          .extend({ owner_user_id: z.string(), owner_membership_id: uuidSchema })
+          .optional()
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT ${columns(tx)}, owner_user_id, owner_membership_id FROM ${relation(tx, 'tf_agent_tasks')} WHERE id=$1`,
+                [id],
+              )
+            ).rows[0],
+          );
+        if (!candidate || candidate.status !== 'waiting-clarification') throw new AccessDenied();
+        const check = await isAuthorizedEscalationResponder(tx, actor, {
+          sponsorMembershipId: candidate.owner_membership_id,
+          agentId: candidate.agentId,
+          definitionRevision: candidate.definitionRevision,
+          sourceId: id,
+        });
+        if (!check.authorized) throw new AccessDenied();
+        taskOwner = { kind: 'human', userId: candidate.owner_user_id, membershipId: candidate.owner_membership_id };
+        const { owner_user_id: _u, owner_membership_id: _m, ...rest } = candidate;
+        task = rest;
+        escalationResponder = true;
+      }
       const command = await previous(tx, actor, input.requestId, { kind: 'continue', id, ...input });
       if (command.receipt) return command.receipt;
       const sequence = z
@@ -791,10 +822,14 @@ export function createAgentTasks(
         ).rowCount
       )
         throw new AgentTaskError('continuation-conflict');
-      if (task.status === 'failed') await requireCapacity(tx, actor);
-      await eligible(tx, actor, task.agentId, task.activationId);
+      if (task.status === 'failed') await requireCapacity(tx, taskOwner);
+      await eligible(tx, taskOwner, task.agentId, task.activationId);
       const sources = await bindGoogleInputs(tx, actor, input.sources);
-      await sourcesAllowed(tx, actor, [{ kind: 'task', taskId: id, throughSequence: sequence }, ...sources]);
+      if (escalationResponder) {
+        if (sources.length > 0) await sourcesAllowed(tx, actor, sources);
+      } else {
+        await sourcesAllowed(tx, actor, [{ kind: 'task', taskId: id, throughSequence: sequence }, ...sources]);
+      }
       await referencesFit(tx, sources, id);
       if (
         input.limits &&
@@ -814,7 +849,15 @@ export function createAgentTasks(
         `UPDATE ${relation(tx, 'tf_agent_task_steps')} s SET completed=true WHERE task_id=$1 AND generation=$2 AND NOT completed AND (decision->>'kind'='clarify' OR EXISTS (SELECT 1 FROM ${relation(tx, 'tf_model_generations')} g WHERE g.run_id=s.run_id AND g.generation=s.step AND g.status='failed'))`,
         [id, task.generation],
       );
-      return saveReceipt(tx, actor, input.requestId, command.digest, await owned(tx, actor, id));
+      if (await relationInstalled(tx.client, relation(tx, 'tf_inbox_items'))) {
+        await tx.client.query(
+          `UPDATE ${relation(tx, 'tf_inbox_items')}
+           SET resolved_at = clock_timestamp()
+           WHERE source_id = $1 AND kind = 'waiting' AND resolved_at IS NULL`,
+          [id],
+        );
+      }
+      return saveReceipt(tx, actor, input.requestId, command.digest, await owned(tx, taskOwner, id));
     });
   }
   async function read(workspaceId: string, user: string, id: string) {

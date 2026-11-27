@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { AccessDenied, type AuthorizationTransaction, type HumanActor, lockAndResolveHuman } from '@tulipfarm/access';
 import { uuidSchema } from '@tulipfarm/access/contracts';
 import { qualified, type createWorkspaceRuntime, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
-import { GoogleWorkspaceError } from './contracts.ts';
+import { GoogleWorkspaceError, googleOwnershipSchema } from './contracts.ts';
+import { googleAccountAccess } from './grants.ts';
 import { googleOperationSchema } from './operation-contracts.ts';
 import { googleReceiptSchema, GoogleLifecycleError, requiredScopes } from './lifecycle-contracts.ts';
 
@@ -10,6 +11,9 @@ export type GoogleOperationRuntime = Pick<ReturnType<typeof createWorkspaceRunti
 export const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, `tf_google_${name}`);
 const integrationSchema = z.object({
   id: z.uuid(),
+  ownership: googleOwnershipSchema,
+  user_id: z.string(),
+  membership_id: z.uuid(),
   account_id: z.string().nullable(),
   generation: z.number().int(),
   status: z.enum(['connected', 'disconnected', 'reconnect-required']),
@@ -41,18 +45,32 @@ export function authorized(runtime: GoogleOperationRuntime) {
       return operation(tx, await lockAndResolveHuman(tx, userId));
     });
 }
-export async function loadIntegration(tx: AuthorizationTransaction, actor: HumanActor, scopes: readonly string[]) {
-  const row = integrationSchema
-    .optional()
-    .parse(
-      (
-        await tx.client.query(
-          `SELECT id,account_id,generation,status,scopes FROM ${table(tx, 'integrations')} WHERE membership_id=$1 AND user_id=$2`,
+export async function loadIntegration(
+  tx: AuthorizationTransaction,
+  actor: HumanActor,
+  scopes: readonly string[],
+  integrationId?: string,
+) {
+  const row = integrationSchema.optional().parse(
+    (integrationId !== undefined
+      ? await tx.client.query(
+          `SELECT id,ownership,user_id,membership_id,account_id,generation,status,scopes
+             FROM ${table(tx, 'integrations')} WHERE id=$1`,
+          [uuidSchema.parse(integrationId)],
+        )
+      : await tx.client.query(
+          `SELECT id,ownership,user_id,membership_id,account_id,generation,status,scopes
+             FROM ${table(tx, 'integrations')}
+             WHERE membership_id=$1 AND user_id=$2 AND ownership='personal'
+             ORDER BY (status='connected') DESC, (status='reconnect-required') DESC, id ASC
+             LIMIT 1`,
           [actor.membershipId, actor.userId],
         )
-      ).rows[0],
-    );
-  if (!row || row.status === 'disconnected') throw new GoogleLifecycleError('integration-required');
+    ).rows[0],
+  );
+  if (!row) throw new GoogleLifecycleError('integration-required');
+  if (!(await googleAccountAccess(tx, actor, row)).canUse) throw new AccessDenied();
+  if (row.status === 'disconnected') throw new GoogleLifecycleError('integration-required');
   if (row.status !== 'connected' || row.account_id === null) throw new GoogleWorkspaceError('reconnect-required');
   const missing = scopes.filter(scope => !row.scopes.includes(scope));
   if (missing.length) throw new GoogleWorkspaceError('insufficient-scope', missing);
@@ -120,7 +138,7 @@ export async function proposalView(tx: AuthorizationTransaction, row: ProposalRo
 }
 export async function freshProposal(tx: AuthorizationTransaction, actor: HumanActor, row: ProposalRow) {
   if (row.expired) throw new GoogleLifecycleError('operation-expired');
-  const integration = await loadIntegration(tx, actor, requiredScopes(row.operation));
+  const integration = await loadIntegration(tx, actor, requiredScopes(row.operation), row.integration_id);
   if (
     integration.integrationId !== row.integration_id ||
     integration.accountId !== row.account_id ||

@@ -1,5 +1,9 @@
 import { z } from 'zod';
 import {
+  googleAccountsListSchema,
+  googleBeginOptionsSchema,
+  googleGrantsResponseSchema,
+  googleGrantsUpdateSchema,
   googleStatusSchema,
   googleAvailabilitySchema,
   googleAuthorizationSchema,
@@ -16,11 +20,15 @@ import {
   operationRequestSchema,
   proposalRequestSchema,
   googleResultSchema,
+  type GoogleAccountSummary,
   type GoogleApp,
+  type GoogleBeginOptions,
+  type GoogleGrantsUpdate,
 } from '@tulipfarm/google-workspace/public-contracts';
 import { apiOrigin } from './auth';
 import { jsonResponse, readJson, requestSignal, responseError } from './http';
 
+export type { GoogleAccountSummary, GoogleBeginOptions, GoogleGrantsUpdate };
 export type GoogleProposal = z.infer<typeof googleProposalSchema>;
 export type HeartbeatView = z.infer<typeof heartbeatViewSchema>;
 export type HeartbeatCommand = z.infer<typeof heartbeatCommandSchema>;
@@ -89,9 +97,33 @@ export const googleApi = {
   availability: (signal?: AbortSignal) =>
     request('/google-workspace/availability', googleAvailabilitySchema, 'GET', undefined, signal),
   status: (id: string, signal?: AbortSignal) => request(base(id), googleStatusSchema, 'GET', undefined, signal),
-  begin: (id: string, app?: GoogleApp) =>
-    request(`${base(id)}/begin${app ? `?app=${app}` : ''}`, googleAuthorizationSchema, 'POST'),
+  accounts: (id: string, signal?: AbortSignal) =>
+    request(`${base(id)}/accounts`, googleAccountsListSchema, 'GET', undefined, signal),
+  begin: (id: string, app?: GoogleApp, options?: GoogleBeginOptions) =>
+    request(
+      `${base(id)}/begin${app ? `?app=${app}` : ''}`,
+      googleAuthorizationSchema,
+      'POST',
+      options ? googleBeginOptionsSchema.parse(options) : undefined,
+    ),
   disconnect: (id: string) => request(base(id), googleDisconnectSchema, 'DELETE'),
+  disconnectAccount: (id: string, integrationId: string) =>
+    request(`${base(id)}/accounts/${encodeURIComponent(integrationId)}`, googleDisconnectSchema, 'DELETE'),
+  grants: (id: string, integrationId: string, signal?: AbortSignal) =>
+    request(
+      `${base(id)}/accounts/${encodeURIComponent(integrationId)}/grants`,
+      googleGrantsResponseSchema,
+      'GET',
+      undefined,
+      signal,
+    ),
+  setGrants: (id: string, integrationId: string, input: GoogleGrantsUpdate) =>
+    request(
+      `${base(id)}/accounts/${encodeURIComponent(integrationId)}/grants`,
+      googleGrantsResponseSchema,
+      'PUT',
+      googleGrantsUpdateSchema.parse(input),
+    ),
   proposals: (id: string, cursor: string | null, signal?: AbortSignal) =>
     request(
       `${base(id)}/operations/proposals?limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
@@ -135,5 +167,5 @@ export async function loadGoogleIntegration(workspaceId: string, signal: AbortSi
   const status = await googleApi.status(workspaceId, signal);
   const configuration = await availability;
   if (configuration.kind === 'error') throw configuration.error;
-  return { ...configuration.value, status };
+  return { ...configuration.value, status, accounts: status.accounts ?? [] };
 }

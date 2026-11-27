@@ -653,16 +653,30 @@ export const githubTriggerSchema = z
     path: ['events'],
   });
 export type GitHubTrigger = z.infer<typeof githubTriggerSchema>;
+export const gmailTriggerSchema = z.strictObject({
+  kind: z.literal('gmail'),
+  integrationId: idSchema,
+  labelIds: z.array(z.string().trim().min(1).max(128)).max(20).optional(),
+  from: z.string().trim().min(1).max(254).optional(),
+  to: z.string().trim().min(1).max(254).optional(),
+  subject: z.string().trim().min(1).max(254).optional(),
+  repliesOnly: z.boolean().optional(),
+  excludeOwnSent: z.boolean().default(true),
+  minutes: z.number().int().min(1).max(1440).default(5),
+});
+export type GmailTrigger = z.infer<typeof gmailTriggerSchema>;
 /** A trigger's identity across revisions; a namespace separate from step IDs. */
 export const triggerIdSchema = name;
 export const maxTriggers = 20;
 const triggerIdentity = { id: triggerIdSchema, label: z.string().trim().min(1).max(100).optional() };
 export const identifiedProviderTriggerSchema = providerTriggerSchema.extend(triggerIdentity);
+export const identifiedGmailTriggerSchema = gmailTriggerSchema.extend(triggerIdentity);
 export const triggerSchema = z.discriminatedUnion('kind', [
   recordTriggerSchema.extend(triggerIdentity),
   rowTriggerSchema.safeExtend(triggerIdentity),
   identifiedProviderTriggerSchema,
   githubTriggerSchema.safeExtend(triggerIdentity),
+  identifiedGmailTriggerSchema,
   z.strictObject({ ...triggerIdentity, kind: z.literal('webhook'), payload: rawWebhookSchema.optional() }),
   z.strictObject({ ...triggerIdentity, kind: z.literal('event'), name }),
   z.strictObject({
@@ -681,6 +695,7 @@ export const triggerVariantSchema = z.discriminatedUnion('kind', [
   rowTriggerSchema,
   providerTriggerSchema,
   githubTriggerSchema,
+  gmailTriggerSchema,
   z.strictObject({ kind: z.literal('webhook'), payload: rawWebhookSchema.optional() }),
   z.strictObject({ kind: z.literal('event'), name }),
   z.strictObject({ kind: z.literal('once'), at: z.iso.datetime(), timezone: timezoneSchema.optional() }),
@@ -694,6 +709,7 @@ export const triggerKinds = [
   'row',
   'provider',
   'github',
+  'gmail',
   'webhook',
   'event',
   'once',
@@ -709,6 +725,7 @@ export const eventDrivenTriggerKinds = [
   'row',
   'provider',
   'github',
+  'gmail',
   'webhook',
   'event',
 ] as const satisfies readonly TriggerKind[];
@@ -763,6 +780,15 @@ export function triggerSummary(trigger: Trigger): string {
       return `GitHub ${trigger.events
         .map(item => `${item.event}${item.actions ? ` (${item.actions.join(', ')})` : ''}`)
         .join(', ')}`;
+    case 'gmail': {
+      const parts: string[] = [];
+      if (trigger.repliesOnly) parts.push('replies');
+      if (trigger.from) parts.push(`from ${trigger.from}`);
+      if (trigger.to) parts.push(`to ${trigger.to}`);
+      if (trigger.subject) parts.push(`subject "${trigger.subject}"`);
+      if (trigger.labelIds?.length) parts.push(`labels ${trigger.labelIds.join(', ')}`);
+      return parts.length ? `Gmail (${parts.join(', ')})` : 'Gmail';
+    }
     default: {
       const exhaustive: never = trigger;
       return exhaustive;
@@ -997,6 +1023,7 @@ export const runSourceSchema = z.enum([
   'event',
   'provider',
   'github',
+  'gmail',
   'record',
   'row',
 ]);

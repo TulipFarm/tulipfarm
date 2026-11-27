@@ -22,6 +22,7 @@ export const googleToolCallSchema = z.discriminatedUnion('tool', [
   z.strictObject({
     tool: z.literal('google.read'),
     operation: googleOperationSchema,
+    integrationId: z.uuid().optional(),
     importSelection: z
       .string()
       .max(16384)
@@ -33,15 +34,17 @@ export const googleToolCallSchema = z.discriminatedUnion('tool', [
       tool: z.literal('google.propose'),
       operation: googleOperationSchema.optional(),
       document: googleDocumentSchema.optional(),
+      integrationId: z.uuid().optional(),
     })
     .describe(proposeDescription),
-  z.strictObject({ tool: z.literal('google.status'), proposalId: z.uuid() }),
-  z.strictObject({ tool: z.literal('google.execute'), proposalId: z.uuid() }),
+  z.strictObject({ tool: z.literal('google.status'), proposalId: z.uuid(), integrationId: z.uuid().optional() }),
+  z.strictObject({ tool: z.literal('google.execute'), proposalId: z.uuid(), integrationId: z.uuid().optional() }),
 ]);
 export const googleAgentToolCallSchema = z.discriminatedUnion('tool', [
   z.strictObject({
     tool: z.literal('google.read'),
     operation: googleAgentOperationSchema,
+    integrationId: z.uuid().optional(),
     importSelection: z
       .string()
       .max(16384)
@@ -53,10 +56,11 @@ export const googleAgentToolCallSchema = z.discriminatedUnion('tool', [
       tool: z.literal('google.propose'),
       operation: googleAgentOperationSchema.optional(),
       document: googleDocumentSchema.optional(),
+      integrationId: z.uuid().optional(),
     })
     .describe(proposeDescription),
-  z.strictObject({ tool: z.literal('google.status'), proposalId: z.uuid() }),
-  z.strictObject({ tool: z.literal('google.execute'), proposalId: z.uuid() }),
+  z.strictObject({ tool: z.literal('google.status'), proposalId: z.uuid(), integrationId: z.uuid().optional() }),
+  z.strictObject({ tool: z.literal('google.execute'), proposalId: z.uuid(), integrationId: z.uuid().optional() }),
 ]);
 export const googleAgentToolCallOptions = new Map<string, (typeof googleAgentToolCallSchema.options)[number]>(
   googleAgentToolCallSchema.options.map(option => [option.shape.tool.value, option]),
@@ -67,6 +71,7 @@ export const googleToolErrorCodeSchema = z.enum([
   'operation-conflict',
   'operation-expired',
   'operation-limit',
+  'operation-policy-denied',
   'operation-read-required',
   'operation-write-required',
   'operation-approval-required',
@@ -89,6 +94,9 @@ export const googleToolErrorCodeSchema = z.enum([
   'consent-denied',
   'stale-integration',
   'credential-unavailable',
+  'account-limit',
+  'grants-conflict',
+  'invalid-grant',
 ]);
 export const googleToolErrorSchema = z.strictObject({
   provider: z.literal('google-workspace'),

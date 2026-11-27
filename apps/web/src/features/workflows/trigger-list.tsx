@@ -74,6 +74,7 @@ const triggerKindDescriptions: Record<TriggerKind, string> = {
   once: 'Run once at a specific date and time',
   webhook: 'Run when an external service calls a URL',
   github: 'Run on pull requests, issues, or repository events',
+  gmail: 'Run when a matching email arrives in a connected Gmail inbox',
   row: 'Run when a record is created or updated in a table',
   record: 'Run when a date field in a table arrives',
   provider: 'Run on updates from a connected integration',
@@ -448,6 +449,8 @@ export function TriggerList({
                         disabled={locked}
                         onChange={body => update(item.id, current => ({ ...current, body }))}
                       />
+                    ) : item.kind === 'gmail' ? (
+                      <p className="text-sm text-muted-foreground">Configured via connected Google Workspace inbox.</p>
                     ) : (
                       <TriggerSettings
                         workspaceId={workspaceId}

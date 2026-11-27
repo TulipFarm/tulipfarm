@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import type { RegistryEntry } from '@tulipfarm/workspace-mcp-transport';
-import { googleAppScopes, type GoogleApp, type GoogleStatus } from '@tulipfarm/google-workspace/public-contracts';
+import {
+  googleAppScopes,
+  type GoogleAccountSummary,
+  type GoogleApp,
+  type GoogleStatus,
+} from '@tulipfarm/google-workspace/public-contracts';
 
 type Provider = 'google' | 'github' | 'atlassian' | 'trello';
 type App = { name: string; provider: Provider; googleApp?: GoogleApp };
@@ -21,9 +26,10 @@ export const connectableApps = {
 export type ConnectableApp = keyof typeof connectableApps;
 export const connectableAppSchema = z.enum(Object.keys(connectableApps) as [ConnectableApp, ...ConnectableApp[]]);
 
-/** `google`, or `github:` or `atlassian:` and the account ID. Trello accounts are Atlassian accounts. */
+/** `google`, `google:<id>`, `github:<id>`, or `atlassian:<id>`. Trello accounts are Atlassian accounts. */
 export const connectionIdSchema = z.union([
   z.literal('google'),
+  z.templateLiteral(['google:', z.uuid()]),
   z.templateLiteral(['github:', z.uuid()]),
   z.templateLiteral(['atlassian:', z.uuid()]),
 ]);
@@ -41,7 +47,11 @@ export type ConnectionServices = {
       }
     | undefined;
   google?:
-    | { availability(): { configured: boolean }; status(workspaceId: string, userId: string): Promise<GoogleStatus> }
+    | {
+        availability(): { configured: boolean };
+        status(workspaceId: string, userId: string): Promise<GoogleStatus>;
+        list?(workspaceId: string, userId: string): Promise<GoogleAccountSummary[]>;
+      }
     | undefined;
   github?:
     | {
@@ -79,8 +89,10 @@ export type Connection = {
   connectionId: ConnectionId;
   provider: Provider;
   account: string | null;
+  label?: string | null;
+  email?: string | null;
   state: 'connected' | 'reconnect-required' | 'sign-in-incomplete';
-  ownership: 'personal' | 'business';
+  ownership: 'personal' | 'business' | 'shared';
   /** Google apps this connection was granted. */
   apps?: ConnectableApp[];
   /** Atlassian sites or Trello workspaces the account reaches. */
@@ -95,27 +107,48 @@ const state = (value: AccountState): Connection['state'] =>
       ? 'reconnect-required'
       : 'sign-in-incomplete';
 
+const grantedGoogleApps = (scopes: readonly string[]): ConnectableApp[] =>
+  (Object.keys(connectableApps) as ConnectableApp[]).filter(app => {
+    const target: App = connectableApps[app];
+    return target.googleApp && googleAppScopes[target.googleApp].every(scope => scopes.includes(scope));
+  });
+
 /** The person's connections, and which integrations this server can connect. Disconnected accounts are left out. */
 export async function listConnections(services: ConnectionServices, workspaceId: string, userId: string) {
-  const [google, github, atlassian] = await Promise.all([
-    services.google?.availability().configured ? services.google.status(workspaceId, userId) : null,
+  const googleConfigured = services.google?.availability().configured === true;
+  const [googleAccounts, googleLegacy, github, atlassian] = await Promise.all([
+    googleConfigured && services.google?.list ? services.google.list(workspaceId, userId) : null,
+    googleConfigured && !services.google?.list ? services.google!.status(workspaceId, userId) : null,
     services.github ? services.github.list(workspaceId, userId) : null,
     services.atlassian ? services.atlassian.list(workspaceId, userId) : null,
   ]);
   const connections: Connection[] = [];
-  if (google && google.status !== 'disconnected')
+  if (googleAccounts) {
+    for (const account of googleAccounts) {
+      if (account.status === 'disconnected') continue;
+      connections.push({
+        connectionId: `google:${account.integrationId}`,
+        provider: 'google',
+        account: account.email ?? account.label ?? null,
+        label: account.label ?? account.email ?? null,
+        email: account.email ?? null,
+        state: account.status,
+        ownership: account.ownership,
+        apps: grantedGoogleApps(account.scopes),
+        canDisconnect: account.canManage,
+      });
+    }
+  } else if (googleLegacy && googleLegacy.status !== 'disconnected') {
     connections.push({
       connectionId: 'google',
       provider: 'google',
-      account: google.email,
-      state: google.status,
+      account: googleLegacy.email,
+      state: googleLegacy.status,
       ownership: 'personal',
-      apps: (Object.keys(connectableApps) as ConnectableApp[]).filter(app => {
-        const target: App = connectableApps[app];
-        return target.googleApp && googleAppScopes[target.googleApp].every(scope => google.scopes.includes(scope));
-      }),
+      apps: grantedGoogleApps(googleLegacy.scopes),
       canDisconnect: true,
     });
+  }
   for (const account of github?.accounts ?? [])
     if (account.state !== 'disconnected')
       connections.push({
@@ -139,7 +172,7 @@ export async function listConnections(services: ConnectionServices, workspaceId:
       });
   const configured = (app: ConnectableApp) => {
     const { provider } = connectableApps[app];
-    if (provider === 'google') return google !== null;
+    if (provider === 'google') return googleConfigured;
     if (provider === 'github') return github?.configured === true;
     const protocol = provider === 'trello' ? 'trello' : 'atlassian-mcp';
     return atlassian?.providers.some(item => item.protocol === protocol && item.configured) === true;

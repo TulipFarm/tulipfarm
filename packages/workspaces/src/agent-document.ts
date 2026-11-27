@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { googleAutonomousWritePolicySchema } from '@tulipfarm/google-workspace/public-contracts';
 
 export const mcpPermissionSlotsSchema = z
   .array(
@@ -101,6 +102,13 @@ export const agentDefinitionSchema = z.strictObject({
           allowWrites: z.boolean().default(false),
         })
         .optional(),
+      googleConnection: z
+        .strictObject({
+          integrationId: z.uuid(),
+          ownership: z.enum(['personal', 'shared']).default('shared'),
+          autonomousWrites: googleAutonomousWritePolicySchema.optional(),
+        })
+        .optional(),
       knowledgeSourceIds: z.array(z.uuid()).max(20).optional(),
     })
     .optional(),
@@ -109,6 +117,8 @@ export const agentDefinitionSchema = z.strictObject({
     .strictObject({
       rules: z.string().trim().min(1).max(2000),
       minConfidence: z.number().min(0).max(1).default(0.7),
+      targetMembershipIds: z.array(z.uuid()).min(1).max(20).optional(),
+      targetTeamId: z.uuid().optional(),
     })
     .optional(),
 });

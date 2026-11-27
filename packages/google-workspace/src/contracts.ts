@@ -1,12 +1,34 @@
 import { z } from 'zod';
 import { googleAppScopes, googleIdentityScopes, type GoogleCallbackResult } from './public-contracts.ts';
 export {
+  googleAutonomousWriteKinds,
+  googleAutonomousWritePolicySchema,
+  checkAutonomousWritePolicy,
   googleStatusSchema,
   googleAppScopes,
   googleIdentityScopes,
   googleAppSchema,
+  googleOwnershipSchema,
+  googleGrantRoleSchema,
+  googleGrantTargetSchema,
+  googleGrantsResponseSchema,
+  googleGrantsUpdateSchema,
+  googleAccountSummarySchema,
+  googleAccountsListSchema,
+  googleBeginOptionsSchema,
+  googleLabelSchema,
+  type GoogleAutonomousWriteKind,
+  type GoogleAutonomousWritePolicy,
+  type AutonomousWritePolicyCheck,
   type GoogleApp,
   type GoogleStatus,
+  type GoogleOwnership,
+  type GoogleGrantRole,
+  type GoogleGrantTarget,
+  type GoogleGrantsResponse,
+  type GoogleGrantsUpdate,
+  type GoogleAccountSummary,
+  type GoogleBeginOptions,
 } from './public-contracts.ts';
 
 export const googleWorkspaceScopes = [...googleIdentityScopes, ...Object.values(googleAppScopes).flat()];
@@ -31,7 +53,10 @@ export class GoogleWorkspaceError extends Error {
     | 'insufficient-scope'
     | 'stale-integration'
     | 'provider-unavailable'
-    | 'credential-unavailable';
+    | 'credential-unavailable'
+    | 'account-limit'
+    | 'grants-conflict'
+    | 'invalid-grant';
   /** For `insufficient-scope` raised by a stored-scope check, the scopes the integration lacks. */
   readonly missingScopes: readonly string[];
 

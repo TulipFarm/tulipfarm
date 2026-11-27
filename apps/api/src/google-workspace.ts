@@ -11,11 +11,16 @@ import {
   type SessionPrincipal,
 } from '@tulipfarm/google-workspace/contracts';
 import {
+  googleAccountsListSchema,
   googleAppSchema,
   googleAvailabilitySchema,
   googleAuthorizationSchema,
+  googleBeginOptionsSchema,
+  googleCallbackOutcomeSchema,
   googleCallbackResultSchema,
   googleDisconnectSchema,
+  googleGrantsResponseSchema,
+  googleGrantsUpdateSchema,
   googleStatusSchema,
   type GoogleCallbackResult,
 } from '@tulipfarm/google-workspace/public-contracts';
@@ -25,6 +30,7 @@ import { requestBoundaryError } from './security.ts';
 import { requestSession } from './request-session.ts';
 
 const paramsSchema = z.strictObject({ workspaceId: z.uuid() });
+const accountParamsSchema = paramsSchema.extend({ integrationId: z.uuid() });
 const beginQuerySchema = z.strictObject({ app: googleAppSchema.optional() });
 const validation = routeValidation({
   missing: 'Missing Google Workspace request validator',
@@ -37,6 +43,7 @@ function schema(
   response: z.ZodType,
   params?: z.ZodType,
   querystring?: z.ZodType,
+  body?: z.ZodType,
 ) {
   return {
     operationId,
@@ -44,6 +51,7 @@ function schema(
     tags: ['Google Workspace'],
     ...(params ? { params: validation.json(params) } : {}),
     ...(querystring ? { querystring: validation.json(querystring) } : {}),
+    ...(body ? { body: validation.json(body) } : {}),
     response: {
       200: validation.json(response),
       400: errorSchema,
@@ -97,9 +105,13 @@ export function registerGoogleWorkspace(
       if (isCallback(request)) {
         if (error instanceof GoogleCallbackError)
           return redirect(reply, { outcome: error.outcome, workspaceId: error.workspaceId });
-        const outcome =
+        const mapped =
           error instanceof GoogleWorkspaceError
-            ? error.code
+            ? googleCallbackOutcomeSchema.safeParse(error.code)
+            : { success: false as const };
+        const outcome: GoogleCallbackResult['outcome'] =
+          mapped.success && mapped.data !== 'connected'
+            ? mapped.data
             : error instanceof AccessDenied
               ? 'integration-not-found'
               : error instanceof StorageUnavailableError
@@ -122,6 +134,9 @@ export function registerGoogleWorkspace(
           'stale-integration': 409,
           'provider-unavailable': 502,
           'credential-unavailable': 503,
+          'account-limit': 409,
+          'grants-conflict': 409,
+          'invalid-grant': 400,
         }[error.code];
         return reply.code(status).send({ error: error.code });
       }
@@ -153,7 +168,33 @@ export function registerGoogleWorkspace(
           paramsSchema,
         ),
       },
-      request => dependencies.service.status(paramsSchema.parse(request.params).workspaceId, principal(request).userId),
+      async request => {
+        const workspaceId = paramsSchema.parse(request.params).workspaceId;
+        const userId = principal(request).userId;
+        const status = await dependencies.service.status(workspaceId, userId);
+        const accounts = await dependencies.service.list(workspaceId, userId);
+        return accounts.length > 1 || accounts.some(account => account.ownership === 'shared')
+          ? { ...status, accounts }
+          : status;
+      },
+    );
+    routes.get(
+      `${base}/accounts`,
+      {
+        logLevel: 'silent',
+        schema: schema(
+          'listGoogleWorkspaceAccountsV1',
+          'List personal and shared Google accounts you can access',
+          googleAccountsListSchema,
+          paramsSchema,
+        ),
+      },
+      async request => ({
+        accounts: await dependencies.service.list(
+          paramsSchema.parse(request.params).workspaceId,
+          principal(request).userId,
+        ),
+      }),
     );
     routes.post(
       `${base}/begin`,
@@ -161,7 +202,7 @@ export function registerGoogleWorkspace(
         logLevel: 'silent',
         schema: schema(
           'beginGoogleWorkspaceOAuthV1',
-          'Begin personal Google authorization',
+          'Begin Google authorization',
           googleAuthorizationSchema,
           paramsSchema,
           beginQuerySchema,
@@ -172,6 +213,7 @@ export function registerGoogleWorkspace(
           paramsSchema.parse(request.params).workspaceId,
           principal(request),
           beginQuerySchema.parse(request.query).app,
+          request.body !== undefined ? googleBeginOptionsSchema.parse(request.body) : undefined,
         ),
     );
     routes.get(
@@ -180,7 +222,7 @@ export function registerGoogleWorkspace(
         logLevel: 'silent',
         schema: {
           operationId: 'completeGoogleWorkspaceOAuthV1',
-          summary: 'Complete personal Google authorization',
+          summary: 'Complete Google authorization',
           tags: ['Google Workspace'],
           querystring: validation.json(callbackSchema),
           response: { 303: { type: 'null', description: 'Return to the fixed web callback with a sanitized outcome' } },
@@ -205,6 +247,61 @@ export function registerGoogleWorkspace(
       },
       request =>
         dependencies.service.disconnect(paramsSchema.parse(request.params).workspaceId, principal(request).userId),
+    );
+    routes.delete(
+      `${base}/accounts/:integrationId`,
+      {
+        logLevel: 'silent',
+        schema: schema(
+          'disconnectGoogleWorkspaceAccountV1',
+          'Disconnect a personal or shared Google account',
+          googleDisconnectSchema,
+          accountParamsSchema,
+        ),
+      },
+      request => {
+        const p = accountParamsSchema.parse(request.params);
+        return dependencies.service.disconnect(p.workspaceId, principal(request).userId, p.integrationId);
+      },
+    );
+    routes.get(
+      `${base}/accounts/:integrationId/grants`,
+      {
+        logLevel: 'silent',
+        schema: schema(
+          'listGoogleWorkspaceAccountGrantsV1',
+          'List grants for a shared Google account',
+          googleGrantsResponseSchema,
+          accountParamsSchema,
+        ),
+      },
+      request => {
+        const p = accountParamsSchema.parse(request.params);
+        return dependencies.service.listGrants(p.workspaceId, principal(request).userId, p.integrationId);
+      },
+    );
+    routes.put(
+      `${base}/accounts/:integrationId/grants`,
+      {
+        logLevel: 'silent',
+        schema: schema(
+          'setGoogleWorkspaceAccountGrantsV1',
+          'Replace grants for a shared Google account',
+          googleGrantsResponseSchema,
+          accountParamsSchema,
+          undefined,
+          googleGrantsUpdateSchema,
+        ),
+      },
+      request => {
+        const p = accountParamsSchema.parse(request.params);
+        return dependencies.service.setGrants(
+          p.workspaceId,
+          principal(request).userId,
+          p.integrationId,
+          googleGrantsUpdateSchema.parse(request.body),
+        );
+      },
     );
   });
 }

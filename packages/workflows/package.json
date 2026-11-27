@@ -39,6 +39,10 @@
       "types": "./dist/github-triggers.d.ts",
       "default": "./dist/github-triggers.js"
     },
+    "./gmail-trigger": {
+      "types": "./dist/gmail-trigger.d.ts",
+      "default": "./dist/gmail-trigger.js"
+    },
     "./temporal": {
       "types": "./dist/temporal.d.ts",
       "default": "./dist/temporal.js"

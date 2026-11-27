@@ -29,6 +29,7 @@ const labels = {
   'calendar.events.create': 'Create a Google Calendar event',
   'calendar.events.update': 'Update a Google Calendar event',
   'calendar.events.delete': 'Delete a Google Calendar event',
+  'calendar.freebusy.query': 'Checking Google Calendar availability',
   'drive.files.list': 'Searching Google Drive files',
   'drive.files.get': 'Reading Google Drive file details',
   'drive.files.create': 'Create a Google Drive file',

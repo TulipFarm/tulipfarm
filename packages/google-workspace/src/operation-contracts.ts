@@ -77,10 +77,11 @@ const calendar = z.strictObject({
   location: title.optional(),
   timeZone: z.string().min(1).max(100).optional(),
 });
+const dateTime = z.iso.datetime({ offset: true });
 const eventTime = z.union([
   z.strictObject({ date: z.iso.date() }),
   z.strictObject({
-    dateTime: z.iso.datetime({ offset: true }),
+    dateTime,
     timeZone: z
       .string()
       .min(1)
@@ -502,12 +503,21 @@ function sheetsAppend() {
 const calendarList = operation('calendar.events.list', 'calendar', 'read', {
   calendarId,
   q: query.optional(),
-  timeMin: z.iso.datetime({ offset: true }).optional(),
-  timeMax: z.iso.datetime({ offset: true }).optional(),
+  timeMin: dateTime.optional(),
+  timeMax: dateTime.optional(),
   singleEvents: z.boolean().optional(),
   orderBy: z.literal('startTime').optional(),
   pageToken,
   maxResults: pageSize,
+});
+const calendarFreeBusy = operation('calendar.freebusy.query', 'calendar', 'read', {
+  timeMin: dateTime,
+  timeMax: dateTime,
+  timeZone: z.string().trim().min(1).max(100).optional(),
+  items: z
+    .array(z.strictObject({ id: calendarId }))
+    .min(1)
+    .max(50),
 });
 const operations = [
   operation('gmail.messages.list', 'gmail', 'read', {
@@ -561,6 +571,13 @@ const operations = [
   operation('calendar.events.create', 'calendar', 'write', { calendarId, event, sendUpdates }),
   operation('calendar.events.update', 'calendar', 'write', { calendarId, eventId: id, event, sendUpdates }),
   operation('calendar.events.delete', 'calendar', 'write', { calendarId, eventId: id, sendUpdates }),
+  {
+    ...calendarFreeBusy,
+    schema: calendarFreeBusy.schema.refine(
+      value => Date.parse(value.timeMax) > Date.parse(value.timeMin),
+      'timeMax must be after timeMin',
+    ),
+  },
   operation('drive.files.list', 'drive', 'read', {
     q: query.optional(),
     pageToken,

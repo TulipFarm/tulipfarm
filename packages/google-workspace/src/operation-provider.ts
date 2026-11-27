@@ -177,6 +177,13 @@ function serialize(op: GoogleOperation): Request {
       return request('calendar', `/calendars/${path(op.calendarId)}/events/${path(op.eventId)}`, 'DELETE', undefined, {
         sendUpdates: op.sendUpdates ?? 'none',
       });
+    case 'calendar.freebusy.query':
+      return request('calendar', '/freeBusy', 'POST', {
+        timeMin: op.timeMin,
+        timeMax: op.timeMax,
+        ...(op.timeZone ? { timeZone: op.timeZone } : {}),
+        items: op.items,
+      });
     case 'drive.files.list':
       return request('drive', '/files', 'GET', undefined, {
         q: op.q,
