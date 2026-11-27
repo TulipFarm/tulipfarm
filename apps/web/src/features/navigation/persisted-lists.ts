@@ -7,7 +7,7 @@ import type { PersistedRead } from '@/lib/query/persisted-reads';
 import { appSummarySchema } from '@/features/apps/api';
 import { knowledgeEntrySchema } from '@/features/files/knowledge-api';
 import { skillListSchema } from '@/features/skills/api';
-import { recordSchema, tableListSchema } from '@/features/tables/api';
+import { actorDirectorySchema, recordSchema, tableListSchema } from '@/features/tables/api';
 import { taskListSchema } from '@/features/tasks/api';
 import { taskActivitySchema, taskKeysSchema } from '@/features/task-board/api';
 
@@ -36,6 +36,7 @@ const taskBoardRowsKey = z.tuple([
 ]);
 const taskActivityKey = z.tuple([z.literal('task-board'), z.literal('activity'), id]);
 const taskKeysKey = z.tuple([z.literal('tasks'), z.literal('keys'), id]);
+const actorsKey = z.tuple([z.literal('tables'), z.literal('actors'), id]);
 // Unsearched, unfiltered first pages of a files section, at its root or in a folder.
 const filesKey = z.tuple([
   z.literal('files'),
@@ -69,6 +70,7 @@ export const persistedListReads: PersistedRead[] = [
   },
   { name: 'task-activity', limit: 1, match: matches(taskActivityKey), schema: taskActivitySchema },
   { name: 'task-keys', limit: 1, match: matches(taskKeysKey), schema: taskKeysSchema },
+  { name: 'actors', limit: 1, match: matches(actorsKey), schema: actorDirectorySchema },
   { name: 'workflows', limit: 1, match: matches(workflowsKey), schema: workflowSchema.array() },
   { name: 'tables', limit: 3, match: matches(tablesKey), schema: tableListSchema },
   { name: 'skills', limit: 3, match: matches(skillsKey), schema: skillListSchema },

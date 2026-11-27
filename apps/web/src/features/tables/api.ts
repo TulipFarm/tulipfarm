@@ -592,3 +592,16 @@ export function tableApi(workspaceId: string) {
   };
 }
 export type TableApi = ReturnType<typeof tableApi>;
+
+export const actorDirectorySchema = z.object({
+  members: z.array(
+    z.object({
+      membershipId: z.uuid(),
+      name: z.string(),
+      email: z.string().nullable(),
+      photo: z.string().nullable().default(null),
+      current: z.boolean(),
+    }),
+  ),
+  agents: z.array(z.object({ id: z.uuid(), name: z.string(), available: z.boolean() })),
+});

@@ -35,3 +35,11 @@ test('a saved board read holds rows and the more flag, and anything else is refu
   assert.equal(rows?.schema.safeParse({ records: [record], more: false }).success, true);
   assert.equal(rows?.schema.safeParse({ records: [record] }).success, false);
 });
+
+test('the people list persists so a reload shows assignee names and photos at once', () => {
+  assert.equal(saved(['tables', 'actors', id]), 'actors');
+  const actors = persistedListReads.find(read => read.name === 'actors');
+  const member = { membershipId: id, name: 'Ada', email: null, photo: '/photo', current: true };
+  assert.equal(actors?.schema.safeParse({ members: [member], agents: [] }).success, true);
+  assert.equal(actors?.schema.safeParse({ members: [member] }).success, false);
+});

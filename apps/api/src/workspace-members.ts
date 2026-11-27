@@ -252,7 +252,8 @@ export function registerWorkspaceMembers(
         const p = photoParams.parse(request.params);
         const image = await service.photo(p.workspaceId, user(request), p.memberId, p.digest);
         reply
-          .header('Cache-Control', 'private, no-store')
+          // The digest in the URL changes whenever the photo does, so a cached copy is never stale.
+          .header('Cache-Control', 'private, max-age=31536000, immutable')
           .header('Referrer-Policy', 'no-referrer')
           .header('X-Content-Type-Options', 'nosniff')
           // The web app is on a sibling origin, such as app. beside api., and shows this in an <img>.
