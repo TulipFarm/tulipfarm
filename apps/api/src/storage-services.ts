@@ -30,6 +30,7 @@ import type { defaultKnowledgeStarter } from './knowledge-defaults-dispatch.ts';
 import { registerKnowledgeDispatch } from './knowledge-dispatch.ts';
 import { registerRecommendationDispatch } from './recommendation-dispatch.ts';
 import { registerWorkflowDispatch, workflowWake } from './workflow-dispatch.ts';
+import { createWorkflowGmailAccess } from './workflow-gmail-access.ts';
 import { registerSkillImportDispatch } from './skill-import-dispatch.ts';
 import { createAgentEvals, registerAgentEvalDispatch } from './agent-evals.ts';
 import { registerSystemPackageSweep } from './system-package-sweep.ts';
@@ -66,7 +67,18 @@ export function createStorageServices(app: FastifyInstance, dependencies: Storag
   }
   const wake = workflowWake(app, temporal);
   const githubSubscriptions = createGitHubSubscriptions(pool);
-  const agentSetup: AgentSetupOptions = { ...dependencies.agentSetup, workflowWake: wake, githubSubscriptions };
+  const googleService = createGoogleWorkspaceService({
+    runtime,
+    keyring: integrationCredentialKeyring(),
+    ...(defaultKnowledge ? { defaultKnowledge: defaultKnowledge.hook } : {}),
+  });
+  const gmailAccess = createWorkflowGmailAccess(runtime, googleService);
+  const agentSetup: AgentSetupOptions = {
+    ...dependencies.agentSetup,
+    workflowWake: wake,
+    githubSubscriptions,
+    gmailAccess,
+  };
   const chatObjects = chatObjectStore();
   app.addHook('onClose', async () => {
     chatObjects?.close();
@@ -79,13 +91,9 @@ export function createStorageServices(app: FastifyInstance, dependencies: Storag
     agentResultReadable: createAgentTasks(runtime).resultReadable,
     wake,
     githubSubscriptions,
+    gmailAccess,
   });
   const files = chatObjects ? createFilesService(app.log, { runtime, objects: chatObjects }) : undefined;
-  const googleService = createGoogleWorkspaceService({
-    runtime,
-    keyring: integrationCredentialKeyring(),
-    ...(defaultKnowledge ? { defaultKnowledge: defaultKnowledge.hook } : {}),
-  });
   const knowledge = createKnowledgeServices({
     runtime,
     pool,

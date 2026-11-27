@@ -50,6 +50,36 @@ export async function requireWorkflowProvider(
     throw new AccessDenied();
 }
 
+export async function requireGoogleIntegration(tx: AuthorizationTransaction, actor: HumanActor, integrationId: string) {
+  const row = (
+    await tx.client.query(
+      `SELECT id, membership_id, ownership FROM ${table(tx, 'tf_google_integrations')} WHERE id=$1 AND status='connected'`,
+      [z.uuid().parse(integrationId)],
+    )
+  ).rows[0];
+  if (!row) throw new AccessDenied();
+  const integration = z
+    .object({ id: z.uuid(), membership_id: z.uuid(), ownership: z.enum(['personal', 'shared']) })
+    .parse(row);
+  if (integration.membership_id === actor.membershipId) return;
+  if (integration.ownership !== 'shared') throw new AccessDenied();
+  const granted = (
+    await tx.client.query(
+      `SELECT 1 FROM ${table(tx, 'tf_google_grants')} g
+       WHERE g.integration_id=$1
+         AND g.role IN ('use', 'manage')
+         AND (
+           g.grantee='workspace'
+           OR g.membership_id=$2
+           OR EXISTS (SELECT 1 FROM ${table(tx, 'tf_member_teams')} mt WHERE mt.team_id=g.team_id AND mt.membership_id=$2)
+         )
+       LIMIT 1`,
+      [integration.id, actor.membershipId],
+    )
+  ).rowCount;
+  if (granted !== 1) throw new AccessDenied();
+}
+
 export async function requireWorkflowSource(
   tx: AuthorizationTransaction,
   actor: HumanActor,
@@ -77,6 +107,11 @@ export async function requireWorkflowSource(
   for (const item of [...definition.triggers, ...definition.steps]) {
     if (item.tableId && !(await canAccessTable(tx, actor, item.tableId, 'table.row.read'))) throw new AccessDenied();
     if (item.agentId) await requireTaskInvocation(tx, actor, item.agentId);
+    if (item.kind === 'gmail') {
+      if (!item.integrationId) throw new AccessDenied();
+      await requireGoogleIntegration(tx, actor, item.integrationId);
+      continue;
+    }
     const integrationId = item.integrationId ?? item.credential?.integrationId;
     if (integrationId) await requireWorkflowProvider(tx, actor, integrationId);
   }

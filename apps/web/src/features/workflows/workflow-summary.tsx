@@ -29,6 +29,7 @@ export const triggerIcons: Record<TriggerKind, IconComponent> = {
   event: ZapIcon,
   provider: PlugIcon,
   github: GitPullRequestIcon,
+  gmail: PlugIcon,
   once: ClockIcon,
   interval: RepeatIcon,
   cron: CalendarClockIcon,

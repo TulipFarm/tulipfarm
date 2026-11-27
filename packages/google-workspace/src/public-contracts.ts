@@ -90,7 +90,7 @@ export const googleLabelSchema = z
   .string()
   .min(1)
   .max(120)
-  .refine(value => !/[\u0000-\u001f\u007f]/.test(value));
+  .refine(value => ![...value].some(ch => ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f));
 export const googleBeginOptionsSchema = z.strictObject({
   integrationId: z.uuid().optional(),
   ownership: googleOwnershipSchema.optional(),

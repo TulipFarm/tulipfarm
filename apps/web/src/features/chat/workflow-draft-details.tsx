@@ -208,6 +208,8 @@ function describeTrigger(trigger: Trigger, recordSource: RecordSource, rowSource
       return `Connected provider records ${trigger.event}, checked every ${trigger.minutes} minutes`;
     case 'github':
       return `${describeGitHubTrigger(trigger, github)}. Run input holds a short summary of the GitHub event`;
+    case 'gmail':
+      return `Gmail messages checked every ${trigger.minutes} ${trigger.minutes === 1 ? 'minute' : 'minutes'}${trigger.repliesOnly ? ' (replies only)' : ''}. Run input holds message metadata and body text`;
     case 'record':
       return recordSource
         ? `${recordScheduleDescription(trigger.field, `“${recordSource.field}”`)}, once for each row of “${recordSource.table}”. Run input holds the row ID and values`

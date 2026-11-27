@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { createWorkflows } from '@tulipfarm/workflows';
+import { createWorkflows, type GmailTriggerAccess } from '@tulipfarm/workflows';
 import { hasGrant } from '@tulipfarm/workflows/authorization';
 import { definitionSchema, type Definition, type Trigger, type Work } from '@tulipfarm/workflows/contracts';
 import type { GitHubSubscriptions } from '@tulipfarm/workflows/github-triggers';
@@ -21,6 +21,7 @@ import { relation, type AgentStorage, type AgentTransaction } from './store.ts';
 export type AgentWorkflowOptions = {
   workflowWake?: ((work: Work) => Promise<void>) | undefined;
   githubSubscriptions?: GitHubSubscriptions | undefined;
+  gmailAccess?: GmailTriggerAccess | undefined;
 };
 type WorkflowTransaction = AgentTransaction & { commonVersion: number };
 
@@ -126,6 +127,7 @@ function bindWorkflows(tx: WorkflowTransaction, storage: AgentStorage, options: 
       ? { wake: (work: Work) => Promise.resolve(afterCommit(tx.client, () => void wake(work).catch(() => undefined))) }
       : {}),
     ...(options.githubSubscriptions ? { githubSubscriptions: options.githubSubscriptions } : {}),
+    ...(options.gmailAccess ? { gmailAccess: options.gmailAccess } : {}),
   });
 }
 

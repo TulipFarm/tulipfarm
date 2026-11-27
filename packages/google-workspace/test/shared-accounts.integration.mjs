@@ -45,7 +45,7 @@ test('multiple personal and shared Google accounts enforce grants, explicit rout
 
     // Bob connects his own personal account; before any grant he only sees his personal account.
     f.behavior({ account: 'bob-sub-1', email: 'bob@example.com' });
-    const bobPersonal = await f.connect(bobPrincipal);
+    await f.connect(bobPrincipal);
     assert.deepEqual(
       (await f.service.list(f.workspace.id, bob.userId)).map(a => a.email),
       ['bob@example.com'],

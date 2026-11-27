@@ -1335,6 +1335,7 @@ const runSourceLabel = {
   event: 'Started by event',
   provider: 'Started by connected app',
   github: 'Started by GitHub event',
+  gmail: 'Started by Gmail message',
   record: 'Started by record date',
   row: 'Started by row change',
 } as const;

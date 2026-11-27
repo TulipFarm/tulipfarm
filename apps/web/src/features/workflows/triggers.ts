@@ -21,6 +21,7 @@ export const triggerKindNames: Record<TriggerKind, string> = {
   once: 'One time',
   webhook: 'Webhook',
   github: 'GitHub',
+  gmail: 'Gmail',
   record: 'Record date',
   row: 'Row change',
   provider: 'Connected app',

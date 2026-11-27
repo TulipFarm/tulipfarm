@@ -68,6 +68,7 @@ export const triggerTitles: Record<Trigger['kind'], string> = {
   event: 'Event received',
   provider: 'Connected app event',
   github: 'GitHub event',
+  gmail: 'Gmail message received',
   once: 'At a scheduled time',
   interval: 'On a repeating schedule',
   cron: 'On a calendar schedule',
@@ -154,6 +155,8 @@ function triggerText(trigger: Trigger, labels: WorkflowLabels) {
     case 'record':
     case 'row':
       return labels.tables?.[trigger.tableId] ?? 'Table name unavailable';
+    case 'gmail':
+      return `Every ${workflowDuration(trigger.minutes * 60)}${trigger.repliesOnly ? ' · replies only' : ''}`;
   }
 }
 
