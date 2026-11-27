@@ -119,6 +119,23 @@ const cases = [
     { sendUpdates: 'none' },
   ],
   [
+    'calendar.freebusy.query',
+    {
+      timeMin: '2026-10-01T00:00:00Z',
+      timeMax: '2026-10-02T00:00:00Z',
+      timeZone: 'UTC',
+      items: [{ id: 'alice@example.com' }, { id: 'bob@example.com' }],
+    },
+    'POST',
+    '/calendar/v3/freeBusy',
+    {
+      timeMin: '2026-10-01T00:00:00Z',
+      timeMax: '2026-10-02T00:00:00Z',
+      timeZone: 'UTC',
+      items: [{ id: 'alice@example.com' }, { id: 'bob@example.com' }],
+    },
+  ],
+  [
     'drive.files.list',
     { q: 'trashed = false' },
     'GET',
@@ -404,9 +421,10 @@ for (const [kind, input, method, pathname, expectedBody, query = {}] of cases) {
         : { id: 'result1' },
     );
     const metadata = googleOperationCatalog.find(entry => entry.kind === kind);
-    assert.equal(isGoogleWrite(operation), method !== 'GET');
-    assert.equal(metadata.approvalRequired, method !== 'GET');
-    assert.equal(metadata.effect, method === 'GET' ? 'read' : 'write');
+    const isWrite = method !== 'GET' && kind !== 'calendar.freebusy.query';
+    assert.equal(isGoogleWrite(operation), isWrite);
+    assert.equal(metadata.approvalRequired, isWrite);
+    assert.equal(metadata.effect, isWrite ? 'write' : 'read');
     const versioned = [
       'sheets.values.update',
       'sheets.values.batchUpdate',
@@ -489,6 +507,56 @@ test('a new one-slide presentation reads within the model tool result limit', as
   );
 });
 
+test('calendar.freebusy.query posts bounded availability queries and trims optional timeZone', async () => {
+  const withoutTimeZone = {
+    kind: 'calendar.freebusy.query',
+    timeMin: '2026-10-01T09:00:00Z',
+    timeMax: '2026-10-01T17:00:00Z',
+    items: [{ id: 'alice@example.com' }, { id: 'bob@example.com' }],
+  };
+  assert.equal(googleAgentOperationSchema.safeParse(withoutTimeZone).success, true);
+
+  const responsePayload = {
+    kind: 'calendar#freeBusy',
+    timeMin: '2026-10-01T09:00:00Z',
+    timeMax: '2026-10-01T17:00:00Z',
+    calendars: {
+      'alice@example.com': { busy: [{ start: '2026-10-01T10:00:00Z', end: '2026-10-01T11:00:00Z' }] },
+      'bob@example.com': { busy: [] },
+    },
+  };
+  const result = await dispatchGoogleOperation({
+    operation: withoutTimeZone,
+    accessToken,
+    fetcher: async (url, init) => {
+      assert.equal(url.href, 'https://www.googleapis.com/calendar/v3/freeBusy');
+      assert.equal(init.method, 'POST');
+      assert.equal(init.headers['content-type'], 'application/json');
+      assert.deepEqual(JSON.parse(init.body), {
+        timeMin: '2026-10-01T09:00:00Z',
+        timeMax: '2026-10-01T17:00:00Z',
+        items: [{ id: 'alice@example.com' }, { id: 'bob@example.com' }],
+      });
+      return Response.json(responsePayload);
+    },
+  });
+  assert.deepEqual(result, responsePayload);
+
+  const withPaddedTimeZone = {
+    ...withoutTimeZone,
+    timeZone: ' America/New_York ',
+  };
+  assert.equal(googleAgentOperationSchema.parse(withPaddedTimeZone).timeZone, 'America/New_York');
+  await dispatchGoogleOperation({
+    operation: withPaddedTimeZone,
+    accessToken,
+    fetcher: async (_url, init) => {
+      assert.equal(JSON.parse(init.body).timeZone, 'America/New_York');
+      return Response.json(responsePayload);
+    },
+  });
+});
+
 test('HTTP examples cover every catalog operation exactly once', () => {
   assert.deepEqual(cases.map(([kind]) => kind).sort(), googleOperationCatalog.map(entry => entry.kind).sort());
   assert.equal(new Set(cases.map(([kind]) => kind)).size, cases.length);
@@ -547,6 +615,37 @@ const invalid = [
     kind: 'calendar.events.create',
     calendarId: 'primary',
     event: { ...event, end: { dateTime: '2026-10-02T00:00:00Z' } },
+  },
+  {
+    kind: 'calendar.freebusy.query',
+    timeMin: '2026-10-02T00:00:00Z',
+    timeMax: '2026-10-01T00:00:00Z',
+    items: [{ id: 'alice@example.com' }],
+  },
+  {
+    kind: 'calendar.freebusy.query',
+    timeMin: '2026-10-01T00:00:00Z',
+    timeMax: '2026-10-02T00:00:00Z',
+    items: [],
+  },
+  {
+    kind: 'calendar.freebusy.query',
+    timeMin: '2026-10-01T00:00:00Z',
+    timeMax: '2026-10-02T00:00:00Z',
+    timeZone: '   ',
+    items: [{ id: 'alice@example.com' }],
+  },
+  {
+    kind: 'calendar.freebusy.query',
+    timeMin: '2026-10-01T00:00:00Z',
+    timeMax: '2026-10-02T00:00:00Z',
+    items: [{ id: '..' }],
+  },
+  {
+    kind: 'calendar.freebusy.query',
+    timeMin: '2026-10-01T00:00:00Z',
+    timeMax: '2026-10-02T00:00:00Z',
+    items: Array.from({ length: 51 }, (_, n) => ({ id: `user${n}@example.com` })),
   },
   { kind: 'docs.documents.batchUpdate', documentId: 'd1', requests: [{ arbitrary: {} }] },
   {

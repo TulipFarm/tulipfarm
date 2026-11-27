@@ -36,6 +36,7 @@ Each prefix below combines with each listed suffix.
 | `gmail.labels`               | `list`, `get`, `create`, `update`, `delete`                                        |
 | `calendar.calendars`         | `list`, `get`, `create`, `update`, `delete`                                        |
 | `calendar.events`            | `list`, `get`, `create`, `update`, `delete`                                        |
+| `calendar.freebusy`          | `query`                                                                            |
 | `drive.files`                | `list`, `get`, `create`, `update`, `copy`, `trash`, `upload`, `download`, `export` |
 | `drive.permissions`          | `list`, `get`, `create`, `update`, `delete`                                        |
 | `sheets.spreadsheets`        | `get`, `create`, `batchUpdate`                                                     |
@@ -44,7 +45,7 @@ Each prefix below combines with each listed suffix.
 | `slides.presentations`       | `create`, `get`, `batchUpdate`                                                     |
 | `slides.presentations.pages` | `get`                                                                              |
 
-There are 58 kinds. `src/operation-contracts.ts` is the field-level contract.
+There are 59 kinds. `src/operation-contracts.ts` is the field-level contract.
 `test/operation-provider.test.mjs` supplies an HTTP example for each kind and
 checks that its examples cover the catalog exactly once.
 
