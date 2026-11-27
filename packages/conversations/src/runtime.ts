@@ -3476,6 +3476,38 @@ export function createConversationExecutor(
     return withRemoteSourceCheckMemo(() => processAttempt(value, onTitle));
   }
 
+  /**
+   * Runs a waiting turn's resume hook and its hand-back. An AccessDenied here is permanent: the requester can no longer
+   * read a source the action depends on, or the action is gone. The turn is blocked the way a denied first call blocks
+   * it, instead of being thrown back to the dispatcher, which would wake the same waiting turn forever.
+   */
+  async function resumeOrBlock(work: ReplyWork, resume: () => Promise<'idle' | undefined>) {
+    try {
+      return await resume();
+    } catch (error) {
+      if (!(error instanceof AccessDenied) || error instanceof SourceAuthorizationUnavailable) throw error;
+      const blocked = await transaction(work.workspaceId, async tx => {
+        const updated = await tx.client.query(
+          `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='blocked', lease_until=NULL, retry_at=NULL, error_code='requester-unavailable', attempt_epoch=attempt_epoch+1 WHERE id=$1 AND conversation_id=$2 AND generation=$3 AND status='waiting'`,
+          [work.turnId, work.conversationId, work.generation],
+        );
+        if (!updated.rowCount) return false;
+        await interruptToolReceipts(tx, work.turnId, 'blocked');
+        await changed(tx, work, true);
+        return true;
+      });
+      if (blocked)
+        log('warn', 'activity', 'call_failed', {
+          operation: 'conversation.reply',
+          'error.type': errorType(error),
+          'error.code': 'access-denied',
+          'error.stage': 'resume',
+          outcome: 'blocked',
+        });
+      return 'idle' as const;
+    }
+  }
+
   async function processAttempt(
     value: unknown,
     onTitle?: TitleListener,
@@ -3515,49 +3547,57 @@ export function createConversationExecutor(
                       );
                   });
                   if (pending) {
-                    const actor = await transaction(work.workspaceId, tx =>
-                      turnRequester(tx, work.conversationId, work.turnId),
-                    );
-                    const response = await resumeMcp(
-                      {
-                        runtime,
-                        workspaceId: work.workspaceId,
-                        actor,
-                        callId: pending.call_id,
-                        origin: { conversationId: work.conversationId, turnId: work.turnId, sources: pending.sources },
-                      },
-                      pending.call,
-                    );
-                    if (response.result.kind === 'waiting') return 'idle';
-                    await transaction(work.workspaceId, async tx => {
-                      const chat = await root(tx, work);
-                      const turn = await head(tx, work.conversationId);
-                      if (
-                        !chat ||
-                        !turn ||
-                        turn.id !== work.turnId ||
-                        turn.generation !== work.generation ||
-                        turn.status !== 'waiting'
-                      )
-                        throw new AccessDenied();
-                      await requireReplyMcpSources(tx, actor, work.conversationId, [
-                        ...pending.sources,
-                        ...response.sources,
-                      ]);
-                      await tx.client.query(
-                        `UPDATE ${table(tx, 'tf_conversation_execution_steps')} SET output=$2 WHERE call_id=$1 AND output IS NULL`,
-                        [pending.call_id, JSON.stringify(response)],
+                    const outcome = await resumeOrBlock(work, async (): Promise<'idle' | undefined> => {
+                      const actor = await transaction(work.workspaceId, tx =>
+                        turnRequester(tx, work.conversationId, work.turnId),
                       );
-                      await tx.client.query(
-                        `UPDATE ${table(tx, 'tf_conversation_tool_calls')} SET status='completed' WHERE id=$1 AND status='running'`,
-                        [pending.call_id],
+                      const response = await resumeMcp(
+                        {
+                          runtime,
+                          workspaceId: work.workspaceId,
+                          actor,
+                          callId: pending.call_id,
+                          origin: {
+                            conversationId: work.conversationId,
+                            turnId: work.turnId,
+                            sources: pending.sources,
+                          },
+                        },
+                        pending.call,
                       );
-                      await tx.client.query(
-                        `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='queued',error_code=NULL,attempts=0,retry_at=NULL WHERE id=$1`,
-                        [work.turnId],
-                      );
-                      await changed(tx, work);
+                      if (response.result.kind === 'waiting') return 'idle';
+                      await transaction(work.workspaceId, async tx => {
+                        const chat = await root(tx, work);
+                        const turn = await head(tx, work.conversationId);
+                        if (
+                          !chat ||
+                          !turn ||
+                          turn.id !== work.turnId ||
+                          turn.generation !== work.generation ||
+                          turn.status !== 'waiting'
+                        )
+                          throw new AccessDenied();
+                        await requireReplyMcpSources(tx, actor, work.conversationId, [
+                          ...pending.sources,
+                          ...response.sources,
+                        ]);
+                        await tx.client.query(
+                          `UPDATE ${table(tx, 'tf_conversation_execution_steps')} SET output=$2 WHERE call_id=$1 AND output IS NULL`,
+                          [pending.call_id, JSON.stringify(response)],
+                        );
+                        await tx.client.query(
+                          `UPDATE ${table(tx, 'tf_conversation_tool_calls')} SET status='completed' WHERE id=$1 AND status='running'`,
+                          [pending.call_id],
+                        );
+                        await tx.client.query(
+                          `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='queued',error_code=NULL,attempts=0,retry_at=NULL WHERE id=$1`,
+                          [work.turnId],
+                        );
+                        await changed(tx, work);
+                      });
+                      return undefined;
                     });
+                    if (outcome === 'idle') return 'idle';
                   }
                 }
                 if (resumeApiCall) {
@@ -3582,40 +3622,44 @@ export function createConversationExecutor(
                     return { callId: uuidSchema.parse(row.id), actor: chat.requester };
                   });
                   if (pending) {
-                    const response = await resumeApiCall({
-                      runtime,
-                      workspaceId: work.workspaceId,
-                      actor: pending.actor,
-                      conversationId: work.conversationId,
-                      turnId: work.turnId,
-                      callId: pending.callId,
+                    const outcome = await resumeOrBlock(work, async (): Promise<'idle' | undefined> => {
+                      const response = await resumeApiCall({
+                        runtime,
+                        workspaceId: work.workspaceId,
+                        actor: pending.actor,
+                        conversationId: work.conversationId,
+                        turnId: work.turnId,
+                        callId: pending.callId,
+                      });
+                      if (response.state === 'waiting') return 'idle';
+                      await transaction(work.workspaceId, async tx => {
+                        const chat = await root(tx, work);
+                        const turn = await head(tx, work.conversationId);
+                        if (
+                          !chat ||
+                          !turn ||
+                          turn.id !== work.turnId ||
+                          turn.generation !== work.generation ||
+                          turn.status !== 'waiting'
+                        )
+                          throw new AccessDenied();
+                        await tx.client.query(
+                          `UPDATE ${table(tx, 'tf_conversation_execution_steps')} SET output=$2 WHERE call_id=$1 AND output IS NULL`,
+                          [pending.callId, JSON.stringify({ result: response.result, sources: response.sources })],
+                        );
+                        await tx.client.query(
+                          `UPDATE ${table(tx, 'tf_conversation_tool_calls')} SET status='completed' WHERE id=$1 AND status='running'`,
+                          [pending.callId],
+                        );
+                        await tx.client.query(
+                          `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='queued',error_code=NULL,attempts=0,retry_at=NULL WHERE id=$1`,
+                          [work.turnId],
+                        );
+                        await changed(tx, work);
+                      });
+                      return undefined;
                     });
-                    if (response.state === 'waiting') return 'idle';
-                    await transaction(work.workspaceId, async tx => {
-                      const chat = await root(tx, work);
-                      const turn = await head(tx, work.conversationId);
-                      if (
-                        !chat ||
-                        !turn ||
-                        turn.id !== work.turnId ||
-                        turn.generation !== work.generation ||
-                        turn.status !== 'waiting'
-                      )
-                        throw new AccessDenied();
-                      await tx.client.query(
-                        `UPDATE ${table(tx, 'tf_conversation_execution_steps')} SET output=$2 WHERE call_id=$1 AND output IS NULL`,
-                        [pending.callId, JSON.stringify({ result: response.result, sources: response.sources })],
-                      );
-                      await tx.client.query(
-                        `UPDATE ${table(tx, 'tf_conversation_tool_calls')} SET status='completed' WHERE id=$1 AND status='running'`,
-                        [pending.callId],
-                      );
-                      await tx.client.query(
-                        `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='queued',error_code=NULL,attempts=0,retry_at=NULL WHERE id=$1`,
-                        [work.turnId],
-                      );
-                      await changed(tx, work);
-                    });
+                    if (outcome === 'idle') return 'idle';
                   }
                 }
                 if (resumeCodingRun) {
@@ -3640,40 +3684,44 @@ export function createConversationExecutor(
                     return { callId: uuidSchema.parse(row.id), actor: chat.requester };
                   });
                   if (pending) {
-                    const response = await resumeCodingRun({
-                      runtime,
-                      workspaceId: work.workspaceId,
-                      actor: pending.actor,
-                      conversationId: work.conversationId,
-                      turnId: work.turnId,
-                      callId: pending.callId,
+                    const outcome = await resumeOrBlock(work, async (): Promise<'idle' | undefined> => {
+                      const response = await resumeCodingRun({
+                        runtime,
+                        workspaceId: work.workspaceId,
+                        actor: pending.actor,
+                        conversationId: work.conversationId,
+                        turnId: work.turnId,
+                        callId: pending.callId,
+                      });
+                      if (response.state === 'waiting') return 'idle';
+                      await transaction(work.workspaceId, async tx => {
+                        const chat = await root(tx, work);
+                        const turn = await head(tx, work.conversationId);
+                        if (
+                          !chat ||
+                          !turn ||
+                          turn.id !== work.turnId ||
+                          turn.generation !== work.generation ||
+                          turn.status !== 'waiting'
+                        )
+                          throw new AccessDenied();
+                        await tx.client.query(
+                          `UPDATE ${table(tx, 'tf_conversation_execution_steps')} SET output=$2 WHERE call_id=$1 AND output IS NULL`,
+                          [pending.callId, JSON.stringify({ result: response.result, sources: response.sources })],
+                        );
+                        await tx.client.query(
+                          `UPDATE ${table(tx, 'tf_conversation_tool_calls')} SET status='completed' WHERE id=$1 AND status='running'`,
+                          [pending.callId],
+                        );
+                        await tx.client.query(
+                          `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='queued',error_code=NULL,attempts=0,retry_at=NULL WHERE id=$1`,
+                          [work.turnId],
+                        );
+                        await changed(tx, work);
+                      });
+                      return undefined;
                     });
-                    if (response.state === 'waiting') return 'idle';
-                    await transaction(work.workspaceId, async tx => {
-                      const chat = await root(tx, work);
-                      const turn = await head(tx, work.conversationId);
-                      if (
-                        !chat ||
-                        !turn ||
-                        turn.id !== work.turnId ||
-                        turn.generation !== work.generation ||
-                        turn.status !== 'waiting'
-                      )
-                        throw new AccessDenied();
-                      await tx.client.query(
-                        `UPDATE ${table(tx, 'tf_conversation_execution_steps')} SET output=$2 WHERE call_id=$1 AND output IS NULL`,
-                        [pending.callId, JSON.stringify({ result: response.result, sources: response.sources })],
-                      );
-                      await tx.client.query(
-                        `UPDATE ${table(tx, 'tf_conversation_tool_calls')} SET status='completed' WHERE id=$1 AND status='running'`,
-                        [pending.callId],
-                      );
-                      await tx.client.query(
-                        `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='queued',error_code=NULL,attempts=0,retry_at=NULL WHERE id=$1`,
-                        [work.turnId],
-                      );
-                      await changed(tx, work);
-                    });
+                    if (outcome === 'idle') return 'idle';
                   }
                 }
                 const waiting = await transaction(work.workspaceId, async tx => {

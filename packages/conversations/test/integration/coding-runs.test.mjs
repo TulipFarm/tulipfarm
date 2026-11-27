@@ -34,6 +34,7 @@ async function codingChat(t) {
   const work = { workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 };
   const replies = [];
   const starts = [];
+  const hooks = { resume: undefined };
   const executor = runtime =>
     createConversationExecutor(
       runtime,
@@ -68,6 +69,7 @@ async function codingChat(t) {
       {
         offered: async () => true,
         resume: async context => {
+          if (hooks.resume) return hooks.resume(context);
           const resumed = await resumeCodingRun(
             context.runtime,
             context.workspaceId,
@@ -107,7 +109,7 @@ async function codingChat(t) {
   assert.equal(await executor(f.runtime).process(work), 'idle');
   assert.deepEqual(starts, []);
   assert.equal((await view(actor, runId)).status, 'awaiting-approval');
-  return { f, w, actor, work, runId, replies, starts, executor, turn, output, decide, view };
+  return { f, w, actor, work, runId, replies, starts, hooks, executor, turn, output, decide, view };
 }
 
 test(
@@ -182,3 +184,30 @@ test('only the member who asked can see or decide a coding run', { timeout: 6000
   assert.equal((await view(actor, runId)).status, 'awaiting-approval');
   assert.deepEqual(starts, []);
 });
+
+test(
+  'a waiting turn whose resume is denied is blocked once instead of being retried forever',
+  { timeout: 60000 },
+  async t => {
+    const { f, work, replies, hooks, executor, turn } = await codingChat(t);
+    let resumes = 0;
+    hooks.resume = async () => {
+      resumes++;
+      throw new AccessDenied();
+    };
+    assert.equal(await executor(f.runtime).process(work), 'idle');
+    assert.deepEqual(await turn(), { status: 'blocked', error_code: 'requester-unavailable' });
+    assert.equal(
+      (
+        await f.db.platform.query(`SELECT status FROM ${f.table('tf_conversation_tool_calls')} WHERE turn_id=$1`, [
+          work.turnId,
+        ])
+      ).rows[0].status,
+      'blocked',
+    );
+    assert.deepEqual(await executor(f.runtime).due(work.workspaceId, work.conversationId), [], 'the sweep skips it');
+    assert.equal(await executor(f.runtime).process(work), 'idle');
+    assert.equal(resumes, 1, 'a blocked turn is not resumed again');
+    assert.equal(replies.length, 1, 'no model call follows the denial');
+  },
+);
