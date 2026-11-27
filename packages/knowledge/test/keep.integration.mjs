@@ -59,6 +59,17 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       const connected = { on: true };
       const endpoint = () => (connected.on ? keep.client : undefined);
       const feed = createKnowledgeKeepFeed({ runtime: feedRuntime, client: endpoint });
+      // `pending` counts due work with its own query; every scenario checks that it agrees with `due`.
+      const listDue = feed.due;
+      feed.due = async (workspaceId, after, limit) => {
+        if (after === null && feedRuntime === runtime)
+          assert.equal(
+            await feed.pending(workspaceId),
+            (await listDue(workspaceId, null, 1)).length > 0,
+            'pending agrees with due',
+          );
+        return listDue(workspaceId, after, limit);
+      };
       const search = createKnowledgeSearch({
         runtime,
         index: customIndex?.(ws) ?? createKnowledgeKeepIndex({ client: endpoint }),

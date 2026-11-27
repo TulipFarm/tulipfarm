@@ -538,9 +538,35 @@ export function createKnowledgeKeepFeed({
     }
   }
 
-  /** Whether the workspace has any Keep work due. */
+  /**
+   * Whether the workspace has any Keep work due: the same documents {@link due} returns, counted rather than listed.
+   * Nothing is due most of the time, and proving that visits every document. Without a limit Postgres hashes the narrow
+   * tables and reads only the publication and revision indexes, instead of walking every document in id order and
+   * loading its wide publication and revision rows.
+   */
   async function pending(workspaceId: string) {
-    return (await due(workspaceId, null, 1)).length > 0;
+    if (!client()) return false;
+    return tenant.transaction(workspaceId, {}, async tx => {
+      if (!installed(tx)) return false;
+      const plain = `EXISTS (SELECT 1 FROM ${table(tx, 'publications')} p
+          JOIN ${table(tx, 'revisions')} r ON r.id=p.revision_id
+          WHERE p.id=d.lexical_publication_id AND p.document_id=d.id AND r.sources='[]'::jsonb)`;
+      const { rows } = await tx.client.query(
+        `SELECT (SELECT count(*) FROM ${table(tx, 'documents')} d
+            JOIN ${table(tx, 'sources')} s ON s.id=d.source_id
+            LEFT JOIN ${keepTable(tx)} k ON k.document_id=d.id
+            WHERE d.tombstoned_at IS NULL AND s.state IN ('active','paused') AND ${ready}
+              AND k.publication_id IS DISTINCT FROM d.lexical_publication_id
+              AND k.failed_publication_id IS DISTINCT FROM d.lexical_publication_id AND ${plain})
+          + (SELECT count(*) FROM ${keepTable(tx)} k
+            LEFT JOIN ${table(tx, 'documents')} d ON d.id=k.document_id
+            LEFT JOIN ${table(tx, 'sources')} s ON s.id=d.source_id
+            WHERE k.held AND ${ready}
+              AND NOT coalesce(d.id IS NOT NULL AND d.tombstoned_at IS NULL AND s.state IN ('active','paused') AND ${plain}, false)) > 0
+          AS pending`,
+      );
+      return z.object({ pending: z.boolean() }).parse(rows[0]).pending;
+    });
   }
 
   return { due, sync, recordFailure, pending };
