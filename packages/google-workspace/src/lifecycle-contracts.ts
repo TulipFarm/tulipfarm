@@ -27,8 +27,13 @@ export const googleReadBindingSchema = z.strictObject({
 export const operationRequestSchema = z.strictObject({
   operation: googleOperationSchema,
   expectedIntegration: googleReadBindingSchema.optional(),
+  integrationId: z.uuid().optional(),
 });
-export const proposalRequestSchema = z.strictObject({ operation: googleOperationSchema, commandId: z.uuid() });
+export const proposalRequestSchema = z.strictObject({
+  operation: googleOperationSchema,
+  commandId: z.uuid(),
+  integrationId: z.uuid().optional(),
+});
 export const approvalDecisionSchema = z.strictObject({
   digest: z.string().regex(/^[a-f0-9]{64}$/),
   decision: z.enum(['approve', 'reject']),

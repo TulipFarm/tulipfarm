@@ -29,7 +29,7 @@ export async function googleFixture(extend) {
     if (url.endsWith('/userinfo'))
       return Response.json({
         sub: behavior.account ?? 'google-account-1',
-        email: 'member@example.com',
+        email: behavior.email ?? 'member@example.com',
         email_verified: true,
       });
     assert.equal(url, 'https://oauth2.googleapis.com/token');
@@ -55,14 +55,14 @@ export async function googleFixture(extend) {
   };
   const serviceOptions = { runtime: f.runtime, config, keyring, providerFetch, now: () => time };
   const service = createGoogleWorkspaceService(serviceOptions);
-  async function begin(who = principal, app) {
-    const result = await service.begin(f.workspace.id, who, app);
+  async function begin(who = principal, app, options) {
+    const result = await service.begin(f.workspace.id, who, app, options);
     const url = new URL(result.authorizationUrl);
     challenge = url.searchParams.get('code_challenge');
     return { url, state: url.searchParams.get('state') };
   }
-  async function connect(who = principal, app) {
-    const { state } = await begin(who, app);
+  async function connect(who = principal, app, options) {
+    const { state } = await begin(who, app, options);
     return service.complete(who, { state, code: 'private-code' });
   }
   const fence = status => ({

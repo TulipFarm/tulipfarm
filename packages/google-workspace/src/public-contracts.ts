@@ -58,6 +58,56 @@ export const googleAppScopes = {
 } as const;
 export const googleAppSchema = z.enum(['gmail', 'calendar', 'drive', 'sheets', 'docs', 'slides']);
 export type GoogleApp = z.infer<typeof googleAppSchema>;
+export const googleOwnershipSchema = z.enum(['personal', 'shared']);
+export type GoogleOwnership = z.infer<typeof googleOwnershipSchema>;
+export const googleGrantRoleSchema = z.enum(['use', 'manage']);
+export type GoogleGrantRole = z.infer<typeof googleGrantRoleSchema>;
+export const googleGrantTargetSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('workspace'), role: googleGrantRoleSchema }),
+  z.strictObject({ kind: z.literal('member'), membershipId: z.uuid(), role: googleGrantRoleSchema }),
+  z.strictObject({ kind: z.literal('team'), teamId: z.uuid(), role: googleGrantRoleSchema }),
+]);
+export type GoogleGrantTarget = z.infer<typeof googleGrantTargetSchema>;
+export const googleGrantsResponseSchema = z.strictObject({
+  integrationId: z.uuid(),
+  grantsVersion: z.number().int().positive(),
+  grants: z.array(googleGrantTargetSchema),
+});
+export type GoogleGrantsResponse = z.infer<typeof googleGrantsResponseSchema>;
+export const googleGrantsUpdateSchema = z.strictObject({
+  expectedGrantsVersion: z.number().int().positive(),
+  grants: z.array(googleGrantTargetSchema).max(200),
+});
+export type GoogleGrantsUpdate = z.infer<typeof googleGrantsUpdateSchema>;
+export const googleLabelSchema = z
+  .string()
+  .min(1)
+  .max(120)
+  .refine(value => !/[\u0000-\u001f\u007f]/.test(value));
+export const googleBeginOptionsSchema = z.strictObject({
+  integrationId: z.uuid().optional(),
+  ownership: googleOwnershipSchema.optional(),
+  label: googleLabelSchema.optional(),
+  newAccount: z.boolean().optional(),
+});
+export type GoogleBeginOptions = z.infer<typeof googleBeginOptionsSchema>;
+export const googleAccountSummarySchema = z.strictObject({
+  integrationId: z.uuid(),
+  ownership: googleOwnershipSchema,
+  status: z.enum(['connected', 'reconnect-required', 'disconnected']),
+  accountId: z.string().optional(),
+  email: z.string().optional(),
+  label: z.string().optional(),
+  generation: z.number().int().positive(),
+  grantsVersion: z.number().int().positive(),
+  scopes: z.array(z.string()),
+  canUse: z.boolean(),
+  canManage: z.boolean(),
+});
+export type GoogleAccountSummary = z.infer<typeof googleAccountSummarySchema>;
+export const googleAccountsListSchema = z.strictObject({
+  accounts: z.array(googleAccountSummarySchema),
+});
 export const googleStatusSchema = z.discriminatedUnion('status', [
   z.strictObject({ status: z.literal('disconnected') }),
   z.strictObject({

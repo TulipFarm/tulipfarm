@@ -15,16 +15,26 @@ import {
   GoogleCallbackError,
   GoogleWorkspaceError,
   googleAppScopes,
+  googleBeginOptionsSchema,
+  googleGrantsUpdateSchema,
   googleIdentityScopes,
+  googleOwnershipSchema,
   googleWorkspaceConfig,
   googleWorkspaceScopes,
   sessionPrincipalSchema,
+  type GoogleAccountSummary,
   type GoogleApp,
+  type GoogleBeginOptions,
+  type GoogleGrantsResponse,
+  type GoogleGrantsUpdate,
+  type GoogleGrantTarget,
   type GoogleStatus,
   type GoogleWorkspaceConfig,
   type SessionPrincipal,
 } from './contracts.ts';
+import { googleCallbackOutcomeSchema } from './callback-contracts.ts';
 import { googleCredentialCipher, tokenBundleSchema, type CredentialBinding, type TokenBundle } from './credentials.ts';
+import { googleAccountAccess, granteeKey } from './grants.ts';
 import { googleProvider } from './provider.ts';
 import { GoogleFileError } from './file-contracts.ts';
 import { GoogleOperationError } from './operation-contracts.ts';
@@ -41,12 +51,16 @@ export type GoogleExecutionFence = {
   requiredScopes: readonly string[];
 };
 const compatibility = commonCompatibility;
+const maxAccountsPerBucket = 20;
 const relation = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, name);
 const digest = (value: string) => createHash('sha256').update(value).digest('base64url');
 const rowSchema = z.object({
   id: z.uuid(),
   user_id: z.string(),
   membership_id: z.uuid(),
+  ownership: googleOwnershipSchema,
+  grants_version: z.number().int().positive(),
+  label: z.string().nullable(),
   generation: z.number().int().positive(),
   status: z.enum(['disconnected', 'connected', 'reconnect-required']),
   account_id: z.string().nullable(),
@@ -55,6 +69,18 @@ const rowSchema = z.object({
   credential: z.unknown(),
 });
 type Row = z.infer<typeof rowSchema>;
+const grantRowSchema = z.object({
+  grantee: z.string(),
+  membership_id: z.uuid().nullable(),
+  team_id: z.uuid().nullable(),
+  role: z.enum(['use', 'manage']),
+});
+function toGrantTarget(row: z.infer<typeof grantRowSchema>): GoogleGrantTarget {
+  if (row.grantee === 'workspace') return { kind: 'workspace', role: row.role };
+  if (row.membership_id) return { kind: 'member', membershipId: row.membership_id, role: row.role };
+  if (row.team_id) return { kind: 'team', teamId: row.team_id, role: row.role };
+  throw new GoogleWorkspaceError('invalid-grant');
+}
 function binding(workspaceId: string, row: Row): CredentialBinding {
   return {
     workspaceId: uuidSchema.parse(workspaceId),
@@ -74,6 +100,21 @@ function metadata(row: Row | undefined): GoogleStatus {
     accountId: row.account_id,
     email: row.email,
     scopes: row.scopes,
+  };
+}
+function summary(row: Row, access: { canUse: boolean; canManage: boolean }): GoogleAccountSummary {
+  return {
+    integrationId: row.id,
+    ownership: row.ownership,
+    status: row.status,
+    ...(row.account_id !== null ? { accountId: row.account_id } : {}),
+    ...(row.email !== null ? { email: row.email } : {}),
+    ...(row.label !== null ? { label: row.label } : {}),
+    generation: row.generation,
+    grantsVersion: row.grants_version,
+    scopes: row.scopes,
+    canUse: access.canUse,
+    canManage: access.canManage,
   };
 }
 const googleKnowledgeScopes = {
@@ -121,17 +162,40 @@ export function createGoogleWorkspaceService(options: {
       return operation(tx, actor);
     });
   }
-  async function load(tx: AuthorizationTransaction, actor: HumanActor) {
+  async function loadPersonal(tx: AuthorizationTransaction, actor: HumanActor) {
+    return rowSchema.optional().parse(
+      (
+        await tx.client.query(
+          `SELECT * FROM ${relation(tx, 'tf_google_integrations')}
+             WHERE membership_id = $1 AND user_id = $2 AND ownership = 'personal'
+             ORDER BY (status = 'connected') DESC, (status = 'reconnect-required') DESC, id ASC
+             LIMIT 1 FOR UPDATE`,
+          [actor.membershipId, actor.userId],
+        )
+      ).rows[0],
+    );
+  }
+  async function loadById(tx: AuthorizationTransaction, integrationId: string) {
     return rowSchema
       .optional()
       .parse(
         (
-          await tx.client.query(
-            `SELECT * FROM ${relation(tx, 'tf_google_integrations')} WHERE membership_id = $1 AND user_id = $2 FOR UPDATE`,
-            [actor.membershipId, actor.userId],
-          )
+          await tx.client.query(`SELECT * FROM ${relation(tx, 'tf_google_integrations')} WHERE id = $1 FOR UPDATE`, [
+            integrationId,
+          ])
         ).rows[0],
       );
+  }
+  async function checkRefreshExpiry(tx: AuthorizationTransaction, workspaceId: string, row: Row): Promise<Row> {
+    if (row.status !== 'connected') return row;
+    const tokens = tokenBundleSchema.parse(
+      JSON.parse(cipher.decrypt('tokens', binding(workspaceId, row), row.credential)),
+    );
+    if (tokens.refreshExpiresAt !== null && tokens.refreshExpiresAt <= now()) {
+      await invalidate(tx, row);
+      return { ...row, status: 'reconnect-required', credential: null, generation: row.generation + 1 };
+    }
+    return row;
   }
   async function storeTokens(
     tx: AuthorizationTransaction,
@@ -169,38 +233,133 @@ export function createGoogleWorkspaceService(options: {
     },
     async status(workspaceId: string, userId: string): Promise<GoogleStatus> {
       return authorized(workspaceId, userId, async (tx, actor) => {
-        const row = await load(tx, actor);
-        if (row?.status === 'connected') {
-          const tokens = tokenBundleSchema.parse(
-            JSON.parse(cipher.decrypt('tokens', binding(workspaceId, row), row.credential)),
-          );
-          if (tokens.refreshExpiresAt !== null && tokens.refreshExpiresAt <= now()) {
-            await invalidate(tx, row);
-            return metadata({ ...row, status: 'reconnect-required', generation: row.generation + 1 });
-          }
-        }
-        return metadata(row);
+        const row = await loadPersonal(tx, actor);
+        return metadata(row ? await checkRefreshExpiry(tx, workspaceId, row) : undefined);
       });
     },
-    async begin(workspaceId: string, principal: SessionPrincipal, app?: GoogleApp) {
+    async list(workspaceId: string, userId: string): Promise<GoogleAccountSummary[]> {
+      return authorized(workspaceId, userId, async (tx, actor) => {
+        const rows = z.array(rowSchema).parse(
+          (
+            await tx.client.query(
+              `SELECT i.* FROM ${relation(tx, 'tf_google_integrations')} i
+                 WHERE i.status <> 'disconnected'
+                   AND (
+                     (i.ownership = 'personal' AND i.membership_id = $1 AND i.user_id = $2)
+                     OR (i.ownership = 'shared' AND EXISTS (
+                       SELECT 1 FROM ${relation(tx, 'tf_google_grants')} g
+                       WHERE g.integration_id = i.id
+                         AND (
+                           g.grantee = 'workspace'
+                           OR g.membership_id = $1
+                           OR EXISTS (
+                             SELECT 1 FROM ${relation(tx, 'tf_member_teams')} mt
+                             WHERE mt.team_id = g.team_id AND mt.membership_id = $1
+                           )
+                         )
+                     ))
+                   )
+                 ORDER BY (i.ownership = 'personal') DESC, lower(i.email) ASC NULLS LAST, i.id ASC
+                 FOR UPDATE OF i`,
+              [actor.membershipId, actor.userId],
+            )
+          ).rows,
+        );
+        const accounts: GoogleAccountSummary[] = [];
+        for (const row of rows) {
+          const current = await checkRefreshExpiry(tx, workspaceId, row);
+          const access = await googleAccountAccess(tx, actor, current);
+          if (access.canUse) accounts.push(summary(current, access));
+        }
+        return accounts;
+      });
+    },
+    async begin(workspaceId: string, principal: SessionPrincipal, app?: GoogleApp, options?: GoogleBeginOptions) {
       workspaceId = uuidSchema.parse(workspaceId);
       principal = sessionPrincipalSchema.parse(principal);
+      const parsedOptions = googleBeginOptionsSchema.optional().parse(options);
       provider();
       if (!config) throw new GoogleWorkspaceError('not-configured');
       return authorized(workspaceId, principal.userId, async (tx, actor) => {
-        await tx.client.query(
-          `INSERT INTO ${relation(tx, 'tf_google_integrations')} (id, user_id, membership_id, generation, status) VALUES ($1,$2,$3,1,'disconnected') ON CONFLICT (membership_id) DO NOTHING`,
-          [randomUUID(), actor.userId, actor.membershipId],
-        );
-        const row = await load(tx, actor);
-        if (!row) throw new AccessDenied();
-        // A connected row keeps its generation so adding an app does not cancel pending approvals.
-        if (row.status !== 'connected') {
-          row.generation++;
-          await tx.client.query(
-            `UPDATE ${relation(tx, 'tf_google_integrations')} SET generation = $2, credential = NULL WHERE id = $1`,
-            [row.id, row.generation],
+        let row: Row | undefined;
+        if (parsedOptions?.integrationId) {
+          row = await loadById(tx, parsedOptions.integrationId);
+          if (!row || !(await googleAccountAccess(tx, actor, row)).canManage) throw new AccessDenied();
+          if (parsedOptions.label !== undefined) {
+            await tx.client.query(`UPDATE ${relation(tx, 'tf_google_integrations')} SET label = $2 WHERE id = $1`, [
+              row.id,
+              parsedOptions.label,
+            ]);
+            row = { ...row, label: parsedOptions.label };
+          }
+          // A connected row keeps its generation so adding an app does not cancel pending approvals.
+          if (row.status !== 'connected') {
+            row = { ...row, generation: row.generation + 1, credential: null };
+            await tx.client.query(
+              `UPDATE ${relation(tx, 'tf_google_integrations')} SET generation = $2, credential = NULL WHERE id = $1`,
+              [row.id, row.generation],
+            );
+          }
+        } else if (parsedOptions?.newAccount || parsedOptions?.ownership === 'shared') {
+          const ownership = parsedOptions.ownership ?? 'personal';
+          const count = z.number().parse(
+            (ownership === 'personal'
+              ? await tx.client.query(
+                  `SELECT count(*)::integer AS count FROM ${relation(tx, 'tf_google_integrations')}
+                       WHERE membership_id = $1 AND ownership = 'personal' AND status <> 'disconnected'`,
+                  [actor.membershipId],
+                )
+              : await tx.client.query(
+                  `SELECT count(*)::integer AS count FROM ${relation(tx, 'tf_google_integrations')}
+                       WHERE ownership = 'shared' AND status <> 'disconnected'`,
+                )
+            ).rows[0]?.count,
           );
+          if (count >= maxAccountsPerBucket) throw new GoogleWorkspaceError('account-limit');
+          const id = randomUUID();
+          row = rowSchema.parse(
+            (
+              await tx.client.query(
+                `INSERT INTO ${relation(tx, 'tf_google_integrations')} (id, user_id, membership_id, ownership, label, generation, status)
+                 VALUES ($1, $2, $3, $4, $5, 1, 'disconnected') RETURNING *`,
+                [id, actor.userId, actor.membershipId, ownership, parsedOptions.label ?? null],
+              )
+            ).rows[0],
+          );
+          if (ownership === 'shared') {
+            await tx.client.query(
+              `INSERT INTO ${relation(tx, 'tf_google_grants')} (integration_id, grantee, membership_id, team_id, role, granted_by)
+               VALUES ($1, $2, $3, NULL, 'manage', $3)`,
+              [row.id, `member:${actor.membershipId}`, actor.membershipId],
+            );
+          }
+        } else {
+          row = await loadPersonal(tx, actor);
+          if (!row) {
+            row = rowSchema.parse(
+              (
+                await tx.client.query(
+                  `INSERT INTO ${relation(tx, 'tf_google_integrations')} (id, user_id, membership_id, ownership, label, generation, status)
+                   VALUES ($1, $2, $3, 'personal', $4, 1, 'disconnected') RETURNING *`,
+                  [randomUUID(), actor.userId, actor.membershipId, parsedOptions?.label ?? null],
+                )
+              ).rows[0],
+            );
+          } else if (parsedOptions?.label !== undefined) {
+            await tx.client.query(`UPDATE ${relation(tx, 'tf_google_integrations')} SET label = $2 WHERE id = $1`, [
+              row.id,
+              parsedOptions.label,
+            ]);
+            row = { ...row, label: parsedOptions.label };
+          }
+          // A connected row keeps its generation so adding an app does not cancel pending approvals.
+          if (row.status !== 'connected') {
+            row = { ...row, generation: row.generation + 1, credential: null };
+            await tx.client.query(
+              `UPDATE ${relation(tx, 'tf_google_integrations')} SET generation = $2, credential = NULL WHERE id = $1`,
+              [row.id, row.generation],
+            );
+          }
         }
         const state = `${workspaceId}.${randomBytes(32).toString('base64url')}`;
         const verifier = randomBytes(32).toString('base64url');
@@ -238,8 +397,22 @@ export function createGoogleWorkspaceService(options: {
       if (!workspace.success) throw new GoogleWorkspaceError('invalid-state');
       const workspaceId = workspace.data;
       const prepared = await authorized(workspaceId, principal.userId, async (tx, actor) => {
-        const row = await load(tx, actor);
-        if (!row) throw new GoogleWorkspaceError('invalid-state');
+        const pending = z
+          .object({ integration_id: z.uuid() })
+          .optional()
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT integration_id FROM ${relation(tx, 'tf_google_oauth_states')}
+                 WHERE state_hash = $1 AND session_hash = $2 AND expires_at > $3`,
+                [digest(callback.state), digest(principal.sessionId), new Date(now())],
+              )
+            ).rows[0],
+          );
+        if (!pending) throw new GoogleWorkspaceError('invalid-state');
+        const row = await loadById(tx, pending.integration_id);
+        if (!row || !(await googleAccountAccess(tx, actor, row)).canManage)
+          throw new GoogleWorkspaceError('invalid-state');
         const attempt = z
           .object({ verifier: z.unknown() })
           .optional()
@@ -270,8 +443,12 @@ export function createGoogleWorkspaceService(options: {
         const automatic = options.defaultKnowledge;
         const intents: string[] = [];
         const status = await authorized(workspaceId, prepared.actor, async (tx, actor) => {
-          const row = await load(tx, actor);
-          if (!row || row.id !== prepared.row.id || row.generation !== prepared.row.generation)
+          const row = await loadById(tx, prepared.row.id);
+          if (
+            !row ||
+            !(await googleAccountAccess(tx, actor, row)).canManage ||
+            row.generation !== prepared.row.generation
+          )
             throw new GoogleWorkspaceError('stale-integration');
           const accountReplaced = row.account_id !== null && row.account_id !== account.sub;
           const consented = {
@@ -287,7 +464,7 @@ export function createGoogleWorkspaceService(options: {
             refreshExpiresAt: result.refresh_token_expires_in ? now() + result.refresh_token_expires_in * 1000 : null,
           };
           await storeTokens(tx, workspaceId, consented, tokens, grantedScopes);
-          if (automatic) {
+          if (automatic && row.ownership === 'personal') {
             // Only a newly granted Drive or Gmail read scope is a new enablement; reauthorization keeps prior scopes.
             const previous = accountReplaced ? [] : row.scopes;
             for (const [product, accepted] of [
@@ -313,20 +490,30 @@ export function createGoogleWorkspaceService(options: {
         if (automatic && intents.length) automatic.started?.(workspaceId, intents);
         return status;
       } catch (error) {
-        throw new GoogleCallbackError(
+        const mapped =
           error instanceof GoogleWorkspaceError
-            ? error.code
+            ? googleCallbackOutcomeSchema.safeParse(error.code)
+            : { success: false as const };
+        const outcome: GoogleCallbackError['outcome'] =
+          mapped.success && mapped.data !== 'connected'
+            ? mapped.data
             : error instanceof AccessDenied
               ? 'integration-not-found'
-              : 'integration-operation-failed',
-          workspaceId,
-        );
+              : 'integration-operation-failed';
+        throw new GoogleCallbackError(outcome, workspaceId);
       }
     },
-    async disconnect(workspaceId: string, userId: string) {
+    async disconnect(workspaceId: string, userId: string, integrationId?: string) {
+      const targetId = integrationId !== undefined ? uuidSchema.parse(integrationId) : undefined;
       return authorized(workspaceId, userId, async (tx, actor) => {
-        const row = await load(tx, actor);
-        if (!row) return { disconnected: true as const, revoked: true };
+        let row: Row | undefined;
+        if (targetId !== undefined) {
+          row = await loadById(tx, targetId);
+          if (!row || !(await googleAccountAccess(tx, actor, row)).canManage) throw new AccessDenied();
+        } else {
+          row = await loadPersonal(tx, actor);
+          if (!row) return { disconnected: true as const, revoked: true };
+        }
         const recommendations = await watchIntegrationRecommendations(tx, row.id, () =>
           googleRecommendations(tx, row.id),
         );
@@ -352,14 +539,145 @@ export function createGoogleWorkspaceService(options: {
         return { disconnected: true as const, revoked };
       });
     },
+    async listGrants(workspaceId: string, userId: string, integrationId: string): Promise<GoogleGrantsResponse> {
+      const id = uuidSchema.parse(integrationId);
+      return authorized(workspaceId, userId, async (tx, actor) => {
+        const row = await loadById(tx, id);
+        if (!row || row.ownership !== 'shared' || !(await googleAccountAccess(tx, actor, row)).canManage)
+          throw new AccessDenied();
+        const rows = z.array(grantRowSchema).parse(
+          (
+            await tx.client.query(
+              `SELECT grantee, membership_id, team_id, role
+                 FROM ${relation(tx, 'tf_google_grants')}
+                 WHERE integration_id = $1
+                 ORDER BY grantee ASC`,
+              [row.id],
+            )
+          ).rows,
+        );
+        return {
+          integrationId: row.id,
+          grantsVersion: row.grants_version,
+          grants: rows.map(toGrantTarget),
+        };
+      });
+    },
+    async setGrants(
+      workspaceId: string,
+      userId: string,
+      integrationId: string,
+      input: GoogleGrantsUpdate,
+    ): Promise<GoogleGrantsResponse> {
+      const id = uuidSchema.parse(integrationId);
+      const parsed = googleGrantsUpdateSchema.parse(input);
+      return authorized(workspaceId, userId, async (tx, actor) => {
+        const row = await loadById(tx, id);
+        if (!row || row.ownership !== 'shared' || !(await googleAccountAccess(tx, actor, row)).canManage)
+          throw new AccessDenied();
+        if (row.grants_version !== parsed.expectedGrantsVersion) throw new GoogleWorkspaceError('grants-conflict');
+        const seen = new Set<string>();
+        const memberIds: string[] = [];
+        const teamIds: string[] = [];
+        for (const grant of parsed.grants) {
+          const key = granteeKey(grant);
+          if (seen.has(key)) throw new GoogleWorkspaceError('invalid-grant');
+          seen.add(key);
+          if (grant.kind === 'member') memberIds.push(grant.membershipId);
+          if (grant.kind === 'team') teamIds.push(grant.teamId);
+        }
+        if (memberIds.length > 0) {
+          const found = z.number().parse(
+            (
+              await tx.client.query(
+                `SELECT count(*)::integer AS count FROM ${relation(tx, 'tf_memberships')}
+                   WHERE id = ANY($1::uuid[]) AND removed_at IS NULL`,
+                [memberIds],
+              )
+            ).rows[0]?.count,
+          );
+          if (found !== memberIds.length) throw new GoogleWorkspaceError('invalid-grant');
+        }
+        if (teamIds.length > 0) {
+          const found = z.number().parse(
+            (
+              await tx.client.query(
+                `SELECT count(*)::integer AS count FROM ${relation(tx, 'tf_teams')}
+                   WHERE id = ANY($1::uuid[])`,
+                [teamIds],
+              )
+            ).rows[0]?.count,
+          );
+          if (found !== teamIds.length) throw new GoogleWorkspaceError('invalid-grant');
+        }
+        const manageWorkspace = parsed.grants.some(grant => grant.kind === 'workspace' && grant.role === 'manage');
+        const manageMember = parsed.grants.some(grant => grant.kind === 'member' && grant.role === 'manage');
+        const manageTeamIds = parsed.grants
+          .filter(
+            (grant): grant is Extract<GoogleGrantTarget, { kind: 'team' }> =>
+              grant.kind === 'team' && grant.role === 'manage',
+          )
+          .map(grant => grant.teamId);
+        let hasActiveManager = manageWorkspace || manageMember;
+        if (!hasActiveManager && manageTeamIds.length > 0) {
+          const activeInTeam = z.number().parse(
+            (
+              await tx.client.query(
+                `SELECT count(*)::integer AS count
+                   FROM ${relation(tx, 'tf_member_teams')} mt
+                   JOIN ${relation(tx, 'tf_memberships')} m ON m.id = mt.membership_id AND m.removed_at IS NULL
+                   WHERE mt.team_id = ANY($1::uuid[])`,
+                [manageTeamIds],
+              )
+            ).rows[0]?.count,
+          );
+          hasActiveManager = activeInTeam > 0;
+        }
+        if (!hasActiveManager) throw new GoogleWorkspaceError('invalid-grant');
+        await tx.client.query(`DELETE FROM ${relation(tx, 'tf_google_grants')} WHERE integration_id = $1`, [row.id]);
+        for (const grant of parsed.grants) {
+          await tx.client.query(
+            `INSERT INTO ${relation(tx, 'tf_google_grants')} (integration_id, grantee, membership_id, team_id, role, granted_by)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [
+              row.id,
+              granteeKey(grant),
+              grant.kind === 'member' ? grant.membershipId : null,
+              grant.kind === 'team' ? grant.teamId : null,
+              grant.role,
+              actor.membershipId,
+            ],
+          );
+        }
+        const nextVersion = z
+          .number()
+          .int()
+          .positive()
+          .parse(
+            (
+              await tx.client.query(
+                `UPDATE ${relation(tx, 'tf_google_integrations')} SET grants_version = grants_version + 1 WHERE id = $1 RETURNING grants_version`,
+                [row.id],
+              )
+            ).rows[0]?.grants_version,
+          );
+        return {
+          integrationId: row.id,
+          grantsVersion: nextVersion,
+          grants: parsed.grants,
+        };
+      });
+    },
     async withCredential<T>(
       fence: GoogleExecutionFence,
       operation: (credential: { accessToken: string; signal: AbortSignal }, tx: AuthorizationTransaction) => Promise<T>,
     ): Promise<T> {
       const outcome = await authorized(fence.workspaceId, fence.actor, async (tx, actor) => {
-        const row = await load(tx, actor);
+        const row = await loadById(tx, uuidSchema.parse(fence.integrationId));
+        const allowed = row ? (await googleAccountAccess(tx, actor, row)).canUse : false;
         if (
           !row ||
+          !allowed ||
           row.id !== fence.integrationId ||
           row.account_id !== fence.accountId ||
           row.generation !== fence.generation

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { uuidSchema } from '@tulipfarm/access/contracts';
-import { denyMcpEgress } from '@tulipfarm/access';
+import { AccessDenied, denyMcpEgress } from '@tulipfarm/access';
 import type { createGoogleWorkspaceService } from './service.ts';
 import {
   GoogleOperationError,
@@ -115,7 +115,6 @@ export function createGoogleOperations(options: {
 }) {
   const access = authorized(options.runtime);
   const fetcher = options.fetcher ?? fetch;
-  // A member holds one Google integration per workspace, so workspace and user name the integration before it is loaded.
   const fileReads = new Map<string, number>();
   let activeFileReads = 0;
   async function fileRead<T>(
@@ -127,18 +126,35 @@ export function createGoogleOperations(options: {
     signal?: AbortSignal,
   ): Promise<T> {
     denyMcpEgress();
-    const integration = `${workspaceId}:${userId}`;
+    const integration = `${workspaceId}:${expected.integrationId}`;
     const held = fileReads.get(integration) ?? 0;
     if (held >= googleFileReadLimits.perIntegration || activeFileReads >= googleFileReadLimits.total)
       throw new GoogleFileError('transfer-busy');
     fileReads.set(integration, held + 1);
     activeFileReads++;
     try {
-      const fence = await access(workspaceId, userId, async (tx, actor) => ({
-        workspaceId: uuidSchema.parse(workspaceId),
-        actor,
-        ...(await loadIntegration(tx, actor, scopes)),
-      }));
+      const fence = await access(workspaceId, userId, async (tx, actor) => {
+        try {
+          return {
+            workspaceId: uuidSchema.parse(workspaceId),
+            actor,
+            ...(await loadIntegration(tx, actor, scopes, expected.integrationId)),
+          };
+        } catch (error) {
+          if (
+            (error instanceof GoogleLifecycleError && error.code === 'integration-required') ||
+            error instanceof AccessDenied
+          ) {
+            // Fall back to the member's own integration so a mismatched expectedIntegration reports reconnect-required.
+            return {
+              workspaceId: uuidSchema.parse(workspaceId),
+              actor,
+              ...(await loadIntegration(tx, actor, scopes)),
+            };
+          }
+          throw error;
+        }
+      });
       if (
         expected.integrationId !== fence.integrationId ||
         expected.accountId !== fence.accountId ||
@@ -233,13 +249,43 @@ export function createGoogleOperations(options: {
     },
     async read(workspaceId: string, userId: string, input: unknown) {
       denyMcpEgress();
-      const { operation, expectedIntegration } = operationRequestSchema.parse(input);
+      const { operation, expectedIntegration, integrationId } = operationRequestSchema.parse(input);
       if (isGoogleWrite(operation)) throw new GoogleLifecycleError('operation-read-required');
-      const fence = await access(workspaceId, userId, async (tx, actor) => ({
-        workspaceId: uuidSchema.parse(workspaceId),
-        actor,
-        ...(await loadIntegration(tx, actor, requiredScopes(operation))),
-      }));
+      const fence = await access(workspaceId, userId, async (tx, actor) => {
+        if (integrationId !== undefined) {
+          return {
+            workspaceId: uuidSchema.parse(workspaceId),
+            actor,
+            ...(await loadIntegration(tx, actor, requiredScopes(operation), integrationId)),
+          };
+        }
+        if (expectedIntegration) {
+          try {
+            return {
+              workspaceId: uuidSchema.parse(workspaceId),
+              actor,
+              ...(await loadIntegration(tx, actor, requiredScopes(operation), expectedIntegration.integrationId)),
+            };
+          } catch (error) {
+            if (
+              (error instanceof GoogleLifecycleError && error.code === 'integration-required') ||
+              error instanceof AccessDenied
+            ) {
+              return {
+                workspaceId: uuidSchema.parse(workspaceId),
+                actor,
+                ...(await loadIntegration(tx, actor, requiredScopes(operation))),
+              };
+            }
+            throw error;
+          }
+        }
+        return {
+          workspaceId: uuidSchema.parse(workspaceId),
+          actor,
+          ...(await loadIntegration(tx, actor, requiredScopes(operation))),
+        };
+      });
       if (
         expectedIntegration &&
         (expectedIntegration.integrationId !== fence.integrationId ||
@@ -276,7 +322,7 @@ export function createGoogleOperations(options: {
             fence: {
               workspaceId: uuidSchema.parse(workspaceId),
               actor,
-              ...(await loadIntegration(tx, actor, requiredScopes(value.operation))),
+              ...(await loadIntegration(tx, actor, requiredScopes(value.operation), value.integrationId)),
             },
           };
         });
@@ -291,7 +337,7 @@ export function createGoogleOperations(options: {
         const previous = await previousProposal(tx, actor, value.commandId, value.operation);
         if (previous) return proposalView(tx, previous);
         if (target?.kind === 'created-spreadsheet') await requireCreatedSpreadsheet(tx, target.id);
-        const integration = await loadIntegration(tx, actor, requiredScopes(value.operation));
+        const integration = await loadIntegration(tx, actor, requiredScopes(value.operation), value.integrationId);
         if (
           observed &&
           (observed.integrationId !== integration.integrationId ||

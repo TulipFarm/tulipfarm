@@ -96,22 +96,48 @@ export async function requireGoogleFileReference(
   await requireGoogleDriveBinding(tx, actor, reference);
 }
 
-/** The bound Google integration is still the member's, connected, at the same account and generation, and holds Drive access. */
+async function loadAllowedGoogleScopes(
+  tx: AuthorizationTransaction,
+  actor: HumanActor,
+  binding: { integrationId: string; accountId: string; generation: number },
+): Promise<string[] | undefined> {
+  const table = (name: string) => `${escapeIdentifier(tx.schema)}.${escapeIdentifier(name)}`;
+  await tx.client.query(`SELECT id FROM ${table('tf_google_integrations')} WHERE id=$1 FOR SHARE`, [
+    binding.integrationId,
+  ]);
+  const row = (
+    await tx.client.query(
+      `SELECT i.scopes FROM ${table('tf_google_integrations')} i
+       WHERE i.id=$1 AND i.account_id=$2 AND i.generation=$3 AND i.status='connected'
+         AND (
+           (i.ownership='personal' AND i.membership_id=$4 AND i.user_id=$5)
+           OR (i.ownership='shared' AND EXISTS(
+             SELECT 1 FROM ${table('tf_google_grants')} g
+             WHERE g.integration_id=i.id
+               AND (
+                 g.grantee='workspace'
+                 OR g.membership_id=$4
+                 OR EXISTS(
+                   SELECT 1 FROM ${table('tf_member_teams')} mt
+                   WHERE mt.team_id=g.team_id AND mt.membership_id=$4
+                 )
+               )
+           ))
+         )`,
+      [binding.integrationId, binding.accountId, binding.generation, actor.membershipId, actor.userId],
+    )
+  ).rows[0];
+  return z.array(z.string()).optional().parse(row?.scopes);
+}
+
+/** The bound Google integration is still accessible to the member, connected, at the same account and generation, and holds Drive access. */
 export async function requireGoogleDriveBinding(
   tx: AuthorizationTransaction,
   actor: HumanActor,
   binding: { integrationId: string; accountId: string; generation: number },
 ) {
-  const table = `${escapeIdentifier(tx.schema)}.${escapeIdentifier('tf_google_integrations')}`;
-  await tx.client.query(`SELECT id FROM ${table} WHERE id=$1 FOR SHARE`, [binding.integrationId]);
-  const row = (
-    await tx.client.query(
-      `SELECT scopes FROM ${table} WHERE id=$1 AND account_id=$2 AND membership_id=$3 AND user_id=$4 AND generation=$5 AND status='connected'`,
-      [binding.integrationId, binding.accountId, actor.membershipId, actor.userId, binding.generation],
-    )
-  ).rows[0];
-  if (!z.array(z.string()).optional().parse(row?.scopes)?.includes('https://www.googleapis.com/auth/drive'))
-    throw new AccessDenied();
+  const scopes = await loadAllowedGoogleScopes(tx, actor, binding);
+  if (!scopes?.includes('https://www.googleapis.com/auth/drive')) throw new AccessDenied();
 }
 
 /** Personal memory is readable only by the current member who saved it. */
@@ -354,16 +380,7 @@ export async function requireProtectedSource(
     }
     case 'google-integration': {
       if (runId || source.membershipId !== actor.membershipId) throw new AccessDenied();
-      await tx.client.query(`SELECT id FROM ${table('tf_google_integrations')} WHERE id=$1 FOR SHARE`, [
-        source.integrationId,
-      ]);
-      const row = (
-        await tx.client.query(
-          `SELECT scopes FROM ${table('tf_google_integrations')} WHERE id=$1 AND account_id=$2 AND membership_id=$3 AND user_id=$4 AND generation=$5 AND status='connected'`,
-          [source.integrationId, source.accountId, actor.membershipId, actor.userId, source.generation],
-        )
-      ).rows[0];
-      const scopes = z.array(z.string()).optional().parse(row?.scopes);
+      const scopes = await loadAllowedGoogleScopes(tx, actor, source);
       if (!scopes || !source.requiredScopes.every(scope => scopes.includes(scope))) throw new AccessDenied();
       break;
     }

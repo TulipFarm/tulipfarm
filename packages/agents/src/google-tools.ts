@@ -195,7 +195,10 @@ export async function invokeGoogleTool(
   try {
     switch (call.tool) {
       case 'google.read':
-        data = await service.read(workspaceId, actor.userId, { operation: call.operation });
+        data = await service.read(workspaceId, actor.userId, {
+          operation: call.operation,
+          ...(call.integrationId ? { integrationId: call.integrationId } : {}),
+        });
         break;
       case 'google.propose': {
         if (!call.operation === !call.document) return invalidProposal('Set exactly one of operation or document.');
@@ -226,7 +229,11 @@ export async function invokeGoogleTool(
             );
           operation = documentUpload(call.document, Buffer.from(bytes).toString('base64'));
         }
-        data = await service.propose(workspaceId, actor.userId, { commandId: callId, operation });
+        data = await service.propose(workspaceId, actor.userId, {
+          commandId: callId,
+          operation,
+          ...(call.integrationId ? { integrationId: call.integrationId } : {}),
+        });
         break;
       }
       case 'google.status':
