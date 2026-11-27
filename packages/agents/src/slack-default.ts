@@ -21,6 +21,8 @@ import {
   threadSnapshotSchema,
   openBotDirectMessage,
   postBotMessage,
+  resolveSlackOutboundMentions,
+  resolveSlackPresentationMentions,
   setBotThreadStatus,
   setBotReaction,
   slackCredentialsReady,
@@ -716,12 +718,17 @@ export function createSlackDefault(
         reserve: cards.length + followUps.length,
         fetcher: options.fetcher,
       });
+      const resolvedPresentation = presentation
+        ? await resolveSlackPresentationMentions(tx, row.team_id, presentation)
+        : undefined;
+      const outbound = resolvedPresentation ? undefined : await resolveSlackOutboundMentions(tx, row.team_id, row.text);
       const outcome = await postBotMessage({
         token,
         channel,
         rootTs: destination.kind === 'ChannelAllowed' ? destination.rootTs : (row.dm_root ?? undefined),
-        text: row.text,
-        presentation,
+        text: outbound ? outbound.text : row.text,
+        mentionUserIds: outbound?.mentionUserIds,
+        presentation: resolvedPresentation,
         blocks: [...cards, ...followUps],
         attachments: changed,
         ...(options.fetcher ? { fetcher: options.fetcher } : {}),

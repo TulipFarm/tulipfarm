@@ -103,6 +103,7 @@ export async function postBotMessage(input: {
   rootTs?: string | undefined;
   replaceTs?: string | undefined;
   text: string;
+  mentionUserIds?: ReadonlySet<string> | undefined;
   presentation?: SlackMessage | undefined;
   /** Blocks shown under the answer, such as review buttons; the answer text alone stays the message text. */
   blocks?: SlackMessage['blocks'] | undefined;
@@ -112,7 +113,7 @@ export async function postBotMessage(input: {
   customizeName?: boolean;
   fetcher?: typeof fetch;
 }): Promise<BotMessageOutcome> {
-  const rendered = input.presentation ?? renderSlackAnswer(input.text);
+  const rendered = input.presentation ?? renderSlackAnswer(input.text, { mentionUserIds: input.mentionUserIds });
   const message = input.blocks?.length ? { ...rendered, blocks: [...rendered.blocks, ...input.blocks] } : rendered;
   const username =
     input.customizeName && input.agentName && /^[CG]/.test(input.channel) && !input.replaceTs

@@ -51,6 +51,15 @@ export {
   slackThreadPrompt,
   type SlackResolvedMember,
 } from './message-content.ts';
+export {
+  applySlackOutboundMentions,
+  resolveSlackOutboundMentions,
+  resolveSlackPresentationMentions,
+  scanSlackOutboundMentions,
+  type OutboundMentionResolution,
+  type OutboundMentionSpan,
+  type ResolvedSlackOutboundMentions,
+} from './outbound-mentions.ts';
 export { SlackApiError, type SlackApiErrorCode } from './web-api.ts';
 export * from './action-contracts.ts';
 export {

@@ -201,3 +201,36 @@ for (const [name, first, next, padding, marker, nextMarker] of [
     assert.equal(result.blocks[0].elements[1].indent, 1);
   });
 }
+
+test('authorized mentionUserIds render as rich-text user elements while broadcasts and code stay inert', () => {
+  const mentionUserIds = new Set(['U0123ABC', 'W999XYZ']);
+  const result = parseSlackSurface(
+    renderSlackAnswer(
+      'New PR by <@U0123ABC> &amp; **<@W999XYZ>** (cc <@UOTHER> <!channel> <!here> <#C123> `code <@U0123ABC>` &lt;@U0123ABC&gt; \\<@U0123ABC> [<@U0123ABC>](https://example.com))\n\n- Ping <@U0123ABC>\n\n```\n<@U0123ABC>\n```',
+      { mentionUserIds },
+    ),
+  );
+  assert.deepEqual(result.blocks[0].elements[0].elements, [
+    { type: 'text', text: 'New PR by ' },
+    { type: 'user', user_id: 'U0123ABC' },
+    { type: 'text', text: ' & ' },
+    { type: 'user', user_id: 'W999XYZ', style: { bold: true } },
+    { type: 'text', text: ' (cc <@UOTHER> <!channel> <!here> <#C123> ' },
+    { type: 'text', text: 'code <@U0123ABC>', style: { code: true } },
+    { type: 'text', text: ' <@U0123ABC> ' },
+    { type: 'text', text: '<' },
+    { type: 'text', text: '@U0123ABC> ' },
+    { type: 'link', url: 'https://example.com/', text: '<@U0123ABC>' },
+    { type: 'text', text: ')' },
+  ]);
+  assert.deepEqual(result.blocks[0].elements[1].elements[0].elements, [
+    { type: 'text', text: 'Ping ' },
+    { type: 'user', user_id: 'U0123ABC' },
+  ]);
+  assert.deepEqual(result.blocks[0].elements[2], {
+    type: 'rich_text_preformatted',
+    elements: [{ type: 'text', text: '<@U0123ABC>' }],
+  });
+  assert.match(result.text, /New PR by <@U0123ABC> & <@W999XYZ>/);
+  assert.match(result.text, /• Ping <@U0123ABC>/);
+});

@@ -12,6 +12,7 @@ import {
   observeExternalHandle,
   removeManualMemberIdentity,
   resolveMemberIdentities,
+  resolveOutboundMemberIdentities,
   searchMemberIdentities,
   updateManualMemberIdentity,
 } from '../src/member-identities.ts';
@@ -737,7 +738,7 @@ test('concurrent member deletion and manual identity creation never leave an orp
     const second = await handAdded();
     await writer.query('BEGIN');
     await addManualMemberIdentity(
-      { client: writer, schema: ws.names.schema, commonVersion: 118 },
+      { client: writer, schema: ws.names.schema, commonVersion: 120 },
       {
         tableId: membersTable,
         memberId: second.memberId,
@@ -766,4 +767,83 @@ test('concurrent member deletion and manual identity creation never leave an orp
     await deleter.end();
     await writer.end();
   }
+});
+
+test('outbound mention resolution maps cross-platform handles, renames and manual links to the target Slack team', async () => {
+  const existing = (await seed(`SELECT id, team_id FROM ${t('tf_slack_installations')} WHERE state = 'active' LIMIT 1`))
+    .rows[0];
+  const teamA = existing?.id ?? (await installSlack('T0TULIP'));
+  const scopeA = existing?.team_id ?? 'T0TULIP';
+  const dhruv = await admit();
+  const alex = await admit();
+  const samSlack = await admit();
+  const samGitHub = await admit();
+  const dupOne = await admit();
+  const dupTwo = await admit();
+  const departed = await admit();
+  const manualOnly = await handAdded();
+
+  await authorizeSlack(teamA, dhruv, 'U0DHRUV');
+  await connectGitHub(dhruv, { id: '18121502', login: 'dhruvjainin-old' });
+  await observe({
+    provider: 'github',
+    scope: 'github.com',
+    externalId: '18121502',
+    handle: 'dhruvjainin',
+    source: 'oauth',
+  });
+  await add(dhruv, { provider: 'discord', handle: 'dhruv_disc' });
+
+  await add(alex, { provider: 'slack', scope: 'T0OTHER', externalId: 'U0ALEXB', handle: 'alex_other' });
+  await connectGitHub(alex, { id: '20002', login: 'alex-other-team' });
+
+  await authorizeSlack(teamA, samSlack, 'U0SAMSL');
+  await add(samSlack, { provider: 'slack', scope: scopeA, handle: 'sam-conflict' });
+  await authorizeSlack(teamA, samGitHub, 'U0SAMGH');
+  await connectGitHub(samGitHub, { id: '20003', login: 'sam-conflict' });
+
+  await authorizeSlack(teamA, dupOne, 'U0DUP1');
+  await authorizeSlack(teamA, dupTwo, 'U0DUP2');
+  await add(dupOne, { provider: 'discord', handle: 'shared_handle' });
+  await add(dupTwo, { provider: 'discord', handle: 'shared_handle' });
+
+  await authorizeSlack(teamA, departed, 'U0GONE');
+  await connectGitHub(departed, { id: '20004', login: 'departed-dev' });
+  await leave(departed);
+
+  await add(manualOnly, { provider: 'slack', scope: scopeA, externalId: 'U0MANUAL', handle: 'manual_slack' });
+  await add(manualOnly, { provider: 'linear', handle: 'manual_linear' });
+
+  const resolved = await within(tx =>
+    resolveOutboundMemberIdentities(tx, {
+      targetProvider: 'slack',
+      targetScope: scopeA,
+      handles: [
+        '@DhruvJainIn',
+        'dhruvjainin-old',
+        'dhruv_disc',
+        'alex-other-team',
+        'sam-conflict',
+        'shared_handle',
+        'departed-dev',
+        'manual_linear',
+        'unknown_person',
+      ],
+      targetExternalIds: ['U0DHRUV', 'U0MANUAL', 'U0ALEXB', 'U0GONE', 'U0UNKNOWN'],
+    }),
+  );
+
+  assert.deepEqual([...resolved.knownExternalIds].sort(), ['U0DHRUV', 'U0MANUAL']);
+  assert.deepEqual(
+    Object.fromEntries(
+      [...resolved.byHandle.entries()].map(([handle, target]) => [handle, [target.externalId, target.trust]]),
+    ),
+    {
+      dhruvjainin: ['U0DHRUV', 'verified'],
+      'dhruvjainin-old': ['U0DHRUV', 'verified'],
+      dhruv_disc: ['U0DHRUV', 'verified'],
+      'sam-conflict': ['U0SAMSL', 'verified'],
+      manual_linear: ['U0MANUAL', 'manual'],
+    },
+  );
 });

@@ -43,6 +43,7 @@ import {
   createChannelProvider,
   threadSnapshotSchema,
   postBotMessage,
+  resolveSlackOutboundMentions,
   openBotDirectMessage,
   botChannelInfo,
   botMessageThread,
@@ -1374,6 +1375,7 @@ export function createSlackChannelAgents(options: {
           branch: branchSchema,
           agent_name: z.string().nullable(),
           user_id: z.string(),
+          team_id: z.string(),
           bot_credential: z.unknown(),
           scopes: z.array(z.string()),
           request_snapshot: messageSchema,
@@ -1382,7 +1384,7 @@ export function createSlackChannelAgents(options: {
         .parse(
           (
             await tx.client.query(
-              `SELECT row_to_json(r) AS root,row_to_json(b) AS branch,a.display_name AS agent_name,i.user_id,s.bot_credential,s.scopes,t.request_snapshot,t.history_run_ids FROM ${table(tx, 'tf_slack_agent_turns')} t JOIN ${table(tx, 'tf_slack_agent_branches')} b ON b.id=t.branch_id JOIN ${table(tx, 'tf_slack_channel_roots')} r ON r.id=b.root_id LEFT JOIN ${table(tx, 'tf_agents')} a ON a.id=r.agent_id JOIN ${table(tx, 'tf_slack_identities')} i ON i.id=b.identity_id JOIN ${table(tx, 'tf_slack_installations')} s ON s.id=r.installation_id WHERE t.event_id=$1 AND t.attempt_id=$2 AND t.state='sending' FOR UPDATE OF t`,
+              `SELECT row_to_json(r) AS root,row_to_json(b) AS branch,a.display_name AS agent_name,i.user_id,s.team_id,s.bot_credential,s.scopes,t.request_snapshot,t.history_run_ids FROM ${table(tx, 'tf_slack_agent_turns')} t JOIN ${table(tx, 'tf_slack_agent_branches')} b ON b.id=t.branch_id JOIN ${table(tx, 'tf_slack_channel_roots')} r ON r.id=b.root_id LEFT JOIN ${table(tx, 'tf_agents')} a ON a.id=r.agent_id JOIN ${table(tx, 'tf_slack_identities')} i ON i.id=b.identity_id JOIN ${table(tx, 'tf_slack_installations')} s ON s.id=r.installation_id WHERE t.event_id=$1 AND t.attempt_id=$2 AND t.state='sending' FOR UPDATE OF t`,
               [eventId, attempt],
             )
           ).rows[0],
@@ -1439,6 +1441,7 @@ export function createSlackChannelAgents(options: {
           operation: 'slack.channel.reply.identity',
           outcome: 'scope-missing',
         });
+      const outbound = await resolveSlackOutboundMentions(tx, row.team_id, text);
       const outcome = await postBotMessage({
         token: options.cipher.decrypt(
           { workspaceId, installationId: row.root.installation_id, generation: row.root.generation, kind: 'bot' },
@@ -1446,7 +1449,8 @@ export function createSlackChannelAgents(options: {
         ),
         channel,
         rootTs: destination.kind === 'ChannelAllowed' ? destination.rootTs : (row.branch.dm_root ?? undefined),
-        text,
+        text: outbound.text,
+        mentionUserIds: outbound.mentionUserIds,
         agentName: row.agent_name,
         customizeName,
         ...(options.fetcher ? { fetcher: options.fetcher } : {}),

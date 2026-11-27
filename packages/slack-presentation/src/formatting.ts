@@ -7,6 +7,11 @@ import { parseSlackSurface } from './validation.ts';
 
 type Style = NonNullable<RichTextText['style']>;
 type LinkProjection = 'label' | 'destination';
+export type RenderSlackAnswerOptions = {
+  /** Slack user IDs explicitly authorized to render as live rich-text user mentions. */
+  mentionUserIds?: ReadonlySet<string> | undefined;
+};
+const slackUserMentionPattern = /<@([UW][A-Z0-9]+)>/g;
 const markdownParser = new Marked({
   gfm: true,
   tokenizer: {
@@ -30,6 +35,7 @@ function plain(elements: SlackRichElement[], links: LinkProjection): string {
   return elements
     .map(element => {
       if (element.type === 'text') return element.text;
+      if (element.type === 'user') return `<@${element.user_id}>`;
       if (element.type !== 'link') return '';
       const label = element.text ?? element.url;
       return links === 'destination' && label !== element.url ? `${label} (${element.url})` : label;
@@ -37,17 +43,49 @@ function plain(elements: SlackRichElement[], links: LinkProjection): string {
     .join('');
 }
 
-function inline(tokens: Token[] = [], style: Style = {}): RichTextElement[] {
+function textElements(
+  raw: string,
+  style: Style,
+  decodeHtml: boolean,
+  mentionUserIds?: ReadonlySet<string>,
+): RichTextElement[] {
+  const styled = Object.keys(style).length ? { style } : {};
+  const decode = (value: string) => (decodeHtml ? decodeHTMLStrict(value) : value);
+  if (!mentionUserIds?.size) {
+    const text = decode(raw);
+    return text ? [{ type: 'text', text, ...styled }] : [];
+  }
+  const result: RichTextElement[] = [];
+  let cursor = 0;
+  for (const match of raw.matchAll(slackUserMentionPattern)) {
+    const userId = match[1];
+    const index = match.index;
+    if (!userId || index === undefined || !mentionUserIds.has(userId)) continue;
+    if (index > cursor) {
+      const before = decode(raw.slice(cursor, index));
+      if (before) result.push({ type: 'text', text: before, ...styled });
+    }
+    result.push({ type: 'user', user_id: userId, ...styled });
+    cursor = index + match[0].length;
+  }
+  if (cursor < raw.length) {
+    const tail = decode(raw.slice(cursor));
+    if (tail) result.push({ type: 'text', text: tail, ...styled });
+  }
+  return result;
+}
+
+function inline(tokens: Token[] = [], style: Style = {}, mentionUserIds?: ReadonlySet<string>): RichTextElement[] {
   return tokens.flatMap((token): RichTextElement[] => {
     switch (token.type) {
       case 'checkbox':
         return [];
       case 'strong':
-        return inline(token.tokens, { ...style, bold: true });
+        return inline(token.tokens, { ...style, bold: true }, mentionUserIds);
       case 'em':
-        return inline(token.tokens, { ...style, italic: true });
+        return inline(token.tokens, { ...style, italic: true }, mentionUserIds);
       case 'del':
-        return inline(token.tokens, { ...style, strike: true });
+        return inline(token.tokens, { ...style, strike: true }, mentionUserIds);
       case 'codespan':
         return [{ type: 'text', text: token.text, style: { ...style, code: true } }];
       case 'br':
@@ -65,13 +103,9 @@ function inline(tokens: Token[] = [], style: Style = {}): RichTextElement[] {
         return url ? [{ type: 'link', url, text }] : [{ type: 'text', text }];
       }
       default: {
-        if ('tokens' in token && Array.isArray(token.tokens)) return inline(token.tokens, style);
-        const text =
-          token.type === 'text' && !token.escaped
-            ? decodeHTMLStrict(token.raw)
-            : 'text' in token && typeof token.text === 'string'
-              ? token.text
-              : token.raw;
+        if ('tokens' in token && Array.isArray(token.tokens)) return inline(token.tokens, style, mentionUserIds);
+        if (token.type === 'text' && !token.escaped) return textElements(token.raw, style, true, mentionUserIds);
+        const text = 'text' in token && typeof token.text === 'string' ? token.text : token.raw;
         return text ? [{ type: 'text', text, ...(Object.keys(style).length ? { style } : {}) }] : [];
       }
     }
@@ -82,11 +116,16 @@ function isList(token: Token): token is Tokens.List {
   return token.type === 'list' && typeof token.ordered === 'boolean' && Array.isArray(token.items);
 }
 
-function list(token: Tokens.List, indent: number, links: LinkProjection): SlackRichBlockElement[] {
+function list(
+  token: Tokens.List,
+  indent: number,
+  links: LinkProjection,
+  mentionUserIds?: ReadonlySet<string>,
+): SlackRichBlockElement[] {
   const result: SlackRichBlockElement[] = [];
   let offset = typeof token.start === 'number' ? token.start - 1 : 0;
   for (const item of token.items) {
-    const content = blocks(item.tokens, links, indent + 1);
+    const content = blocks(item.tokens, links, indent + 1, mentionUserIds);
     for (const [index, block] of content.entries()) {
       if (index === 0 && block.type === 'rich_text_section') {
         if (item.task) block.elements.unshift({ type: 'text', text: item.checked ? '☑ ' : '☐ ' });
@@ -112,7 +151,12 @@ function list(token: Tokens.List, indent: number, links: LinkProjection): SlackR
   return result;
 }
 
-function blocks(tokens: Token[] = [], links: LinkProjection, indent = 0): SlackRichBlockElement[] {
+function blocks(
+  tokens: Token[] = [],
+  links: LinkProjection,
+  indent = 0,
+  mentionUserIds?: ReadonlySet<string>,
+): SlackRichBlockElement[] {
   return tokens.flatMap((token): SlackRichBlockElement[] => {
     switch (token.type) {
       case 'space':
@@ -122,7 +166,7 @@ function blocks(tokens: Token[] = [], links: LinkProjection, indent = 0): SlackR
       case 'code':
         return [{ type: 'rich_text_preformatted', elements: [{ type: 'text', text: token.text || ' ' }] }];
       case 'list':
-        return isList(token) ? list(token, indent, links) : [];
+        return isList(token) ? list(token, indent, links, mentionUserIds) : [];
       case 'blockquote':
         return [
           { type: 'rich_text_quote', elements: [{ type: 'text', text: fallback(blocks(token.tokens, links), links) }] },
@@ -147,6 +191,7 @@ function blocks(tokens: Token[] = [], links: LinkProjection, indent = 0): SlackR
         const elements = inline(
           'tokens' in token && Array.isArray(token.tokens) ? token.tokens : [token],
           token.type === 'heading' ? { bold: true } : {},
+          mentionUserIds,
         );
         return elements.length ? [{ type: 'rich_text_section', elements }] : [];
       }
@@ -169,13 +214,17 @@ function fallback(elements: SlackRichBlockElement[], links: LinkProjection): str
     .join('\n\n');
 }
 
-function parseAnswer(markdown: string, links: LinkProjection): SlackRichBlockElement[] {
+function parseAnswer(
+  markdown: string,
+  links: LinkProjection,
+  mentionUserIds?: ReadonlySet<string>,
+): SlackRichBlockElement[] {
   if (!markdown.trim() || Buffer.byteLength(markdown) > 65536) throw new Error('slack-answer-size');
-  return blocks(markdownParser.lexer(markdown), links);
+  return blocks(markdownParser.lexer(markdown), links, 0, mentionUserIds);
 }
 
-export function renderSlackAnswer(markdown: string): SlackMessage {
-  const elements = parseAnswer(markdown, 'label');
+export function renderSlackAnswer(markdown: string, options?: RenderSlackAnswerOptions): SlackMessage {
+  const elements = parseAnswer(markdown, 'label', options?.mentionUserIds);
   const message: SlackMessage = {
     kind: 'message',
     text: fallback(elements, 'label'),
