@@ -536,7 +536,12 @@ test("an assigned agent is handed the row's description and comment files", { ti
     [upload, tableId, notes.length, createHash('sha256').update(notes).digest('hex'), ws.membershipId],
   );
   const change = await transaction(tx =>
-    changeRowAttachments(tx, ws.membershipId, { tableId, rowId: row.id, itemId: null }, { add: [upload], remove: [shot] }),
+    changeRowAttachments(
+      tx,
+      ws.membershipId,
+      { tableId, rowId: row.id, itemId: null },
+      { add: [upload], remove: [shot] },
+    ),
   );
   assert.deepEqual(change.added, [upload]);
   const description = await query(

@@ -180,6 +180,7 @@ export function tasksApi() {
           runState: row.state,
           canEdit: true,
           thread,
+          attachments: [],
           reminders: reminderList(row.id),
         });
       }

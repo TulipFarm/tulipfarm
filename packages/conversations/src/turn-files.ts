@@ -1164,7 +1164,7 @@ export async function readChatFile(input: {
       },
       sources: [],
     };
-  const rowFiles = input.turnFiles.rowFiles;
+  const rowFiles = input.turnFiles?.rowFiles;
   let rowSource: SourceDependency | undefined;
   const found = await input.transaction(async tx => {
     let part = await chatFilePart(tx, { ...input, source: input.call.source });
