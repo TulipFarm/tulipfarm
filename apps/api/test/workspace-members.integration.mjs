@@ -194,7 +194,7 @@ test(
     const photo = await http(reader, photoPath);
     assert.equal(photo.status, 200);
     assert.match(photo.headers.get('content-type'), /^image\/png/);
-    assert.equal(photo.headers.get('cache-control'), 'private, no-store');
+    assert.equal(photo.headers.get('cache-control'), 'private, max-age=31536000, immutable');
     assert.equal(photo.headers.get('referrer-policy'), 'no-referrer');
     assert.deepEqual(Buffer.from(await photo.arrayBuffer()), Buffer.from(image.split(',')[1], 'base64'));
     assert.equal((await http(outsider, photoPath)).status, 404);

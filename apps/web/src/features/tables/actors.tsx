@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import type { z } from 'zod';
 import { AgentMark } from '@/components/agent-mark';
 import { EntityAvatar } from '@tulipfarm/sprout/avatar';
 import {
@@ -13,20 +13,9 @@ import {
 import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson, responseError } from '@/lib/http';
 import { useFeatureRead } from '@/lib/query';
+import { actorDirectorySchema } from './api';
 import { TableRequestError } from './request-state';
 
-export const actorDirectorySchema = z.object({
-  members: z.array(
-    z.object({
-      membershipId: z.uuid(),
-      name: z.string(),
-      email: z.string().nullable(),
-      photo: z.string().nullable().default(null),
-      current: z.boolean(),
-    }),
-  ),
-  agents: z.array(z.object({ id: z.uuid(), name: z.string(), available: z.boolean() })),
-});
 export type ActorDirectory = z.infer<typeof actorDirectorySchema>;
 export type Actor = { type: 'member' | 'agent'; id: string };
 
