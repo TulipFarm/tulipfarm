@@ -24,6 +24,7 @@ import {
   type InferenceRoute,
   type InferenceUsage,
 } from '@tulipfarm/agents/inference';
+import { judgeEvalPassWithJev, judgeEvalStatusWithJev } from '@tulipfarm/agents/decisions';
 import { modelFamilyEnabled } from '@tulipfarm/agents/model-availability';
 import type { ModelEnvironment } from '@tulipfarm/agents/model-environment';
 import type { ModelFamilyEligibility } from '@tulipfarm/agents/model-policy';
@@ -38,7 +39,7 @@ import {
 } from '@tulipfarm/workspace-storage/credits';
 import { createAgentDriver } from './agent-driver.ts';
 import { createCaps } from './caps.ts';
-import type { JudgeModel } from './checks.ts';
+import { statusSystemPrompt, type JudgeModel } from './checks.ts';
 import {
   caseResultSchema,
   emptyUsage,
@@ -678,6 +679,13 @@ export function createWorkspaceEvals(dependencies: {
       const judge: JudgeModel | undefined = !judgeTarget
         ? undefined
         : async ({ system, user }) => {
+            if (system === statusSystemPrompt) {
+              const fastStatus = await judgeEvalStatusWithJev({ workspaceId, payload: user, signal: aborted });
+              if (fastStatus) return { text: JSON.stringify({ status: fastStatus }), usage: emptyUsage() };
+            } else {
+              const fastVerdict = await judgeEvalPassWithJev({ workspaceId, payload: user, signal: aborted });
+              if (fastVerdict) return { text: JSON.stringify(fastVerdict), usage: emptyUsage() };
+            }
             const usage: Usage = emptyUsage();
             const route: InferenceRoute = {
               ...judgeTarget.route,

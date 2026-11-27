@@ -150,6 +150,41 @@ export const featureFlags = {
     scope: 'workspace',
     env: 'FEATURE_FLAG_DECISIONS_GOAL_LOOPS',
   },
+  'decisions-worker-gates': {
+    description:
+      'With TYPESAFE_API_KEY set, the Jev decision model checks whether background workspace recommendation refreshes have meaningful new signal before reserving credits and calling the full model.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_DECISIONS_WORKER_GATES',
+  },
+  'decisions-compaction-filter': {
+    description:
+      'With TYPESAFE_API_KEY set, the Jev decision model pre-filters low-signal filler turns before conversation compaction calls the summarization model.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_DECISIONS_COMPACTION_FILTER',
+  },
+  'decisions-context-rerank': {
+    description:
+      'With TYPESAFE_API_KEY set, the Jev decision model reranks retrieved knowledge passages in one batched call so the most relevant evidence stays in chat context.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_DECISIONS_CONTEXT_RERANK',
+  },
+  'decisions-table-query-filter': {
+    description:
+      'With TYPESAFE_API_KEY set, the Jev decision model pre-filters wide tables to query-relevant fields before the natural-language table query translator runs.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_DECISIONS_TABLE_QUERY_FILTER',
+  },
+  'decisions-eval-judge': {
+    description:
+      'With TYPESAFE_API_KEY set, the Jev decision model fast-paths confident binary rubric checks and completion status classification in workspace evals, falling back to the full judge model when uncertain.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_DECISIONS_EVAL_JUDGE',
+  },
   'chat-onboarding': {
     description:
       'Signup step 2 becomes a chat with the TulipFarm onboarding agent: it asks the goal and a line about the business, suggests starter agents, and signs the person up in the chat. Off keeps the account form. Signed-out visitors read it from /v1/auth/options.',

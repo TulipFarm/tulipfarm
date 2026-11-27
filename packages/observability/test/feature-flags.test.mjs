@@ -289,6 +289,11 @@ test('a snapshot uses evaluateMany once per scope; false decides, missing and fa
     'decisions-tool-gate': false,
     'decisions-security-guardrails': false,
     'decisions-goal-loops': false,
+    'decisions-worker-gates': false,
+    'decisions-compaction-filter': false,
+    'decisions-context-rerank': false,
+    'decisions-table-query-filter': false,
+    'decisions-eval-judge': false,
     'chat-onboarding': false,
   });
   assert.deepEqual(failed, {
@@ -310,6 +315,11 @@ test('a snapshot uses evaluateMany once per scope; false decides, missing and fa
     'decisions-tool-gate': false,
     'decisions-security-guardrails': false,
     'decisions-goal-loops': false,
+    'decisions-worker-gates': false,
+    'decisions-compaction-filter': false,
+    'decisions-context-rerank': false,
+    'decisions-table-query-filter': false,
+    'decisions-eval-judge': false,
     'chat-onboarding': false,
   });
 });

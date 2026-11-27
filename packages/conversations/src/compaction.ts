@@ -43,7 +43,12 @@ export type ReplyCompactionFence = {
 export type CompactionFence = ReplyCompactionFence | MaintenanceFence;
 
 /** Worker-supplied model access. Conversations owns what is compacted; the compactor owns pricing, routing, and metering. */
-export type ConversationCompactor = Summarizer<AuthorizationTransaction, CompactionFence, ReplyCompactionFence>;
+export type ConversationCompactor = Summarizer<AuthorizationTransaction, CompactionFence, ReplyCompactionFence> & {
+  filterMessages?: <T extends { role: string; text: string }>(
+    fence: CompactionFence,
+    messages: readonly T[],
+  ) => Promise<readonly T[]>;
+};
 
 const line = z.string().trim().max(1000);
 export const workingSummarySchema = z.object({
@@ -498,7 +503,8 @@ export async function summarize(
   let summary = previous;
   let familyId: string | null = null;
   let fallbackFrom: string | null = null;
-  const chunks = transcriptChunks(covered, budget);
+  const filteredCovered = compactor.filterMessages ? await compactor.filterMessages(fence, covered) : covered;
+  const chunks = transcriptChunks(filteredCovered, budget);
   if (!continuation && chunks.length > 24) throw new Error('compaction-ineffective');
   const start = continuation?.fromChunk ?? 0;
   const end = Math.min(chunks.length, start + (continuation?.maxChunks ?? chunks.length));
