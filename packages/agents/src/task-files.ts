@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { AccessDenied } from '@tulipfarm/access';
+import { AccessDenied, type HumanActor } from '@tulipfarm/access';
 import { defaultImageInputLimits } from '@tulipfarm/config';
 import { FileError } from '@tulipfarm/files';
 import {
@@ -27,9 +27,11 @@ import {
 import type { taskFileReadResultSchema } from './contracts.ts';
 import type { TaskFileContent } from './model.ts';
 import type { taskSourcesSchema } from './task-contracts.ts';
+import { readableRowAttachment, rowAttachmentsInstalled } from './row-attachments.ts';
+import { relation, type AgentTransaction } from './store.ts';
 
 type TaskSource = z.infer<typeof taskSourcesSchema>[number];
-type FileSource = Extract<TaskSource, { kind: 'attachment' | 'file' | 'google-drive-file' }>;
+type FileSource = Extract<TaskSource, { kind: 'attachment' | 'row-attachment' | 'file' | 'google-drive-file' }>;
 /** The task and owner a read is made for; recognition is charged to the owner's membership. */
 type Scope = { workspaceId: string; userId: string; membershipId: string; taskId: string };
 
@@ -41,6 +43,16 @@ export type TaskFileReading = {
   attachments?: AttachmentReader | undefined;
   files?: FileContent | undefined;
   google?: GoogleFileReader | undefined;
+  /** Reads a file on a task or its comments, or null when the owner cannot read that row. */
+  rowFiles?:
+    | {
+        read(
+          workspaceId: string,
+          userId: string,
+          id: string,
+        ): Promise<{ filename: string; mediaType: string; size: number; bytes: Uint8Array } | null>;
+      }
+    | undefined;
   /** The owner's recognizer on the workspace recognition model, and the image size that model accepts. */
   recognition(scope: Scope): Promise<{ recognition: FileRecognition | undefined; maxImageBytes: number }>;
   /**
@@ -97,6 +109,25 @@ async function readSource(
     const result = await readFile(
       { name: file.filename, mediaType: file.mediaType, bytes: file.bytes },
       readingSource(options, `attachment:${source.attachmentId}`),
+    );
+    return {
+      read: {
+        origin: 'attachment',
+        id: source.attachmentId,
+        name: file.filename,
+        mediaType: file.mediaType,
+        size: file.size,
+        reading: result,
+      },
+      receipt: null,
+    };
+  }
+  if (source.kind === 'row-attachment') {
+    const file = await reading.rowFiles?.read(scope.workspaceId, scope.userId, source.attachmentId);
+    if (!file) return { kind: 'unsupported' };
+    const result = await readFile(
+      { name: file.filename, mediaType: file.mediaType, bytes: file.bytes },
+      readingSource(options, `row-attachment:${source.attachmentId}`),
     );
     return {
       read: {
@@ -357,8 +388,14 @@ export async function readTaskFiles(input: {
   for (const source of input.sources) {
     if (!input.withinAllowance()) break;
     const result = await readSource(reading, scope, source, options);
-    if ('kind' in result) return { stop: result };
+    // A task's own files are context, not input the owner chose: one the step cannot read is skipped, not a stop.
+    const optional = source.kind === 'row-attachment';
+    if ('kind' in result) {
+      if (optional) continue;
+      return { stop: result };
+    }
     if (result.read.reading.kind === 'unreadable') {
+      if (optional) continue;
       if (!(source.kind === 'file' && input.uploadable?.includes(source.fileId) && result.read.origin === 'tulipfarm'))
         return { stop: { kind: 'unreadable', name: result.read.name, reason: result.read.reading.reason } };
       // Its contents were not read, so it carries no read receipt.
@@ -376,7 +413,10 @@ export async function readTaskFiles(input: {
   if (!reads.length && !links.files.length && !links.notice) return { content: null, receipts };
   const notice = [uploadOnly ? uploadOnlyNotice : '', links.notice].filter(Boolean).join('\n\n');
   const { content, omitted } = taskFileContent([...reads, ...links.files], family, notice);
-  const named = omitted.find(file => file.origin !== 'web');
+  const skippable = new Set(
+    input.sources.flatMap(source => (source.kind === 'row-attachment' ? [source.attachmentId] : [])),
+  );
+  const named = omitted.find(file => file.origin !== 'web' && !skippable.has(file.id));
   if (named) return { stop: { kind: 'omitted', name: named.name } };
   return { content: [...content], receipts };
 }
@@ -456,7 +496,8 @@ export async function readTaskApiFile(
 ): Promise<z.infer<typeof taskFileReadResultSchema>> {
   const notFound = {
     error: 'file-not-found' as const,
-    instruction: 'This task kept no file with that source. Use the source an api.request result of this task names.',
+    instruction:
+      'This task kept no file with that source. Use the source an api.request result of this task names, or the id of a file on a task you work on.',
   };
   if (!objects || !z.uuid().safeParse(call.source).success) return notFound;
   let record: z.infer<typeof apiFileSchema>;
@@ -481,5 +522,49 @@ export async function readTaskApiFile(
     reading: result,
   };
   const shell = { source: call.source, file: '', url: record.url, private: record.private };
+  return { ...shell, file: taskFileBlock(read, { imageInputTokens: 0 }, maxChars - JSON.stringify(shell).length) };
+}
+
+/**
+ * `files.read` in a task for a file on a task's description or comment, read under the owner's row read access. Like
+ * `readTaskApiFile` it runs inside the step's transaction, so it reads text; images reach the agent with its brief.
+ */
+export async function readTaskRowFile(
+  tx: AgentTransaction,
+  owner: HumanActor,
+  objects: AttachmentBytes | undefined,
+  workspaceId: string,
+  call: { source: string } & ReadSelection,
+  maxChars: number,
+): Promise<z.infer<typeof taskFileReadResultSchema> | null> {
+  if (!objects || !z.uuid().safeParse(call.source).success || !(await rowAttachmentsInstalled(tx))) return null;
+  const at = (
+    await tx.client.query<{ table_id: string; row_id: string }>(
+      `SELECT table_id,row_id FROM ${relation(tx, 'tf_row_attachments')} WHERE id=$1 AND row_id IS NOT NULL`,
+      [call.source],
+    )
+  ).rows[0];
+  if (!at) return null;
+  let file;
+  try {
+    file = await readableRowAttachment(tx, owner, at.table_id, at.row_id, call.source);
+  } catch (error) {
+    if (error instanceof AccessDenied) return null;
+    throw error;
+  }
+  const bytes = await objects.read(`${workspaceId}/${file.objectKey}`, file.size);
+  if (hash(bytes) !== file.sha256) throw new Error('task-row-file-integrity');
+  const read = {
+    origin: 'attachment' as const,
+    id: call.source,
+    name: file.filename,
+    mediaType: file.mediaType,
+    size: file.size,
+    reading: await readFile(
+      { name: file.filename, mediaType: file.mediaType, bytes },
+      { imageInput: false, maxImageBytes: defaultImageInputLimits.maxImageBytes, selection: call },
+    ),
+  };
+  const shell = { source: call.source, file: '', url: null, private: true };
   return { ...shell, file: taskFileBlock(read, { imageInputTokens: 0 }, maxChars - JSON.stringify(shell).length) };
 }

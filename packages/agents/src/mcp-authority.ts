@@ -213,6 +213,7 @@ export async function taskMcpSources(
         if (source.kind === 'task') pending.push(source);
         else if (source.kind === 'attachment')
           result.push({ kind: 'private-conversation', conversationId: source.conversationId });
+        else if (source.kind === 'row-attachment') result.push({ kind: 'table', tableId: source.tableId });
         else if (source.kind !== 'file' && source.kind !== 'google-drive-file') result.push(source);
       }
     }

@@ -56,6 +56,7 @@ const rowDraftReplies = {
   created: 'Row added.',
   updated: 'Row updated.',
   deleted: 'Row deleted.',
+  commented: 'Comment posted.',
   dismissed: 'Draft dismissed. No row was changed.',
   stale: 'The table or row changed after this draft. Nothing was changed. Ask again for a fresh draft.',
   decided: 'This row change was already decided. Nothing else was changed.',

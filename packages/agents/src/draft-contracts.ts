@@ -221,6 +221,18 @@ export const authoringProposalSchema = z.discriminatedUnion('kind', [
   /** targetId is the Knowledge document: a new ID when adding. */
   z.strictObject({ kind: z.literal('knowledge'), targetId: uuidSchema, input: knowledgeDraftInput }),
   z.strictObject({ kind: z.literal('memory'), input: memoryDraftInput }),
+  /** A comment the person reviews before it posts: it carries chat files, or the chat used outside content. */
+  z.strictObject({
+    kind: z.literal('task-comment'),
+    input: z.strictObject({
+      tableId: uuidSchema,
+      rowId: uuidSchema,
+      key: z.string().regex(/^TUL-\d{1,10}$/),
+      body: z.string().trim().min(1).max(20000),
+      mentions: z.array(uuidSchema).max(50),
+      attachments: z.array(uuidSchema).max(5),
+    }),
+  }),
   z.strictObject({
     kind: z.literal('row'),
     input: z.discriminatedUnion('tool', [
@@ -233,6 +245,8 @@ export const authoringProposalSchema = z.discriminatedUnion('kind', [
     written: rowsAlreadyWrittenSchema.optional(),
     /** Server-read values retained with the reviewed patches, including after approval. */
     before: z.record(uuidSchema, z.record(z.string(), agentRecordValueSchema)).optional(),
+    /** Chat attachment IDs a task create or update adds to the task's description when approved. */
+    attachments: z.array(uuidSchema).min(1).max(10).optional(),
   }),
 ]);
 export const draftDecisionSchema = z.strictObject({
@@ -299,6 +313,7 @@ export const draftOutcomeSchema = z.discriminatedUnion('kind', [
     documentId: z.uuid(),
   }),
   z.object({ kind: z.literal('memory'), operation: z.enum(['edit', 'restore', 'forget']), revision: z.number().int() }),
+  z.object({ kind: z.literal('task-comment'), itemId: z.uuid() }),
 ]);
 export const agentDraftChangeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('create') }),
@@ -378,6 +393,7 @@ export type FilesProposal = Extract<AuthoringProposal, { kind: 'files' }>;
 export type FileShareProposal = Extract<AuthoringProposal, { kind: 'file-share' }>;
 export type KnowledgeProposal = Extract<AuthoringProposal, { kind: 'knowledge' }>;
 export type MemoryProposal = Extract<AuthoringProposal, { kind: 'memory' }>;
+export type TaskCommentProposal = Extract<AuthoringProposal, { kind: 'task-comment' }>;
 export type DraftOutcome = z.infer<typeof draftOutcomeSchema>;
 export type DraftView = z.infer<typeof draftViewSchema>;
 export type AgentDraftChange = z.infer<typeof agentDraftChangeSchema>;

@@ -123,6 +123,20 @@ export type TurnFiles = {
   links?: LinkReader;
   /** Keeps `api.request` response bodies for `files.read`; absent, large and binary bodies are left out of results. */
   apiFiles?: { keep: KeepCallFile };
+  /** Files on tasks and their comments, which `files.read` opens by id for anyone who can read the task. */
+  rowFiles?: {
+    read(
+      workspaceId: string,
+      userId: string,
+      id: string,
+    ): Promise<{
+      filename: string;
+      mediaType: string;
+      size: number;
+      bytes: Uint8Array;
+      source: SourceDependency;
+    } | null>;
+  };
 };
 
 export type FileSegment =
@@ -1150,8 +1164,19 @@ export async function readChatFile(input: {
       },
       sources: [],
     };
+  const rowFiles = input.turnFiles?.rowFiles;
+  let rowSource: SourceDependency | undefined;
   const found = await input.transaction(async tx => {
-    const part = await chatFilePart(tx, { ...input, source: input.call.source });
+    let part = await chatFilePart(tx, { ...input, source: input.call.source });
+    if (!part && rowFiles && z.uuid().safeParse(input.call.source).success) {
+      const message = (
+        await tx.client.query<{ id: string }>(
+          `SELECT id FROM ${qualified(tx.schema, 'tf_conversation_messages')} WHERE conversation_id=$1 AND author_kind='human' ORDER BY sequence DESC LIMIT 1`,
+          [input.conversationId],
+        )
+      ).rows[0];
+      if (message) part = { kind: 'attachment', messageId: message.id, attachmentId: input.call.source, rowFile: true };
+    }
     if (!part) return null;
     if (part.error === 'file-trashed') return { error: 'file-trashed' as const };
     const turn = z
@@ -1166,6 +1191,7 @@ export async function readChatFile(input: {
       );
     const model = turn.responder === 'reverse-text-v1' ? loadModelCatalog().defaultModel.id : turn.responder;
     return {
+      rowFile: part.rowFile === true,
       library: part.kind === 'library',
       api: part.api === true ? { sourceUrl: z.string().nullable().parse(part.sourceUrl) } : null,
       part: turnFilePartSchema.parse(
@@ -1200,7 +1226,7 @@ export async function readChatFile(input: {
       },
       sources: [],
     };
-  const { part, pinned, library, api } = found;
+  const { part, pinned, library, api, rowFile } = found;
   const family = input.turnFiles.family(pinned.familyId);
   const recognitionModel = pinned.recognitionFamilyId;
   const read = await readTurnFile({
@@ -1210,7 +1236,17 @@ export async function readChatFile(input: {
     part,
     files: input.files,
     google: input.google,
-    attachments: input.turnFiles.attachments,
+    attachments:
+      rowFile && rowFiles
+        ? {
+            async download(workspaceId, userId, _conversationId, id) {
+              const file = await rowFiles.read(workspaceId, userId, id);
+              if (!file) throw new AccessDenied();
+              rowSource = file.source;
+              return file;
+            },
+          }
+        : input.turnFiles.attachments,
     authorize: check => input.transaction(check),
     library,
     options: {
@@ -1268,15 +1304,17 @@ export async function readChatFile(input: {
   return {
     result: { file: text },
     // A response file carries its call's sources: the public URL, or this chat when the call sent a secret.
-    sources: api
-      ? [
-          api.sourceUrl
-            ? { kind: 'public-web', url: api.sourceUrl }
-            : { kind: 'private-conversation', conversationId: input.conversationId },
-        ]
-      : read.source
-        ? [read.source]
-        : [],
+    sources: rowSource
+      ? [rowSource]
+      : api
+        ? [
+            api.sourceUrl
+              ? { kind: 'public-web', url: api.sourceUrl }
+              : { kind: 'private-conversation', conversationId: input.conversationId },
+          ]
+        : read.source
+          ? [read.source]
+          : [],
     ...(images.length
       ? {
           images: {

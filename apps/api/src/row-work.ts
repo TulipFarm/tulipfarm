@@ -13,6 +13,8 @@ import {
   inboxSlackSchema,
   reminderInputSchema,
   remindersSchema,
+  rowAttachmentsInputSchema,
+  rowAttachmentsSchema,
   rowThreadSchema,
   taskActivitySchema,
   taskDetailSchema,
@@ -20,7 +22,9 @@ import {
   TaskReminderError,
   tasksTableSchema,
 } from '@tulipfarm/agents/row-work';
+import { createRowAttachments, rowAttachmentSchema } from '@tulipfarm/agents/row-attachments';
 import { createTaskClarifications, TaskClarificationError } from '@tulipfarm/agents/task-clarifications';
+import { AttachmentError, attachmentLimit } from '@tulipfarm/conversations/attachments';
 import {
   taskClarificationAnswerInputSchema,
   taskClarificationViewSchema,
@@ -37,9 +41,19 @@ export function registerRowWork(
   dependencies: {
     auth: Pick<ReturnType<typeof registerAuth>['auth'], 'api'>;
     runtime: Parameters<typeof createRowWork>[0] & Parameters<typeof createTaskClarifications>[0]['runtime'];
+    rowAttachments?: ReturnType<typeof createRowAttachments> | undefined;
   },
 ) {
-  const service = createRowWork(dependencies.runtime, commonCompatibility);
+  const files = dependencies.rowAttachments;
+  const rowFiles = () => {
+    if (!files) throw new StorageUnavailableError('disabled');
+    return files;
+  };
+  const service = createRowWork(
+    dependencies.runtime,
+    commonCompatibility,
+    files ? { removeObjects: files.removeObjects } : {},
+  );
   const clarifications = createTaskClarifications({ runtime: dependencies.runtime });
   const workspace = z.object({ workspaceId: z.uuid() });
   const row = workspace.extend({ tableId: z.uuid(), rowId: z.uuid() });
@@ -48,6 +62,9 @@ export function registerRowWork(
   const inboxItem = workspace.extend({ itemId: z.uuid() });
   const taskKey = workspace.extend({ key: z.string().regex(/^tul-\d{1,10}$/i) });
   const reminder = row.extend({ reminderId: z.uuid() });
+  const tableParam = workspace.extend({ tableId: z.uuid() });
+  const attachmentParam = row.extend({ attachmentId: z.uuid() });
+  const uploadQuery = z.object({ name: z.string().min(1).max(255), mediaType: z.string().max(127).optional() });
   const validation = routeValidation({
     missing: 'Missing row work validator',
     invalid: () => new Error('invalid-request'),
@@ -58,6 +75,9 @@ export function registerRowWork(
 
   app.register(async routes => {
     validation.install(routes, true);
+    routes.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (_request, body, done) =>
+      done(null, body),
+    );
     const user = authenticateRoutes(routes, dependencies.auth, { origin: authConfig().webOrigin });
     routes.setErrorHandler((error, _request, reply) => {
       if (requestBoundaryError(error, reply)) return;
@@ -70,6 +90,10 @@ export function registerRowWork(
         const status = error.code === 'not-found' ? 404 : error.code === 'already-answered' ? 409 : 400;
         return reply.code(status).send({ error: error.code });
       }
+      if (error instanceof AttachmentError)
+        return reply
+          .code(error.code === 'attachment-busy' ? 503 : error.code === 'attachment-size' ? 413 : 409)
+          .send({ error: error.code });
       if (error instanceof StorageUnavailableError) return reply.code(503).send({ error: 'workspace-unavailable' });
       if (error instanceof z.ZodError || (typeof error === 'object' && error !== null && 'validation' in error))
         return reply.code(400).send({ error: 'invalid-request' });
@@ -122,6 +146,66 @@ export function registerRowWork(
       request => {
         const p = comment.parse(request.params);
         return service.deleteComment(p.workspaceId, user(request), p.tableId, p.rowId, p.itemId);
+      },
+    );
+    routes.post(
+      '/workspaces/:workspaceId/tables/:tableId/attachments',
+      {
+        logLevel: 'silent',
+        bodyLimit: attachmentLimit,
+        schema: {
+          operationId: 'rowAttachmentUpload',
+          params: validation.json(tableParam),
+          querystring: validation.json(uploadQuery),
+          response: { 200: validation.json(rowAttachmentSchema), 413: errors[400], ...errors },
+        },
+      },
+      request => {
+        const p = tableParam.parse(request.params);
+        const q = uploadQuery.parse(request.query);
+        if (!Buffer.isBuffer(request.body)) throw new AttachmentError('attachment-size');
+        return rowFiles().upload(p.workspaceId, user(request), p.tableId, {
+          filename: q.name,
+          mediaType: q.mediaType,
+          content: request.body,
+        });
+      },
+    );
+    routes.put(
+      `${base}/attachments`,
+      {
+        schema: {
+          operationId: 'rowAttachmentsSet',
+          params: validation.json(row),
+          body: validation.json(rowAttachmentsInputSchema),
+          response: { 200: validation.json(rowAttachmentsSchema), ...errors },
+        },
+      },
+      request => {
+        const p = row.parse(request.params);
+        return service.setAttachments(p.workspaceId, user(request), p.tableId, p.rowId, request.body);
+      },
+    );
+    routes.get(
+      `${base}/attachments/:attachmentId/content`,
+      {
+        logLevel: 'silent',
+        schema: {
+          operationId: 'rowAttachmentDownload',
+          params: validation.json(attachmentParam),
+          response: { 200: { type: 'string', format: 'binary' }, ...errors },
+        },
+      },
+      async (request, reply) => {
+        const p = attachmentParam.parse(request.params);
+        const result = await rowFiles().download(p.workspaceId, user(request), p.tableId, p.rowId, p.attachmentId);
+        const filename = encodeURIComponent(result.filename).replaceAll("'", '%27');
+        return reply
+          .header('X-Content-Type-Options', 'nosniff')
+          .header('Cache-Control', 'private, max-age=3600')
+          .header('Content-Disposition', `attachment; filename="attachment"; filename*=UTF-8''${filename}`)
+          .type('application/octet-stream')
+          .send(Buffer.from(result.bytes));
       },
     );
     routes.post(

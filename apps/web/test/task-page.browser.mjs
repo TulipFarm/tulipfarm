@@ -53,6 +53,7 @@ try {
     editedAt: null,
     deleted: false,
     mine: false,
+    attachments: [],
   });
   await page.getByText('The printer can deliver on Thursday.').waitFor({ timeout: 15_000 });
   await until(

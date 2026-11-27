@@ -131,6 +131,7 @@ export async function createSlackPromptComposition(
         channels,
         compactor,
         rowLink,
+        ...(attachments ? { fileBytes: attachments } : {}),
         reply: (guard, slack) => meteredReply(runtime, { externalContext: guard, slack, compactor, workspaceSlug }),
       })
     : undefined;

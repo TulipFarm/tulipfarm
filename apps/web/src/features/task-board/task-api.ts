@@ -4,6 +4,7 @@ import { jsonResponse, readJson, responseError } from '@/lib/http';
 import { useFeatureRead } from '@/lib/query';
 import { TableRequestError } from '@/features/tables/request-state';
 import { tableValuesSchema } from '@/features/tables/review-contracts';
+import { rowAttachmentSchema } from '@/features/tables/row-attachments';
 import { rowThreadSchema } from '@/features/tables/row-thread';
 import { taskKeysSchema } from './api';
 
@@ -136,6 +137,7 @@ export const taskDetailSchema = z.object({
   canEdit: z.boolean(),
   thread: rowThreadSchema,
   reminders: remindersSchema,
+  attachments: z.array(rowAttachmentSchema),
 });
 export type TaskDetail = z.infer<typeof taskDetailSchema>;
 
