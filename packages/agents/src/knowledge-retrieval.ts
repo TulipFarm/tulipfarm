@@ -19,6 +19,7 @@ import {
 import { AccessDenied, type HumanActor } from '@tulipfarm/access';
 import { requireDraftSources } from './draft-sources.ts';
 import { knowledgeToolResultSchema } from './knowledge-tool-contracts.ts';
+import { rerankKnowledgePassages } from './decisions.ts';
 import { errorAttributes, log } from '@tulipfarm/observability';
 const relation = (tx: AgentTransaction, name: string) => qualified(tx.schema, name);
 
@@ -220,6 +221,47 @@ export async function invokeBoundedKnowledge(
     }
     context.signal?.throwIfAborted();
     clearInterval(fence);
+    if (
+      call.tool === 'knowledge.retrieve' &&
+      output.result &&
+      typeof output.result === 'object' &&
+      'branches' in output.result
+    ) {
+      const branches = (
+        output.result as { branches?: Array<{ documents?: Array<{ passages?: Array<{ text: string }> }> }> }
+      ).branches;
+      if (Array.isArray(branches)) {
+        const query =
+          call.action === 'search'
+            ? (call.query ?? '')
+            : (call.branches ?? []).map(branch => ('query' in branch ? (branch.query ?? '') : '')).join(' ');
+        const flat: { id: string; text: string }[] = [];
+        for (const [bIdx, branch] of branches.entries())
+          for (const [dIdx, doc] of (branch.documents ?? []).entries())
+            for (const [pIdx, passage] of (doc.passages ?? []).entries())
+              flat.push({ id: `${bIdx}:${dIdx}:${pIdx}`, text: passage.text });
+        if (query.trim() && flat.length > 4) {
+          const scores = await rerankKnowledgePassages({
+            workspaceId,
+            query,
+            passages: flat,
+            signal: context.signal,
+          });
+          if (scores) {
+            for (const [bIdx, branch] of branches.entries())
+              for (const [dIdx, doc] of (branch.documents ?? []).entries()) {
+                if (!doc.passages || doc.passages.length <= 1) continue;
+                const indexed = doc.passages.map((passage, pIdx) => ({
+                  passage,
+                  score: scores.get(`${bIdx}:${dIdx}:${pIdx}`) ?? 0.5,
+                }));
+                indexed.sort((a, b) => b.score - a.score);
+                doc.passages = indexed.map(item => item.passage);
+              }
+          }
+        }
+      }
+    }
     const budget = await monitored.transaction(workspaceId, range, async tx => {
       const state = await readKnowledgeBudget(tx, root);
       const operation = state.operations.find(operation => operation.id === context.commandId);

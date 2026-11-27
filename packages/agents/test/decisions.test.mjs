@@ -17,18 +17,24 @@ import {
   evaluateGoalRubric,
   evaluateTriggerFilter,
   evaluateWorkflowDecision,
+  filterCompactionMessages,
+  filterTableQueryFields,
   formatUnmetCriteriaFeedback,
   gateToolCall,
   heartbeatMatches,
   isExternalReadTool,
   isGatedSideEffectTool,
+  judgeEvalPassWithJev,
+  judgeEvalStatusWithJev,
   preloadSkills,
   preloadTools,
   recordDecisionDrift,
   recordHumanOverride,
+  rerankKnowledgePassages,
   rowReviewIntent,
   sampleDecisionDrift,
   scrubDecisionText,
+  shouldGenerateRecommendations,
   taskCompletionStatus,
   worthLearning,
 } from '../src/decisions.ts';
@@ -65,13 +71,16 @@ test('preloadTools offers a group when its probability outweighs its schema cost
     Object.fromEntries(
       Object.keys(body.questions).map(id => [
         id,
-        { noul: { 'github-investigation': 0.9, 'skills-manage': 0.6, workflows: 0.4 }[id] ?? 0.01 },
+        {
+          noul: { __needs_tools: 0.95, 'github-investigation': 0.9, 'skills-manage': 0.6, workflows: 0.4 }[id] ?? 0.01,
+        },
       ]),
     ),
   );
   const tools = await preloadTools({ request: 'Read issue 4 and write a skill for it', earlier: [], ...sizes });
   assert.deepEqual(tools.sort(), ['github_issue_read', 'skills_draft', 'skills_list']);
   assert.deepEqual(Object.keys(bodies[0].questions).sort(), [
+    '__needs_tools',
     'github-investigation',
     'skills-manage',
     'skills-use',
@@ -527,4 +536,130 @@ test('classifyTableRows strips file fields, enforces batch limit, and throws whe
   assert.equal(results[0].uncertain, false);
   assert.ok(!JSON.stringify(bodies[0]).includes('fileId'));
   assert.ok(!JSON.stringify(bodies[0]).includes('reverse-link'));
+});
+
+test('preloadTools returns empty when __needs_tools confidently says no tools are needed', async t => {
+  jev(t, () => ({
+    __needs_tools: { noul: 0.05 },
+    github: { noul: 0.2 },
+    'skills-manage': { noul: 0.3 },
+  }));
+  const tools = await preloadTools({ request: 'Write a short follow-up email to a customer', earlier: [], ...sizes });
+  assert.deepEqual(tools, []);
+});
+
+test('shouldGenerateRecommendations skips on low signal and fails open on error', async t => {
+  let fail = false;
+  jev(t, () => {
+    if (fail) throw new Error('network down');
+    return { worthGenerating: { noul: 0.08 } };
+  });
+  assert.equal(
+    await shouldGenerateRecommendations({ workspaceId, context: { tables: [] }, priorItems: [], slots: 3 }),
+    false,
+  );
+  fail = true;
+  assert.equal(
+    await shouldGenerateRecommendations({ workspaceId, context: { tables: [] }, priorItems: [], slots: 3 }),
+    true,
+  );
+});
+
+test('filterCompactionMessages drops filler middle turns while preserving first and last 4 turns', async t => {
+  const messages = Array.from({ length: 10 }, (_, idx) => ({
+    role: idx % 2 === 0 ? 'user' : 'assistant',
+    text: `Turn ${idx}`,
+  }));
+  jev(t, () => ({
+    m0: { noul: 0.9 },
+    m1: { noul: 0.1 },
+    m2: { noul: 0.8 },
+    m3: { noul: 0.05 },
+    m4: { noul: 0.7 },
+  }));
+  const filtered = await filterCompactionMessages(workspaceId, messages);
+  assert.deepEqual(
+    filtered.map(m => m.text),
+    ['Turn 0', 'Turn 1', 'Turn 3', 'Turn 5', 'Turn 6', 'Turn 7', 'Turn 8', 'Turn 9'],
+  );
+  // Short transcripts bypass Jev completely.
+  const short = messages.slice(0, 5);
+  assert.equal(await filterCompactionMessages(workspaceId, short), short);
+});
+
+test('rerankKnowledgePassages scores >4 passages and skips small sets', async t => {
+  const passages = Array.from({ length: 5 }, (_, idx) => ({ id: `0:0:${idx}`, text: `Passage ${idx}` }));
+  assert.equal(
+    await rerankKnowledgePassages({ workspaceId, query: 'pricing', passages: passages.slice(0, 4) }),
+    undefined,
+  );
+  jev(t, () => ({
+    p0: { noul: 0.2 },
+    p1: { noul: 0.95 },
+    p2: { noul: 0.1 },
+    p3: { noul: 0.8 },
+    p4: { noul: 0.5 },
+  }));
+  const scores = await rerankKnowledgePassages({ workspaceId, query: 'pricing', passages });
+  assert.equal(scores?.get('0:0:1'), 0.95);
+  assert.equal(scores?.get('0:0:2'), 0.1);
+});
+
+test('filterTableQueryFields filters wide schemas, keeps pinned fields, and fails open if too few kept', async t => {
+  const fields = Array.from({ length: 10 }, (_, idx) => ({
+    id: `f-${idx}`,
+    name: `Field ${idx}`,
+    type: 'text',
+  }));
+  let reply = {
+    f0: { noul: 0.9 },
+    f1: { noul: 0.05 },
+    f2: { noul: 0.8 },
+    f3: { noul: 0.05 },
+    f4: { noul: 0.05 },
+    f5: { noul: 0.05 },
+    f6: { noul: 0.05 },
+    f7: { noul: 0.05 },
+    f8: { noul: 0.05 },
+    f9: { noul: 0.05 },
+  };
+  jev(t, () => reply);
+  const filtered = await filterTableQueryFields({
+    workspaceId,
+    prompt: 'show high value deals',
+    fields,
+    pinnedIds: new Set(['f-5']),
+  });
+  assert.deepEqual(
+    filtered.map(f => f.id),
+    ['f-0', 'f-2', 'f-5'],
+  );
+
+  // Too few kept (<2) fails open to all fields.
+  reply = Object.fromEntries(fields.map((_, idx) => [`f${idx}`, { noul: 0.05 }]));
+  const fallback = await filterTableQueryFields({ workspaceId, prompt: 'show all', fields });
+  assert.equal(fallback.length, 10);
+});
+
+test('judgeEvalStatusWithJev and judgeEvalPassWithJev fast-path confident verdicts and fall back when uncertain', async t => {
+  let reply = { status: { choice: 'completed', confidence: 0.92 } };
+  jev(t, () => reply);
+  assert.equal(await judgeEvalStatusWithJev({ workspaceId, payload: '{}' }), 'completed');
+
+  reply = { status: { choice: 'waiting', confidence: 0.6 } };
+  assert.equal(await judgeEvalStatusWithJev({ workspaceId, payload: '{}' }), undefined);
+
+  reply = { pass: { noul: 0.95 } };
+  assert.equal((await judgeEvalPassWithJev({ workspaceId, payload: '{}' }))?.pass, true);
+
+  reply = { pass: { noul: 0.08 } };
+  assert.equal((await judgeEvalPassWithJev({ workspaceId, payload: '{}' }))?.pass, false);
+
+  reply = { pass: { noul: 0.5 } };
+  assert.equal(await judgeEvalPassWithJev({ workspaceId, payload: '{}' }), undefined);
+
+  // Oversized payloads (>8000 chars) fall back to the full judge instead of truncating reply/toolCalls.
+  const huge = 'x'.repeat(8001);
+  assert.equal(await judgeEvalStatusWithJev({ workspaceId, payload: huge }), undefined);
+  assert.equal(await judgeEvalPassWithJev({ workspaceId, payload: huge }), undefined);
 });

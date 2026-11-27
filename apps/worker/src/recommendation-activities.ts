@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { AccessDenied, lockAuthorization, type HumanActor } from '@tulipfarm/access';
 import { calculateUsageCost, reserveModelCost } from '@tulipfarm/config';
 import { inferWithSystem } from '@tulipfarm/agents/inference';
+import { shouldGenerateRecommendations } from '@tulipfarm/agents/decisions';
 import { budPersona } from '@tulipfarm/conversations/bud-contracts';
 import { modelEnvironment } from '@tulipfarm/agents/model-environment';
 import {
@@ -128,6 +129,30 @@ export function createRecommendationActivities(options: {
             fingerprint: input.fingerprint,
             sources: input.sources,
           });
+        if (
+          !(await shouldGenerateRecommendations({
+            workspaceId,
+            context: input.context,
+            priorItems: input.prior?.items,
+            slots,
+          }))
+        ) {
+          if (input.prior)
+            return await publish(workspaceId, claim, {
+              ...input.prior,
+              fingerprint: input.fingerprint,
+              sources: input.sources,
+            });
+          return await publish(workspaceId, claim, {
+            ...combineRecommendations(input.signals, []),
+            items: combineRecommendations(input.signals, []).items.map(item => ({
+              ...item,
+              facts: recommendationFacts(input.context, item),
+            })),
+            fingerprint: input.fingerprint,
+            sources: input.sources,
+          });
+        }
         const { budget, model } = options;
         const existing = await budget.getAttempt(claim.attemptId);
         if (existing && existing.state !== 'reserved') {

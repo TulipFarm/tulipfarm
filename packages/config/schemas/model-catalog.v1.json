@@ -183,7 +183,12 @@
                   "decisions-task-completion",
                   "decisions-tool-gate",
                   "decisions-security-guardrails",
-                  "decisions-goal-loops"
+                  "decisions-goal-loops",
+                  "decisions-worker-gates",
+                  "decisions-compaction-filter",
+                  "decisions-context-rerank",
+                  "decisions-table-query-filter",
+                  "decisions-eval-judge"
                 ]
               },
               {
@@ -546,7 +551,12 @@
                   "decisions-task-completion",
                   "decisions-tool-gate",
                   "decisions-security-guardrails",
-                  "decisions-goal-loops"
+                  "decisions-goal-loops",
+                  "decisions-worker-gates",
+                  "decisions-compaction-filter",
+                  "decisions-context-rerank",
+                  "decisions-table-query-filter",
+                  "decisions-eval-judge"
                 ]
               },
               {

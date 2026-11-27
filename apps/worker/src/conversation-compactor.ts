@@ -1,4 +1,5 @@
 import { inferWithSystem, measureToolRequest } from '@tulipfarm/agents/inference';
+import { filterCompactionMessages } from '@tulipfarm/agents/decisions';
 import { effectiveCompactionPolicy } from '@tulipfarm/agents/compaction-policy';
 import { renewConversationReplyLease, type ConversationRuntime } from '@tulipfarm/conversations/runtime';
 import type { ChatMessage, ConversationCompactor } from '@tulipfarm/conversations/compaction';
@@ -221,6 +222,9 @@ export function conversationCompactor(
         return response;
       }
       throw failure;
+    },
+    filterMessages(fence, messages) {
+      return filterCompactionMessages(fence.workspaceId, messages);
     },
   };
 }

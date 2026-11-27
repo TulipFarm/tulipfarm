@@ -38,6 +38,7 @@ import {
   type TranslationErrorCode,
 } from '@tulipfarm/tables/translation-contracts';
 import { inferWithSystem, type ChatTextTurn, type InferenceRoute, type InferenceUsage } from './inference.ts';
+import { filterTableQueryFields } from './decisions.ts';
 import { modelEnvironment } from './model-environment.ts';
 
 /** Hard limits for one logical translation. Input tokens are admitted by request bytes, which never undercount tokens. */
@@ -948,11 +949,26 @@ export function createTableQueryTranslations(options: {
         unavailable(error);
       }
     }
+    let promptCapabilities = capabilities;
+    if (capabilities.fields.length > 8) {
+      const serializedCurrent = current ? JSON.stringify(current) : '';
+      const pinnedIds = new Set(
+        capabilities.fields.filter(field => serializedCurrent.includes(field.fieldId)).map(field => field.fieldId),
+      );
+      const filtered = await filterTableQueryFields({
+        workspaceId,
+        prompt: input.prompt,
+        fields: capabilities.fields.map(field => ({ id: field.fieldId, name: field.label, type: field.kind, field })),
+        pinnedIds,
+      });
+      if (filtered.length < capabilities.fields.length)
+        promptCapabilities = { ...capabilities, fields: filtered.map(item => item.field) };
+    }
     const context = translationContext({
       prompt: input.prompt,
       timezone: input.timezone,
       now: now(),
-      capabilities,
+      capabilities: promptCapabilities,
       current,
     });
     const messages: ChatTextTurn[] = [{ role: 'user', text: renderContext(context) }];
