@@ -56,6 +56,7 @@ import { keepStoppedReply } from './stopped-replies.ts';
 import { notifyConversationChange } from './event-publisher.ts';
 import {
   requireConversationMcpSources,
+  requireMcpSources,
   requireGitHubSources,
   requireGoogleFileSources,
   requireGoogleSources,
@@ -169,6 +170,51 @@ const pinnedSchema = z.object({ pinned: z.boolean() });
 const pinnedLimit = 50;
 const movedSchema = z.object({ projectId: uuidSchema });
 const hiddenReply = 'This reply is hidden because it uses information you cannot access.';
+const sourceUnavailableReply =
+  'This reply is hidden because an app or source it used was removed or you can no longer access it.';
+async function sourcesReadable(tx: AuthorizationTransaction, actor: HumanActor, chatId: string) {
+  try {
+    await requireConversationMcpSources(tx, actor, chatId);
+    return true;
+  } catch (error) {
+    if (error instanceof AccessDenied) return false;
+    throw error;
+  }
+}
+
+/** A reply's own sources, without the chat's earlier turns, which are checked as their own replies. */
+const withoutConversation = (sources: unknown, chatId: string) => {
+  const parsed = sourceDependenciesSchema.safeParse(sources);
+  return parsed.success
+    ? parsed.data.filter(source => source.kind !== 'private-conversation' || source.conversationId !== chatId)
+    : sources;
+};
+
+/** The requester's own chats are always listed; a project chat is listed only while its sources are readable. */
+async function listable<T extends { id: string; projectId: string | null }>(
+  tx: AuthorizationTransaction,
+  actor: HumanActor,
+  rows: T[],
+) {
+  const projectRows = rows.filter(chat => chat.projectId);
+  if (!projectRows.length) return rows;
+  const prefetch = await prefetchConversationSources(
+    tx,
+    projectRows.map(chat => chat.id),
+  );
+  const chats = [];
+  for (const chat of rows) {
+    if (chat.projectId)
+      try {
+        await requireConversationMcpSources(tx, actor, chat.id, prefetch);
+      } catch (error) {
+        if (!(error instanceof AccessDenied)) throw error;
+        continue;
+      }
+    chats.push(chat);
+  }
+  return chats;
+}
 export const knowledgeUnavailableReply =
   'This reply is unavailable because a knowledge source it cited changed or your access to it ended. Search knowledge again to make a new request.';
 export const knowledgeRemovedReply =
@@ -883,11 +929,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
   async function read(workspaceId: string, userId: string, chatId: string) {
     chatId = uuidSchema.parse(chatId);
     return reader(workspaceId, userId, async (tx, actor) => {
-      const [chat] = await pipelinedAll(tx.client, [
-        () => owned(tx, actor, chatId),
-        () => requireConversationMcpSources(tx, actor, chatId),
-      ]);
-      return chatSchema.parse(chat);
+      return chatSchema.parse(await owned(tx, actor, chatId));
     });
   }
 
@@ -929,8 +971,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
     const input = historyQuerySchema.parse(value);
     return reader(workspaceId, userId, async (tx, actor) => {
       const [chat] = await pipelinedAll(tx.client, [() => owned(tx, actor, chatId), () => warmConversationSources(tx)]);
-      const [, messageRows, gitHubProposal] = await pipelinedAll(tx.client, [
-        () => requireConversationMcpSources(tx, actor, chatId),
+      const [messageRows, gitHubProposal] = await pipelinedAll(tx.client, [
         () =>
           tx.client.query(
             `SELECT m.id, m.sequence, m.author_kind AS author, m.created_at AS "createdAt",
@@ -1064,6 +1105,11 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
         sources => requireGitHubSources(tx, actor, sources),
       );
       await conceal(hiddenReply, true, sources => requireWorkflowSources(tx, actor, sources));
+      // A lost app or source marks only the replies that read it; the chat itself stays open.
+      if (!(await sourcesReadable(tx, actor, chatId)))
+        await conceal(sourceUnavailableReply, true, sources =>
+          requireMcpSources(tx, actor, chatId, withoutConversation(sources, chatId), undefined, true),
+        );
       if (chat.projectId) await conceal(hiddenReply, true, sources => requireResultSources(tx, actor, chatId, sources));
       const hasGitHubProposals = !!gitHubProposal.rowCount;
       const toolsByTurn = new Map<string, typeof toolRows>();
@@ -1322,19 +1368,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
         () => warmConversationSources(tx),
       ]);
       const rows = z.array(chatSchema).parse(found.rows);
-      const prefetch = await prefetchConversationSources(
-        tx,
-        rows.slice(0, 50).map(chat => chat.id),
-      );
-      const chats = [];
-      for (const chat of rows.slice(0, 50)) {
-        try {
-          await requireConversationMcpSources(tx, actor, chat.id, prefetch);
-          chats.push(chat);
-        } catch (error) {
-          if (!(error instanceof AccessDenied)) throw error;
-        }
-      }
+      const chats = await listable(tx, actor, rows.slice(0, 50));
       const last = rows.slice(0, 50).at(-1);
       return { chats, nextCursor: rows.length > 50 && last ? { activityAt: last.activityAt, id: last.id } : null };
     });
@@ -1407,21 +1441,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
           ),
         () => warmConversationSources(tx),
       ]);
-      const rows = z.array(chatSchema).parse(found.rows);
-      const prefetch = await prefetchConversationSources(
-        tx,
-        rows.map(chat => chat.id),
-      );
-      const chats = [];
-      for (const chat of rows) {
-        try {
-          await requireConversationMcpSources(tx, actor, chat.id, prefetch);
-          chats.push(chat);
-        } catch (error) {
-          if (!(error instanceof AccessDenied)) throw error;
-        }
-      }
-      return { chats };
+      return { chats: await listable(tx, actor, z.array(chatSchema).parse(found.rows)) };
     });
   }
 

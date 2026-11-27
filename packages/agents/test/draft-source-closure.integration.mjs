@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { test } from 'node:test';
-import { AccessDenied, lockAuthorization, requireWorkflowDefinitionSources } from '@tulipfarm/access';
+import {
+  AccessDenied,
+  lockAuthorization,
+  requireProtectedSource,
+  requireWorkflowDefinitionSources,
+} from '@tulipfarm/access';
 import { conversationFixture } from '../../conversations/test/fixture.mjs';
 import { conversationResult, mergeSources } from '../../conversations/src/results.ts';
 import { requireDraftSources } from '../src/draft-sources.ts';
@@ -198,6 +203,8 @@ test('a saved definition outlives edited tables and deleted agents and skills it
   await sql(`UPDATE ${f.table('tf_workspace_skills')} SET enabled=false WHERE id=$1`, [skillId]);
   await assert.rejects(pinned(), AccessDenied);
   await saved();
+  // A chat that used a deleted agent stays readable to whoever could read the agent.
+  await inTransaction(tx => requireProtectedSource(tx, actor, sources[1]));
   // An agent or skill that still exists, and every table, keeps needing current access.
   await sql(`DELETE FROM ${f.table('tf_skill_person_grants')} WHERE skill_id=$1`, [skillId]);
   await assert.rejects(saved(), AccessDenied);
@@ -210,6 +217,12 @@ test('a saved definition outlives edited tables and deleted agents and skills it
   await sql(`UPDATE ${f.table('tf_agents')} SET deleted_at=NULL WHERE id=$1`, [agentId]);
   await sql(`DELETE FROM ${f.table('tf_agent_grants')} WHERE agent_id=$1`, [agentId]);
   await assert.rejects(saved(), AccessDenied);
+  await sql(`UPDATE ${f.table('tf_agents')} SET deleted_at=now() WHERE id=$1`, [agentId]);
+  await assert.rejects(
+    inTransaction(tx => requireProtectedSource(tx, actor, sources[1])),
+    AccessDenied,
+  );
+  await sql(`UPDATE ${f.table('tf_agents')} SET deleted_at=NULL WHERE id=$1`, [agentId]);
   await sql(`INSERT INTO ${f.table('tf_agent_grants')} (agent_id,team_id,permission) VALUES ($1,$2,'read')`, [
     agentId,
     team,

@@ -554,3 +554,36 @@ test(
     }
   },
 );
+
+test(
+  'a chat whose app access ended stays listed and open, with only the affected reply marked',
+  { timeout: 120000 },
+  async () => {
+    const f = await setup();
+    try {
+      const { workspace: w } = f;
+      const chatId = await f.chat(w.userId);
+      const sent = await f.send(w.userId, chatId, [{ kind: 'text', text: 'Read the tracker' }]);
+      assert.equal(await f.process(chatId, sent), 'completed');
+      await f.db.platform.query(
+        `UPDATE ${f.table('tf_conversation_results')} SET sources=$2 WHERE conversation_id=$1`,
+        [chatId, JSON.stringify([{ kind: 'mcp-integration', integrationId: randomUUID(), authorizationEpoch: 1 }])],
+      );
+      assert.ok((await f.store.list(w.id, w.userId, {})).chats.some(chat => chat.id === chatId));
+      assert.equal((await f.store.read(w.id, w.userId, chatId)).id, chatId);
+      const { messages } = await f.store.history(w.id, w.userId, chatId);
+      assert.deepEqual(
+        messages.map(message => [message.author, message.parts.map(part => part.text).join('')]),
+        [
+          ['human', 'Read the tracker'],
+          [
+            'assistant',
+            'This reply is hidden because an app or source it used was removed or you can no longer access it.',
+          ],
+        ],
+      );
+    } finally {
+      await f.close();
+    }
+  },
+);
