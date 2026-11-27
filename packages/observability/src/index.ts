@@ -993,6 +993,17 @@ const knowledgeImportReasons = new Set([
   'unsupported-platform',
 ]);
 
+/**
+ * A workspace reaching its knowledge capacity is an expected limit the source shows as resource-limited, not a service
+ * fault, so it logs as a warning and stays out of error-log alerts. The import counter still records it as an error.
+ */
+const expectedKnowledgeImportFailures = new Set(['quota', 'resource-limited']);
+
+function importLogLevel(outcome: 'skipped' | 'error', errorCode: string) {
+  if (outcome !== 'error') return 'info';
+  return expectedKnowledgeImportFailures.has(errorCode) ? 'warn' : 'error';
+}
+
 export function recordKnowledgeImport(
   stage: 'item' | 'source',
   outcome: 'ready' | 'skipped' | 'error',
@@ -1023,7 +1034,7 @@ export function recordKnowledgeImport(
       details[`parser.${key}`] = value;
   }
   if (outcome !== 'ready')
-    log(outcome === 'error' ? 'error' : 'info', 'activity', outcome === 'error' ? 'call_failed' : 'call_completed', {
+    log(importLogLevel(outcome, errorCode), 'activity', outcome === 'error' ? 'call_failed' : 'call_completed', {
       operation: `knowledge.github.${stage}`,
       provider: 'github',
       outcome,

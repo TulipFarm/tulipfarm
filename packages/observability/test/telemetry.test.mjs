@@ -699,6 +699,8 @@ test('HTTP, nested work and inference export counts, seconds, status and correla
       recordKnowledgeImport('source', 'error', 'provider', { error: storageFailure });
       recordKnowledgeImport('item', 'ready');
       recordKnowledgeImport('item', 'skipped', 'unsupported');
+      recordKnowledgeImport('item', 'error', 'quota');
+      recordKnowledgeImport('item', 'error', 'resource-limited');
     });
     await reader.forceFlush();
     const finished = spans.getFinishedSpans();
@@ -751,6 +753,8 @@ test('HTTP, nested work and inference export counts, seconds, status and correla
         ['ERROR', 'call_failed', 'unclassified'],
         ['ERROR', 'call_failed', 'wait_timeout'],
         ['INFO', 'call_completed', 'unsupported'],
+        ['WARN', 'call_failed', 'quota'],
+        ['WARN', 'call_failed', 'resource-limited'],
       ],
     );
     assert.ok(importLogs.every(record => record.spanContext.traceId === http.spanContext().traceId));
@@ -759,7 +763,7 @@ test('HTTP, nested work and inference export counts, seconds, status and correla
     assert.equal(importLogs[0].attributes['parser.outputBytes'], undefined);
     assert.deepEqual(
       data.find(metric => metric.descriptor.name === 'cloud_knowledge_imports').dataPoints.map(point => point.value),
-      [1, 1, 1, 1, 1],
+      [1, 1, 1, 1, 1, 1, 1],
     );
     assert.equal(
       counter.dataPoints.reduce((sum, point) => sum + point.value, 0),
