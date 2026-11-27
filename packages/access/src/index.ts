@@ -310,12 +310,14 @@ export async function lockAndResolveHuman(
     heldLock(transaction, 'write');
     return humanFrom(transaction, followed!, userId);
   }
-  const connection = transaction.client as { pipeline?: boolean | undefined };
-  const previous = connection.pipeline;
-  // pg sends queries without waiting for earlier replies while this is on; it stays on until both replies arrive.
-  connection.pipeline = true;
-  const [lock, member] = await Promise.allSettled([tryReadLock(transaction), readMember(transaction, userId)()]);
-  connection.pipeline = previous;
+  // One round trip for both. `pipelined` keeps pipelining on until queries siblings sent beside them are answered too.
+  const [lock, member] = (await pipelined(transaction.client, () => [
+    tryReadLock(transaction),
+    readMember(transaction, userId)(),
+  ])) as [
+    PromiseSettledResult<Awaited<ReturnType<typeof tryReadLock>>>,
+    PromiseSettledResult<Awaited<ReturnType<ReturnType<typeof readMember>>>>,
+  ];
   if (lock.status === 'rejected') throw lock.reason;
   // A failed read aborted the transaction, so report it as resolveHuman would have after the wait.
   if (member.status === 'rejected') throw member.reason;
