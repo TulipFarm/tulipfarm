@@ -77,8 +77,39 @@ export async function pipelined(client: QueryClient, issue: () => Promise<unknow
   }
   // pg keeps handing out replies only while the flag is on, so it stays on until the last one arrives.
   const settled = await Promise.allSettled(pending);
-  connection.pipeline = previous;
+  await restorePipeline(client, previous);
   return settled;
+}
+
+type PipelineState = {
+  pipeline?: boolean | undefined;
+  _sentQueryQueue?: unknown[];
+  _activeQuery?: unknown;
+  once?: (event: 'drain' | 'end', listener: () => void) => unknown;
+  off?: (event: 'drain' | 'end', listener: () => void) => unknown;
+};
+
+/**
+ * Turns pipelining back to `previous` only once no query is still on the wire. Queries that run beside a pipelined
+ * batch on the same client, such as a sibling in `Promise.all` sharing a transaction, are sent pipelined too. Turning
+ * the flag off while one of them still waits makes pg hand its reply to the next query instead, so a read gets another
+ * query's rows or the connection fails with an unexpected message.
+ */
+async function restorePipeline(client: QueryClient, previous: boolean | undefined) {
+  const connection = client as unknown as PipelineState;
+  const busy = () => (connection._sentQueryQueue?.length ?? 0) > 0 || Boolean(connection._activeQuery);
+  if (!previous && connection.once && connection.off)
+    while (busy() && connection.pipeline === true)
+      await new Promise<void>(resolve => {
+        const done = () => {
+          connection.off!('drain', done);
+          connection.off!('end', done);
+          resolve();
+        };
+        connection.once!('drain', done);
+        connection.once!('end', done);
+      });
+  connection.pipeline = previous;
 }
 
 /**
