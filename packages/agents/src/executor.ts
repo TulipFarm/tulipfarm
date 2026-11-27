@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { errorType, log, observeTool, type ToolRuntime } from '@tulipfarm/observability';
+import { errorType, log, observeTool, transientFailure, type ToolRuntime } from '@tulipfarm/observability';
 import { denyMcpEgress, requireAgentRunHistory } from '@tulipfarm/access';
 import { createApiCallGuard, apiRefusedReply } from './api-call-guard.ts';
 import { isOwnServiceUrl, ownServiceDomains, ownServiceRefusal } from './own-service.ts';
@@ -247,6 +247,14 @@ async function requireIssueAccess(
     [call.integrationId, call.sourceId],
   );
   if (!source.rowCount) throw new AccessDenied();
+}
+
+/**
+ * Hides why a tool call could not run: an unexpected error's text can carry workspace data. A connection-wait or lock
+ * timeout is kept as the cause, so tool telemetry records its code instead of `unclassified`; Temporal retries the step.
+ */
+function executionUnavailable(error: unknown) {
+  return new Error('Agent tool execution unavailable', transientFailure(error) ? { cause: error } : undefined);
 }
 
 export function createAgentExecutor(options: Options) {
@@ -2060,7 +2068,7 @@ export function createAgentExecutor(options: Options) {
             !(error instanceof WorkspaceMemberError) &&
             !(error instanceof DecisionUnavailableError)
           )
-            throw new Error('Agent tool execution unavailable');
+            throw executionUnavailable(error);
           const status = error instanceof AccessDenied ? 'blocked' : 'failed';
           if (failed) failed(errorType(error));
           else
@@ -2359,8 +2367,8 @@ export function createAgentExecutor(options: Options) {
   async function executeAgentTool(ids: ExecutionIds) {
     try {
       return await execute(ids);
-    } catch {
-      throw new Error('Agent tool execution unavailable');
+    } catch (error) {
+      throw executionUnavailable(error);
     }
   }
 
