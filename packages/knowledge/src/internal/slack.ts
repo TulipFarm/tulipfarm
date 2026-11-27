@@ -673,7 +673,7 @@ export function createSlackKnowledge({
     return renew(workspaceId, userId, uuidSchema.parse(sourceId), 20, false);
   }
   async function due(workspaceId: string): Promise<SlackKnowledgeWork[]> {
-    return transaction(workspaceId, 'write', async tx => {
+    return transaction(workspaceId, 'read', async tx => {
       await tx.client.query(
         `UPDATE ${table(tx, 'slack_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL WHERE lease_until<=clock_timestamp()`,
       );
@@ -689,21 +689,31 @@ export function createSlackKnowledge({
       return rows.map(row => ({ workspaceId, sourceId: row.source_id, generation: row.generation }));
     });
   }
+  // Lease tokens, each with the owner it last authorized. One token covers one batch: a page or one sweep of items.
+  const authorized = new Map<string, string>();
+  /**
+   * Sync steps take the shared workspace lock and fence on the source row, so they never queue other requests in the
+   * workspace. The owner's membership and source access are checked once per batch, not once per step.
+   */
   async function fenced<T>(
     work: SlackKnowledgeWork,
     token: string,
     operation: (tx: Tx, s: Source, actor: HumanActor) => Promise<T>,
   ) {
-    return transaction(work.workspaceId, 'write', async tx => {
+    return transaction(work.workspaceId, 'read', async tx => {
       const s = await source(tx, work.sourceId);
       const owned = await tx.client.query(
-        `SELECT 1 FROM ${table(tx, 'slack_sources')} WHERE source_id=$1 AND generation=$2 AND lease_token=$3 AND lease_until>clock_timestamp()`,
+        `SELECT 1 FROM ${table(tx, 'slack_sources')} WHERE source_id=$1 AND generation=$2 AND lease_token=$3 AND lease_until>clock_timestamp() FOR NO KEY UPDATE`,
         [work.sourceId, work.generation, token],
       );
       if (!owned.rowCount || s.state !== 'active') throw new KnowledgeError('superseded');
       const actor: HumanActor = { kind: 'human', membershipId: s.owner_membership_id, userId: s.owner_user_id };
-      await currentMember(tx, actor);
-      await store.source(tx, actor, s.source_id, true);
+      const owner = `${actor.membershipId}:${actor.userId}`;
+      if (authorized.get(token) !== owner) {
+        await currentMember(tx, actor);
+        await store.source(tx, actor, s.source_id, true);
+        authorized.set(token, owner);
+      }
       return operation(tx, s, actor);
     });
   }
@@ -940,23 +950,35 @@ export function createSlackKnowledge({
     denyMcpEgress();
     const work = slackKnowledgeWorkSchema.parse(value);
     const token = randomUUID();
-    const claim = await transaction(work.workspaceId, 'write', async tx => {
+    const claim = await transaction(work.workspaceId, 'read', async tx => {
       const s = await source(tx, work.sourceId);
       if (s.generation !== work.generation || !['active', 'paused'].includes(s.state)) return 'stale' as const;
       if (s.lease_token) return 'busy' as const;
       if (s.next_attempt_at.getTime() > clock.now()) return 'busy' as const;
-      await tx.client.query(
-        `UPDATE ${table(tx, 'slack_sources')} SET lease_token=$2,lease_until=clock_timestamp()+interval '15 minutes',sync_state=CASE WHEN $3 THEN sync_state ELSE 'syncing' END WHERE source_id=$1`,
-        [s.source_id, token, s.state === 'paused'],
+      // Another worker may claim under the shared lock at the same time; only one conditional update wins.
+      const claimed = await tx.client.query(
+        `UPDATE ${table(tx, 'slack_sources')} SET lease_token=$2,lease_until=clock_timestamp()+interval '15 minutes',sync_state=CASE WHEN $3 THEN sync_state ELSE 'syncing' END WHERE source_id=$1 AND generation=$4 AND lease_token IS NULL`,
+        [s.source_id, token, s.state === 'paused', s.generation],
       );
-      return s;
+      return claimed.rowCount ? s : ('busy' as const);
     });
     if (typeof claim === 'string') return { disposition: claim };
+    try {
+      return await run(work, token, claim);
+    } finally {
+      authorized.delete(token);
+    }
+  }
+  async function run(
+    work: SlackKnowledgeWork,
+    token: string,
+    claim: Source,
+  ): Promise<{ disposition: 'ready' | 'retry' | 'stale' | 'busy' }> {
     if (claim.state === 'paused') {
       try {
         await renew(work.workspaceId, claim.owner_user_id, claim.source_id, 50, true);
       } finally {
-        await transaction(work.workspaceId, 'write', tx =>
+        await transaction(work.workspaceId, 'read', tx =>
           tx.client.query(
             `UPDATE ${table(tx, 'slack_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=clock_timestamp()+interval '1 minute' WHERE source_id=$1 AND generation=$2 AND lease_token=$3`,
             [work.sourceId, work.generation, token],
@@ -1092,10 +1114,12 @@ export function createSlackKnowledge({
       });
       return { disposition: 'retry' };
     } catch (error) {
-      return transaction(work.workspaceId, 'write', async tx => {
-        const current = await source(tx, work.sourceId);
-        if (current.generation !== work.generation || current.lease_token !== token)
-          return { disposition: 'stale' as const };
+      return transaction(work.workspaceId, 'read', async tx => {
+        const owned = await tx.client.query(
+          `SELECT 1 FROM ${table(tx, 'slack_sources')} WHERE source_id=$1 AND generation=$2 AND lease_token=$3 FOR NO KEY UPDATE`,
+          [work.sourceId, work.generation, token],
+        );
+        if (!owned.rowCount) return { disposition: 'stale' as const };
         const failure =
           error instanceof SlackCorpusError
             ? error.code

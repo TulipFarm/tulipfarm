@@ -1269,6 +1269,9 @@ export function createGitHubKnowledge({
       'read',
     );
   }
+  // Lease tokens, each with the owner it last authorized. The sync clears its token at every batch boundary.
+  const authorized = new Map<string, string>();
+  /** The owner's membership and source access are checked once per batch; the lease is checked on every step. */
   async function fenced<T>(
     work: GitHubKnowledgeWork,
     token: string,
@@ -1284,8 +1287,12 @@ export function createGitHubKnowledge({
         );
         if (!owned.rowCount || s.state !== 'active') throw new KnowledgeError('superseded');
         const actor: HumanActor = { kind: 'human', membershipId: s.owner_membership_id, userId: s.owner_user_id };
-        await currentMember(tx, actor);
-        await store.source(tx, actor, s.source_id, true);
+        const owner = `${actor.membershipId}:${actor.userId}`;
+        if (authorized.get(token) !== owner) {
+          await currentMember(tx, actor);
+          await store.source(tx, actor, s.source_id, true);
+          authorized.set(token, owner);
+        }
         return operation(tx, s, actor);
       },
       'read',
@@ -2197,6 +2204,8 @@ export function createGitHubKnowledge({
       }
       // Time-boxed: page after page until the pass ends, the budget is spent or Temporal cancels the activity.
       for (;;) {
+        // Each listing page or sweep batch checks the owner's authorization again.
+        authorized.delete(token);
         await beat();
         if (performance.now() - refreshed >= tuning.leaseRenewMs) {
           refreshed = performance.now();
@@ -2317,6 +2326,8 @@ export function createGitHubKnowledge({
           { error },
         );
       return result;
+    } finally {
+      authorized.delete(token);
     }
   }
   async function evidence(workspaceId: string, userId: string, value: unknown) {
