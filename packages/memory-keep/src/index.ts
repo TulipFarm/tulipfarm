@@ -157,6 +157,14 @@ export type KeepKnowledgeHit = {
 export type KeepKnowledgeSearch = { readonly hits: readonly KeepKnowledgeHit[]; readonly omitted: number };
 
 export type KeepForgetSourceReceipt = { readonly episodes: number; readonly chunks: number };
+export type KeepForgetSources = {
+  readonly forgotten: readonly { readonly sourceId: string; readonly receipt: KeepForgetSourceReceipt }[];
+  /** Ids the scope does not hold. */
+  readonly missing: readonly string[];
+};
+
+/** The most source ids one `forgetKnowledgeSources` call may list. */
+export const keepForgetSourcesLimit = 1000;
 
 /** The most source ids or collections one knowledge request may list. */
 export const keepKnowledgeAllowlistLimit = 1000;
@@ -277,6 +285,11 @@ const knowledgeHitSchema = z.object({
 const knowledgeSearchSchema = z.object({ hits: z.array(knowledgeHitSchema), omitted: z.number().int().default(0) });
 const forgetSourceSchema = z.object({
   receipt: z.object({ episodes: z.number().int(), chunks: z.number().int() }),
+});
+
+const forgetSourcesSchema = z.object({
+  forgotten: z.array(z.object({ sourceId: z.string(), receipt: forgetSourceSchema.shape.receipt })),
+  missing: z.array(z.string()),
 });
 
 const target = (value: KeepTarget) => ('path' in value ? { path: value.path } : { memory_id: value.memoryId });
@@ -575,6 +588,19 @@ export function createKeepClient(options: KeepClientOptions) {
         scope: input.scope,
         source_id: input.sourceId,
       }).then(result => (result.status === 'ok' ? { status: 'ok' as const, value: result.value.receipt } : result)),
+
+    /**
+     * `POST /v1/knowledge/forget_sources`: erases up to {@link keepForgetSourcesLimit} sources in one pass. A Keep
+     * without this route answers `not_found`; it never does otherwise, since unknown ids are listed as `missing`.
+     */
+    forgetKnowledgeSources: (input: {
+      readonly scope: KeepScope;
+      readonly sourceIds: readonly string[];
+    }): Promise<KeepMemoryResult<KeepForgetSources>> =>
+      post('/v1/knowledge/forget_sources', forgetSourcesSchema, {
+        scope: input.scope,
+        source_ids: input.sourceIds,
+      }),
   };
 
   function memory<T>(route: string, schema: z.ZodType<T>, body: unknown): Promise<KeepMemoryResult<T>> {

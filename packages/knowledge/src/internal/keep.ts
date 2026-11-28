@@ -4,6 +4,7 @@ import { KnowledgeSearchUnavailable } from '@tulipfarm/memory-core/documents/con
 import type { KnowledgeIndexHit, KnowledgeIndexSearch } from '@tulipfarm/memory-core/search';
 import {
   createKeepClient,
+  keepForgetSourcesLimit,
   keepKnowledgeAllowlistLimit,
   keepWorkspaceKnowledgeScope,
   type KeepClient,
@@ -167,6 +168,15 @@ export type KnowledgeKeepOutcome =
   | { status: 'disabled' }
   /** Keep refused this publication itself. It is recorded and not sent again until the document changes. */
   | { status: 'rejected'; error: string };
+
+/** How a batch forget ended. */
+export type KnowledgeKeepBatchOutcome =
+  /** Keep no longer holds these documents. Listed documents left out were busy or searchable again. */
+  | { status: 'forgotten'; documentIds: string[] }
+  /** Keep has no batch route; forget the documents one at a time. */
+  | { status: 'unsupported' }
+  /** The deployment has no Keep endpoint. */
+  | { status: 'disabled' };
 
 /**
  * How far a failure reaches:
@@ -477,6 +487,67 @@ export function createKnowledgeKeepFeed({
   }
 
   /**
+   * Forgets many documents with one Keep call. Leases every listed document that Keep holds, that is no longer
+   * searchable, and that no other sync holds, all under one token; asks Keep to forget them; and deletes their records.
+   * Documents it could not lease, or that are searchable again, are left for a later sync. Returns `unsupported` when
+   * Keep has no batch route, so the caller forgets one document at a time instead. Throws `KnowledgeKeepUnavailable`
+   * when Keep does not answer; nothing is recorded then, and the documents stay due.
+   */
+  async function forget(
+    workspaceId: string,
+    documentIds: readonly string[],
+    options: { signal?: AbortSignal; progress?: () => void } = {},
+  ): Promise<KnowledgeKeepBatchOutcome> {
+    const keep = client();
+    if (!keep) return { status: 'disabled' };
+    const ids = [...new Set(documentIds)];
+    if (!ids.length || ids.length > keepForgetSourcesLimit) throw new Error('Forget between 1 and 1000 documents');
+    const token = randomUUID();
+    const leasedIds = await tenant.transaction(workspaceId, {}, async tx => {
+      if (!installed(tx)) return [];
+      const { rows } = await tx.client.query(
+        `UPDATE ${keepTable(tx)} k SET lease_token=$2, lease_until=clock_timestamp() + make_interval(secs => $3)
+          WHERE k.document_id = ANY($1::uuid[]) AND k.held
+            AND (k.lease_until IS NULL OR k.lease_until < clock_timestamp())
+            AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'documents')} d
+              JOIN ${table(tx, 'sources')} s ON s.id=d.source_id
+              JOIN ${table(tx, 'publications')} p ON p.id=d.lexical_publication_id AND p.document_id=d.id
+              JOIN ${table(tx, 'revisions')} r ON r.id=p.revision_id
+              WHERE d.id=k.document_id AND ${deliverable})
+          RETURNING k.document_id`,
+        [ids, token, leaseSeconds],
+      );
+      return z
+        .array(z.object({ document_id: z.uuid() }))
+        .parse(rows)
+        .map(row => row.document_id);
+    });
+    if (!leasedIds.length) return { status: 'forgotten', documentIds: [] };
+    try {
+      options.signal?.throwIfAborted();
+      options.progress?.();
+      const result = await keep.forgetKnowledgeSources({
+        scope: keepWorkspaceKnowledgeScope(workspaceId),
+        sourceIds: leasedIds,
+      });
+      if (result.status === 'not_found') return { status: 'unsupported' };
+      if (result.status !== 'ok') throw new KnowledgeKeepUnavailable(failure(result));
+      // Keep holds none of them now: each was either forgotten or already missing.
+      await write(workspaceId, `DELETE FROM $table WHERE document_id = ANY($1::uuid[]) AND lease_token=$2`, [
+        leasedIds,
+        token,
+      ]);
+      return { status: 'forgotten', documentIds: leasedIds };
+    } finally {
+      await write(
+        workspaceId,
+        `UPDATE $table SET lease_token=NULL, lease_until=NULL WHERE document_id = ANY($1::uuid[]) AND lease_token=$2`,
+        [leasedIds, token],
+      );
+    }
+  }
+
+  /**
    * Records a failed sync so it stays visible until a later run succeeds, and returns how it was recorded.
    * - `keep`: Keep itself was down. Recorded without backoff; the workflow waits for Keep instead.
    * - `busy`: Keep timed out. Recorded as `keep` and counted against the document; the
@@ -569,6 +640,6 @@ export function createKnowledgeKeepFeed({
     });
   }
 
-  return { due, sync, recordFailure, pending };
+  return { due, sync, forget, recordFailure, pending };
 }
 export type KnowledgeKeepFeed = ReturnType<typeof createKnowledgeKeepFeed>;

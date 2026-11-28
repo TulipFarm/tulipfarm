@@ -37,8 +37,9 @@ async function withWorker(feed, run) {
   }
 }
 
-function fakeFeed(workspaceId, ids, fail) {
+function fakeFeed(workspaceId, ids, fail, { action = 'deliver', batch = true } = {}) {
   const due = new Set(ids);
+  const batches = [];
   const attempts = new Map();
   const failures = [];
   const pages = [];
@@ -46,6 +47,7 @@ function fakeFeed(workspaceId, ids, fail) {
   const timeouts = new Map();
   return {
     syncs,
+    batches,
     due,
     attempts,
     failures,
@@ -57,14 +59,21 @@ function fakeFeed(workspaceId, ids, fail) {
         return [...due]
           .filter(id => after === null || id > after)
           .slice(0, limit)
-          .map(document_id => ({ document_id, action: 'deliver' }));
+          .map(document_id => ({ document_id, action }));
+      },
+      forget: async (workspace, documents) => {
+        assert.equal(workspace, workspaceId);
+        batches.push(documents);
+        if (!batch) return { status: 'unsupported' };
+        for (const document of documents) due.delete(document);
+        return { status: 'forgotten', documentIds: documents };
       },
       sync: async (workspace, document) => {
         attempts.set(document, (attempts.get(document) ?? 0) + 1);
         syncs.push(document);
         fail(document, attempts.get(document));
         due.delete(document);
-        return { status: 'delivered', publicationId: randomUUID() };
+        return action === 'forget' ? { status: 'forgotten' } : { status: 'delivered', publicationId: randomUUID() };
       },
       recordFailure: async (workspace, document, error, kind) => {
         failures.push({ document, error, kind });
@@ -83,7 +92,7 @@ test(
   { timeout: 120000 },
   async () => {
     const workspaceId = randomUUID();
-    const [slow, broken, ...rest] = Array.from({ length: 103 }, () => randomUUID()).toSorted();
+    const [slow, broken, ...rest] = Array.from({ length: 253 }, () => randomUUID()).toSorted();
     const fake = fakeFeed(workspaceId, [slow, broken, ...rest], document => {
       if (document === slow) throw new KnowledgeKeepUnavailable('invalid_response');
       if (document === broken) throw new Error('unexpected state');
@@ -99,7 +108,7 @@ test(
       { document: broken, error: 'unexpected state', kind: 'permanent' },
     ]);
     assert.deepEqual([...fake.due], [slow, broken], 'every later document was still delivered');
-    assert.deepEqual(fake.pages, [null, rest[97]]);
+    assert.deepEqual(fake.pages, [null, rest[247]]);
   },
 );
 
@@ -158,5 +167,30 @@ test(
     );
     assert.deepEqual([...fake.due], [stuck], 'the document that kept timing out is left to back off');
     assert.deepEqual(fake.pages, [...Array(keepKnowledgeMaxTimeouts).fill(null), stuck]);
+  },
+);
+
+test(
+  'Keep sync forgets removed documents in batches, one at a time when Keep has no batch route',
+  { timeout: 120000 },
+  async () => {
+    for (const batch of [true, false]) {
+      const workspaceId = randomUUID();
+      const ids = Array.from({ length: 300 }, () => randomUUID()).toSorted();
+      const fake = fakeFeed(workspaceId, ids, () => {}, { action: 'forget', batch });
+      await withWorker(fake.feed, async ({ client, clientConnection }) => {
+        await startKnowledgeKeepWorkflow({ connection: clientConnection, client }, workspaceId);
+        await client.workflow.getHandle(`knowledge-keep-${workspaceId}`).result();
+      });
+      assert.deepEqual([...fake.due], []);
+      if (batch) {
+        assert.deepEqual(fake.batches, [ids.slice(0, 250), ids.slice(250)]);
+        assert.deepEqual(fake.syncs, []);
+        assert.deepEqual(fake.pages, [null, ids[249]]);
+      } else {
+        assert.deepEqual(fake.batches, [ids.slice(0, 250)], 'an older Keep is asked once per run');
+        assert.deepEqual(fake.syncs, ids);
+      }
+    }
   },
 );

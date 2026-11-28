@@ -250,6 +250,83 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     });
 
     await t.test(
+      'a batch forget makes Keep forget many removed documents in one call, skipping busy and republished ones',
+      async () => {
+        const w = await setup();
+        const docs = [];
+        for (const text of ['supplier payment deadline', 'warehouse floor plan', 'holiday rota', 'parking rules'])
+          docs.push(await w.note(text));
+        const [busy, republished, ...rest] = docs;
+        await w.drain();
+        const republishedPublication = await w.publication(republished.documentId);
+        for (const doc of docs) await w.unpublish(doc.documentId);
+        await w.republish(republished.documentId, republishedPublication);
+        const corpus = w.keep.corpora.get(keepWorkspaceKnowledgeScope(w.ws.id).user);
+        // Keep already lost one of them; forgetting it again is harmless.
+        corpus.delete(rest[1].documentId);
+        await db.platform.query(
+          `UPDATE ${qualified(w.ws.names.schema, 'tf_keep_knowledge')}
+            SET lease_token=gen_random_uuid(), lease_until=now() + interval '1 minute' WHERE document_id=$1`,
+          [busy.documentId],
+        );
+        const ids = docs.map(doc => doc.documentId);
+        let heartbeats = 0;
+        const outcome = await w.feed.forget(w.ws.id, ids, { progress: () => heartbeats++ });
+        assert.deepEqual(
+          { ...outcome, documentIds: outcome.documentIds.toSorted() },
+          { status: 'forgotten', documentIds: rest.map(doc => doc.documentId).toSorted() },
+        );
+        assert.equal(heartbeats, 1);
+        assert.deepEqual(
+          w.keep.calls.filter(call => call.op.startsWith('forget')).map(call => [call.op, call.sourceIds.toSorted()]),
+          [['forgetMany', rest.map(doc => doc.documentId).toSorted()]],
+        );
+        assert.deepEqual([...corpus.keys()].toSorted(), [busy.documentId, republished.documentId].toSorted());
+        for (const doc of rest) assert.equal(await w.row(doc.documentId), undefined);
+        assert.ok((await w.row(busy.documentId)).lease_token, 'the busy lease is left alone');
+        assert.equal((await w.row(republished.documentId)).lease_token, null);
+        assert.deepEqual(
+          await w.feed.due(w.ws.id, null, 100),
+          [{ document_id: busy.documentId, action: 'forget' }],
+          'only the busy document is left to forget',
+        );
+        assert.deepEqual(await w.feed.forget(w.ws.id, ids), { status: 'forgotten', documentIds: [] });
+      },
+    );
+
+    await t.test(
+      'a batch forget leaves the documents due when Keep lacks the batch route or does not answer',
+      async () => {
+        const w = await setup();
+        const docs = [await w.note('supplier payment deadline'), await w.note('warehouse floor plan')];
+        await w.drain();
+        for (const doc of docs) await w.unpublish(doc.documentId);
+        const ids = docs.map(doc => doc.documentId).toSorted();
+        const due = async () => (await w.feed.due(w.ws.id, null, 100)).map(work => [work.document_id, work.action]);
+        w.keep.state.batch = false;
+        assert.deepEqual(await w.feed.forget(w.ws.id, ids), { status: 'unsupported' });
+        w.keep.state.batch = true;
+        w.keep.state.available = false;
+        await assert.rejects(w.feed.forget(w.ws.id, ids), KnowledgeKeepUnavailable);
+        for (const id of ids) {
+          const left = await w.row(id);
+          assert.equal(left.held, true);
+          assert.equal(left.lease_token, null, 'the lease is released');
+        }
+        assert.deepEqual(
+          await due(),
+          ids.map(id => [id, 'forget']),
+        );
+        w.keep.state.available = true;
+        w.connected.on = false;
+        assert.deepEqual(await w.feed.forget(w.ws.id, ids), { status: 'disabled' });
+        w.connected.on = true;
+        assert.deepEqual(await w.feed.forget(w.ws.id, ids), { status: 'forgotten', documentIds: ids });
+        assert.deepEqual(await due(), []);
+      },
+    );
+
+    await t.test(
       'losing read access or supported coverage without a tombstone forgets the document; republishing replaces it',
       async () => {
         const w = await setup();
