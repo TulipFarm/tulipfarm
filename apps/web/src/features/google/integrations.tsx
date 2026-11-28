@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Link } from '@tanstack/react-router';
 import { RefreshIcon } from '@tulipfarm/icons';
 import type { GoogleGrantTarget } from '@tulipfarm/google-workspace/public-contracts';
 import { EntityAvatar } from '@tulipfarm/sprout/avatar';
@@ -253,13 +254,27 @@ function GoogleShareDialog({
   );
 }
 
+function shareSummaryLabel(account: GoogleAccountSummary): string | null {
+  if (account.ownership !== 'shared') return null;
+  const summary = account.shareSummary;
+  if (!summary) return account.canManage ? 'Shared account' : 'Shared with you';
+  const parts: string[] = [];
+  if (summary.workspace) parts.push('everyone in the workspace');
+  if (summary.teamCount > 0) parts.push(summary.teamCount === 1 ? '1 team' : `${summary.teamCount} teams`);
+  if (summary.memberCount > 0) parts.push(summary.memberCount === 1 ? '1 person' : `${summary.memberCount} people`);
+  const base = parts.length > 0 ? `Shared with ${parts.join(', ')}` : 'Shared account';
+  return account.canManage ? base : `${base} · Use only`;
+}
+
 function GoogleConfigureDialog({
   workspaceId,
+  slug,
   account,
   available,
   onClose,
 }: {
   workspaceId: string;
+  slug?: string | undefined;
   account: GoogleAccountSummary;
   available: boolean;
   onClose: () => void;
@@ -269,11 +284,36 @@ function GoogleConfigureDialog({
       <DialogContent size="form">
         <DialogHeader>
           <DialogTitle>Configure {account.email ?? 'Google account'}</DialogTitle>
-          <DialogDescription>Manage Gmail heartbeat and account settings.</DialogDescription>
+          <DialogDescription>
+            {account.ownership === 'shared'
+              ? 'Automate shared inbox monitoring and replies with a Gmail workflow trigger.'
+              : 'Manage Gmail heartbeat and account settings.'}
+          </DialogDescription>
         </DialogHeader>
-        <div className="max-h-96 overflow-y-auto pr-1">
-          <GoogleHeartbeat workspaceId={workspaceId} available={available} embedded />
-        </div>
+        {account.ownership === 'shared' ? (
+          <div className="space-y-3 text-sm text-muted-foreground">
+            <p>
+              Gmail heartbeat is private to your personal inbox. To watch{' '}
+              <span className="font-medium text-foreground">{account.email ?? 'this shared inbox'}</span> and trigger
+              agents or replies automatically, create a workflow with a Gmail trigger.
+            </p>
+            {slug && (
+              <div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  render={<Link to="/$workspaceSlug/workflows" params={{ workspaceSlug: slug }} />}
+                >
+                  Open Workflows
+                </Button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="max-h-96 overflow-y-auto pr-1">
+            <GoogleHeartbeat workspaceId={workspaceId} available={available} embedded />
+          </div>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
             Done
@@ -284,7 +324,15 @@ function GoogleConfigureDialog({
   );
 }
 
-export function GoogleAccount({ workspaceId }: { workspaceId: string }) {
+export function GoogleAccount({
+  workspaceId,
+  appId,
+  slug,
+}: {
+  workspaceId: string;
+  appId?: string | undefined;
+  slug?: string | undefined;
+}) {
   const read = useGoogleIntegration(workspaceId);
   const changes = useIntegrationChanges();
   const [state, setState] = useState<Disconnect>({ phase: 'idle' });
@@ -409,6 +457,9 @@ export function GoogleAccount({ workspaceId }: { workspaceId: string }) {
       <ul aria-label="Connected Google accounts" className="divide-y divide-border rounded-lg border border-border">
         {accounts.map(account => {
           const isPending = state.phase === 'pending' && state.integrationId === account.integrationId;
+          const shareLine = shareSummaryLabel(account);
+          const subtitle = [account.label, shareLine].filter(Boolean).join(' · ');
+          const showConfigure = !appId || appId === 'gmail';
           return (
             <li key={account.integrationId} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
               <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -423,7 +474,7 @@ export function GoogleAccount({ workspaceId }: { workspaceId: string }) {
                     </Badge>
                     {account.status === 'reconnect-required' && <Badge variant="warning">Reconnect required</Badge>}
                   </div>
-                  {account.label && <p className="truncate text-xs text-muted-foreground">{account.label}</p>}
+                  {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -432,9 +483,11 @@ export function GoogleAccount({ workspaceId }: { workspaceId: string }) {
                     Share
                   </Button>
                 )}
-                <Button variant="outline" size="sm" disabled={blocked} onClick={() => setConfigureAccount(account)}>
-                  Configure
-                </Button>
+                {showConfigure && (
+                  <Button variant="outline" size="sm" disabled={blocked} onClick={() => setConfigureAccount(account)}>
+                    Configure
+                  </Button>
+                )}
                 {account.canManage && (
                   <Button
                     variant="destructive"
@@ -503,6 +556,7 @@ export function GoogleAccount({ workspaceId }: { workspaceId: string }) {
       {configureAccount && (
         <GoogleConfigureDialog
           workspaceId={workspaceId}
+          slug={slug}
           account={configureAccount}
           available={!read.busy && !read.error}
           onClose={() => setConfigureAccount(null)}

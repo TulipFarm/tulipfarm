@@ -649,7 +649,7 @@ function Accounts({
               Accounts
             </h2>
           )}
-          <GoogleAccount workspaceId={workspaceId} />
+          <GoogleAccount workspaceId={workspaceId} appId={app.id} slug={slug} />
         </section>
         <GoogleApprovals workspaceId={workspaceId} />
       </div>

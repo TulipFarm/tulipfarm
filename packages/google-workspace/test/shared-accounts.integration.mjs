@@ -239,6 +239,7 @@ test('a personal account can be shared in place and reverted back to personal wi
     const aliceListShared = await f.service.list(f.workspace.id, f.member.userId);
     assert.equal(aliceListShared[0].ownership, 'shared');
     assert.equal(aliceListShared[0].canManage, true);
+    assert.deepEqual(aliceListShared[0].shareSummary, { workspace: false, memberCount: 2, teamCount: 0 });
 
     const bobListShared = await f.service.list(f.workspace.id, bob.userId);
     assert.equal(bobListShared.length, 1);

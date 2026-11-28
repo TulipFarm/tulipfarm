@@ -102,7 +102,11 @@ function metadata(row: Row | undefined): GoogleStatus {
     scopes: row.scopes,
   };
 }
-function summary(row: Row, access: { canUse: boolean; canManage: boolean }): GoogleAccountSummary {
+function summary(
+  row: Row,
+  access: { canUse: boolean; canManage: boolean },
+  shareSummary?: { workspace: boolean; memberCount: number; teamCount: number },
+): GoogleAccountSummary {
   return {
     integrationId: row.id,
     ownership: row.ownership,
@@ -115,6 +119,7 @@ function summary(row: Row, access: { canUse: boolean; canManage: boolean }): Goo
     scopes: row.scopes,
     canUse: access.canUse,
     canManage: access.canManage,
+    ...(shareSummary ? { shareSummary } : {}),
   };
 }
 const googleKnowledgeScopes = {
@@ -265,11 +270,46 @@ export function createGoogleWorkspaceService(options: {
             )
           ).rows,
         );
+        const sharedIds = rows.filter(row => row.ownership === 'shared').map(row => row.id);
+        const shareSummaries = new Map<string, { workspace: boolean; memberCount: number; teamCount: number }>();
+        if (sharedIds.length > 0) {
+          const grantCounts = z
+            .array(
+              z.object({
+                integration_id: z.uuid(),
+                workspace: z.boolean(),
+                member_count: z.number().int().nonnegative(),
+                team_count: z.number().int().nonnegative(),
+              }),
+            )
+            .parse(
+              (
+                await tx.client.query(
+                  `SELECT
+                     integration_id,
+                     bool_or(grantee = 'workspace') AS workspace,
+                     count(*) FILTER (WHERE membership_id IS NOT NULL)::integer AS member_count,
+                     count(*) FILTER (WHERE team_id IS NOT NULL)::integer AS team_count
+                   FROM ${relation(tx, 'tf_google_grants')}
+                   WHERE integration_id = ANY($1::uuid[])
+                   GROUP BY integration_id`,
+                  [sharedIds],
+                )
+              ).rows,
+            );
+          for (const row of grantCounts) {
+            shareSummaries.set(row.integration_id, {
+              workspace: row.workspace,
+              memberCount: row.member_count,
+              teamCount: row.team_count,
+            });
+          }
+        }
         const accounts: GoogleAccountSummary[] = [];
         for (const row of rows) {
           const current = await checkRefreshExpiry(tx, workspaceId, row);
           const access = await googleAccountAccess(tx, actor, current);
-          if (access.canUse) accounts.push(summary(current, access));
+          if (access.canUse) accounts.push(summary(current, access, shareSummaries.get(current.id)));
         }
         return accounts;
       });

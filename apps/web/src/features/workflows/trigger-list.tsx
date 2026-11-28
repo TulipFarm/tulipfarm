@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { z } from 'zod';
 import { AddIcon, ArrowDownIcon, ArrowUpIcon, DeleteIcon } from '@tulipfarm/icons';
+import { googleApi, type GoogleAccountSummary } from '@/lib/google-workspace';
 import {
   githubTriggerEvents,
   maxTriggers,
@@ -66,7 +67,18 @@ type Item = {
 };
 type Failure = { message: string; triggerId: string | null };
 
-const addOrder: TriggerKind[] = ['cron', 'interval', 'once', 'webhook', 'github', 'row', 'record', 'provider', 'event'];
+const addOrder: TriggerKind[] = [
+  'cron',
+  'interval',
+  'once',
+  'webhook',
+  'github',
+  'gmail',
+  'row',
+  'record',
+  'provider',
+  'event',
+];
 
 const triggerKindDescriptions: Record<TriggerKind, string> = {
   cron: 'Run on a calendar schedule, such as weekdays at 9 AM',
@@ -450,7 +462,15 @@ export function TriggerList({
                         onChange={body => update(item.id, current => ({ ...current, body }))}
                       />
                     ) : item.kind === 'gmail' ? (
-                      <p className="text-sm text-muted-foreground">Configured via connected Google Workspace inbox.</p>
+                      <GmailSettings
+                        workspaceId={workspaceId}
+                        trigger={item.body?.kind === 'gmail' ? item.body : null}
+                        disabled={locked}
+                        onChange={body => update(item.id, current => ({ ...current, body }))}
+                        onValidityChange={(valid, reason) =>
+                          update(item.id, current => ({ ...current, invalid: valid ? undefined : reason }))
+                        }
+                      />
                     ) : (
                       <TriggerSettings
                         workspaceId={workspaceId}
@@ -674,6 +694,254 @@ function ProviderSettings({
           }}
         />
         <p className="text-xs text-muted-foreground">A whole number from 1 to 1440.</p>
+      </div>
+    </fieldset>
+  );
+}
+
+function GmailSettings({
+  workspaceId,
+  trigger,
+  disabled,
+  onChange,
+  onValidityChange,
+}: {
+  workspaceId: string;
+  trigger: Extract<TriggerBody, { kind: 'gmail' }> | null;
+  disabled: boolean;
+  onChange: (body: TriggerBody | null) => void;
+  onValidityChange: (valid: boolean, reason?: string) => void;
+}) {
+  const [accounts, setAccounts] = useState<GoogleAccountSummary[]>([]);
+  const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [integrationId, setIntegrationId] = useState(trigger?.integrationId ?? '');
+  const [from, setFrom] = useState(trigger?.from ?? '');
+  const [to, setTo] = useState(trigger?.to ?? '');
+  const [subject, setSubject] = useState(trigger?.subject ?? '');
+  const [labels, setLabels] = useState(trigger?.labelIds?.join(', ') ?? '');
+  const [repliesOnly, setRepliesOnly] = useState(trigger?.repliesOnly ?? false);
+  const [excludeOwnSent, setExcludeOwnSent] = useState(trigger?.excludeOwnSent ?? true);
+  const [minutes, setMinutes] = useState(String(trigger?.minutes ?? 5));
+
+  useEffect(() => {
+    let active = true;
+    googleApi
+      .accounts(workspaceId)
+      .then(result => {
+        if (!active) return;
+        setAccounts(result.accounts);
+        setLoadState('ready');
+      })
+      .catch(() => {
+        if (active) setLoadState('error');
+      });
+    return () => {
+      active = false;
+    };
+  }, [workspaceId]);
+
+  const emit = (next: {
+    integrationId: string;
+    from: string;
+    to: string;
+    subject: string;
+    labels: string;
+    repliesOnly: boolean;
+    excludeOwnSent: boolean;
+    minutes: string;
+  }) => {
+    const minsValid = /^\d+$/.test(next.minutes) && Number(next.minutes) >= 1 && Number(next.minutes) <= 1440;
+    if (!minsValid) {
+      onValidityChange(false, 'Check interval must be a whole number from 1 to 1440 minutes.');
+      return;
+    }
+    onValidityChange(true);
+    if (!next.integrationId) {
+      onChange(null);
+      return;
+    }
+    const labelIds = next.labels
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+    const trimmedFrom = next.from.trim();
+    const trimmedTo = next.to.trim();
+    const trimmedSubject = next.subject.trim();
+    onChange({
+      kind: 'gmail',
+      integrationId: next.integrationId,
+      excludeOwnSent: next.excludeOwnSent,
+      minutes: Number(next.minutes),
+      ...(trimmedFrom ? { from: trimmedFrom } : {}),
+      ...(trimmedTo ? { to: trimmedTo } : {}),
+      ...(trimmedSubject ? { subject: trimmedSubject } : {}),
+      ...(labelIds.length ? { labelIds } : {}),
+      ...(next.repliesOnly ? { repliesOnly: true } : {}),
+    });
+  };
+
+  const selected = accounts.find(a => a.integrationId === integrationId);
+  const minsValid = /^\d+$/.test(minutes) && Number(minutes) >= 1 && Number(minutes) <= 1440;
+
+  return (
+    <fieldset disabled={disabled} className="space-y-4">
+      <div className="space-y-1.5">
+        <Label htmlFor="gmail-trigger-account">Gmail account</Label>
+        {loadState === 'loading' ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            Loading connected Google accounts...
+          </p>
+        ) : loadState === 'error' ? (
+          <p role="alert" className="text-sm text-destructive">
+            Connected Google accounts could not load. Refresh the page and try again.
+          </p>
+        ) : !accounts.length ? (
+          <p className="text-sm text-muted-foreground">
+            No connected Google accounts available. Connect a personal or shared Gmail account in Integrations first.
+          </p>
+        ) : (
+          <Select
+            value={integrationId || '__none__'}
+            onValueChange={next => {
+              const id = !next || next === '__none__' ? '' : next;
+              setIntegrationId(id);
+              emit({ integrationId: id, from, to, subject, labels, repliesOnly, excludeOwnSent, minutes });
+            }}
+          >
+            <SelectTrigger id="gmail-trigger-account">
+              <SelectValue>
+                {selected
+                  ? `${selected.email ?? 'Google account'} (${selected.ownership === 'shared' ? 'Shared' : 'Personal'})`
+                  : integrationId
+                    ? 'Connected account (unavailable)'
+                    : 'Choose a Gmail account'}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">Choose a Gmail account</SelectItem>
+              {accounts.map(account => (
+                <SelectItem key={account.integrationId} value={account.integrationId}>
+                  {account.email ?? 'Google account'} ({account.ownership === 'shared' ? 'Shared' : 'Personal'})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="gmail-trigger-from">From (optional)</Label>
+          <Input
+            id="gmail-trigger-from"
+            value={from}
+            placeholder="customer@example.com or @domain.com"
+            onChange={e => {
+              setFrom(e.target.value);
+              emit({ integrationId, from: e.target.value, to, subject, labels, repliesOnly, excludeOwnSent, minutes });
+            }}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="gmail-trigger-to">To (optional)</Label>
+          <Input
+            id="gmail-trigger-to"
+            value={to}
+            placeholder="hello@example.com"
+            onChange={e => {
+              setTo(e.target.value);
+              emit({ integrationId, from, to: e.target.value, subject, labels, repliesOnly, excludeOwnSent, minutes });
+            }}
+          />
+        </div>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="gmail-trigger-subject">Subject contains (optional)</Label>
+          <Input
+            id="gmail-trigger-subject"
+            value={subject}
+            placeholder="Welcome to TulipFarm"
+            onChange={e => {
+              setSubject(e.target.value);
+              emit({
+                integrationId,
+                from,
+                to,
+                subject: e.target.value,
+                labels,
+                repliesOnly,
+                excludeOwnSent,
+                minutes,
+              });
+            }}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="gmail-trigger-labels">Gmail labels (optional, comma-separated)</Label>
+          <Input
+            id="gmail-trigger-labels"
+            value={labels}
+            placeholder="INBOX"
+            onChange={e => {
+              setLabels(e.target.value);
+              emit({
+                integrationId,
+                from,
+                to,
+                subject,
+                labels: e.target.value,
+                repliesOnly,
+                excludeOwnSent,
+                minutes,
+              });
+            }}
+          />
+        </div>
+      </div>
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="gmail-trigger-replies-only"
+            checked={repliesOnly}
+            onCheckedChange={checked => {
+              const next = checked === true;
+              setRepliesOnly(next);
+              emit({ integrationId, from, to, subject, labels, repliesOnly: next, excludeOwnSent, minutes });
+            }}
+          />
+          <Label htmlFor="gmail-trigger-replies-only">Replies only (ignore brand-new threads)</Label>
+        </div>
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="gmail-trigger-exclude-own-sent"
+            checked={excludeOwnSent}
+            onCheckedChange={checked => {
+              const next = checked === true;
+              setExcludeOwnSent(next);
+              emit({ integrationId, from, to, subject, labels, repliesOnly, excludeOwnSent: next, minutes });
+            }}
+          />
+          <Label htmlFor="gmail-trigger-exclude-own-sent">
+            Ignore messages sent by this mailbox (prevents reply loops)
+          </Label>
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="gmail-trigger-minutes">Check every, in minutes</Label>
+        <Input
+          id="gmail-trigger-minutes"
+          type="number"
+          inputMode="numeric"
+          min={1}
+          max={1440}
+          value={minutes}
+          aria-invalid={!minsValid}
+          onChange={e => {
+            setMinutes(e.target.value);
+            emit({ integrationId, from, to, subject, labels, repliesOnly, excludeOwnSent, minutes: e.target.value });
+          }}
+        />
+        <p className="text-xs text-muted-foreground">A whole number from 1 to 1440 (default 5).</p>
       </div>
     </fieldset>
   );
