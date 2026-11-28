@@ -24,8 +24,14 @@ import { activateRevision, needsActivationReview, type RevisionActivation } from
 import { RevisionReview } from './revision-review';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { BrandIcon } from '@tulipfarm/sprout/brand-icon';
+import { Checkbox } from '@tulipfarm/sprout/checkbox';
+import { Label } from '@tulipfarm/sprout/label';
+import { RadioGroup, RadioGroupItem } from '@tulipfarm/sprout/radio-group';
 import { Switch } from '@tulipfarm/sprout/switch';
+import { googleAutonomousWriteKinds, type GoogleAutonomousWriteKind } from '@tulipfarm/google-workspace/contracts';
 import { GitHubRepositoryPicker } from '@/features/code-sessions/GitHubRepositoryPicker';
+import { usePeople } from '@/features/models/subscription-sharing';
+import { googleApi, type GoogleAccountSummary } from '@/lib/google-workspace';
 import { apiOrigin } from '@/lib/auth';
 import { AgentBrowserSettingsSection, browserSettings, parseBrowserSites } from './browser-settings';
 
@@ -49,6 +55,16 @@ const commandStatus: Record<AgentCommand['status'], string> = {
 };
 const instructionLimit = 32000;
 
+const googleAutonomousWriteLabels: Record<GoogleAutonomousWriteKind, string> = {
+  'gmail.messages.send': 'Send Gmail messages and replies',
+  'gmail.messages.modify': 'Modify Gmail labels and read status',
+  'gmail.drafts.create': 'Create Gmail drafts',
+  'gmail.drafts.update': 'Update Gmail drafts',
+  'gmail.drafts.send': 'Send Gmail drafts',
+  'calendar.events.create': 'Create Google Calendar events',
+  'calendar.events.update': 'Update Google Calendar events',
+};
+
 type DefinitionDraft = {
   name: string;
   instructions: string;
@@ -63,11 +79,26 @@ type DefinitionDraft = {
   defaultGitHubRepository: string;
   defaultTeamGitHubId: string;
   defaultTeamGitHubAllowWrites: boolean;
+  defaultGoogleIntegrationId: string;
+  defaultGoogleOwnership: 'personal' | 'shared';
+  defaultGoogleAutonomousOps: GoogleAutonomousWriteKind[];
+  defaultGoogleAllowedRecipients: string;
+  escalationRules: string;
+  escalationTargetKind: 'owner' | 'people' | 'team';
+  escalationTargetMembershipIds: string[];
+  escalationTargetTeamId: string;
 };
 function savedDraft(detail: AgentDetail | null): DefinitionDraft {
   const definition = detail?.definition;
   const defaults = definition?.defaults;
   const teamConn = defaults?.githubConnection?.kind === 'team' ? defaults.githubConnection : undefined;
+  const googleConn = defaults?.googleConnection;
+  const escalation = definition?.escalationPolicy;
+  const escalationTargetKind: 'owner' | 'people' | 'team' = escalation?.targetMembershipIds?.length
+    ? 'people'
+    : escalation?.targetTeamId
+      ? 'team'
+      : 'owner';
   return {
     name: definition?.name ?? '',
     instructions: definition?.instructions ?? '',
@@ -81,6 +112,14 @@ function savedDraft(detail: AgentDetail | null): DefinitionDraft {
     defaultGitHubRepository: defaults?.githubRepository ?? '',
     defaultTeamGitHubId: teamConn?.id ?? '',
     defaultTeamGitHubAllowWrites: teamConn?.allowWrites ?? false,
+    defaultGoogleIntegrationId: googleConn?.integrationId ?? '',
+    defaultGoogleOwnership: googleConn?.ownership ?? 'shared',
+    defaultGoogleAutonomousOps: googleConn?.autonomousWrites?.allowedOperations ?? [],
+    defaultGoogleAllowedRecipients: googleConn?.autonomousWrites?.allowedRecipients?.join('\n') ?? '',
+    escalationRules: escalation?.rules ?? '',
+    escalationTargetKind,
+    escalationTargetMembershipIds: escalation?.targetMembershipIds ?? [],
+    escalationTargetTeamId: escalation?.targetTeamId ?? '',
   };
 }
 
@@ -313,7 +352,8 @@ export function AgentEditor({
     const {
       modelFamilyId: _savedFamily,
       browser: _savedBrowser,
-      defaults: _savedDefaults,
+      defaults: savedDefaults,
+      escalationPolicy: savedEscalation,
       ...savedDefinition
     } = detail?.definition ?? {};
     const {
@@ -324,14 +364,42 @@ export function AgentEditor({
       defaultGitHubRepository,
       defaultTeamGitHubId,
       defaultTeamGitHubAllowWrites,
+      defaultGoogleIntegrationId,
+      defaultGoogleOwnership,
+      defaultGoogleAutonomousOps,
+      defaultGoogleAllowedRecipients,
+      escalationRules,
+      escalationTargetKind,
+      escalationTargetMembershipIds,
+      escalationTargetTeamId,
       ...definition
     } = draft;
     const browser = draft.tools.includes('browser.act') ? browserSettings(browserSites, browserLogins) : undefined;
     const trimmedContext = defaultContext.trim();
     const trimmedRepo = defaultGitHubRepository.trim();
     const trimmedTeamId = defaultTeamGitHubId.trim();
+    const trimmedGoogleId = defaultGoogleIntegrationId.trim();
+    const allowedRecipients = defaultGoogleAllowedRecipients
+      .split(/[\n,]/)
+      .map(entry => entry.trim())
+      .filter(Boolean);
+    const googleConnection = trimmedGoogleId
+      ? {
+          integrationId: trimmedGoogleId,
+          ownership: defaultGoogleOwnership,
+          ...(defaultGoogleAutonomousOps.length > 0
+            ? {
+                autonomousWrites: {
+                  allowedOperations: defaultGoogleAutonomousOps,
+                  ...(allowedRecipients.length > 0 ? { allowedRecipients } : {}),
+                },
+              }
+            : {}),
+        }
+      : undefined;
+    const savedKnowledgeSourceIds = savedDefaults?.knowledgeSourceIds;
     const defaults =
-      trimmedContext || trimmedRepo || trimmedTeamId
+      trimmedContext || trimmedRepo || trimmedTeamId || googleConnection || savedKnowledgeSourceIds?.length
         ? {
             ...(trimmedContext ? { context: trimmedContext } : {}),
             ...(trimmedRepo ? { githubRepository: trimmedRepo } : {}),
@@ -344,14 +412,30 @@ export function AgentEditor({
                   },
                 }
               : {}),
+            ...(googleConnection ? { googleConnection } : {}),
+            ...(savedKnowledgeSourceIds?.length ? { knowledgeSourceIds: savedKnowledgeSourceIds } : {}),
           }
         : undefined;
+    const trimmedEscalationRules = escalationRules.trim();
+    const escalationPolicy = trimmedEscalationRules
+      ? {
+          rules: trimmedEscalationRules,
+          minConfidence: savedEscalation?.minConfidence ?? 0.7,
+          ...(escalationTargetKind === 'people' && escalationTargetMembershipIds.length > 0
+            ? { targetMembershipIds: escalationTargetMembershipIds }
+            : {}),
+          ...(escalationTargetKind === 'team' && escalationTargetTeamId
+            ? { targetTeamId: escalationTargetTeamId }
+            : {}),
+        }
+      : undefined;
     const parsed = webAgentDefinitionSchema.safeParse({
       ...savedDefinition,
       ...definition,
       ...(modelFamilyId === undefined ? {} : { modelFamilyId }),
       ...(browser ? { browser } : {}),
       ...(defaults ? { defaults } : {}),
+      ...(escalationPolicy ? { escalationPolicy } : {}),
     });
     if (!parsed.success) {
       setParseFailed(true);
@@ -488,6 +572,7 @@ export function AgentEditor({
         />
       </FormSection>
       <AgentDefaultsSection workspaceId={workspaceId} draft={draft} disabled={locked} onChange={update} />
+      <AgentEscalationSection workspaceId={workspaceId} draft={draft} disabled={locked} onChange={update} />
     </>
   );
   const footer = (
@@ -767,6 +852,21 @@ function AgentDefaultsSection({
   onChange: (patch: Partial<DefinitionDraft>) => void;
 }) {
   const [teamConnections, setTeamConnections] = useState<Array<{ id: string; name: string }>>([]);
+  const [googleAccounts, setGoogleAccounts] = useState<GoogleAccountSummary[]>([]);
+  const [googleLoaded, setGoogleLoaded] = useState(false);
+
+  const loadGoogleAccounts = () => {
+    if (googleLoaded) return;
+    setGoogleLoaded(true);
+    googleApi
+      .accounts(workspaceId)
+      .then(result => {
+        setGoogleAccounts(result.accounts);
+      })
+      .catch(() => {
+        setGoogleLoaded(false);
+      });
+  };
 
   useEffect(() => {
     let active = true;
@@ -790,6 +890,32 @@ function AgentDefaultsSection({
       active = false;
     };
   }, [workspaceId]);
+
+  useEffect(() => {
+    if (!draft.defaultGoogleIntegrationId || googleLoaded) return;
+    let active = true;
+    googleApi
+      .accounts(workspaceId)
+      .then(result => {
+        if (!active) return;
+        setGoogleAccounts(result.accounts);
+        setGoogleLoaded(true);
+      })
+      .catch(() => {
+        // Optional helper list; users can still configure other defaults.
+      });
+    return () => {
+      active = false;
+    };
+  }, [workspaceId, draft.defaultGoogleIntegrationId, googleLoaded]);
+
+  const selectedGoogle = googleAccounts.find(account => account.integrationId === draft.defaultGoogleIntegrationId);
+  const toggleAutonomousOp = (op: GoogleAutonomousWriteKind, checked: boolean) => {
+    const next = checked
+      ? [...new Set([...draft.defaultGoogleAutonomousOps, op])]
+      : draft.defaultGoogleAutonomousOps.filter(item => item !== op);
+    onChange({ defaultGoogleAutonomousOps: next });
+  };
 
   return (
     <FormSection
@@ -883,6 +1009,233 @@ function AgentDefaultsSection({
             aria-label="Allow commits, pushes, and pull requests with team GitHub connection"
             onCheckedChange={checked => onChange({ defaultTeamGitHubAllowWrites: checked })}
           />
+        </div>
+      )}
+      <Field
+        id="agent-default-google"
+        label="Default Google Workspace account"
+        optional
+        helper="Bind a personal or shared Gmail and Calendar account so this agent can read and act on it automatically."
+      >
+        <Select
+          value={draft.defaultGoogleIntegrationId || '__none__'}
+          disabled={disabled}
+          onOpenChange={open => {
+            if (open) loadGoogleAccounts();
+          }}
+          onValueChange={next => {
+            if (!next || next === '__none__') {
+              onChange({
+                defaultGoogleIntegrationId: '',
+                defaultGoogleAutonomousOps: [],
+                defaultGoogleAllowedRecipients: '',
+              });
+              return;
+            }
+            const account = googleAccounts.find(item => item.integrationId === next);
+            onChange({
+              defaultGoogleIntegrationId: next,
+              defaultGoogleOwnership: account?.ownership ?? 'shared',
+            });
+          }}
+        >
+          <SelectTrigger id="agent-default-google">
+            <SelectValue>
+              {selectedGoogle
+                ? `${selectedGoogle.email ?? 'Google account'} (${selectedGoogle.ownership === 'shared' ? 'Shared' : 'Personal'})`
+                : draft.defaultGoogleIntegrationId
+                  ? 'Connected Google account (unavailable)'
+                  : "None (use member's own Google account)"}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">None (use member&apos;s own Google account)</SelectItem>
+            {googleAccounts.map(account => (
+              <SelectItem key={account.integrationId} value={account.integrationId}>
+                {account.email ?? 'Google account'} ({account.ownership === 'shared' ? 'Shared' : 'Personal'})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      {draft.defaultGoogleIntegrationId && (
+        <div className="space-y-4 rounded-lg border border-border p-3">
+          <fieldset disabled={disabled} className="space-y-2">
+            <legend className="text-sm font-medium">Autonomous Google actions (no approval prompt)</legend>
+            <p className="text-xs text-muted-foreground">
+              Checked actions run automatically on this account. Unchecked write actions still ask for approval.
+            </p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {googleAutonomousWriteKinds.map(op => (
+                <div key={op} className="flex items-center gap-2">
+                  <Checkbox
+                    id={`agent-google-op-${op}`}
+                    checked={draft.defaultGoogleAutonomousOps.includes(op)}
+                    onCheckedChange={checked => toggleAutonomousOp(op, checked === true)}
+                  />
+                  <Label htmlFor={`agent-google-op-${op}`}>{googleAutonomousWriteLabels[op]}</Label>
+                </div>
+              ))}
+            </div>
+          </fieldset>
+          {draft.defaultGoogleAutonomousOps.length > 0 && (
+            <Field
+              id="agent-google-allowed-recipients"
+              label="Allowed recipients"
+              optional
+              helper="Optional safety allowlist (one email or @domain.com per line). Leave blank to allow any recipient."
+            >
+              <Textarea
+                id="agent-google-allowed-recipients"
+                rows={3}
+                disabled={disabled}
+                value={draft.defaultGoogleAllowedRecipients}
+                placeholder={'verifier@example.com\n@company.com'}
+                onChange={e => onChange({ defaultGoogleAllowedRecipients: e.target.value })}
+              />
+            </Field>
+          )}
+        </div>
+      )}
+    </FormSection>
+  );
+}
+
+function EscalationTargetPicker({
+  workspaceId,
+  kind,
+  selectedMembershipIds,
+  selectedTeamId,
+  disabled,
+  onChange,
+}: {
+  workspaceId: string;
+  kind: 'people' | 'team';
+  selectedMembershipIds: string[];
+  selectedTeamId: string;
+  disabled: boolean;
+  onChange: (patch: Partial<DefinitionDraft>) => void;
+}) {
+  const people = usePeople(workspaceId);
+  const toggleMember = (memberId: string, checked: boolean) => {
+    const next = checked
+      ? [...new Set([...selectedMembershipIds, memberId])]
+      : selectedMembershipIds.filter(id => id !== memberId);
+    onChange({ escalationTargetMembershipIds: next });
+  };
+  if (kind === 'people') {
+    return (
+      <fieldset disabled={disabled} className="space-y-2">
+        <legend className="text-xs font-medium text-muted-foreground">Choose people</legend>
+        {people.members.length === 0 ? (
+          <p className="text-xs text-muted-foreground">Loading workspace members...</p>
+        ) : (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {people.members.map(member => (
+              <div key={member.id} className="flex items-center gap-2">
+                <Checkbox
+                  id={`escalation-member-${member.id}`}
+                  checked={selectedMembershipIds.includes(member.id)}
+                  onCheckedChange={checked => toggleMember(member.id, checked === true)}
+                />
+                <Label htmlFor={`escalation-member-${member.id}`}>{member.name}</Label>
+              </div>
+            ))}
+          </div>
+        )}
+      </fieldset>
+    );
+  }
+  return (
+    <Field id="escalation-team-select" label="Team" required>
+      <Select
+        value={selectedTeamId || '__none__'}
+        disabled={disabled}
+        onValueChange={next => onChange({ escalationTargetTeamId: !next || next === '__none__' ? '' : next })}
+      >
+        <SelectTrigger id="escalation-team-select">
+          <SelectValue>{people.teams.find(team => team.id === selectedTeamId)?.name ?? 'Choose a team'}</SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__none__">Choose a team</SelectItem>
+          {people.teams.map(team => (
+            <SelectItem key={team.id} value={team.id}>
+              {team.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
+function AgentEscalationSection({
+  workspaceId,
+  draft,
+  disabled,
+  onChange,
+}: {
+  workspaceId: string;
+  draft: DefinitionDraft;
+  disabled: boolean;
+  onChange: (patch: Partial<DefinitionDraft>) => void;
+}) {
+  return (
+    <FormSection
+      title="Escalation & human check-ins"
+      description="Pause a run and ask people in the Inbox when the agent needs a decision, such as choosing a meeting time."
+    >
+      <Field
+        id="agent-escalation-rules"
+        label="When to escalate"
+        optional
+        helper="Plain-English rules for when this agent should pause and ask a person before continuing."
+      >
+        <Textarea
+          id="agent-escalation-rules"
+          rows={3}
+          disabled={disabled}
+          value={draft.escalationRules}
+          placeholder="Example: Before booking a customer call, ask the founders to pick a suitable timeslot."
+          onChange={e => onChange({ escalationRules: e.target.value })}
+        />
+      </Field>
+      {draft.escalationRules.trim().length > 0 && (
+        <div className="space-y-3 rounded-lg border border-border p-3">
+          <fieldset disabled={disabled} className="space-y-2">
+            <legend className="text-sm font-medium">Who receives escalations</legend>
+            <RadioGroup
+              value={draft.escalationTargetKind}
+              onValueChange={value => {
+                if (value === 'owner' || value === 'people' || value === 'team') {
+                  onChange({ escalationTargetKind: value });
+                }
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <RadioGroupItem id="escalation-target-owner" value="owner" />
+                <Label htmlFor="escalation-target-owner">Task owner only</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <RadioGroupItem id="escalation-target-people" value="people" />
+                <Label htmlFor="escalation-target-people">Specific people (first responder resumes the task)</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <RadioGroupItem id="escalation-target-team" value="team" />
+                <Label htmlFor="escalation-target-team">A team (first responder resumes the task)</Label>
+              </div>
+            </RadioGroup>
+          </fieldset>
+          {draft.escalationTargetKind !== 'owner' && (
+            <EscalationTargetPicker
+              workspaceId={workspaceId}
+              kind={draft.escalationTargetKind}
+              selectedMembershipIds={draft.escalationTargetMembershipIds}
+              selectedTeamId={draft.escalationTargetTeamId}
+              disabled={disabled}
+              onChange={onChange}
+            />
+          )}
         </div>
       )}
     </FormSection>

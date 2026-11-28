@@ -325,16 +325,12 @@ test('integration status recovery and Google review lifecycle', { timeout: 480_0
     });
 
     await t.test(
-      'heartbeat lives in Configure dialog and approval checkbox works via script, pointer, and keyboard',
+      'Configure is scoped to Gmail and approval checkbox works via script, pointer, and keyboard',
       async () => {
         await page.goto(`${origin}/qa-integrations/integrations`);
         await listRow('Google Calendar').getByRole('link', { name: 'Google Calendar', exact: true }).click();
         await account(page);
-        await main.getByRole('button', { name: 'Configure', exact: true }).click();
-        const configureDialog = page.getByRole('dialog');
-        await configureDialog.getByRole('checkbox', { name: 'Enable Gmail heartbeat', exact: true }).waitFor();
-        await configureDialog.getByRole('button', { name: 'Done', exact: true }).click();
-        await configureDialog.waitFor({ state: 'hidden' });
+        assert.equal(await main.getByRole('button', { name: 'Configure', exact: true }).count(), 0);
         await page
           .getByRole('region', { name: 'Action: Create document', exact: true })
           .getByRole('button', { name: 'View action', exact: true })

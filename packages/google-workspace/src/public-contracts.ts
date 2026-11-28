@@ -98,6 +98,12 @@ export const googleBeginOptionsSchema = z.strictObject({
   newAccount: z.boolean().optional(),
 });
 export type GoogleBeginOptions = z.infer<typeof googleBeginOptionsSchema>;
+export const googleShareSummarySchema = z.strictObject({
+  workspace: z.boolean(),
+  memberCount: z.number().int().nonnegative(),
+  teamCount: z.number().int().nonnegative(),
+});
+export type GoogleShareSummary = z.infer<typeof googleShareSummarySchema>;
 export const googleAccountSummarySchema = z.strictObject({
   integrationId: z.uuid(),
   ownership: googleOwnershipSchema,
@@ -110,6 +116,7 @@ export const googleAccountSummarySchema = z.strictObject({
   scopes: z.array(z.string()),
   canUse: z.boolean(),
   canManage: z.boolean(),
+  shareSummary: googleShareSummarySchema.optional(),
 });
 export type GoogleAccountSummary = z.infer<typeof googleAccountSummarySchema>;
 export const googleAccountsListSchema = z.strictObject({

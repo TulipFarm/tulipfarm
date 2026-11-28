@@ -47,6 +47,13 @@ export function triggerLine(trigger: TriggerBody | Trigger, tableNames?: Readonl
       return rowTriggerLine(trigger, tableNames?.get(trigger.tableId));
     case 'provider':
       return trigger.event === 'updated' ? 'Connected app updates' : 'Connected app items';
+    case 'gmail': {
+      const base = trigger.repliesOnly ? 'Gmail replies' : 'Gmail messages';
+      const detail = trigger.from ? `from ${trigger.from}` : trigger.subject ? `matching "${trigger.subject}"` : null;
+      return detail
+        ? `${base} ${detail}, every ${workflowDuration(trigger.minutes * 60)}`
+        : `${base}, every ${workflowDuration(trigger.minutes * 60)}`;
+    }
     default:
       return triggerKindNames[trigger.kind];
   }
