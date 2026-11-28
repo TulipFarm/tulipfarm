@@ -63,7 +63,7 @@ services:
 
   # Personal memory, Knowledge search and chat recall. Data lives in the keep database on postgres.
   keep:
-    image: ghcr.io/tulipfarm/keep:0.1.1@sha256:1e88111253930c6c0b408c87619314493e092e5164e148e385e6ab237f6137d0
+    image: ghcr.io/tulipfarm/keep:0.2.0@sha256:f9789b71998c09fe100e0656704ba4dd119ac77227f9e9280e3fae5bff43a60c
     depends_on:
       keep-database:
         condition: service_completed_successfully
