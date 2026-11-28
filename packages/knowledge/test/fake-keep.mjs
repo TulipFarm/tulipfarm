@@ -4,12 +4,12 @@ import { createKnowledgeKeepFeed, createKnowledgeKeepIndex, createKnowledgeSearc
 /**
  * An in-memory Keep knowledge corpus: per-scope sources of episodes, keyword search and forget. `state.timeouts` holds
  * source ids whose ingest times out, and `state.beforeIngest` runs before each ingest; a result it returns is answered
- * instead.
+ * instead. With `state.batch` false, Keep has no batch forget route.
  */
 export function fakeKnowledgeKeep() {
   const corpora = new Map();
   const calls = [];
-  const state = { available: true, timeouts: new Set(), beforeIngest: undefined };
+  const state = { available: true, batch: true, timeouts: new Set(), beforeIngest: undefined };
   const corpus = scope => {
     if (!corpora.has(scope.user)) corpora.set(scope.user, new Map());
     return corpora.get(scope.user);
@@ -74,6 +74,19 @@ export function fakeKnowledgeKeep() {
       if (!state.available) return down;
       if (!corpus(input.scope).delete(input.sourceId)) return { status: 'not_found' };
       return { status: 'ok', value: { episodes: 1, chunks: 1 } };
+    },
+    async forgetKnowledgeSources(input) {
+      calls.push({ op: 'forgetMany', ...input });
+      if (!state.batch) return { status: 'not_found' };
+      if (!state.available) return down;
+      const sources = corpus(input.scope);
+      const forgotten = [];
+      const missing = [];
+      for (const sourceId of input.sourceIds) {
+        if (sources.delete(sourceId)) forgotten.push({ sourceId, receipt: { episodes: 1, chunks: 1 } });
+        else missing.push(sourceId);
+      }
+      return { status: 'ok', value: { forgotten, missing } };
     },
   };
   return { client, calls, state, corpora };

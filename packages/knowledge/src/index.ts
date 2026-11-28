@@ -41,6 +41,7 @@ export {
   type KnowledgeKeepFailureKind,
   type KnowledgeKeepRecordedFailure,
   type KnowledgeKeepFeed,
+  type KnowledgeKeepBatchOutcome,
   type KnowledgeKeepOutcome,
   type KnowledgeKeepWork,
 } from './internal/keep.ts';

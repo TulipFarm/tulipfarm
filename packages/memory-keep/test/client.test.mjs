@@ -306,3 +306,33 @@ test('knowledge ingest, search and forget_source send snake_case bodies and map 
   assert.deepEqual(await client.forgetKnowledgeSource({ scope, sourceId: 'doc-1' }), { status: 'not_found' });
   assert.deepEqual(requests[2].body, { scope, source_id: 'doc-1' });
 });
+
+test('forget_sources sends the ids and maps receipts, missing ids and an older Keep without the route', async () => {
+  const requests = [];
+  const answers = [
+    json(200, {
+      scope: 'ws',
+      forgotten: [{ sourceId: 'doc-1', receipt: { episodes: 2, chunks: 3, facts_deleted: 1 } }],
+      missing: ['doc-2'],
+    }),
+    json(404, { error: { code: 'not_found', message: 'unknown tool', reason: 'UNKNOWN_TOOL', retryable: false } }),
+  ];
+  const client = createKeepClient({
+    endpoint,
+    token: 'secret-token',
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), body: JSON.parse(init.body) });
+      return answers.shift();
+    },
+  });
+  const scope = { user: 'ws' };
+  assert.deepEqual(await client.forgetKnowledgeSources({ scope, sourceIds: ['doc-1', 'doc-2'] }), {
+    status: 'ok',
+    value: { forgotten: [{ sourceId: 'doc-1', receipt: { episodes: 2, chunks: 3 } }], missing: ['doc-2'] },
+  });
+  assert.deepEqual(requests[0], {
+    url: 'http://keep.test/v1/knowledge/forget_sources',
+    body: { scope, source_ids: ['doc-1', 'doc-2'] },
+  });
+  assert.deepEqual(await client.forgetKnowledgeSources({ scope, sourceIds: ['doc-1'] }), { status: 'not_found' });
+});

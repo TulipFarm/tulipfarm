@@ -15,7 +15,9 @@ function activityContext() {
   }
 }
 
-export function createKnowledgeKeepActivities(feed: Pick<KnowledgeKeepFeed, 'due' | 'sync' | 'recordFailure'>) {
+export function createKnowledgeKeepActivities(
+  feed: Pick<KnowledgeKeepFeed, 'due' | 'sync' | 'forget' | 'recordFailure'>,
+) {
   return {
     async dueKnowledgeKeep(workspace: string, after: string | null, limit: number) {
       return feed.due(workspaceId.parse(workspace), after === null ? null : documentId.parse(after), limit);
@@ -40,6 +42,28 @@ export function createKnowledgeKeepActivities(feed: Pick<KnowledgeKeepFeed, 'due
         throw ApplicationFailure.nonRetryable(
           error instanceof Error ? error.message : 'Knowledge Keep delivery failed',
           knowledgeKeepFailures.permanent,
+        );
+      }
+    },
+    /**
+     * Forgets many documents with one Keep call. Any failure is final here: the workflow then forgets the same documents
+     * one at a time, which records failures and waits out an outage of Keep.
+     */
+    async forgetKnowledgeKeep(workspace: string, documents: string[]) {
+      const context = activityContext();
+      try {
+        return await feed.forget(
+          workspaceId.parse(workspace),
+          documents.map(document => documentId.parse(document)),
+          context ? { signal: context.cancellationSignal, progress: () => context.heartbeat() } : {},
+        );
+      } catch (error) {
+        if (context?.cancellationSignal.aborted) throw error;
+        throw ApplicationFailure.nonRetryable(
+          error instanceof Error ? error.message : 'Knowledge Keep forget failed',
+          error instanceof KnowledgeKeepUnavailable
+            ? knowledgeKeepFailures[error.scope]
+            : knowledgeKeepFailures.permanent,
         );
       }
     },
