@@ -265,7 +265,7 @@ function GitHubSourceRow({
     ) ?? [];
   const reconnect = source.connection === 'reconnect-required' && source.state !== 'removed';
   const repositoryCounts = source.repositoryCounts;
-  const excludedCount = source.repositories?.filter(repository => repository.excluded).length ?? 0;
+  const excludedCount = source.repositories?.filter(repository => repository.excluded && !repository.fork).length ?? 0;
   const listed = showAll ? source.repositories : source.repositories?.slice(0, 20);
   async function refreshAccess() {
     if (controller.current || locked) return;
@@ -301,7 +301,7 @@ function GitHubSourceRow({
             <>
               <p className="text-sm text-muted-foreground">
                 {source.selection.scope === 'all'
-                  ? 'All repositories, including new ones'
+                  ? 'All repositories except forks, including new ones'
                   : `${source.selection.repositories.length} chosen ${source.selection.repositories.length === 1 ? 'repository' : 'repositories'}`}
                 {excludedCount > 0 && ` · ${excludedCount} excluded`} · {describeGitHubContent(source.selection)}
               </p>
@@ -592,9 +592,9 @@ export function GitHubKnowledgeSources({
             </div>
             {!selecting && (
               <p className="max-w-prose text-sm text-muted-foreground">
-                Connecting a GitHub account indexes every repository it can read, with all content and full history. New
-                repositories are added automatically. Use Edit settings on a source to leave out repositories, content
-                types or file paths.
+                Connecting a GitHub account indexes every repository it can read except forks, with all content and full
+                history. New repositories are added automatically. To index a fork, use Add repositories and choose it.
+                Use Edit settings on a source to leave out repositories, content types or file paths.
               </p>
             )}
             {accountsChecked && !active.length && (

@@ -326,6 +326,8 @@ const repositorySchema = z.strictObject({
   visibility: z.enum(['public', 'private', 'internal']),
   title: z.string().max(512),
   ownerId: githubRepositoryIdSchema.optional(),
+  // A fork: an all-repositories source skips it, and a source that chooses it by name indexes it.
+  fork: z.boolean().optional(),
 });
 export const githubKnowledgeDiscoverySchema = z.strictObject({
   binding: githubCorpusBindingSchema,

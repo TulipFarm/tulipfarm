@@ -399,8 +399,18 @@ test(
 
       await t.test('all repositories and all content are selected by default and new repositories follow', () =>
         fixture(async f => {
+          f.faults.discoveryPages = [
+            [
+              { repositoryId: '7001', fullName: 'acme/handbook', visibility: 'private', title: 'acme/handbook' },
+              { repositoryId: '7002', fullName: 'acme/leadership', visibility: 'private', title: 'acme/leadership' },
+            ],
+            [
+              { repositoryId: '7003', fullName: 'acme/archive', visibility: 'internal', title: 'acme/archive' },
+              { repositoryId: '7004', fullName: 'acme/vscode', visibility: 'public', title: 'acme/vscode', fork: true },
+            ],
+          ];
           await f.open();
-          await f.page.getByText('indexes every repository it can read', { exact: false }).waitFor();
+          await f.page.getByText('indexes every repository it can read except forks', { exact: false }).waitFor();
           await f.select();
           assert.equal(await f.page.getByRole('radio', { name: /^All repositories/ }).isChecked(), true);
           await f.page
@@ -416,7 +426,58 @@ test(
             kinds: ['code', 'commits', 'discussions', 'docs', 'issues', 'pulls'],
           });
           const row = f.page.getByRole('listitem', { name: 'All repositories', exact: true });
-          await row.getByText('All repositories, including new ones · All content · full history').waitFor();
+          await row
+            .getByText('All repositories except forks, including new ones · All content · full history')
+            .waitFor();
+        }),
+      );
+
+      await t.test('an all-repositories source shows forks as skipped and keeps them out of its settings', () =>
+        fixture(async f => {
+          const fork = {
+            repositoryId: '7004',
+            fullName: 'acme/vscode',
+            visibility: 'public',
+            title: 'acme/vscode',
+            state: 'active',
+            failure: null,
+            excluded: true,
+            status: 'excluded',
+            missingKinds: [],
+            fork: true,
+          };
+          const item = source({
+            title: 'All repositories of octo-owner',
+            selection: { scope: 'all', repositories: [], kinds: ['docs', 'issues', 'pulls'] },
+            repositories: [
+              repositories[0],
+              { ...repositories[1], state: 'active', failure: null, status: 'active' },
+              fork,
+            ],
+            repositoryCounts: { active: 2, excluded: 0, needsPermission: 0, accessLost: 0, indexedElsewhere: 0 },
+          });
+          f.sources.set(item.sourceId, item);
+          const row = () => f.page.getByRole('listitem', { name: item.title, exact: true });
+          await f.open();
+          const summary = row().getByText('All repositories except forks, including new ones', { exact: false });
+          await summary.waitFor();
+          assert.doesNotMatch(await summary.textContent(), /excluded/, 'the fork is not counted as excluded');
+          await row().getByRole('button', { name: 'Edit settings' }).click();
+          const settings = row().getByRole('region', { name: 'GitHub source settings', exact: true });
+          await settings.getByText('except forks', { exact: false }).waitFor();
+          const forkBox = settings.getByRole('checkbox', { name: 'acme/vscode · fork, skipped here' });
+          assert.equal(await forkBox.isDisabled(), true);
+          assert.equal(await forkBox.isChecked(), false);
+          await settings.getByText('2 of 2 repositories included', { exact: true }).waitFor();
+          await settings.getByRole('checkbox', { name: 'acme/leadership Private' }).uncheck();
+          await settings.getByText('1 of 2 repositories included', { exact: true }).waitFor();
+          await settings.getByRole('button', { name: 'Include all repositories' }).click();
+          await settings.getByText('2 of 2 repositories included', { exact: true }).waitFor();
+          assert.equal(await forkBox.isChecked(), false, 'Include all leaves forks out');
+          await settings.getByRole('checkbox', { name: 'acme/leadership Private' }).uncheck();
+          await settings.getByRole('button', { name: 'Save source settings' }).click();
+          await row().getByRole('button', { name: 'Edit settings' }).waitFor();
+          assert.deepEqual(f.writes.find(write => write.kind === 'settings').body.excludedRepositories, ['7002']);
         }),
       );
 

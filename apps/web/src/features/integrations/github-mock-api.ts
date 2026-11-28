@@ -95,6 +95,13 @@ if (githubMockEnabled) {
       visibility: index % 2 ? ('private' as const) : ('public' as const),
       title: name,
     })),
+    ...['DefinitelyTyped', 'storybook', 'vscode'].map((name, index) => ({
+      repositoryId: String(1500 + index),
+      fullName: `dev-user/${name}`,
+      visibility: 'public' as const,
+      title: `Fork of ${name}`,
+      fork: true,
+    })),
   ];
   const workRepositories: GitHubRepositoryChoice[] = [
     { repositoryId: '2000', fullName: 'WorkTeam/handbook', visibility: 'private', title: 'Team handbook' },
@@ -188,8 +195,9 @@ if (githubMockEnabled) {
           ...item,
           state: 'active',
           failure: null,
-          excluded: false,
-          status: 'active',
+          // An all-repositories source keeps forks as excluded rows.
+          excluded: everything && !!item.fork,
+          status: everything && item.fork ? 'excluded' : 'active',
           indexedBy: null,
           missingKinds: [],
         })),
@@ -241,12 +249,14 @@ if (githubMockEnabled) {
       source.repositories =
         source.repositories?.map(item => ({
           ...item,
-          excluded: body.excludedRepositories.includes(item.repositoryId),
-          status: body.excludedRepositories.includes(item.repositoryId)
-            ? 'excluded'
-            : item.status === 'excluded'
-              ? 'active'
-              : item.status,
+          excluded:
+            (source.selection?.scope === 'all' && !!item.fork) || body.excludedRepositories.includes(item.repositoryId),
+          status:
+            (source.selection?.scope === 'all' && item.fork) || body.excludedRepositories.includes(item.repositoryId)
+              ? 'excluded'
+              : item.status === 'excluded'
+                ? 'active'
+                : item.status,
         })) ?? null;
       return Response.json(source);
     }

@@ -70,7 +70,7 @@ export const disclosures: Record<DefaultKnowledgeProduct, Disclosure> = {
     coverage:
       'Docs and code at the latest default-branch version, and the full default-branch commit history. Issues, pull requests and discussions active in the last 90 days.',
     excluded:
-      'Other branches and diffs. Secret-like, generated, binary and oversized files are skipped and listed as skipped.',
+      'Forks, other branches and diffs. Secret-like, generated, binary and oversized files are skipped and listed as skipped.',
   },
   jira: {
     name: 'Jira',

@@ -138,6 +138,7 @@ const repositorySchema = z.object({
   state: z.enum(['active', 'unavailable']),
   failure: z.string().nullable(),
   excluded: z.boolean(),
+  fork: z.boolean().default(false),
 });
 const readerSchema = z.object({
   account_id: uuidSchema,
@@ -350,6 +351,7 @@ export function createGitHubKnowledge({
   // is migrated, its sources index every selected kind except commits.
   const storesCommits = (tx: Tx) => ((tx as { commonVersion?: number }).commonVersion ?? 0) >= 7;
   const storesOwner = (tx: Tx) => ((tx as { commonVersion?: number }).commonVersion ?? 0) >= 48;
+  const storesForks = (tx: Tx) => ((tx as { commonVersion?: number }).commonVersion ?? 0) >= 126;
   async function transaction<T>(workspaceId: string, operation: (tx: Tx) => Promise<T>, mode: 'read' | 'write') {
     return runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async raw => {
       const tx = store.bind(raw);
@@ -391,7 +393,7 @@ export function createGitHubKnowledge({
       .parse(
         (
           await tx.client.query(
-            `SELECT repository_id,full_name,visibility,title,state,failure,excluded FROM ${table(tx, 'github_repositories')} WHERE source_id=$1 ORDER BY length(repository_id),repository_id`,
+            `SELECT repository_id,full_name,visibility,title,state,failure,excluded${storesForks(tx) ? ',fork' : ''} FROM ${table(tx, 'github_repositories')} WHERE source_id=$1 ORDER BY length(repository_id),repository_id`,
             [sourceId],
           )
         ).rows,
@@ -505,6 +507,7 @@ export function createGitHubKnowledge({
         state: r.state,
         failure: r.failure ?? s.cursor.isolated?.[r.repository_id] ?? null,
         excluded: r.excluded,
+        ...(r.fork ? { fork: true } : {}),
         status,
         indexedBy,
         missingKinds:
@@ -515,7 +518,7 @@ export function createGitHubKnowledge({
               : s.selection.kinds.filter(kind => denied.get(r.repository_id)?.has(kind)),
       };
     });
-    const tally = (status: string) => selected.filter(r => r.status === status).length;
+    const tally = (status: string) => selected.filter(r => r.status === status && !r.fork).length;
     return githubKnowledgeSourceSchema.parse({
       sourceId: s.source_id,
       selection: s.selection,
@@ -551,7 +554,7 @@ export function createGitHubKnowledge({
     await memberRead(workspaceId, userId, async () => undefined);
     const result = await provider.discover(workspaceId, userId, accountId, cursor);
     await memberRead(workspaceId, userId, (tx, human) => ownAccount(tx, human, result.binding));
-    return { ...result, items: result.items.map(({ fork: _fork, ...r }) => r) };
+    return result;
   }
   async function configure(workspaceId: string, userId: string, value: unknown) {
     denyMcpEgress();
@@ -972,7 +975,7 @@ export function createGitHubKnowledge({
           .parse(
             (
               await tx.client.query(
-                `UPDATE ${table(tx, 'github_repositories')} SET excluded=false WHERE source_id=$1 AND excluded AND NOT repository_id=ANY($2::text[]) RETURNING repository_id`,
+                `UPDATE ${table(tx, 'github_repositories')} SET excluded=false WHERE source_id=$1 AND excluded AND NOT repository_id=ANY($2::text[])${storesForks(tx) && s.selection.scope === 'all' ? ' AND NOT fork' : ''} RETURNING repository_id`,
                 [sourceId, excluded],
               )
             ).rows,
@@ -1699,10 +1702,11 @@ export function createGitHubKnowledge({
   // Adds every repository the owner's account can now read to an all-repositories source. Repositories the member
   // excluded keep their row and stay excluded; repositories another all-repositories source of the member holds are
   // left to it. A repository a chosen-repository source owns gets a row so settings can name that source, but is skipped.
-  // Forks are never added, and a repository already followed that is now listed as a fork is excluded and withdrawn.
+  // Forks are never indexed: each gets an excluded row marked as a fork, which settings cannot include. A repository
+  // already followed that is now listed as a fork is withdrawn, and one that is no longer a fork is included again.
   async function follow(work: GitHubKnowledgeWork, token: string, s: Source) {
     const found = new Map<string, GitHubRepository>();
-    const forks = new Set<string>();
+    const forks = new Map<string, GitHubRepository>();
     let page: string | undefined;
     for (let pages = 0; pages < 100 && found.size < githubCorpusLimits.repositories; pages++) {
       const result = await provider.discover(work.workspaceId, s.owner_user_id, s.binding.accountId, page, {
@@ -1710,7 +1714,7 @@ export function createGitHubKnowledge({
       });
       if (result.binding.githubUserId !== s.binding.githubUserId) throw new GitHubCorpusError('stale-integration');
       for (const r of result.items) {
-        if (r.fork) forks.add(r.repositoryId);
+        if (r.fork) forks.set(r.repositoryId, r);
         else found.set(r.repositoryId, r);
       }
       if (!result.nextCursor || result.nextCursor === page) break;
@@ -1724,7 +1728,7 @@ export function createGitHubKnowledge({
             (
               await tx.client.query(
                 `UPDATE ${table(tx, 'github_repositories')} SET excluded=true WHERE source_id=$1 AND NOT excluded AND repository_id=ANY($2::text[]) RETURNING repository_id`,
-                [s.source_id, [...forks]],
+                [s.source_id, [...forks.keys()]],
               )
             ).rows,
           )
@@ -1743,6 +1747,16 @@ export function createGitHubKnowledge({
             );
         }
       }
+      if (storesForks(tx)) {
+        await tx.client.query(
+          `UPDATE ${table(tx, 'github_repositories')} SET fork=true WHERE source_id=$1 AND NOT fork AND repository_id=ANY($2::text[])`,
+          [s.source_id, [...forks.keys()]],
+        );
+        await tx.client.query(
+          `UPDATE ${table(tx, 'github_repositories')} SET fork=false,excluded=false WHERE source_id=$1 AND fork AND repository_id=ANY($2::text[])`,
+          [s.source_id, [...found.keys()]],
+        );
+      }
       const known = new Set(
         z
           .array(z.object({ repository_id: z.string() }))
@@ -1753,7 +1767,7 @@ export function createGitHubKnowledge({
             JOIN ${table(tx, 'github_sources')} og ON og.source_id=o.id
             WHERE (r.source_id=$1 OR (o.owner_membership_id=$2 AND o.provider='github' AND o.state<>'removed' AND NOT r.excluded AND og.selection->>'scope'='all'))
               AND r.repository_id=ANY($3::text[])`,
-                [s.source_id, s.owner_membership_id, [...found.keys()]],
+                [s.source_id, s.owner_membership_id, [...found.keys(), ...forks.keys()]],
               )
             ).rows,
           )
@@ -1785,15 +1799,19 @@ export function createGitHubKnowledge({
               )
             ).rows[0],
           ).n;
-      for (const r of [...found.values()].sort(
-        (a, b) => a.repositoryId.length - b.repositoryId.length || (a.repositoryId < b.repositoryId ? -1 : 1),
-      )) {
+      const byId = (a: GitHubRepository, b: GitHubRepository) =>
+        a.repositoryId.length - b.repositoryId.length || (a.repositoryId < b.repositoryId ? -1 : 1);
+      // Forks take whatever room the repositories that are indexed leave.
+      for (const r of [...[...found.values()].sort(byId), ...(storesForks(tx) ? [...forks.values()].sort(byId) : [])]) {
         if (room <= 0) break;
         if (known.has(r.repositoryId)) continue;
+        const fork = !!r.fork;
         await tx.client.query(
-          storesOwner(tx)
-            ? `INSERT INTO ${table(tx, 'github_repositories')} (source_id,repository_id,full_name,visibility,title,owner_id) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`
-            : `INSERT INTO ${table(tx, 'github_repositories')} (source_id,repository_id,full_name,visibility,title) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
+          storesForks(tx)
+            ? `INSERT INTO ${table(tx, 'github_repositories')} (source_id,repository_id,full_name,visibility,title,owner_id,fork,excluded) VALUES ($1,$2,$3,$4,$5,$6,$7,$7) ON CONFLICT DO NOTHING`
+            : storesOwner(tx)
+              ? `INSERT INTO ${table(tx, 'github_repositories')} (source_id,repository_id,full_name,visibility,title,owner_id) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`
+              : `INSERT INTO ${table(tx, 'github_repositories')} (source_id,repository_id,full_name,visibility,title) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
           [
             s.source_id,
             r.repositoryId,
@@ -1801,6 +1819,7 @@ export function createGitHubKnowledge({
             r.visibility,
             r.title.slice(0, 512) || r.fullName,
             ...(storesOwner(tx) ? [r.ownerId ?? null] : []),
+            ...(storesForks(tx) ? [fork] : []),
           ],
         );
         room--;
