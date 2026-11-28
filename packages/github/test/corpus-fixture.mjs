@@ -65,12 +65,14 @@ export function fakeGitHub() {
     issues = [],
     discussions = [],
     commits = [],
+    fork = false,
   }) {
     const repo = {
       id,
       node_id: `R_${id}`,
       full_name: fullName,
       private: isPrivate,
+      fork,
       default_branch: 'main',
       description,
       readers: new Set(readers),
@@ -163,6 +165,7 @@ export function fakeGitHub() {
     visibility: repo.private ? 'private' : 'public',
     default_branch: repo.default_branch,
     description: repo.description,
+    fork: repo.fork,
     permissions: { pull: true },
   });
   const issueBody = (repo, issue) => ({
