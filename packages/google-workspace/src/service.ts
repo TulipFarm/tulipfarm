@@ -543,7 +543,7 @@ export function createGoogleWorkspaceService(options: {
       const id = uuidSchema.parse(integrationId);
       return authorized(workspaceId, userId, async (tx, actor) => {
         const row = await loadById(tx, id);
-        if (!row || row.ownership !== 'shared' || !(await googleAccountAccess(tx, actor, row)).canManage)
+        if (!row || row.status === 'disconnected' || !(await googleAccountAccess(tx, actor, row)).canManage)
           throw new AccessDenied();
         const rows = z.array(grantRowSchema).parse(
           (
@@ -573,9 +573,29 @@ export function createGoogleWorkspaceService(options: {
       const parsed = googleGrantsUpdateSchema.parse(input);
       return authorized(workspaceId, userId, async (tx, actor) => {
         const row = await loadById(tx, id);
-        if (!row || row.ownership !== 'shared' || !(await googleAccountAccess(tx, actor, row)).canManage)
+        if (!row || row.status === 'disconnected' || !(await googleAccountAccess(tx, actor, row)).canManage)
           throw new AccessDenied();
         if (row.grants_version !== parsed.expectedGrantsVersion) throw new GoogleWorkspaceError('grants-conflict');
+        if (parsed.grants.length === 0) {
+          await tx.client.query(`DELETE FROM ${relation(tx, 'tf_google_grants')} WHERE integration_id = $1`, [row.id]);
+          const nextVersion = z
+            .number()
+            .int()
+            .positive()
+            .parse(
+              (
+                await tx.client.query(
+                  `UPDATE ${relation(tx, 'tf_google_integrations')} SET ownership = 'personal', grants_version = grants_version + 1 WHERE id = $1 RETURNING grants_version`,
+                  [row.id],
+                )
+              ).rows[0]?.grants_version,
+            );
+          return {
+            integrationId: row.id,
+            grantsVersion: nextVersion,
+            grants: [],
+          };
+        }
         const seen = new Set<string>();
         const memberIds: string[] = [];
         const teamIds: string[] = [];
@@ -656,7 +676,7 @@ export function createGoogleWorkspaceService(options: {
           .parse(
             (
               await tx.client.query(
-                `UPDATE ${relation(tx, 'tf_google_integrations')} SET grants_version = grants_version + 1 WHERE id = $1 RETURNING grants_version`,
+                `UPDATE ${relation(tx, 'tf_google_integrations')} SET ownership = 'shared', grants_version = grants_version + 1 WHERE id = $1 RETURNING grants_version`,
                 [row.id],
               )
             ).rows[0]?.grants_version,

@@ -251,14 +251,47 @@ test(
       const page = await newPage('member');
       // Gmail has its own integration page; the account, heartbeat and approvals live on its Accounts tab.
       const section = page.getByRole('main');
-      const account = section.getByRole('region', { name: 'Google account', exact: true });
+      const account = section.getByRole('region', { name: 'Google accounts', exact: true });
+      const heartbeatDialog = page.getByRole('dialog');
+      const HEARTBEAT_BUTTONS = new Set([
+        'Check heartbeat status',
+        'Save heartbeat settings',
+        'Recover saved heartbeat request',
+        'Refresh heartbeat results',
+        'Older heartbeat results',
+        'Newest heartbeat results',
+        'Load saved settings',
+        'Recover processing retry',
+        'Retry processing',
+      ]);
       // Connect Gmail appears both in the page header and in the empty Accounts panel.
-      const button = name => section.getByRole('button', { name, exact: true }).first();
+      const button = name =>
+        (HEARTBEAT_BUTTONS.has(name) ? heartbeatDialog : section).getByRole('button', { name, exact: true }).first();
       async function settings(target = page) {
         const tab = target.getByRole('tab', { name: 'Accounts', exact: true });
         if ((await tab.getAttribute('aria-selected')) !== 'true') await tab.click();
       }
+      async function openConfigure(target = page) {
+        const dialog = target.getByRole('dialog');
+        if (await dialog.isVisible()) return dialog;
+        await settings(target);
+        await target.getByRole('main').getByRole('button', { name: 'Configure', exact: true }).first().click();
+        await dialog.waitFor();
+        return dialog;
+      }
+      async function closeConfigure(target = page) {
+        const dialog = target.getByRole('dialog');
+        if (!(await dialog.isVisible())) return;
+        await dialog.getByRole('button', { name: 'Done', exact: true }).click();
+        await dialog.waitFor({ state: 'hidden' });
+      }
       async function click(name) {
+        if (HEARTBEAT_BUTTONS.has(name)) {
+          await openConfigure();
+          await button(name).click();
+          return;
+        }
+        await closeConfigure();
         if (!['Check Google status', 'Check again', 'Connect Gmail', 'Reconnect Gmail', 'Disconnect'].includes(name))
           await settings();
         await button(name).click();
@@ -397,7 +430,7 @@ test(
         return (await http(`${base}/heartbeat/results`)).body.results.find(item => item.messageId === id);
       }
       const resultRow = id =>
-        section.getByRole('listitem').filter({ has: page.getByText(new RegExp(`^Message ${id} ·`)) });
+        heartbeatDialog.getByRole('listitem').filter({ has: page.getByText(new RegExp(`^Message ${id} ·`)) });
       const retries = () => mutations.filter(item => item.path === `${base}/heartbeat/retry`);
       await t.test(
         'initial loading, repeated read failure, unavailable configuration, and consent callback recovery',
@@ -435,34 +468,36 @@ test(
           await page.waitForURL(url => url.pathname === `/${workspace.slug}/integrations/gmail`);
           await settings();
           await account.getByText('member@example.com', { exact: true }).waitFor();
-          await section.getByRole('heading', { name: 'No heartbeat results yet' }).waitFor();
+          await openConfigure();
+          await heartbeatDialog.getByRole('heading', { name: 'No heartbeat results yet' }).waitFor();
         },
       );
       await t.test(
         'revisioned settings, retained draft, lost acknowledgement, and identical command recovery',
         async () => {
           stage = 'heartbeat save';
-          await section.getByLabel('Gmail query', { exact: true }).fill('from:billing@example.test');
-          await section.getByLabel('Processing instructions', { exact: true }).fill('Extract a safe summary');
+          await openConfigure();
+          await heartbeatDialog.getByLabel('Gmail query', { exact: true }).fill('from:billing@example.test');
+          await heartbeatDialog.getByLabel('Processing instructions', { exact: true }).fill('Extract a safe summary');
           faults.settings = 503;
           await click('Check heartbeat status');
-          await section
+          await heartbeatDialog
             .getByText('The response could not be confirmed. Check status before making another change.', {
               exact: true,
             })
             .waitFor();
           assert.equal(
-            await section.getByLabel('Gmail query', { exact: true }).inputValue(),
+            await heartbeatDialog.getByLabel('Gmail query', { exact: true }).inputValue(),
             'from:billing@example.test',
           );
           faults.settings = 200;
           await click('Check heartbeat status');
-          await section.getByText(/Saved revision 0 is disabled/).waitFor();
-          await section.getByRole('checkbox', { name: 'Enable Gmail heartbeat', exact: true }).check();
-          await section.getByLabel('Gmail label ID, optional', { exact: true }).fill('bad label');
+          await heartbeatDialog.getByText(/Saved revision 0 is disabled/).waitFor();
+          await heartbeatDialog.getByRole('checkbox', { name: 'Enable Gmail heartbeat', exact: true }).check();
+          await heartbeatDialog.getByLabel('Gmail label ID, optional', { exact: true }).fill('bad label');
           await click('Save heartbeat settings');
-          await section.getByText(/Use a whole-number cadence/).waitFor();
-          await section.getByLabel('Gmail label ID, optional', { exact: true }).fill('INBOX');
+          await heartbeatDialog.getByText(/Use a whole-number cadence/).waitFor();
+          await heartbeatDialog.getByLabel('Gmail label ID, optional', { exact: true }).fill('INBOX');
           faults.drop = '/heartbeat';
           await button('Save heartbeat settings').evaluate(element => {
             element.click();
@@ -474,18 +509,18 @@ test(
           assert.equal(writes()[0].method, 'POST');
           assert.equal(writes()[0].body.revision, 0);
           await click('Check heartbeat status');
-          await section.getByText(/Saved revision 1 is enabled/).waitFor();
+          await heartbeatDialog.getByText(/Saved revision 1 is enabled/).waitFor();
           assert.equal(writes().length, 1);
           await click('Recover saved heartbeat request');
-          await section.getByText('Heartbeat settings saved.', { exact: true }).waitFor();
+          await heartbeatDialog.getByText('Heartbeat settings saved.', { exact: true }).waitFor();
           assert.equal(writes().length, 2);
           assert.deepEqual(writes()[0], writes()[1]);
           assert.equal((await http(`${base}/heartbeat`)).body.revision, 1);
           await page.reload();
-          await settings();
-          await section.getByLabel('Gmail query', { exact: true }).waitFor();
+          await openConfigure();
+          await heartbeatDialog.getByLabel('Gmail query', { exact: true }).waitFor();
           assert.equal(
-            await section.getByLabel('Gmail query', { exact: true }).inputValue(),
+            await heartbeatDialog.getByLabel('Gmail query', { exact: true }).inputValue(),
             'from:billing@example.test',
           );
         },
@@ -536,16 +571,16 @@ test(
           0,
         );
         await click('Refresh heartbeat results');
-        await section
+        await heartbeatDialog
           .getByText('Private safe answer. <script>window.hostile=true</script> No email was sent.', { exact: true })
           .waitFor();
         assert.equal(await page.evaluate(() => window.hostile), undefined);
-        assert.equal(await section.locator('script').count(), 0);
+        assert.equal(await heartbeatDialog.locator('script').count(), 0);
         for (const width of [1280, 390]) {
           await page.setViewportSize({ width, height: 900 });
-          const refresh = section.getByRole('button', { name: 'Refresh heartbeat results', exact: true });
+          const refresh = heartbeatDialog.getByRole('button', { name: 'Refresh heartbeat results', exact: true });
           await refresh.scrollIntoViewIfNeeded();
-          const result = section.getByText(
+          const result = heartbeatDialog.getByText(
             'Private safe answer. <script>window.hostile=true</script> No email was sent.',
             { exact: true },
           );
@@ -554,7 +589,9 @@ test(
           faults.resultsGate = pending.promise;
           try {
             await refresh.click();
-            await section.getByText('Refreshing heartbeat results…', { exact: true }).waitFor({ state: 'attached' });
+            await heartbeatDialog
+              .getByText('Refreshing heartbeat results…', { exact: true })
+              .waitFor({ state: 'attached' });
             await page.evaluate(
               () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))),
             );
@@ -567,7 +604,9 @@ test(
             pending.resolve();
             faults.resultsGate = null;
           }
-          await section.getByText('Refreshing heartbeat results…', { exact: true }).waitFor({ state: 'detached' });
+          await heartbeatDialog
+            .getByText('Refreshing heartbeat results…', { exact: true })
+            .waitFor({ state: 'detached' });
           assert.ok(
             Math.abs((await result.evaluate(node => node.getBoundingClientRect().top)) - before) <= 1,
             `${width}px refresh completion does not move Google results`,
@@ -576,9 +615,9 @@ test(
         await page.setViewportSize({ width: 1280, height: 900 });
         faults.results = 503;
         await click('Refresh heartbeat results');
-        await section.getByText(/Last loaded information remains visible/).waitFor();
+        await heartbeatDialog.getByText(/Last loaded information remains visible/).waitFor();
         assert.equal(
-          await section
+          await heartbeatDialog
             .getByText('Private safe answer. <script>window.hostile=true</script> No email was sent.', { exact: true })
             .count(),
           1,
@@ -586,8 +625,8 @@ test(
         faults.results = 200;
         await click('Refresh heartbeat results');
         await page.reload();
-        await settings();
-        await section
+        await openConfigure();
+        await heartbeatDialog
           .getByText('Private safe answer. <script>window.hostile=true</script> No email was sent.', { exact: true })
           .waitFor();
       });
@@ -608,7 +647,7 @@ test(
           assert.match(await row.innerText(), /without tools or sending mail/);
           faults.results = 503;
           await click('Refresh heartbeat results');
-          await section.getByText(/Last loaded information remains visible/).waitFor();
+          await heartbeatDialog.getByText(/Last loaded information remains visible/).waitFor();
           assert.equal(await row.getByRole('button', { name: 'Retry processing', exact: true }).isDisabled(), true);
           faults.results = 200;
           await click('Refresh heartbeat results');
@@ -631,7 +670,7 @@ test(
             element.click();
             element.click();
           });
-          await section
+          await heartbeatDialog
             .getByText('Processing retry accepted. Refresh results to check progress.', { exact: true })
             .waitFor();
           await row.getByText('queued', { exact: true }).waitFor();
@@ -640,7 +679,7 @@ test(
           assert.equal(retries().at(-1).body.itemId, failed.id);
           assert.equal(retries().at(-1).body.revision, 1);
           assert.equal(
-            await section
+            await heartbeatDialog
               .getByLabel('Heartbeat retry status', { exact: true })
               .evaluate(element => element === document.activeElement),
             true,
@@ -690,7 +729,7 @@ test(
           assert.equal(retries().length, count + 1);
           faults.results = 503;
           await click('Refresh heartbeat results');
-          await section.getByText(/Last loaded information remains visible/).waitFor();
+          await heartbeatDialog.getByText(/Last loaded information remains visible/).waitFor();
           assert.equal(await button('Recover processing retry').isDisabled(), true);
           faults.results = 200;
           faults.model = 'success';
@@ -701,7 +740,7 @@ test(
           const calls = modelInputs.length;
           await button('Recover processing retry').focus();
           await page.keyboard.press('Enter');
-          await section
+          await heartbeatDialog
             .getByText('Processing retry accepted. Refresh results to check progress.', { exact: true })
             .waitFor();
           assert.equal(retries().length, count + 2);
@@ -911,10 +950,10 @@ test(
         await settings();
         await section.getByRole('region', { name: 'Exact Google action review', exact: true }).scrollIntoViewIfNeeded();
         await page.screenshot({ path: `${shots}approval-unknown-desktop.png`, fullPage: true });
-        await settings();
-        await section.getByRole('heading', { name: 'Gmail heartbeat', exact: true }).scrollIntoViewIfNeeded();
+        await openConfigure();
+        await heartbeatDialog.getByRole('heading', { name: 'Gmail heartbeat', exact: true }).scrollIntoViewIfNeeded();
         await page.screenshot({ path: `${shots}heartbeat-desktop.png`, fullPage: true });
-        await section
+        await heartbeatDialog
           .getByRole('heading', { name: 'Your private heartbeat results', exact: true })
           .scrollIntoViewIfNeeded();
         await page.screenshot({ path: `${shots}results-desktop.png`, fullPage: true });
@@ -927,8 +966,8 @@ test(
           const admin = await newPage('admin');
           await admin.goto(`${origin}/${workspace.slug}/integrations#google-proposals-heading`);
           await admin.getByRole('heading', { name: 'No Google proposals', exact: true }).waitFor();
-          await settings(admin);
-          await admin.getByRole('heading', { name: 'No heartbeat results yet', exact: true }).waitFor();
+          const adminDialog = await openConfigure(admin);
+          await adminDialog.getByRole('heading', { name: 'No heartbeat results yet', exact: true }).waitFor();
           assert.equal((await http(`${base}/heartbeat`, 'GET', undefined, 'admin')).body.revision, 0);
           const own = await http(`${base}/operations/proposals`);
           assert.ok(own.body.proposals.length > 0);
@@ -939,9 +978,9 @@ test(
           assert.equal((await admin.locator('body').innerText()).includes('Private safe answer'), false);
           faults.results = 404;
           await click('Refresh heartbeat results');
-          await section.getByRole('heading', { name: 'Could not load heartbeat results' }).waitFor();
+          await heartbeatDialog.getByRole('heading', { name: 'Could not load heartbeat results' }).waitFor();
           assert.equal(
-            await section
+            await heartbeatDialog
               .getByText('Private safe answer. <script>window.hostile=true</script> No email was sent.', {
                 exact: true,
               })
@@ -950,7 +989,7 @@ test(
           );
           faults.results = 200;
           await admin.close();
-          await section.getByRole('heading', { name: 'Gmail heartbeat', exact: true }).waitFor();
+          await heartbeatDialog.getByRole('heading', { name: 'Gmail heartbeat', exact: true }).waitFor();
           assert.equal(
             await section.getByRole('region', { name: 'Settings', exact: true }).count(),
             0,
@@ -976,8 +1015,9 @@ test(
           ]);
           const other = await newPage('admin');
           await other.goto(`${origin}/${workspace.slug}/integrations#google-workspace`);
-          await other.getByRole('heading', { name: 'No heartbeat results yet', exact: true }).waitFor();
-          assert.equal(await other.getByRole('button', { name: 'Retry processing', exact: true }).count(), 0);
+          const otherDialog = await openConfigure(other);
+          await otherDialog.getByRole('heading', { name: 'No heartbeat results yet', exact: true }).waitFor();
+          assert.equal(await otherDialog.getByRole('button', { name: 'Retry processing', exact: true }).count(), 0);
           const denied = await other.evaluate(
             async ({ url, itemId }) => {
               const response = await fetch(url, {
@@ -1004,6 +1044,7 @@ test(
         'a configuration change in another tab rejects a stale retry and removes the control after a safe read',
         async () => {
           stage = 'stale retry';
+          await openConfigure();
           const row = resultRow('private-failed-mail');
           const saved = (await http(`${base}/heartbeat`)).body;
           assert.equal(
@@ -1022,13 +1063,15 @@ test(
           );
           const count = retries().length;
           await row.getByRole('button', { name: 'Retry processing', exact: true }).click();
-          await section.getByText(/Processing retry was rejected/).waitFor();
+          await heartbeatDialog.getByText(/Processing retry was rejected/).waitFor();
           await row.getByText(/This item cannot be retried because/).waitFor();
           assert.equal(retries().length, count + 1);
           assert.equal(await row.getByRole('button', { name: 'Retry processing', exact: true }).count(), 0);
           assert.equal(await button('Recover processing retry').count(), 0);
           await click('Load saved settings');
-          await section.getByText('Saved settings loaded. Unsaved edits were replaced.', { exact: true }).waitFor();
+          await heartbeatDialog
+            .getByText('Saved settings loaded. Unsaved edits were replaced.', { exact: true })
+            .waitFor();
         },
       );
       await t.test('executing status after navigation, result lifecycle states, pagination, and disable', async () => {
@@ -1064,12 +1107,12 @@ test(
           /Processing failed\./,
           /Cancelled because configuration/,
         ])
-          await section.getByText(text).first().waitFor();
-        await section.getByRole('checkbox', { name: 'Enable Gmail heartbeat', exact: true }).uncheck();
+          await heartbeatDialog.getByText(text).first().waitFor();
+        await heartbeatDialog.getByRole('checkbox', { name: 'Enable Gmail heartbeat', exact: true }).uncheck();
         await click('Save heartbeat settings');
-        await section.getByText('Heartbeat settings saved.', { exact: true }).waitFor();
+        await heartbeatDialog.getByText('Heartbeat settings saved.', { exact: true }).waitFor();
         assert.equal((await http(`${base}/heartbeat`)).body.enabled, false);
-        await section
+        await heartbeatDialog
           .getByText(/This item cannot be retried because/)
           .first()
           .waitFor();
@@ -1083,11 +1126,11 @@ test(
         await click('Refresh heartbeat results');
         await button('Older heartbeat results').waitFor();
         await click('Older heartbeat results');
-        await section
+        await heartbeatDialog
           .getByText('Private safe answer. <script>window.hostile=true</script> No email was sent.', { exact: true })
           .waitFor();
         await click('Newest heartbeat results');
-        await section.getByText('Private page answer 20', { exact: true }).waitFor();
+        await heartbeatDialog.getByText('Private page answer 20', { exact: true }).waitFor();
         for (let index = 0; index < 26; index++)
           await propose({ kind: 'docs.documents.create', title: `Pagination ${index}` });
         await click('Refresh Google proposals');
@@ -1109,10 +1152,10 @@ test(
         faults.status = 200;
         await click('Check again');
         await account.getByText('member@example.com', { exact: true }).waitFor();
-        await settings();
-        await section.getByRole('checkbox', { name: 'Enable Gmail heartbeat', exact: true }).check();
+        await openConfigure();
+        await heartbeatDialog.getByRole('checkbox', { name: 'Enable Gmail heartbeat', exact: true }).check();
         await click('Save heartbeat settings');
-        await section.getByText('Heartbeat settings saved.', { exact: true }).waitFor();
+        await heartbeatDialog.getByText('Heartbeat settings saved.', { exact: true }).waitFor();
         await click('Refresh heartbeat results');
         await button('Older heartbeat results').waitFor();
         await click('Older heartbeat results');
@@ -1143,10 +1186,10 @@ test(
           `${apiOrigin}/v1/google-workspace/callback?state=${encodeURIComponent(url.searchParams.get('state'))}&code=synthetic-reconnect`,
         );
         await page.waitForURL(url => url.pathname.endsWith('/integrations/gmail'));
-        await settings();
-        await section.getByRole('heading', { name: 'Your private heartbeat results', exact: true }).waitFor();
+        await openConfigure();
+        await heartbeatDialog.getByRole('heading', { name: 'Your private heartbeat results', exact: true }).waitFor();
         assert.equal(
-          await section
+          await heartbeatDialog
             .getByText(
               'Reconnect Google and save these settings again to bind future processing to the current account.',
               { exact: true },
@@ -1155,7 +1198,7 @@ test(
           0,
         );
         assert.equal(
-          await section
+          await heartbeatDialog
             .getByText('Private safe answer. <script>window.hostile=true</script> No email was sent.', { exact: true })
             .count(),
           0,

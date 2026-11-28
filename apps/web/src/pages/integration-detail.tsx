@@ -646,7 +646,7 @@ function Accounts({
         <section aria-labelledby={disconnected ? undefined : 'accounts-google'} className="space-y-3 empty:hidden">
           {!disconnected && (
             <h2 id="accounts-google" className="text-base font-semibold">
-              Your Google account
+              Accounts
             </h2>
           )}
           <GoogleAccount workspaceId={workspaceId} />

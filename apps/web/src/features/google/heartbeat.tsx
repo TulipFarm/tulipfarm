@@ -22,10 +22,21 @@ import {
 import { GoogleReadFeedback } from './read';
 import { useGoogleHeartbeat, useGoogleResults, useIntegrationChanges } from '@/features/integrations/queries';
 
-export function GoogleHeartbeat({ workspaceId, available }: { workspaceId: string; available: boolean }) {
+export function GoogleHeartbeat({
+  workspaceId,
+  available,
+  embedded = false,
+}: {
+  workspaceId: string;
+  available: boolean;
+  embedded?: boolean;
+}) {
   const read = useGoogleHeartbeat(workspaceId);
   return (
-    <section aria-labelledby="heartbeat-heading" className="flex min-w-0 flex-col gap-4 border-t border-border pt-5">
+    <section
+      aria-labelledby="heartbeat-heading"
+      className={embedded ? 'flex min-w-0 flex-col gap-4' : 'flex min-w-0 flex-col gap-4 border-t border-border pt-5'}
+    >
       <h3 id="heartbeat-heading" className="font-medium">
         Gmail heartbeat
       </h3>

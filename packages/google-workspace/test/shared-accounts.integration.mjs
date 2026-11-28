@@ -203,3 +203,90 @@ test('multiple personal and shared Google accounts enforce grants, explicit rout
     await f.close();
   }
 });
+
+test('a personal account can be shared in place and reverted back to personal without reconnecting', async () => {
+  const f = await googleFixture();
+  try {
+    const bob = { kind: 'human', userId: randomUUID(), membershipId: randomUUID() };
+    await f.db.platform.query(`INSERT INTO ${f.table('tf_memberships')} (id,user_id,role) VALUES ($1,$2,'member')`, [
+      bob.membershipId,
+      bob.userId,
+    ]);
+    const operations = createGoogleOperations({
+      runtime: f.runtime,
+      integrations: f.service,
+      fetcher: async () => Response.json({ messages: [{ id: 'm-inplace', threadId: 't-inplace' }] }),
+    });
+
+    f.behavior({ account: 'alice-inplace-sub', email: 'hello-team@example.com' });
+    const personal = await f.connect(f.principal, undefined, { ownership: 'personal', label: 'Hello Team' });
+
+    const initialGrants = await f.service.listGrants(f.workspace.id, f.member.userId, personal.integrationId);
+    assert.deepEqual(initialGrants.grants, []);
+    assert.equal(initialGrants.grantsVersion, 1);
+
+    await assert.rejects(f.service.listGrants(f.workspace.id, bob.userId, personal.integrationId), AccessDenied);
+
+    const promoted = await f.service.setGrants(f.workspace.id, f.member.userId, personal.integrationId, {
+      expectedGrantsVersion: 1,
+      grants: [
+        { kind: 'member', membershipId: f.member.membershipId, role: 'manage' },
+        { kind: 'member', membershipId: bob.membershipId, role: 'use' },
+      ],
+    });
+    assert.equal(promoted.grantsVersion, 2);
+
+    const aliceListShared = await f.service.list(f.workspace.id, f.member.userId);
+    assert.equal(aliceListShared[0].ownership, 'shared');
+    assert.equal(aliceListShared[0].canManage, true);
+
+    const bobListShared = await f.service.list(f.workspace.id, bob.userId);
+    assert.equal(bobListShared.length, 1);
+    assert.equal(bobListShared[0].email, 'hello-team@example.com');
+    assert.equal(bobListShared[0].ownership, 'shared');
+    assert.equal(bobListShared[0].canManage, false);
+
+    const readOp = { kind: 'gmail.messages.list', q: 'in:inbox', maxResults: 1 };
+    const bobRead = await operations.read(f.workspace.id, bob.userId, {
+      operation: readOp,
+      integrationId: personal.integrationId,
+    });
+    assert.equal(bobRead.untrusted, true);
+
+    await assert.rejects(
+      f.service.setGrants(f.workspace.id, bob.userId, personal.integrationId, {
+        expectedGrantsVersion: 2,
+        grants: [],
+      }),
+      AccessDenied,
+    );
+
+    const reverted = await f.service.setGrants(f.workspace.id, f.member.userId, personal.integrationId, {
+      expectedGrantsVersion: 2,
+      grants: [],
+    });
+    assert.equal(reverted.grantsVersion, 3);
+    assert.deepEqual(reverted.grants, []);
+
+    const aliceListPersonal = await f.service.list(f.workspace.id, f.member.userId);
+    assert.equal(aliceListPersonal[0].ownership, 'personal');
+    assert.equal(aliceListPersonal[0].canManage, true);
+
+    assert.deepEqual(await f.service.list(f.workspace.id, bob.userId), []);
+    await assert.rejects(
+      operations.read(f.workspace.id, bob.userId, {
+        operation: readOp,
+        integrationId: personal.integrationId,
+      }),
+      AccessDenied,
+    );
+
+    const aliceRead = await operations.read(f.workspace.id, f.member.userId, {
+      operation: readOp,
+      integrationId: personal.integrationId,
+    });
+    assert.equal(aliceRead.untrusted, true);
+  } finally {
+    await f.close();
+  }
+});

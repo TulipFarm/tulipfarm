@@ -324,40 +324,39 @@ test('integration status recovery and Google review lifecycle', { timeout: 480_0
       faults.scopes = allScopes;
     });
 
-    await t.test('an unscoped selector hits another checkbox, named script and pointer and keyboard work', async () => {
-      await page.goto(`${origin}/qa-integrations/integrations`);
-      await listRow('Google Calendar').getByRole('link', { name: 'Google Calendar', exact: true }).click();
-      await account(page);
-      await main.getByRole('checkbox', { name: 'Enable Gmail heartbeat', exact: true }).waitFor();
-      await page
-        .getByRole('region', { name: 'Action: Create document', exact: true })
-        .getByRole('button', { name: 'View action', exact: true })
-        .click();
-      await checkbox.waitFor();
-      const first = page.locator('main [role=checkbox]').first();
-      assert.equal(
-        await first.evaluate((element, target) => element === target, await checkbox.elementHandle()),
-        false,
-      );
-      await first.evaluate(element => element.click());
-      assert.equal(await checkbox.isChecked(), false);
-      assert.equal(await approve.isDisabled(), true);
-      await checkbox.evaluate(element => element.click());
-      assert.equal(await checkbox.isChecked(), true);
-      assert.equal(await approve.isEnabled(), true);
-      await checkbox.uncheck();
-      assert.equal(await approve.isDisabled(), true);
-      await checkbox.focus();
-      await page.keyboard.press('Space');
-      assert.equal(await approve.isEnabled(), true);
-      await checkbox.uncheck();
-      await checkbox.check();
-      assert.equal(await approve.isEnabled(), true);
-      // The compact review names its payload disclosure Details since cloud 51d9a255 (#1053), src/features/google/proposals.tsx.
-      await review.getByRole('button', { name: 'Details', exact: true }).click();
-      await checkReview();
-      assert.deepEqual(writes, []);
-    });
+    await t.test(
+      'heartbeat lives in Configure dialog and approval checkbox works via script, pointer, and keyboard',
+      async () => {
+        await page.goto(`${origin}/qa-integrations/integrations`);
+        await listRow('Google Calendar').getByRole('link', { name: 'Google Calendar', exact: true }).click();
+        await account(page);
+        await main.getByRole('button', { name: 'Configure', exact: true }).click();
+        const configureDialog = page.getByRole('dialog');
+        await configureDialog.getByRole('checkbox', { name: 'Enable Gmail heartbeat', exact: true }).waitFor();
+        await configureDialog.getByRole('button', { name: 'Done', exact: true }).click();
+        await configureDialog.waitFor({ state: 'hidden' });
+        await page
+          .getByRole('region', { name: 'Action: Create document', exact: true })
+          .getByRole('button', { name: 'View action', exact: true })
+          .click();
+        await checkbox.waitFor();
+        await checkbox.evaluate(element => element.click());
+        assert.equal(await checkbox.isChecked(), true);
+        assert.equal(await approve.isEnabled(), true);
+        await checkbox.uncheck();
+        assert.equal(await approve.isDisabled(), true);
+        await checkbox.focus();
+        await page.keyboard.press('Space');
+        assert.equal(await approve.isEnabled(), true);
+        await checkbox.uncheck();
+        await checkbox.check();
+        assert.equal(await approve.isEnabled(), true);
+        // The compact review names its payload disclosure Details since cloud 51d9a255 (#1053), src/features/google/proposals.tsx.
+        await review.getByRole('button', { name: 'Details', exact: true }).click();
+        await checkReview();
+        assert.deepEqual(writes, []);
+      },
+    );
     await t.test(
       'review survives focus failure, recovery, workspace refresh, tab return, and session timer',
       async () => {
