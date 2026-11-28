@@ -54,6 +54,7 @@ import { createKnowledgeActivities } from './knowledge-activities.ts';
 import { knowledgeMediaRecognition } from './media-recognition.ts';
 import { createFiles } from '@tulipfarm/files';
 import { createKnowledgeKeepParts } from './knowledge-keep-composition.ts';
+import { createKnowledgeRetentionParts } from './knowledge-retention-composition.ts';
 import { createGoogleKnowledgeParts } from './knowledge-google-composition.ts';
 import { createSlackKnowledgeParts } from './knowledge-slack-composition.ts';
 import { createGitHubKnowledgeParts } from './knowledge-github-composition.ts';
@@ -576,6 +577,7 @@ async function run() {
         },
       });
       const keep = createKnowledgeKeepParts({ runtime });
+      const retention = createKnowledgeRetentionParts({ runtime });
       return {
         ingest: createKnowledgeActivities(runtime, chatObjects ?? undefined, knowledgeMediaRecognition(runtime)),
         google: google.activities,
@@ -583,6 +585,7 @@ async function run() {
         github: github.activities,
         atlassian: atlassian.activities,
         defaults: defaults.activities,
+        retention: retention.activities,
         ...(keep ? { keep: keep.activities } : {}),
       };
     };

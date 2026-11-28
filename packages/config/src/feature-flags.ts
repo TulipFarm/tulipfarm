@@ -192,6 +192,13 @@ export const featureFlags = {
     scope: 'global',
     env: 'FEATURE_FLAG_CHAT_ONBOARDING',
   },
+  'knowledge-retention-purge': {
+    description:
+      'Deletes removed Knowledge for good once its 30-day retention has passed: tombstoned documents with their revisions, originals and chunks, then removed sources with no documents left. Off keeps them, as a kill switch.',
+    default: true,
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_KNOWLEDGE_RETENTION_PURGE',
+  },
 } as const satisfies Record<string, FeatureFlagDefinition>;
 
 export type FeatureFlag = keyof typeof featureFlags;
