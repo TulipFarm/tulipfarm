@@ -46,6 +46,13 @@ export {
   type KnowledgeKeepWork,
 } from './internal/keep.ts';
 export {
+  createKnowledgeRetention,
+  knowledgePurgeBatch,
+  knowledgePurgeVersion,
+  type KnowledgeRetention,
+  type KnowledgeRetentionDependencies,
+} from './internal/retention.ts';
+export {
   createKnowledgeSourceFailures,
   knowledgeSourceFailureLimit,
   knowledgeSourceFailureSchema,

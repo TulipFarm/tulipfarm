@@ -6,3 +6,4 @@ export { githubKnowledgeSync } from './knowledge-github-workflows.ts';
 export { atlassianKnowledgeSync } from './knowledge-atlassian-workflows.ts';
 export { knowledgeDefaultsSync } from './knowledge-defaults-workflows.ts';
 export { knowledgeKeepSync } from './knowledge-keep-workflows.ts';
+export { knowledgeRetentionPurge } from './knowledge-retention-workflows.ts';

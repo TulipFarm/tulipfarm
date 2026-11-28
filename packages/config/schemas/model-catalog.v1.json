@@ -188,7 +188,8 @@
                   "decisions-compaction-filter",
                   "decisions-context-rerank",
                   "decisions-table-query-filter",
-                  "decisions-eval-judge"
+                  "decisions-eval-judge",
+                  "knowledge-retention-purge"
                 ]
               },
               {
@@ -556,7 +557,8 @@
                   "decisions-compaction-filter",
                   "decisions-context-rerank",
                   "decisions-table-query-filter",
-                  "decisions-eval-judge"
+                  "decisions-eval-judge",
+                  "knowledge-retention-purge"
                 ]
               },
               {

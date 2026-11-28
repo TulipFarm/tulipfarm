@@ -44,7 +44,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test test/*.test.mjs",
-    "test:integration": "node --test test/storage.integration.mjs test/local.integration.mjs test/learned.integration.mjs test/media.integration.mjs test/google-media.integration.mjs test/keep.integration.mjs"
+    "test:integration": "node --test test/storage.integration.mjs test/local.integration.mjs test/learned.integration.mjs test/media.integration.mjs test/google-media.integration.mjs test/keep.integration.mjs test/retention.integration.mjs"
   },
   "dependencies": {
     "@tulipfarm/access": "workspace:*",

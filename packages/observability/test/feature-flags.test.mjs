@@ -294,6 +294,7 @@ test('a snapshot uses evaluateMany once per scope; false decides, missing and fa
     'decisions-context-rerank': false,
     'decisions-table-query-filter': false,
     'decisions-eval-judge': false,
+    'knowledge-retention-purge': true,
     'chat-onboarding': false,
   });
   assert.deepEqual(failed, {
@@ -320,6 +321,7 @@ test('a snapshot uses evaluateMany once per scope; false decides, missing and fa
     'decisions-context-rerank': false,
     'decisions-table-query-filter': false,
     'decisions-eval-judge': false,
+    'knowledge-retention-purge': true,
     'chat-onboarding': false,
   });
 });

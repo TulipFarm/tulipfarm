@@ -9,6 +9,7 @@ import {
   createGoogleKnowledge,
   createKnowledgeKeepFeed,
   createKnowledgeKeepIndex,
+  createKnowledgeRetention,
   createKnowledgeSearch,
   createLocalKnowledge,
   createSlackKnowledge,
@@ -28,6 +29,7 @@ import { atlassianCorpusFromEnvironment } from '@tulipfarm/atlassian/corpus';
 import type { createTemporalClient } from './temporal.ts';
 import { githubKnowledgeEventsFromEnvironment } from './knowledge-github-events.ts';
 import { registerKnowledgeKeepDispatch } from './knowledge-keep-dispatch.ts';
+import { registerKnowledgeRetentionDispatch } from './knowledge-retention-dispatch.ts';
 import { registerGoogleKnowledgeDispatch } from './knowledge-google-dispatch.ts';
 import { registerSlackKnowledgeDispatch } from './knowledge-slack-dispatch.ts';
 import { registerGitHubKnowledgeDispatch } from './knowledge-github-dispatch.ts';
@@ -122,6 +124,11 @@ export function createKnowledgeServices(dependencies: KnowledgeServiceDependenci
   });
   const githubEvents = githubKnowledgeEventsFromEnvironment(dependencies.pool, dependencies.env ?? process.env);
   const keep = createKnowledgeKeepFeed({ runtime: dependencies.runtime, ...keepClient });
+  const { keepClient: client } = dependencies;
+  const retention = createKnowledgeRetention({
+    runtime: dependencies.runtime,
+    ...(client ? { keepLive: () => client() !== undefined } : {}),
+  });
   return {
     service,
     conversations,
@@ -133,6 +140,7 @@ export function createKnowledgeServices(dependencies: KnowledgeServiceDependenci
     search,
     githubEvents,
     keep,
+    retention,
   };
 }
 
@@ -144,6 +152,7 @@ export function registerKnowledgeSweeps(
   const { pool, temporal } = dependencies;
   registerDefaultKnowledgeDispatch(app, { pool, temporal, service: services.defaults });
   registerKnowledgeKeepDispatch(app, { pool, temporal, feed: services.keep });
+  registerKnowledgeRetentionDispatch(app, { pool, temporal, retention: services.retention });
   registerGoogleKnowledgeDispatch(app, { pool, temporal, service: services.google });
   registerSlackKnowledgeDispatch(app, { pool, temporal, service: services.slack });
   registerGitHubKnowledgeDispatch(app, { pool, temporal, service: services.github, events: services.githubEvents });
