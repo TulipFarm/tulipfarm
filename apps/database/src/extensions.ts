@@ -45,5 +45,21 @@ export async function installExtensions(client: Client, azureManaged: boolean) {
     await client.query(`REVOKE ALL ON ALL FUNCTIONS IN SCHEMA ${escapeIdentifier(extension.schema)} FROM PUBLIC`);
     await client.query(`REVOKE ALL ON TYPE ${escapeIdentifier(extension.schema)}.vector FROM PUBLIC`);
   }
+  await restrictQueryStatistics(client);
   process.stdout.write(`Verified ${extensions.length} configured extensions.\n`);
+}
+
+// pg_stat_statements grants its views to PUBLIC, which the release privilege audits reject for every role.
+export async function restrictQueryStatistics(client: Client) {
+  const members = await client.query<{ object: string; relation: boolean }>(
+    `SELECT CASE WHEN d.classid='pg_catalog.pg_class'::regclass THEN d.objid::regclass::text
+      ELSE d.objid::regprocedure::text END AS object, d.classid='pg_catalog.pg_class'::regclass AS relation
+    FROM pg_catalog.pg_depend d JOIN pg_catalog.pg_extension e ON e.oid=d.refobjid
+    WHERE d.refclassid='pg_catalog.pg_extension'::regclass AND d.deptype='e' AND e.extname='pg_stat_statements'
+      AND d.classid IN ('pg_catalog.pg_class'::regclass, 'pg_catalog.pg_proc'::regclass)`,
+  );
+  for (const { object, relation } of members.rows) {
+    await client.query(`REVOKE ALL ON ${relation ? 'TABLE' : 'FUNCTION'} ${object} FROM PUBLIC`);
+    if (relation) await client.query(`GRANT SELECT ON TABLE ${object} TO pg_read_all_stats`);
+  }
 }
