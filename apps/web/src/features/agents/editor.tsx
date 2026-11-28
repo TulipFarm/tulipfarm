@@ -853,6 +853,20 @@ function AgentDefaultsSection({
 }) {
   const [teamConnections, setTeamConnections] = useState<Array<{ id: string; name: string }>>([]);
   const [googleAccounts, setGoogleAccounts] = useState<GoogleAccountSummary[]>([]);
+  const [googleLoaded, setGoogleLoaded] = useState(false);
+
+  const loadGoogleAccounts = () => {
+    if (googleLoaded) return;
+    setGoogleLoaded(true);
+    googleApi
+      .accounts(workspaceId)
+      .then(result => {
+        setGoogleAccounts(result.accounts);
+      })
+      .catch(() => {
+        setGoogleLoaded(false);
+      });
+  };
 
   useEffect(() => {
     let active = true;
@@ -872,10 +886,20 @@ function AgentDefaultsSection({
       .catch(() => {
         // Optional helper list; users can still configure default context and repository.
       });
+    return () => {
+      active = false;
+    };
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (!draft.defaultGoogleIntegrationId || googleLoaded) return;
+    let active = true;
     googleApi
       .accounts(workspaceId)
       .then(result => {
-        if (active) setGoogleAccounts(result.accounts);
+        if (!active) return;
+        setGoogleAccounts(result.accounts);
+        setGoogleLoaded(true);
       })
       .catch(() => {
         // Optional helper list; users can still configure other defaults.
@@ -883,7 +907,7 @@ function AgentDefaultsSection({
     return () => {
       active = false;
     };
-  }, [workspaceId]);
+  }, [workspaceId, draft.defaultGoogleIntegrationId, googleLoaded]);
 
   const selectedGoogle = googleAccounts.find(account => account.integrationId === draft.defaultGoogleIntegrationId);
   const toggleAutonomousOp = (op: GoogleAutonomousWriteKind, checked: boolean) => {
@@ -996,6 +1020,9 @@ function AgentDefaultsSection({
         <Select
           value={draft.defaultGoogleIntegrationId || '__none__'}
           disabled={disabled}
+          onOpenChange={open => {
+            if (open) loadGoogleAccounts();
+          }}
           onValueChange={next => {
             if (!next || next === '__none__') {
               onChange({
@@ -1074,6 +1101,74 @@ function AgentDefaultsSection({
   );
 }
 
+function EscalationTargetPicker({
+  workspaceId,
+  kind,
+  selectedMembershipIds,
+  selectedTeamId,
+  disabled,
+  onChange,
+}: {
+  workspaceId: string;
+  kind: 'people' | 'team';
+  selectedMembershipIds: string[];
+  selectedTeamId: string;
+  disabled: boolean;
+  onChange: (patch: Partial<DefinitionDraft>) => void;
+}) {
+  const people = usePeople(workspaceId);
+  const toggleMember = (memberId: string, checked: boolean) => {
+    const next = checked
+      ? [...new Set([...selectedMembershipIds, memberId])]
+      : selectedMembershipIds.filter(id => id !== memberId);
+    onChange({ escalationTargetMembershipIds: next });
+  };
+  if (kind === 'people') {
+    return (
+      <fieldset disabled={disabled} className="space-y-2">
+        <legend className="text-xs font-medium text-muted-foreground">Choose people</legend>
+        {people.members.length === 0 ? (
+          <p className="text-xs text-muted-foreground">Loading workspace members...</p>
+        ) : (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {people.members.map(member => (
+              <div key={member.id} className="flex items-center gap-2">
+                <Checkbox
+                  id={`escalation-member-${member.id}`}
+                  checked={selectedMembershipIds.includes(member.id)}
+                  onCheckedChange={checked => toggleMember(member.id, checked === true)}
+                />
+                <Label htmlFor={`escalation-member-${member.id}`}>{member.name}</Label>
+              </div>
+            ))}
+          </div>
+        )}
+      </fieldset>
+    );
+  }
+  return (
+    <Field id="escalation-team-select" label="Team" required>
+      <Select
+        value={selectedTeamId || '__none__'}
+        disabled={disabled}
+        onValueChange={next => onChange({ escalationTargetTeamId: !next || next === '__none__' ? '' : next })}
+      >
+        <SelectTrigger id="escalation-team-select">
+          <SelectValue>{people.teams.find(team => team.id === selectedTeamId)?.name ?? 'Choose a team'}</SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__none__">Choose a team</SelectItem>
+          {people.teams.map(team => (
+            <SelectItem key={team.id} value={team.id}>
+              {team.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
 function AgentEscalationSection({
   workspaceId,
   draft,
@@ -1085,14 +1180,6 @@ function AgentEscalationSection({
   disabled: boolean;
   onChange: (patch: Partial<DefinitionDraft>) => void;
 }) {
-  const people = usePeople(workspaceId);
-  const toggleMember = (memberId: string, checked: boolean) => {
-    const next = checked
-      ? [...new Set([...draft.escalationTargetMembershipIds, memberId])]
-      : draft.escalationTargetMembershipIds.filter(id => id !== memberId);
-    onChange({ escalationTargetMembershipIds: next });
-  };
-
   return (
     <FormSection
       title="Escalation & human check-ins"
@@ -1139,49 +1226,15 @@ function AgentEscalationSection({
               </div>
             </RadioGroup>
           </fieldset>
-          {draft.escalationTargetKind === 'people' && (
-            <fieldset disabled={disabled} className="space-y-2">
-              <legend className="text-xs font-medium text-muted-foreground">Choose people</legend>
-              {people.members.length === 0 ? (
-                <p className="text-xs text-muted-foreground">Loading workspace members...</p>
-              ) : (
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {people.members.map(member => (
-                    <div key={member.id} className="flex items-center gap-2">
-                      <Checkbox
-                        id={`escalation-member-${member.id}`}
-                        checked={draft.escalationTargetMembershipIds.includes(member.id)}
-                        onCheckedChange={checked => toggleMember(member.id, checked === true)}
-                      />
-                      <Label htmlFor={`escalation-member-${member.id}`}>{member.name}</Label>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </fieldset>
-          )}
-          {draft.escalationTargetKind === 'team' && (
-            <Field id="escalation-team-select" label="Team" required>
-              <Select
-                value={draft.escalationTargetTeamId || '__none__'}
-                disabled={disabled}
-                onValueChange={next => onChange({ escalationTargetTeamId: !next || next === '__none__' ? '' : next })}
-              >
-                <SelectTrigger id="escalation-team-select">
-                  <SelectValue>
-                    {people.teams.find(team => team.id === draft.escalationTargetTeamId)?.name ?? 'Choose a team'}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">Choose a team</SelectItem>
-                  {people.teams.map(team => (
-                    <SelectItem key={team.id} value={team.id}>
-                      {team.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
+          {draft.escalationTargetKind !== 'owner' && (
+            <EscalationTargetPicker
+              workspaceId={workspaceId}
+              kind={draft.escalationTargetKind}
+              selectedMembershipIds={draft.escalationTargetMembershipIds}
+              selectedTeamId={draft.escalationTargetTeamId}
+              disabled={disabled}
+              onChange={onChange}
+            />
           )}
         </div>
       )}
