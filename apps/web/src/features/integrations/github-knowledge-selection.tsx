@@ -339,12 +339,12 @@ export function GitHubSelectionForm({
                 value: 'all',
                 label: 'All repositories',
                 description:
-                  'Every repository this account can read, including new ones. Leave repositories out later in the source settings.',
+                  'Every repository this account can read, including new ones, except forks. Leave repositories out later in the source settings.',
               },
               {
                 value: 'chosen',
                 label: 'Only repositories I choose',
-                description: `Pick up to ${repositoryLimit.toLocaleString()} repositories.`,
+                description: `Pick up to ${repositoryLimit.toLocaleString()} repositories, including forks.`,
               },
             ]}
           />
@@ -369,16 +369,18 @@ export function GitHubSelectionForm({
                       </Button>
                     </StatePanel>
                   );
-                if (mode === 'all')
+                if (mode === 'all') {
+                  const indexed = data.items.filter(item => !item.fork).length;
                   return (
                     <>
                       <p role="status" className="text-sm">
-                        {data.items.length.toLocaleString()} {data.items.length === 1 ? 'repository' : 'repositories'}{' '}
-                        will be indexed now. New repositories are added on each sync.
+                        {indexed.toLocaleString()} {indexed === 1 ? 'repository' : 'repositories'} will be indexed now.
+                        New repositories are added on each sync.
                       </p>
                       {importSettings}
                     </>
                   );
+                }
                 const owners = [...new Set(data.items.map(item => item.fullName.split('/')[0]!))].sort((a, b) =>
                   a.localeCompare(b),
                 );

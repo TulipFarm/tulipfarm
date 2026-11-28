@@ -30,9 +30,13 @@ export function GitHubSourceSettings({
 }) {
   const formId = useId();
   const repositories = source.repositories ?? [];
+  const all = source.selection.scope === 'all';
+  // An all-repositories source always skips forks, so their rows can't be included and aren't counted.
+  const skipped = (item: (typeof repositories)[number]) => all && item.fork;
+  const choosable = repositories.filter(item => !skipped(item));
   const [content, setContent] = useState(() => githubContentValue(source.selection));
   const [excluded, setExcluded] = useState(
-    () => new Set(repositories.filter(item => item.excluded).map(item => item.repositoryId)),
+    () => new Set(choosable.filter(item => item.excluded).map(item => item.repositoryId)),
   );
   const [search, setSearch] = useState('');
   const [limit, setLimit] = useState(50);
@@ -45,12 +49,11 @@ export function GitHubSourceSettings({
   const checked = checkGitHubContent(content);
   const filtered = filterGitHubRepositories(repositories, search, '');
   const visible = filtered.slice(0, limit);
-  const included = repositories.length - excluded.size;
-  const all = source.selection.scope === 'all';
+  const included = choosable.length - excluded.size;
   const initial = githubContentValue(source.selection);
   const dirty =
     JSON.stringify(content) !== JSON.stringify(initial) ||
-    repositories.some(item => item.excluded !== excluded.has(item.repositoryId));
+    choosable.some(item => item.excluded !== excluded.has(item.repositoryId));
   return (
     <section aria-label="GitHub source settings" className="space-y-4 rounded-lg bg-muted p-4">
       <Form
@@ -75,7 +78,7 @@ export function GitHubSourceSettings({
             <h5 className="text-sm font-medium">Repositories</h5>
             <p className="text-sm text-muted-foreground">
               {all
-                ? 'Every repository this GitHub account can read is indexed, and new repositories are added automatically. Clear a repository to leave it out; it stays out until you select it again. A repository one of your chosen-repository sources indexes is indexed there instead, and comes back here when that source no longer indexes it.'
+                ? 'Every repository this GitHub account can read is indexed, except forks, and new repositories are added automatically. Clear a repository to leave it out; it stays out until you select it again. A repository one of your chosen-repository sources indexes is indexed there instead, and comes back here when that source no longer indexes it. To index a fork, add it as a new source with Only repositories I choose.'
                 : 'Every repository in this source is indexed. Clear a repository to leave it out.'}
             </p>
             {!repositories.length ? (
@@ -96,8 +99,7 @@ export function GitHubSourceSettings({
                   }}
                 />
                 <p role="status" className="text-xs text-muted-foreground">
-                  {included} of {repositories.length} {repositories.length === 1 ? 'repository' : 'repositories'}{' '}
-                  included
+                  {included} of {choosable.length} {choosable.length === 1 ? 'repository' : 'repositories'} included
                 </p>
                 {!filtered.length ? (
                   <StatePanel kind="empty" heading="h3" title="No repositories match" description="Try another name.">
@@ -108,19 +110,27 @@ export function GitHubSourceSettings({
                 ) : (
                   <GitHubRepositoryChoices
                     legend="Included repositories"
-                    value={visible.filter(item => !excluded.has(item.repositoryId)).map(item => item.repositoryId)}
+                    value={visible
+                      .filter(item => !skipped(item) && !excluded.has(item.repositoryId))
+                      .map(item => item.repositoryId)}
                     options={visible.map(item => ({
                       repositoryId: item.repositoryId,
                       fullName: item.fullName,
                       visibility: item.visibility,
-                      detail: item.indexedBy ? `indexed by ${item.indexedBy.title}` : undefined,
+                      detail: skipped(item)
+                        ? 'fork, skipped here'
+                        : item.indexedBy
+                          ? `indexed by ${item.indexedBy.title}`
+                          : undefined,
+                      disabled: skipped(item),
                     }))}
                     error={attempted && !included ? 'Keep at least one repository, or remove the source.' : undefined}
                     onValueChange={ids =>
                       setExcluded(current => {
                         const next = new Set(current);
                         for (const item of visible)
-                          if (ids.includes(item.repositoryId)) next.delete(item.repositoryId);
+                          if (skipped(item)) continue;
+                          else if (ids.includes(item.repositoryId)) next.delete(item.repositoryId);
                           else next.add(item.repositoryId);
                         return next;
                       })

@@ -16,6 +16,7 @@ const repositorySchema = z.object({
   fullName: z.string(),
   visibility: z.enum(['public', 'private', 'internal']),
   title: z.string(),
+  fork: z.boolean().optional(),
 });
 const sourceSchema = z.object({
   sourceId: z.uuid(),

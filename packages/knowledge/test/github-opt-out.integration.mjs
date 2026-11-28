@@ -231,15 +231,30 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         fake.repos.get('5').fork = true;
         await sync();
         await sync();
-        const repositories = (await listed()).repositories;
-        assert.ok(!repositories.some(r => r.repositoryId === '2000'), 'a new fork is never followed');
+        let source = await listed();
         assert.deepEqual(
-          repositories.filter(r => r.excluded).map(r => r.repositoryId),
-          ['3', '5'],
-          'a followed repository now listed as a fork is excluded',
+          source.repositories.filter(r => r.fork).map(r => [r.repositoryId, r.excluded, r.status]),
+          [
+            ['5', true, 'excluded'],
+            ['2000', true, 'excluded'],
+          ],
+          'forks keep excluded rows: a new fork is never indexed and a followed repository that became a fork is withdrawn',
         );
+        assert.equal(source.repositoryCounts.excluded, 1, 'only the member’s own exclusion is counted');
         assert.ok(!(await live()).some(id => id.includes(':5:')), 'the fork’s documents are tombstoned');
         assert.ok(!fake.lists.some(l => l.id === '2000'));
+        source = await github.settings(ws.id, ws.userId, sourceId, {
+          commandId: randomUUID(),
+          kinds: allKinds,
+          excludePaths: [],
+          after: null,
+          excludedRepositories: ['3'],
+        });
+        assert.deepEqual(
+          source.repositories.filter(r => r.excluded).map(r => r.repositoryId),
+          ['3', '5', '2000'],
+          'settings cannot include a fork in an all-repositories source',
+        );
 
         const chosen = await github.configure(ws.id, ws.userId, {
           commandId: randomUUID(),
@@ -307,7 +322,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         await github.process(work);
         const repositories = (await listed()).repositories;
         assert.equal(repositories.length, 1000);
-        assert.equal(repositories.filter(r => r.excluded).length, 2);
+        assert.equal(repositories.filter(r => r.excluded).length, 3);
       });
     } finally {
       await runtime?.close?.();
