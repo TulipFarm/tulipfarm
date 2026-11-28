@@ -182,6 +182,8 @@ export type GitHubRepository = {
   title: string;
   /** The numeric ID of the account that owns the repository, which workflow GitHub triggers match on. */
   ownerId?: string;
+  /** Set by discovery when the repository is a fork. An all-repositories source skips forks. */
+  fork?: boolean;
 };
 // `readable` is the reader's own current pull access, observed with their own account at `accessedAt`.
 export type GitHubRepositoryAccess = GitHubRepository & { accessedAt: string; readable: boolean };

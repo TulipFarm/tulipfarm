@@ -20,9 +20,10 @@ const allKinds = ['code', 'commits', 'discussions', 'docs', 'issues', 'pulls'];
 function fakeGitHub(binding) {
   const repos = new Map();
   const lists = [];
-  const add = (id, { docs = {}, issues = {} } = {}) =>
+  const add = (id, { docs = {}, issues = {}, fork = false } = {}) =>
     repos.set(String(id), {
       fullName: `acme/repo-${id}`,
+      fork,
       docs: new Map(Object.entries(docs)),
       issues: new Map(Object.entries(issues)),
     });
@@ -52,6 +53,7 @@ function fakeGitHub(binding) {
     fullName: repos.get(id).fullName,
     visibility: 'private',
     title: repos.get(id).fullName,
+    ...(repos.get(id).fork ? { fork: true } : {}),
   });
   const provider = {
     discover: async (_w, _u, accountId, cursor) => {
@@ -135,13 +137,13 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           }),
         );
       let sourceId;
-      const sync = async () => {
+      const sync = async (id = sourceId) => {
         for (let i = 0; i < 200; i++) {
           await db.platform.query(
             `UPDATE ${table('github_sources')} SET next_attempt_at=clock_timestamp() WHERE source_id=$1`,
-            [sourceId],
+            [id],
           );
-          const work = (await github.due(ws.id)).find(w => w.sourceId === sourceId);
+          const work = (await github.due(ws.id)).find(w => w.sourceId === id);
           if (!work) return;
           if ((await github.process(work)).disposition === 'ready') return;
         }
@@ -223,6 +225,39 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         assert.ok(!fake.lists.some(l => l.id === '3'), 'an excluded repository is never listed');
       });
 
+      await t.test('all repositories skips forks; a fork chosen by name is still indexed', async () => {
+        assert.ok((await live()).includes('doc:5:README.md'));
+        fake.add(2000, { docs: { 'README.md': 'upstream' }, fork: true });
+        fake.repos.get('5').fork = true;
+        await sync();
+        await sync();
+        const repositories = (await listed()).repositories;
+        assert.ok(!repositories.some(r => r.repositoryId === '2000'), 'a new fork is never followed');
+        assert.deepEqual(
+          repositories.filter(r => r.excluded).map(r => r.repositoryId),
+          ['3', '5'],
+          'a followed repository now listed as a fork is excluded',
+        );
+        assert.ok(!(await live()).some(id => id.includes(':5:')), 'the fork’s documents are tombstoned');
+        assert.ok(!fake.lists.some(l => l.id === '2000'));
+
+        const chosen = await github.configure(ws.id, ws.userId, {
+          commandId: randomUUID(),
+          accountId,
+          selection: { repositories: ['acme/repo-2000'], kinds: ['docs'] },
+          memberIds: [],
+        });
+        await sync(chosen.sourceId);
+        const docs = (
+          await db.platform.query(
+            `SELECT i.native_id FROM ${table('github_items')} i JOIN ${table('documents')} d ON d.id=i.document_id
+            WHERE i.source_id=$1 AND d.tombstoned_at IS NULL`,
+            [chosen.sourceId],
+          )
+        ).rows.map(r => r.native_id);
+        assert.ok(docs.includes('doc:2000:README.md'), 'a fork selected by name is indexed');
+      });
+
       await t.test('opt-out path patterns and kinds withdraw matching content; a cutoff is optional', async () => {
         await github.settings(ws.id, ws.userId, sourceId, {
           commandId: randomUUID(),
@@ -272,7 +307,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         await github.process(work);
         const repositories = (await listed()).repositories;
         assert.equal(repositories.length, 1000);
-        assert.equal(repositories.filter(r => r.excluded).length, 1);
+        assert.equal(repositories.filter(r => r.excluded).length, 2);
       });
     } finally {
       await runtime?.close?.();

@@ -56,6 +56,7 @@ const repositorySchema = z.object({
   description: z.string().max(4096).nullable().optional(),
   permissions: z.object({ pull: z.boolean() }).partial().optional(),
   owner: z.object({ id: z.number().int().positive() }).optional(),
+  fork: z.boolean().optional(),
 });
 type RepositoryBody = z.infer<typeof repositorySchema>;
 const userSchema = z
@@ -1769,7 +1770,9 @@ export function createGitHubCorpusProvider(options: {
         const items = parse(z.array(z.unknown()).max(100), response.json());
         const repositories = items.flatMap(item => {
           const parsed = repositorySchema.safeParse(item);
-          return parsed.success && parsed.data.permissions?.pull !== false ? [repository(parsed.data)] : [];
+          return parsed.success && parsed.data.permissions?.pull !== false
+            ? [{ ...repository(parsed.data), ...(parsed.data.fork ? { fork: true } : {}) }]
+            : [];
         });
         return {
           binding,

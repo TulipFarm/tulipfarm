@@ -173,10 +173,14 @@ test('selection contract bounds repositories, kinds and ordering', () => {
 test('discovery and selection use the caller own account and resolve stable repository IDs', async () => {
   const { provider, github } = setup();
   github.addRepo({ id: 7002, fullName: 'acme/secret', readers: [999] });
+  github.addRepo({ id: 7003, fullName: 'reader/upstream', readers: [101], fork: true });
   const found = await provider.discover(workspaceId, 'reader', accountId);
   assert.deepEqual(
-    found.items.map(item => [item.repositoryId, item.fullName, item.visibility]),
-    [['7001', 'acme/handbook', 'private']],
+    found.items.map(item => [item.repositoryId, item.fullName, item.visibility, item.fork]),
+    [
+      ['7001', 'acme/handbook', 'private', undefined],
+      ['7003', 'reader/upstream', 'private', true],
+    ],
   );
   assert.deepEqual(found.binding, { accountId, accountGeneration: 4, githubUserId: '101', login: 'reader' });
   const inspected = await provider.inspectSelection(workspaceId, 'reader', accountId, selection);

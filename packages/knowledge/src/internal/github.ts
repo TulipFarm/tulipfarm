@@ -551,7 +551,7 @@ export function createGitHubKnowledge({
     await memberRead(workspaceId, userId, async () => undefined);
     const result = await provider.discover(workspaceId, userId, accountId, cursor);
     await memberRead(workspaceId, userId, (tx, human) => ownAccount(tx, human, result.binding));
-    return result;
+    return { ...result, items: result.items.map(({ fork: _fork, ...r }) => r) };
   }
   async function configure(workspaceId: string, userId: string, value: unknown) {
     denyMcpEgress();
@@ -1699,19 +1699,50 @@ export function createGitHubKnowledge({
   // Adds every repository the owner's account can now read to an all-repositories source. Repositories the member
   // excluded keep their row and stay excluded; repositories another all-repositories source of the member holds are
   // left to it. A repository a chosen-repository source owns gets a row so settings can name that source, but is skipped.
+  // Forks are never added, and a repository already followed that is now listed as a fork is excluded and withdrawn.
   async function follow(work: GitHubKnowledgeWork, token: string, s: Source) {
     const found = new Map<string, GitHubRepository>();
+    const forks = new Set<string>();
     let page: string | undefined;
     for (let pages = 0; pages < 100 && found.size < githubCorpusLimits.repositories; pages++) {
       const result = await provider.discover(work.workspaceId, s.owner_user_id, s.binding.accountId, page, {
         includeUnreadable: true,
       });
       if (result.binding.githubUserId !== s.binding.githubUserId) throw new GitHubCorpusError('stale-integration');
-      for (const r of result.items) found.set(r.repositoryId, r);
+      for (const r of result.items) {
+        if (r.fork) forks.add(r.repositoryId);
+        else found.set(r.repositoryId, r);
+      }
       if (!result.nextCursor || result.nextCursor === page) break;
       page = result.nextCursor;
     }
     await fenced(work, token, async tx => {
+      if (forks.size) {
+        const withdrawn = z
+          .array(z.object({ repository_id: z.string() }))
+          .parse(
+            (
+              await tx.client.query(
+                `UPDATE ${table(tx, 'github_repositories')} SET excluded=true WHERE source_id=$1 AND NOT excluded AND repository_id=ANY($2::text[]) RETURNING repository_id`,
+                [s.source_id, [...forks]],
+              )
+            ).rows,
+          )
+          .map(row => row.repository_id);
+        if (withdrawn.length) {
+          await tx.client.query(
+            `UPDATE ${table(tx, 'documents')} d SET tombstoned_at=COALESCE(d.tombstoned_at,clock_timestamp()),retain_until=COALESCE(d.retain_until,clock_timestamp()+interval '30 days'),lexical_publication_id=NULL
+            FROM ${table(tx, 'github_items')} i WHERE i.source_id=$1 AND d.id=i.document_id AND i.repository_id=ANY($2::text[])`,
+            [s.source_id, withdrawn],
+          );
+          for (const repositoryId of withdrawn) await invalidate(tx, s.source_id, repositoryId);
+          if (storesCommits(tx))
+            await tx.client.query(
+              `UPDATE ${table(tx, 'github_repositories')} SET commit_head=NULL WHERE source_id=$1 AND repository_id=ANY($2::text[])`,
+              [s.source_id, withdrawn],
+            );
+        }
+      }
       const known = new Set(
         z
           .array(z.object({ repository_id: z.string() }))
